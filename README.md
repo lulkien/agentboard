@@ -189,3 +189,4 @@ asks, read `board_brief`), not for the worker.
 
 The orchestrator's playbook lives in `skills/`; see [skills/README.md](skills/README.md).
 
+Agent setup (build, MCP registration, skills): [docs/agent-install.md](docs/agent-install.md).
