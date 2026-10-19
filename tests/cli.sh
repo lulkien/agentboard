@@ -132,7 +132,7 @@ run $B --db "$X" add "typo titel" --description "old text" --epic E1 --assignee 
 run $B --db "$X" edit T1 --title "typo title" --spec "new description" --priority 7
 check "edit of a ready task lands and names the changed fields" $([ $rc -eq 0 ] && has "$out" "T1 edited title, description, priority #" && echo 0 || echo 1)
 run $B --db "$X" get T1 --full
-check "edit shows in the task and its timeline with old/new lengths" $(has "$out" "title: typo title" && has "$out" "priority 7" && has "$out" "new description" && has "$out" "edit 0s: title 10->10, description 8->15, priority 100->7" && echo 0 || echo 1)
+check "edit shows in the task and its timeline with old/new lengths" $(has "$out" "title: typo title" && has "$out" "priority 7" && has "$out" "new description" && has "$out" "title \"typo titel\"->\"typo title\", description 8->15, priority 100->7" && echo 0 || echo 1)
 run $B --db "$X" edit T1 --assignee "";                                check "empty --assignee clears it" $([ $rc -eq 0 ] && has "$out" "T1 edited assignee" && echo 0 || echo 1)
 before=$($B --db "$X" get T1 --full)
 run $B --db "$X" edit T1 --title "typo title" --priority 7
@@ -153,7 +153,7 @@ run $B --db "$X" epic get E1 >/dev/null
 run $B --db "$X" edit E1 --title "Epic two" --path "$S/proj/"
 check "edit of an epic: title and normalised path" $([ $rc -eq 0 ] && has "$out" "E1 edited title, path #" && echo 0 || echo 1)
 run $B --db "$X" epic get E1
-check "epic shows the new title, path and the edit event" $(has "$out" "title: Epic two" && has "$out" "path: $S/proj" && ! has "$out" "path: $S/proj/" && has "$out" "edit 0s: title 4->8, path 0->$((${#S} + 5))" && echo 0 || echo 1)
+check "epic shows the new title, path and the edit event" $(has "$out" "title: Epic two" && has "$out" "path: $S/proj" && ! has "$out" "path: $S/proj/" && has "$out" "title \"Epic\"->\"Epic two\", path \"\"->\"$S/proj\"" && echo 0 || echo 1)
 run $B --db "$X" edit E1 --priority 3;                                 check "--priority on an epic: exit 1" $([ $rc -eq 1 ] && has "$err" "are for tasks" && echo 0 || echo 1)
 run $B --db "$X" edit E1;                                              check "epic edit with no field: exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
 run $B --db "$X" edit E1 --title "Epic two";                           check "epic edit with equal values: unchanged" $([ "$out" = "E1 unchanged" ] && echo 0 || echo 1)

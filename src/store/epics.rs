@@ -3,7 +3,7 @@
 //! the work belongs to.
 
 use super::render::{recent_events, status_summary, when};
-use super::{Subject, field_names, log_event, now_ms, open, short_epic, text_change};
+use super::{Subject, field_names, log_event, now_ms, open, short_epic, text_change, value_change};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, clip, clip_marked};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Component, Path, PathBuf};
@@ -261,10 +261,10 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
         .map_err(|e| e.to_string())?;
     let cur = fetch_epic(&tx, id)?;
     let mut diffs = Vec::new();
-    let title = text_change(&mut diffs, "title", &cur.title, e.title);
+    let title = value_change(&mut diffs, "title", &cur.title, e.title);
     let description = text_change(&mut diffs, "description", &cur.description, e.description);
     let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
-    let path = text_change(&mut diffs, "path", &cur.path, path.as_deref());
+    let path = value_change(&mut diffs, "path", &cur.path, path.as_deref());
     if diffs.is_empty() {
         return Ok(format!("{} unchanged", short_epic(id)));
     }

@@ -234,6 +234,26 @@ fn text_change<'a>(
     value
 }
 
+/// Like `text_change` for the short fields (title, assignee, path): the event
+/// records `name "old"->"new"`, each clipped to 80 chars, so a same-length
+/// change is visible and the old text is recoverable.
+fn value_change<'a>(
+    diffs: &mut Vec<String>,
+    name: &str,
+    old: &'a str,
+    new: Option<&'a str>,
+) -> &'a str {
+    let value = new.unwrap_or(old);
+    if value != old {
+        diffs.push(format!(
+            "{name} \"{}\"->\"{}\"",
+            crate::clip::clip(old, 80),
+            crate::clip::clip(value, 80)
+        ));
+    }
+    value
+}
+
 /// `title, goal` out of `["title 12->15", "goal 3->9"]`.
 fn field_names(diffs: &[String]) -> String {
     let names: Vec<&str> = diffs

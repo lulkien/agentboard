@@ -2,6 +2,7 @@
 """Sequential MCP client: drives the real binary over stdio, one request at a
 time (what a real session does), and asserts on the text each tool returns."""
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -48,6 +49,19 @@ class Session:
         self.p.wait(timeout=5)
 
 
+def lease_mins(task_text):
+    """Minutes left on the lease in a task_get render (it moves with the clock)."""
+    m = re.search(r"^lease: (\d+)m left", task_text, re.M)
+    return int(m.group(1)) if m else None
+
+
+def stable(task_text):
+    """A task_get render without what moves with the clock: the created/started/
+    lease lines and the ages on event lines."""
+    kept = [l for l in task_text.splitlines() if not l.startswith(("created:", "started:", "lease:", "completed:"))]
+    return re.sub(r"(?m)^(\s+#\d+ \S+ \S+) \d+[smhd]:", r"\1:", "\n".join(kept))
+
+
 def main():
     shutil.rmtree(os.path.dirname(DB), ignore_errors=True)
     s = Session()
@@ -85,10 +99,14 @@ def main():
     expect("claim returns description+goal", s.call("task_claim", id="T1", ttl_min=5), "T1 working", "one page, SCM_RIGHTS", "verification")
     expect("claim twice is refused", refusal(s, id="T1"), "T1 working by claude1")
     expect("note", s.call("task_update", id="T1", note="outline done"), "T1 working #")
-    expect("note does not extend lease", s.call("task_get", id="T1"), "lease: 4m left")
+    left = lease_mins(s.call("task_get", id="T1"))
+    checks.append(left in (4, 5))
+    print(("PASS " if checks[-1] else "FAIL ") + f"note does not extend lease :: {left}m left of 5")
     expect("heartbeat", s.call("task_update", id="T1", heartbeat=True), "lease")
     expect("heartbeat with note", s.call("task_update", id="T1", heartbeat=True, ttl_min=60, note="still going"), "T1 working #")
-    expect("heartbeat applied alongside note", s.call("task_get", id="T1"), "lease: 59m left")
+    left = lease_mins(s.call("task_get", id="T1"))
+    checks.append(left is not None and 58 <= left <= 60)
+    print(("PASS " if checks[-1] else "FAIL ") + f"heartbeat applied alongside note :: {left}m left of 60")
     intruder = Session(actor="intruder")
     expect("claim by other while leased is refused (internal_error, not invalid_params)", refusal(intruder, id="T1"), "-32603", "lease 60m left, until", "manager: agentboard status T1 ready")
     try:
@@ -459,20 +477,20 @@ def main():
     # task_edit / epic_edit: amend a spec; the lease guard refuses a held task.
     ed = s.call("task_add", title="edit me", description="v1", goal="g").split()[0]
     expect("task_edit returns the changed field list, not the row", s.call("task_edit", id=ed, title="edited", description="version two", priority=3), f"{ed} edited title, description, priority #")
-    expect("edit lands and logs old/new lengths", s.call("task_get", id=ed), "title: edited", "priority 3", "title 7->6, description 2->11, priority 100->3")
+    expect("edit lands and logs old/new lengths", s.call("task_get", id=ed), "title: edited", "priority 3", "title \"edit me\"->\"edited\", description 2->11, priority 100->3")
     expect("edit with equal values is a no-op", s.call("task_edit", id=ed, title="edited"), f"{ed} unchanged")
     expect("edit with no field is refused", refusal_text(lambda: s.call("task_edit", id=ed)), "nothing to edit")
     s.call("task_claim", id=ed)
-    before = s.call("task_get", id=ed, full=True)
+    before = stable(s.call("task_get", id=ed, full=True))
     expect("edit of a held task is refused like a claim (internal_error, lease text)", refusal_text(lambda: s.call("task_edit", id=ed, goal="moved under the worker")), "-32603", f"{ed} working by claude1", "lease", f"manager: agentboard status {ed} ready")
-    ok = s.call("task_get", id=ed, full=True) == before
+    ok = stable(s.call("task_get", id=ed, full=True)) == before
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "the refused edit left the row and timeline byte-identical")
     s.call("task_update", id=ed, status="ready")
     expect("edit lands once the manager frees the task", s.call("task_edit", id=ed, goal="moved"), f"{ed} edited goal")
     expect("task_edit refuses an epic id", refusal_text(lambda: s.call("task_edit", id=epic_id, title="x")), "is an epic id")
     expect("epic_edit returns the changed field list", s.call("epic_edit", id=epic_id, title="epic: shipped", path="/tmp/agentboard-no-such-project/sub/"), f"{epic_id} edited title, path #", "warning: path /tmp/agentboard-no-such-project/sub does not exist")
-    expect("epic edit shows in the epic and its timeline", s.call("epic_get", id=epic_id), "title: epic: shipped", "path: /tmp/agentboard-no-such-project/sub", "title 13->13, path 31->35")
+    expect("epic edit shows in the epic and its timeline", s.call("epic_get", id=epic_id), "title: epic: shipped", "path: /tmp/agentboard-no-such-project/sub", "title \"epic: ship it\"->\"epic: shipped\", path \"/tmp/agentboard-no-such-project\"->\"/tmp/agentboard-no-such-project/sub\"")
     expect("epic_edit with no field is refused", refusal_text(lambda: s.call("epic_edit", id=epic_id)), "nothing to edit")
     expect("epic_edit refuses a task id", refusal_text(lambda: s.call("epic_edit", id=ed, title="x")), "is a task id")
     expect("the tools are listed", " ".join(t["name"] for t in s.rpc("tools/list", {})["tools"]), "task_edit", "epic_edit")

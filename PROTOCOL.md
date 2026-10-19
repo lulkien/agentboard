@@ -53,6 +53,10 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 | started_at | When work began |
 | completed_at | When status reached done/dropped |
 
+## Editing a spec
+
+`agentboard edit T7|E3 ...` / `task_edit` / `epic_edit` amend a spec and are refused while the task is `working` with a live lease (the worker is reading it); free it with `agentboard status T7 ready` first. Each edit logs one `edit` event: short fields record the values, `title "old"->"new"` (title, assignee, path; each clipped to 80 chars, so a same-length change shows and the old text survives), `priority 100->7`, and long fields only the lengths, `description 812->830` (description, goal). A worker re-reading its task sees the spec moved in the timeline.
+
 ## Long text and truncation
 
 `task_get` and `task_claim` fold newlines to ` ⏎ ` (3 chars) and cap long fields so a read stays cheap: description 4000, goal 4000, report 6000, note 800. Caps, counts and markers are all in chars of the folded view, so a text with many short lines hits the cap sooner than its raw length suggests. A field over its cap ends in a marker, never silently:

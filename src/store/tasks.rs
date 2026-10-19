@@ -1,7 +1,7 @@
 use super::render::stamp;
 use super::{
     DEFAULT_TTL_S, Row, STATUS_LIST, Subject, fetch, field_names, log_event, norm, now_ms, open,
-    short, short_epic, text_change,
+    short, short_epic, text_change, value_change,
 };
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use rusqlite::{OptionalExtension, params};
@@ -122,10 +122,10 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         return Err(ClaimError::Held(held_text(&cur)));
     }
     let mut diffs = Vec::new();
-    let title = text_change(&mut diffs, "title", &cur.title, e.title);
+    let title = value_change(&mut diffs, "title", &cur.title, e.title);
     let description = text_change(&mut diffs, "description", &cur.description, e.description);
     let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
-    let assignee = text_change(
+    let assignee = value_change(
         &mut diffs,
         "assignee",
         cur.assignee.as_deref().unwrap_or(""),

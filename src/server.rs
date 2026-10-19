@@ -1,4 +1,4 @@
-//! MCP surface: 18 tools, text-only results, short acks.
+//! MCP surface: 19 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
