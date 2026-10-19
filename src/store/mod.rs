@@ -225,5 +225,5 @@ mod wait;
 pub use dispatch::dispatch;
 pub use render::{brief, children, get, list};
 pub use sessions::{register_session, send, sessions, tail};
-pub use tasks::{Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note, report};
+pub use tasks::{ClaimError, Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note, report};
 pub use wait::{Wait, wait};

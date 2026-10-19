@@ -56,7 +56,7 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
         Cmd::Ls { status, assignee, limit } => store::list(status.as_deref(), assignee.as_deref(), limit),
         Cmd::Get { id, full } => store::get(tid(&id)?, full),
         Cmd::Children { id } => store::children(tid(&id)?),
-        Cmd::Claim { id, ttl } => store::claim(actor, id.as_deref().map(tid).transpose()?, ttl.clamp(1, 720) * 60),
+        Cmd::Claim { id, ttl } => store::claim(actor, id.as_deref().map(tid).transpose()?, ttl.clamp(1, 720) * 60).map_err(|e| e.to_string()),
         Cmd::Heartbeat { id, ttl } => store::heartbeat(actor, tid(&id)?, ttl.clamp(1, 720) * 60),
         Cmd::Note { id, text } => store::note(actor, tid(&id)?, &text),
         Cmd::Report { id, text } => store::report(actor, tid(&id)?, &text),

@@ -3,7 +3,6 @@ use super::render::ago;
 use super::{fetch, now_ms, open, short};
 use rusqlite::params;
 use std::process::Command;
-use std::time::Duration;
 
 pub fn sessions() -> Result<String, String> {
     let conn = open()?;
@@ -51,50 +50,13 @@ fn tmux_alive(name: &str) -> bool {
     proc::run(Command::new("tmux").args(["has-session", "-t", name])).is_ok_and(|o| o.status.success())
 }
 
-const HERDR_TIMEOUT: Duration = Duration::from_secs(2);
-const HERDR_MAX_BYTES: u64 = 1 << 20;
-
 /// Live herdr agents as (name, agent type). Missing binary, hang, bad exit or bad
-/// JSON all mean "none". A hung daemon is killed after HERDR_TIMEOUT.
+/// JSON all mean "none". Bounded by the shared runner (deadline, group kill).
 fn herdr_agents() -> Vec<(String, String)> {
-    use std::io::Read;
-    use std::process::Stdio;
-    let Ok(mut child) = std::process::Command::new("herdr")
-        .args(["agent", "list"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
-        return Vec::new();
-    };
-    let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Vec::new();
-    };
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.take(HERDR_MAX_BYTES).read_to_end(&mut buf);
-        buf
-    });
-    let deadline = std::time::Instant::now() + HERDR_TIMEOUT;
-    let ok = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break false;
-            }
-        }
-    };
-    let buf = reader.join().unwrap_or_default();
-    if !ok {
-        return Vec::new();
+    match proc::run(Command::new("herdr").args(["agent", "list"])) {
+        Ok(o) if o.status.success() => parse_herdr_agents(&o.stdout),
+        _ => Vec::new(),
     }
-    parse_herdr_agents(&buf)
 }
 
 /// Parses the `herdr agent list` envelope (`.result.agents[]`). Agents without a

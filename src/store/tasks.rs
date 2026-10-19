@@ -33,8 +33,28 @@ pub fn add(
     Ok(format!("{} {status}", short(id)))
 }
 
+/// Why a claim failed. `Held` is the legitimate refusal (somebody holds the
+/// task); the MCP layer reports it differently from a bad request or a DB error.
+pub enum ClaimError {
+    Held(String),
+    Other(String),
+}
+
+impl From<String> for ClaimError {
+    fn from(e: String) -> Self {
+        Self::Other(e)
+    }
+}
+
+impl std::fmt::Display for ClaimError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Self::Held(m) | Self::Other(m)) = self;
+        f.write_str(m)
+    }
+}
+
 /// Claims a specific task, or the next ready one. Atomic: BEGIN IMMEDIATE + guarded UPDATE.
-pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String> {
+pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimError> {
     let mut conn = open()?;
     let now = now_ms();
     let lease = now + ttl_s * 1000;
@@ -64,7 +84,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
                     match fetch(&conn2, x) {
                         // A refusal is an error: `agentboard claim T7 && ...` must not
                         // read "somebody else has it" as "claimed".
-                        Ok(r) => Err(format!(
+                        Ok(r) => Err(ClaimError::Held(format!(
                             "{} {} by {}{} — manager: agentboard status {} ready",
                             short(x),
                             r.status,
@@ -75,8 +95,8 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
                                 stamp(l)
                             )),
                             short(x)
-                        )),
-                        Err(_) => Err(format!("no such task {}", short(x))),
+                        ))),
+                        Err(_) => Err(format!("no such task {}", short(x)).into()),
                     }
                 }
                 None => Ok("no ready tasks".to_owned()),
@@ -115,7 +135,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
         out.push_str(&field("goal", &r.goal, CAP_GOAL, true, &short(r.id)));
         return Ok(out);
     }
-    Err("claim contention: retry".to_owned())
+    Err("claim contention: retry".to_owned().into())
 }
 
 /// One transactional edit of a task. Status moves, report, note, commit and

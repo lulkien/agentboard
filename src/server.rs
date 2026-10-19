@@ -27,9 +27,13 @@ fn err(e: String) -> ErrorData {
     ErrorData::invalid_params(e, None)
 }
 
-/// A claim refused because someone holds the task is not a malformed request.
-fn refused(e: String) -> ErrorData {
-    ErrorData::internal_error(e, None)
+/// A claim refused because someone holds the task is not a malformed request;
+/// every other claim failure keeps the code the rest of the tools use.
+fn claim_err(e: store::ClaimError) -> ErrorData {
+    match e {
+        store::ClaimError::Held(m) => ErrorData::internal_error(m, None),
+        store::ClaimError::Other(m) => err(m),
+    }
 }
 
 /// Runs a blocking store call (tmux subprocess) off the async runtime threads.
@@ -246,7 +250,7 @@ impl Board {
             None => None,
         };
         let ttl = a.ttl_min.unwrap_or(30).clamp(1, 720);
-        store::claim(&actor(), id, ttl * 60).map(text).map_err(refused)
+        store::claim(&actor(), id, ttl * 60).map(text).map_err(claim_err)
     }
 
     #[tool(name = "task_update", description = "Write back to the board: status (ready|working|blocking|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.", annotations(title = "Update task", read_only_hint = false, destructive_hint = false))]

@@ -66,7 +66,7 @@ The marker names the field, the chars shown, the folded length (plus the raw len
 Other clips, all marked or absent:
 
 - `get` events (last 8): cut at 220 chars with `[truncated: 220 of N chars; ...]`; `full` returns them whole.
-- `task_wait` / `agentboard wait`: event bodies are returned whole (answers arrive here). On timeout the `last:` tail is cut at 400 chars with a `[truncated: 400 of N chars; task_get id=T7 for the record]` marker.
+- `task_wait` / `agentboard wait`: event bodies are returned whole (answers arrive here). On timeout the reply starts with `timeout:`, then one status line per watched task, then a `last (T7):` tail of the freshest task, cut at 400 chars with a `[truncated: 400 of N chars; task_get id=T7 for the record]` marker.
 - Titles are cut at 60-64 chars with a bare `…` in `task_list`, `task_children` and `board_brief`, and `board_brief` result lines at 80; those are one compact line per task by design. Read `task_get` for the whole title.
 
 ## Status meanings

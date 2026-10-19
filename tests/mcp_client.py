@@ -128,9 +128,9 @@ def main():
         print("FAIL claim of missing task did not error")
         checks.append(False)
     except RuntimeError as e:
-        ok = "no such task" in str(e)
+        ok = "no such task" in str(e) and "-32602" in str(e)
         checks.append(ok)
-        print(("PASS " if ok else "FAIL ") + f"claim missing task -> {e}")
+        print(("PASS " if ok else "FAIL ") + f"claim missing task stays invalid_params -> {e}")
 
     try:
         s.call("task_add", title="orphan", parent="T99")

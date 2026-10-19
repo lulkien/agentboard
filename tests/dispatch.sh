@@ -124,5 +124,16 @@ check "tmux hang: tail exits 1 at the deadline (${ms}ms)" $([ $rc -eq 1 ] && [ $
 TMUX_MODE=hang run $B send w1 hi
 check "tmux hang: send exits 1 at the deadline" $([ $rc -eq 1 ] && has "$err" "tmux: timed out" && echo 0 || echo 1)
 
+# `sessions` is bounded by the same runner and knob: a herdr whose child holds
+# stdout must not stall it (the old ad-hoc runner joined the reader and waited
+# for the descendant, 30s here), and the stub tree dies with the deadline.
+t0=$(date +%s%N)
+HERDR_MODE=hang run $B sessions
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+check "sessions with a stdout-holding herdr: returns at the deadline (${ms}ms), exit 0, rows intact" $([ $rc -eq 0 ] && [ $ms -lt 2500 ] && has "$out" "w1" && echo 0 || echo 1)
+check "sessions: herdr stub shell AND its sleep are dead" $(gone "$S/herdr.pid" && gone "$S/sleep.pid" && echo 0 || echo 1)
+HERDR_MODE=fail run $B sessions
+check "sessions with a failing herdr still lists the registry" $([ $rc -eq 0 ] && has "$out" "w1" && echo 0 || echo 1)
+
 echo "$pass/$total passed"
 [ "$pass" -eq "$total" ]
