@@ -35,7 +35,7 @@ completion is one row; nothing is mutable history.
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |
-| `task_wait` | delta only | server-side long-poll for the answer |
+| `task_wait` | delta only | server-side long-poll over `id`/`ids`/`epic`/`open` with `status`/`kind` filters; first line `matched:` or `timeout:` |
 | `board_brief` | ~1 screen | counts + open tasks + `EPIC` rollup lines (done/non-dropped children, open epics only) + recent completions |
 | `session_list` | 1 line/session | registered sessions and their task; `up` means a live tmux session of that name, or a herdr agent with that name and the registered agent type |
 | `session_register` | ack | map session → task |
@@ -94,9 +94,21 @@ Then register the pane once so the board can map task → session:
 
     agentboard add|ls|get|children|claim|note|ask|answer|done|review|block|brief
     agentboard get T7 --full          # description/goal/report/note/events unclipped, byte-for-byte
-    agentboard wait T7 [--after 42] [--timeout 60]
+    agentboard wait T7 [T8..] | --epic T7 | --open  [--status CSV] [--kind CSV] [--after 42] [--timeout 60]
     agentboard sessions|register|tail|send
     agentboard path                    # where the db lives
+
+`wait` watches the union of its selectors: task ids, `--epic T7` (direct
+children, not T7), `--open` (every task not done/dropped, re-checked while
+waiting, so a task created mid-wait counts). `--status review,done` matches
+while the task's *current* status is in the list (already true => returns at
+once); `--kind note,block` matches new events of those kinds (`ask` is an alias
+of `block`: the store logs an ask as a `block` event). Both given => both hold;
+neither => any new event. Exit 0 and a first line `matched:` (then one
+`T7 review claude1` header per task and its new `#56 actor kind: body` lines),
+or exit 3 and a first line `timeout:` (then every watched status and the tail of
+the freshest task). The same markers lead `task_wait`, which has no exit code.
+An unknown task, status or kind is an error, never a silent wait.
 
 Global: `--actor NAME`, `--db PATH` (or `$AGENTBOARD_DB`).
 Default db: `$XDG_STATE_HOME/agentboard/board.db`.

@@ -288,6 +288,119 @@ def main():
     s.call("task_update", id=eid, note=long_ev)
     expect("wait returns event body whole", s.call("task_wait", id=eid, after_seq=wait_seq, timeout_s=5), long_ev)
 
+    # wait selectors, filters, markers and exit codes.
+    def cli_wait(*args):
+        return subprocess.run([BIN, "wait", *args], env=env, capture_output=True, text=True)
+
+    wa = s.call("task_add", title="wait A").split()[0]
+    wb = s.call("task_add", title="wait B").split()[0]
+    s.call("task_claim", id=wa)
+    s.call("task_claim", id=wb)
+    # matched-on-status: another session moves the task while the wait blocks.
+    mover = subprocess.Popen(["sh", "-c", f"sleep 1; {BIN} status {wa} review 'ready'"], env=env, stdout=subprocess.DEVNULL)
+    t0 = time.time()
+    got = s.call("task_wait", ids=[wa], status="review", timeout_s=10)
+    mover.wait()
+    expect("wait matched on status", got, "matched:", f"{wa} review", "review: ready")
+    ok = got.startswith("matched:") and time.time() - t0 < 5
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "matched marker is the first line, returned before the timeout")
+    # already satisfied: no sleep, no hang.
+    t0 = time.time()
+    r = cli_wait(wa, "--status", "review", "--timeout", "30")
+    ok = r.returncode == 0 and r.stdout.startswith("matched:") and time.time() - t0 < 2
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"already satisfied returns at once, exit 0 :: {r.stdout.splitlines()[:2]}")
+    # real (1s) timeout through the CLI: exit 3, marker, status of every watched task.
+    t0 = time.time()
+    r = cli_wait(wa, wb, "--status", "done", "--timeout", "1")
+    ok = r.returncode == 3 and r.stdout.startswith("timeout:") and f"{wa} review" in r.stdout and f"{wb} working" in r.stdout and time.time() - t0 >= 1
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"cli timeout exits 3 after the wait :: rc={r.returncode} {r.stdout.splitlines()[:3]}")
+    expect("mcp timeout marker", s.call("task_wait", ids=[wa, wb], status="done", timeout_s=1), "timeout:", "last (")
+    # --open --kind ask catches a task_ask (an ask is a `block` event).
+    asker = subprocess.Popen(["sh", "-c", f"sleep 1; {BIN} ask {wb} 'which one?'"], env=env, stdout=subprocess.DEVNULL)
+    r = cli_wait("--open", "--kind", "ask", "--timeout", "10")
+    asker.wait()
+    ok = r.returncode == 0 and r.stdout.startswith("matched:") and f"{wb} blocking" in r.stdout and "block: which one?" in r.stdout and wa not in r.stdout
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"--open --kind ask catches the ask :: {r.stdout.splitlines()[:3]}")
+    # fail fast.
+    r = cli_wait("T9999", "--timeout", "30")
+    ok = r.returncode == 1 and "no such task T9999" in r.stderr
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"unknown task id is an error :: {r.stderr.strip()}")
+    r = cli_wait()
+    ok = r.returncode == 1 and "--open" in r.stderr
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"no selector is an error :: {r.stderr.strip()}")
+    r = cli_wait(wa, "--status", "rview")
+    ok = r.returncode == 1 and "bad status" in r.stderr
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"status typo is an error :: {r.stderr.strip()}")
+
+    # T27 fixes: labelled context line, ordering, epic/union, combined filters, dynamic --open.
+    r = cli_wait(wa, "--status", "review")
+    ok = r.returncode == 0 and "\nlast: #" in r.stdout and "\n#" not in r.stdout
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"status-only match labels the latest event `last:` :: {r.stdout.splitlines()[1:3]}")
+    r = cli_wait(wa, "--kind", "reclaim")
+    ok = r.returncode == 1 and "bad kind" in r.stderr
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"--kind reclaim rejected :: {r.stderr.strip()[:60]}")
+    # Hits come back task id ascending, then event seq ascending, whatever order the ids were given.
+    r = cli_wait(wb, wa, "--after", "0", "--timeout", "5")
+    lines = r.stdout.splitlines()
+    groups, cur = [], None
+    for l in lines:
+        if l.startswith("T"):
+            cur = (l.split()[0], [])
+            groups.append(cur)
+        elif l.startswith("#"):
+            cur[1].append(int(l.split()[0][1:]))
+    ok = (r.returncode == 0 and [g[0] for g in groups] == sorted([wa, wb], key=lambda t: int(t[1:]))
+          and all(g[1] == sorted(g[1]) and len(g[1]) >= 3 for g in groups))
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"hits ordered by task id then seq :: {groups}")
+    # --epic selects children only; epic + ids is a deduplicated union.
+    ep = s.call("task_add", title="wait epic").split()[0]
+    c1 = s.call("task_add", title="child 1", parent=ep).split()[0]
+    c2 = s.call("task_add", title="child 2", parent=ep).split()[0]
+    r = cli_wait("--epic", ep, "--status", "ready")
+    heads = [l.split()[0] for l in r.stdout.splitlines() if l.startswith("T")]
+    ok = r.returncode == 0 and r.stdout.startswith("matched: 2 of 2 watched") and heads == [c1, c2]
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"--epic watches the children, not the epic :: {heads}")
+    r = cli_wait(c2, ep, "--epic", ep, c1, "--status", "ready")
+    heads = [l.split()[0] for l in r.stdout.splitlines() if l.startswith("T")]
+    ok = r.returncode == 0 and r.stdout.startswith("matched: 3 of 3 watched") and heads == [ep, c1, c2]
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"epic + ids union is deduplicated :: {heads}")
+    # --status and --kind together: both must hold.
+    wc = s.call("task_add", title="wait C").split()[0]
+    wd = s.call("task_add", title="wait D").split()[0]
+    for t in (wc, wd):
+        s.call("task_claim", id=t)
+        s.call("task_update", id=t, note="progress")
+    s.call("task_update", id=wd, status="review")
+    r = cli_wait(wc, wd, "--status", "review", "--kind", "note", "--after", "0", "--timeout", "5")
+    heads = [l.split()[0] for l in r.stdout.splitlines() if l.startswith("T")]
+    ok = r.returncode == 0 and r.stdout.startswith("matched: 1 of 2 watched") and heads == [wd] and "note: progress" in r.stdout and "review" not in r.stdout.split("\n", 2)[2]
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"--status + --kind both hold :: {heads}")
+    r = cli_wait(wc, wd, "--status", "review", "--kind", "done", "--after", "0", "--timeout", "1")
+    ok = r.returncode == 3
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "status holds but kind does not => timeout")
+    # --open is a predicate: a task created mid-wait is watched.
+    born = subprocess.Popen(["sh", "-c", f"sleep 1; {BIN} add 'born mid-wait'"], env=env, stdout=subprocess.DEVNULL)
+    t0 = time.time()
+    r = cli_wait("--open", "--kind", "add", "--timeout", "10")
+    born.wait()
+    ok = r.returncode == 0 and "add: born mid-wait" in r.stdout and time.time() - t0 < 5
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"task created during --open wait matches :: rc={r.returncode} {r.stdout.splitlines()[:3]}")
+
     expect("session list", s.call("session_list"), "session")
     s.close()
     print(f"\n{sum(checks)}/{len(checks)} checks passed")

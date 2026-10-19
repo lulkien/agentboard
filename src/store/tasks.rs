@@ -1,8 +1,7 @@
 use super::render::stamp;
-use super::{DEFAULT_TTL_S, STATUS_LIST, fetch, get, log_event, norm, now_ms, open, short};
-use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, CAP_LAST, clip_marked, field};
+use super::{DEFAULT_TTL_S, STATUS_LIST, fetch, log_event, norm, now_ms, open, short};
+use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use rusqlite::{OptionalExtension, params};
-use std::time::Duration;
 
 pub fn add(actor: &str, title: &str, description: &str, goal: &str, status: &str, assignee: Option<&str>, priority: i64, parent: Option<i64>) -> Result<String, String> {
     let conn = open()?;
@@ -220,55 +219,4 @@ pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
         return Err(format!("{} not working or not held by {actor}", short(id)));
     }
     Ok(format!("ok {} lease {}m", short(id), ttl_s / 60))
-}
-
-/// Blocks server-side (no agent-side polling) until the task changes or the timeout hits.
-///
-/// `after` is the last event seq the caller already saw; without it we take the
-/// current watermark, which is correct for "wait for the next thing to happen".
-pub async fn wait(id: i64, after: Option<i64>, timeout_ms: u64) -> Result<String, String> {
-    let start_ev: i64 = {
-        let conn = open()?;
-        fetch(&conn, id)?;
-        match after {
-            Some(seq) => seq,
-            None => conn
-                .query_row("SELECT COALESCE(MAX(seq),0) FROM events WHERE task_id=?", params![id], |r| r.get(0))
-                .map_err(|e| e.to_string())?,
-        }
-    };
-    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
-    loop {
-        {
-            let conn = open()?;
-            let r = fetch(&conn, id)?;
-            let mut stmt = conn
-                .prepare("SELECT seq,actor,kind,body FROM events WHERE task_id=? AND seq>? ORDER BY seq")
-                .map_err(|e| e.to_string())?;
-            let evs: Vec<(i64, String, String, String)> = stmt
-                .query_map(params![id, start_ev], |e| Ok((e.get(0)?, e.get(1)?, e.get(2)?, e.get(3)?)))
-                .map_err(|e| e.to_string())?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|e| e.to_string())?;
-            if !evs.is_empty() {
-                let mut out = format!("{} {}\n", short(id), r.status);
-                for (seq, actor, kind, body) in evs {
-                    // The delta is what the caller asked for (answers live here): never clipped.
-                    out.push_str(&format!("#{seq} {actor} {kind}: {body}\n"));
-                }
-                return Ok(out.trim_end().to_owned());
-            }
-            if std::time::Instant::now() >= deadline {
-                // Never return blind: hand back the tail so the caller can decide.
-                return Ok(format!(
-                    "{} {} unchanged after {}s\nlast: {}",
-                    short(id),
-                    r.status,
-                    timeout_ms / 1000,
-                    clip_marked(&get(id, false).unwrap_or_default(), CAP_LAST, &format!("task_get id={} for the record", short(id)))
-                ));
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
 }

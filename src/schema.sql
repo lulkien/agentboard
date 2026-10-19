@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS events(
   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id INTEGER NOT NULL REFERENCES tasks(id),
   actor   TEXT NOT NULL,
-  kind    TEXT NOT NULL,          -- add|claim|note|report|ask|answer|block|review|done|reclaim|edit
+  kind    TEXT NOT NULL,          -- add|claim|note|report|answer|block|review|done|needs_fix|edit|dispatch
   body    TEXT NOT NULL DEFAULT '',
   ts      INTEGER NOT NULL
 );

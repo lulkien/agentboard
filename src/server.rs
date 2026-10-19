@@ -136,7 +136,24 @@ pub struct AskArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct WaitArgs {
-    pub id: String,
+    /// One task id, T7 or 7. Same as ids=[id].
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Task ids to watch.
+    #[serde(default)]
+    pub ids: Vec<String>,
+    /// Watch every direct child of this epic (not the epic itself).
+    #[serde(default)]
+    pub epic: Option<String>,
+    /// Watch every task whose status is not done/dropped.
+    #[serde(default)]
+    pub open: bool,
+    /// CSV of statuses (ready|working|blocking|needs_fix|review|done|dropped): match only while the task's CURRENT status is in it. Already true => returns at once.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// CSV of event kinds (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch; ask = block): match only new events of these kinds.
+    #[serde(default)]
+    pub kind: Option<String>,
     /// Server-side long-poll in seconds (default 60, max 300). No client polling.
     #[serde(default)]
     pub timeout_s: Option<u64>,
@@ -256,11 +273,20 @@ impl Board {
         run!(store::ask(&actor(), id, &a.question))
     }
 
-    #[tool(name = "task_wait", description = "Server-side long-poll: returns as soon as the task gets an answer or new event. Prefer this over repeated task_get.", annotations(title = "Wait for change", read_only_hint = true))]
+    #[tool(name = "task_wait", description = "Server-side long-poll over a set of tasks. Selectors (union, at least one): id, ids, epic (direct children), open (not done/dropped). Filters: status (CSV, current status; already true returns at once), kind (CSV, new event kinds); both given = both hold; none = any new event. after_seq: only events past it. FIRST LINE is `matched:` (then per task `T7 review claude1` and its new event lines) or `timeout:` (then every watched status and the tail of the freshest task). Unknown task, status or kind is an error. Prefer this over repeated task_get.", annotations(title = "Wait for change", read_only_hint = true))]
     async fn task_wait(&self, Parameters(a): Parameters<WaitArgs>) -> Result<CallToolResult, ErrorData> {
-        let id = store::parse_id(&a.id).map_err(err)?;
         let ms = a.timeout_s.unwrap_or(60).clamp(1, 300) * 1000;
-        run!(store::wait(id, a.after_seq, ms).await)
+        let ids: Vec<String> = a.id.into_iter().chain(a.ids).collect();
+        run!(store::wait(store::Wait {
+            ids: &ids,
+            epic: a.epic.as_deref(),
+            open: a.open,
+            status: a.status.as_deref(),
+            kind: a.kind.as_deref(),
+            after: a.after_seq,
+            timeout_ms: ms,
+        })
+        .await.map(|o| o.text))
     }
 
     #[tool(name = "board_brief", description = "Team status in one screen: counts, open tasks ordered by urgency, recent completions. Use for standup/reporting.", annotations(title = "Board brief", read_only_hint = true, idempotent_hint = true))]

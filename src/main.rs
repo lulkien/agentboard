@@ -33,7 +33,16 @@ agentboard — task board + tmux bridge for a team of CLI agents
   agentboard review <T1> <summary>
   agentboard status <T1> <status> [note]   (ready|working|blocking|needs_fix|review|done|dropped)
   agentboard block <T1> <reason>
-  agentboard wait <T1> [--timeout SEC] [--after SEQ]
+  agentboard wait <T1> [<T2>...] | --epic T1 | --open   [--status CSV] [--kind CSV] [--after SEQ] [--timeout SEC]
+        block until a watched task matches. Selectors (union, at least one; ids need no flag):
+          T1 T2...  those tasks            --epic T1  its direct children (not T1)
+          --open    every task not done/dropped, re-evaluated while waiting (new tasks count)
+        --status CSV  current status in CSV (ready|working|blocking|needs_fix|review|done|dropped);
+                      already true => returns at once
+        --kind CSV    new event kind in CSV (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch;
+                      `ask` is an alias of `block`)
+        both filters => both must hold; neither => any new event. --after: only events with seq > SEQ.
+        exit 0 and first line `matched:`; exit 3 and first line `timeout:` (default --timeout 60)
   agentboard brief [--since MIN]
   agentboard sessions
   agentboard register <tmux-name> [--agent claude|hermes] [--task T1]
@@ -45,9 +54,10 @@ agentboard — task board + tmux bridge for a team of CLI agents
 Global: --actor NAME (default $AGENTBOARD_ACTOR, else 'agent'), --db PATH
 ";
 
-const VALUE_FLAGS: [&str; 19] = [
+const VALUE_FLAGS: [&str; 21] = [
     "--actor", "--db", "--spec", "--description", "--goal", "--assignee", "--priority", "--parent", "--status", "--limit",
     "--after", "--ttl", "--commit", "--timeout", "--since", "--agent", "--task", "--lines", "--to",
+    "--epic", "--kind",
 ];
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -156,11 +166,6 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             };
             store::apply(actor, tid(pos.get(1))?, &patch)
         }
-        "wait" => {
-            let secs: u64 = flag(argv, "--timeout").and_then(|p| p.parse().ok()).unwrap_or(60);
-            let after = flag(argv, "--after").and_then(|p| p.parse().ok());
-            store::wait(tid(pos.get(1))?, after, secs.saturating_mul(1000)).await
-        }
         "brief" => store::brief(flag(argv, "--since").and_then(|p| p.parse().ok()).unwrap_or(120)),
         "sessions" => store::sessions(),
         "register" => {
@@ -181,6 +186,22 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
     }
 }
 
+/// `wait` is the one command whose exit code carries data: 0 matched, 3 timeout.
+async fn wait(pos: &[String], argv: &[String]) -> Result<(String, ExitCode), String> {
+    let secs: u64 = flag(argv, "--timeout").and_then(|p| p.parse().ok()).unwrap_or(60);
+    let out = store::wait(store::Wait {
+        ids: pos.get(1..).unwrap_or_default(),
+        epic: flag(argv, "--epic").as_deref(),
+        open: has(argv, "--open"),
+        status: flag(argv, "--status").as_deref(),
+        kind: flag(argv, "--kind").as_deref(),
+        after: flag(argv, "--after").and_then(|p| p.parse().ok()),
+        timeout_ms: secs.saturating_mul(1000),
+    })
+    .await?;
+    Ok((out.text, if out.timed_out { ExitCode::from(3) } else { ExitCode::SUCCESS }))
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -198,10 +219,15 @@ async fn main() -> ExitCode {
         return serve().await;
     }
 
-    match dispatch(cmd, &pos, &argv, &actor).await {
-        Ok(text) => {
+    let result = if cmd == "wait" {
+        wait(&pos, &argv).await
+    } else {
+        dispatch(cmd, &pos, &argv, &actor).await.map(|text| (text, ExitCode::SUCCESS))
+    };
+    match result {
+        Ok((text, code)) => {
             println!("{text}");
-            ExitCode::SUCCESS
+            code
         }
         Err(e) => {
             eprintln!("agentboard: {e}");
