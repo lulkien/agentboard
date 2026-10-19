@@ -17,7 +17,7 @@ Work that needs review runs as one loop. A task with children is an epic; `board
 5. Manager adds a review task with `parent=<epic>`; the reviewer claims it.
 6. Reviewer either sets the review task `done`, or files a fix task with `parent=<review task>` (`task_add`) and sets the review task `needs_fix`.
 7. Manager delegates the fix. The fixer claims the fix task, fixes, sets it `done` with a report.
-8. Manager delegates verification (reviewer re-checks). The review task goes `done`.
+8. Manager delegates verification to the same reviewer agent that filed the fix (no separate checker task). It re-checks its own findings and sets the review task `done`.
 9. Manager closes the epic (`done`) once every child is terminal (`done` or `dropped`).
 
 Inspect an epic with `task_children(id)` (CLI: `agentboard children T27`); `task_get` appends `children: N (2 done, 1 working, ...)`.

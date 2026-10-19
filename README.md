@@ -37,9 +37,9 @@ completion is one row; nothing is mutable history.
 | `task_ask` | 1 line ack | block on a human decision |
 | `task_wait` | delta only | server-side long-poll for the answer |
 | `board_brief` | ~1 screen | counts + open tasks + `EPIC` rollup lines (done/non-dropped children, open epics only) + recent completions |
-| `session_list` | 1 line/session | registered tmux sessions and their task |
+| `session_list` | 1 line/session | registered sessions and their task; `up` means a live tmux session of that name, or a herdr agent with that name and the registered agent type |
 | `session_register` | ack | map session → task |
-| `session_tail` | N lines | last N lines of a tmux pane |
+| `session_tail` | N lines | last N lines of a tmux pane (tmux only; herdr-only sessions fail) |
 | `session_send` | ack | type a line into a pane (steer another agent) |
 
 Twelve tools is deliberate: every tool schema is resent on every request, so a

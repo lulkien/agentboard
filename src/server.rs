@@ -259,7 +259,7 @@ impl Board {
         run!(store::brief(a.since_min.unwrap_or(120).clamp(1, 20_160)))
     }
 
-    #[tool(name = "session_list", description = "Registered agent sessions (tmux) and what task each holds.", annotations(title = "List sessions", read_only_hint = true))]
+    #[tool(name = "session_list", description = "Registered agent sessions (tmux or herdr) and what task each holds.", annotations(title = "List sessions", read_only_hint = true))]
     async fn session_list(&self, Parameters(_): Parameters<Empty>) -> Result<CallToolResult, ErrorData> {
         run!(blocking(store::sessions).await)
     }
