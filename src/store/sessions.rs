@@ -4,13 +4,21 @@ use super::{fetch, now_ms, open, short};
 use rusqlite::params;
 use std::process::Command;
 
+/// One registry row as `sessions` lists it. `cwd` is stored but not shown.
+struct SessionRow {
+    name: String,
+    agent: String,
+    task: Option<i64>,
+    seen: i64,
+}
+
 pub fn sessions() -> Result<String, String> {
     let conn = open()?;
-    let names: Vec<(String, String, Option<String>, Option<i64>, i64)> = {
+    let names: Vec<SessionRow> = {
         let mut stmt = conn
-            .prepare("SELECT name,agent,cwd,task_id,seen FROM sessions ORDER BY seen DESC")
+            .prepare("SELECT name,agent,task_id,seen FROM sessions ORDER BY seen DESC")
             .map_err(|e| e.to_string())?;
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        stmt.query_map([], |r| Ok(SessionRow { name: r.get(0)?, agent: r.get(1)?, task: r.get(2)?, seen: r.get(3)? }))
             .map_err(|e| e.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|e| e.to_string())?
@@ -20,7 +28,7 @@ pub fn sessions() -> Result<String, String> {
     }
     let herdr = herdr_agents();
     let mut out = String::new();
-    for (name, agent, _cwd, task, seen) in names {
+    for SessionRow { name, agent, task, seen } in names {
         let alive = tmux_alive(&name) || herdr.iter().any(|(n, a)| *n == name && *a == agent);
         out.push_str(&format!(
             "{name} {agent} {} {} {}\n",

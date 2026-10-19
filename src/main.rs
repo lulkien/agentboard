@@ -51,7 +51,16 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
                 Some(raw) => store::norm(&raw).ok_or_else(|| format!("bad status {raw:?}"))?,
                 None => "ready",
             };
-            store::add(actor, &title, &description.unwrap_or_default(), &goal.unwrap_or_default(), status, assignee.as_deref(), priority, parent)
+            let task = store::NewTask {
+                title: &title,
+                description: &description.unwrap_or_default(),
+                goal: &goal.unwrap_or_default(),
+                status,
+                assignee: assignee.as_deref(),
+                priority,
+                parent,
+            };
+            store::add(actor, &task)
         }
         Cmd::Ls { status, assignee, limit } => store::list(status.as_deref(), assignee.as_deref(), limit),
         Cmd::Get { id, full } => store::get(tid(&id)?, full),

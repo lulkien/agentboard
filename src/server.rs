@@ -223,7 +223,16 @@ impl Board {
             Some(raw) => store::norm(raw).ok_or_else(|| err(format!("bad status {raw:?}")))?,
             None => "ready",
         };
-        run!(store::add(&actor(), &a.title, &a.description, &a.goal, status, a.assignee.as_deref(), a.priority.unwrap_or(100), parent))
+        let task = store::NewTask {
+            title: &a.title,
+            description: &a.description,
+            goal: &a.goal,
+            status,
+            assignee: a.assignee.as_deref(),
+            priority: a.priority.unwrap_or(100),
+            parent,
+        };
+        run!(store::add(&actor(), &task))
     }
 
     #[tool(name = "task_list", description = "Open tasks, one compact line each: id, status, assignee, title.", annotations(title = "List tasks", read_only_hint = true))]

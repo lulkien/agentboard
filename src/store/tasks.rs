@@ -3,16 +3,19 @@ use super::{DEFAULT_TTL_S, STATUS_LIST, fetch, log_event, norm, now_ms, open, sh
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use rusqlite::{OptionalExtension, params};
 
-pub fn add(
-    actor: &str,
-    title: &str,
-    description: &str,
-    goal: &str,
-    status: &str,
-    assignee: Option<&str>,
-    priority: i64,
-    parent: Option<i64>,
-) -> Result<String, String> {
+/// A task as the caller describes it; `add` supplies id, timestamps and lease.
+pub struct NewTask<'a> {
+    pub title: &'a str,
+    pub description: &'a str,
+    pub goal: &'a str,
+    pub status: &'a str,
+    pub assignee: Option<&'a str>,
+    pub priority: i64,
+    pub parent: Option<i64>,
+}
+
+pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
+    let NewTask { title, description, goal, status, assignee, priority, parent } = *task;
     let conn = open()?;
     if let Some(p) = parent {
         fetch(&conn, p).map_err(|_| format!("add: no such parent task {}", short(p)))?;
