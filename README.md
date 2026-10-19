@@ -92,23 +92,15 @@ Then register the pane once so the board can map task → session:
 
 ## CLI
 
-    agentboard add|ls|get|children|claim|note|ask|answer|done|review|block|brief
-    agentboard get T7 --full          # description/goal/report/note/events unclipped, byte-for-byte
-    agentboard wait T7 [T8..] | --epic T7 | --open  [--status CSV] [--kind CSV] [--after 42] [--timeout 60]
-    agentboard sessions|register|tail|send
-    agentboard path                    # where the db lives
+    agentboard --help                 # every command, flag and default
+    agentboard wait --help            # selectors, filters, markers
 
-`wait` watches the union of its selectors: task ids, `--epic T7` (direct
-children, not T7), `--open` (every task not done/dropped, re-checked while
-waiting, so a task created mid-wait counts). `--status review,done` matches
-while the task's *current* status is in the list (already true => returns at
-once); `--kind note,block` matches new events of those kinds (`ask` is an alias
-of `block`: the store logs an ask as a `block` event). Both given => both hold;
-neither => any new event. Exit 0 and a first line `matched:` (then one
-`T7 review claude1` header per task and its new `#56 actor kind: body` lines),
-or exit 3 and a first line `timeout:` (then every watched status and the tail of
-the freshest task). The same markers lead `task_wait`, which has no exit code.
-An unknown task, status or kind is an error, never a silent wait.
+`agentboard` with no command serves MCP on stdio. Misuse (unknown flag,
+unknown task, bad value) is exit 1 with an `agentboard: ` prefix on stderr;
+`wait` exits 0 on a match and 3 on a timeout, and its output starts with
+`matched:` or `timeout:` (the same markers lead `task_wait`, which has no exit
+code). Values that begin with `-` are taken literally, so `note T7 "- done"`
+works and `note T7 --bogus` stores `--bogus`; prefer `--flag=value` when unsure.
 
 Global: `--actor NAME`, `--db PATH` (or `$AGENTBOARD_DB`).
 Default db: `$XDG_STATE_HOME/agentboard/board.db`.
@@ -116,6 +108,7 @@ Default db: `$XDG_STATE_HOME/agentboard/board.db`.
 ## Tests
 
     python3 tests/mcp_client.py   # real stdio checks: claim, ask→wait, acks
+    bash tests/cli.sh             # CLI contract: exit codes, stderr, flag spellings, no ANSI
     ./tests/race.sh               # 8 concurrent claimers: 80 claims, 80 unique, ~124 ms
     bash tests/wait.sh            # long-poll returns on the event, not the timeout
     ./target/release/agentboard < tests/mcp-smoke.jsonl   # handshake + tool list

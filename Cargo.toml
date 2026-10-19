@@ -11,6 +11,8 @@ name = "agentboard"
 path = "src/main.rs"
 
 [dependencies]
+# No colour stack: help and errors are plain text on purpose.
+clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
 rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-io"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 schemars = "1"
