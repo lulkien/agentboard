@@ -26,7 +26,7 @@ pub(super) fn ago(ts_ms: i64) -> String {
 }
 
 /// One-line timestamp for listings: "13:32Z" style is locale-safe enough here.
-fn stamp(ts_ms: i64) -> String {
+pub(super) fn stamp(ts_ms: i64) -> String {
     let secs = ts_ms / 1000;
     let (h, m) = ((secs / 3600) % 24, (secs / 60) % 60);
     format!("{h:02}:{m:02}")

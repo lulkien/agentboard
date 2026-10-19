@@ -39,14 +39,15 @@ agentboard — task board + tmux bridge for a team of CLI agents
   agentboard register <tmux-name> [--agent claude|hermes] [--task T1]
   agentboard tail <tmux-name> [--lines N]
   agentboard send <tmux-name> <text>
+  agentboard dispatch <T1> [--to SESSION] [--force] [--print]   (tell a registered pane to claim T1)
   agentboard path
 
 Global: --actor NAME (default $AGENTBOARD_ACTOR, else 'agent'), --db PATH
 ";
 
-const VALUE_FLAGS: [&str; 18] = [
+const VALUE_FLAGS: [&str; 19] = [
     "--actor", "--db", "--spec", "--description", "--goal", "--assignee", "--priority", "--parent", "--status", "--limit",
-    "--after", "--ttl", "--commit", "--timeout", "--since", "--agent", "--task", "--lines",
+    "--after", "--ttl", "--commit", "--timeout", "--since", "--agent", "--task", "--lines", "--to",
 ];
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -174,6 +175,7 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             let lines = flag(argv, "--lines").and_then(|p| p.parse().ok()).unwrap_or(40);
             store::tail(name, lines)
         }
+        "dispatch" => store::dispatch(actor, tid(pos.get(1))?, flag(argv, "--to").as_deref(), has(argv, "--force"), has(argv, "--print")),
         "send" => store::send(req(pos.get(1), "tmux session name")?, req(pos.get(2), "text")?),
         other => Err(format!("unknown command {other:?} (try --help)")),
     }

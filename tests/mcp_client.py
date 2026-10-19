@@ -68,7 +68,7 @@ def main():
     expect("heartbeat with note", s.call("task_update", id="T1", heartbeat=True, ttl_min=60, note="still going"), "T1 working #")
     expect("heartbeat applied alongside note", s.call("task_get", id="T1"), "lease: 59m left")
     intruder = Session(actor="intruder")
-    expect("claim by other while leased", intruder.call("task_claim", id="T1"), "not claimable")
+    expect("claim by other while leased", intruder.call("task_claim", id="T1"), "lease 60m left, until", "manager: agentboard status T1 ready")
     try:
         intruder.call("task_update", id="T1", heartbeat=True)
         expect("heartbeat by non-holder rejected", "accepted")
@@ -160,7 +160,7 @@ def main():
         except RuntimeError as e:
             checks.append(True)
             print(f"PASS children bad id {bad!r} errors :: {e}")
-    expect("needs_fix claimable only via lease msg", s.call("task_claim", id=child_id), f"{child_id} needs_fix", "not claimable")
+    expect("needs_fix claimable only via lease msg", s.call("task_claim", id=child_id), f"{child_id} needs_fix", "manager: agentboard status")
     ok = "(lease)" not in s.call("task_claim", id=child_id)
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "no (lease) text for lease-less needs_fix")
@@ -222,7 +222,10 @@ def main():
     ok = "[truncated" not in s.call("task_get", id="T1")
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "short task has no truncation marker")
-    expect("claim marks clipped description", s.call("task_claim", id=lid), f"[truncated description: 4000 of {len(long_desc)} chars shown")
+    claimed = s.call("task_claim", id=lid)
+    ok = f"description:\n{long_desc}\n" in claimed and "[truncated" not in claimed
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "claim returns over-cap description whole")
     s.call("task_update", id=lid, report="r" * 6500 + "REPORTTAIL", note="n" * 900 + "NOTETAIL")
     plain = s.call("task_get", id=lid)
     expect("report and note marked", plain, "[truncated report: 6000 of 6510 chars shown", "[truncated note: 800 of 908 chars shown")
@@ -251,7 +254,10 @@ def main():
     ok = not plain.split("[truncated")[0].rstrip().endswith("…")
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "marker replaces the bare ellipsis")
-    expect("multi-line claim marks clip", s.call("task_claim", id=mid), "[truncated description: 4000 of 6800 chars shown")
+    claimed = s.call("task_claim", id=mid)
+    ok = f"description:\n{ml_desc}\n" in claimed and "[truncated" not in claimed
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "multi-line claim returns newlines intact")
     s.call("task_update", id=mid, status="ready")
     whole = s.call("task_get", id=mid, full=True)
     ok = f"description:\n{ml_desc}\n" in whole and "[truncated" not in whole

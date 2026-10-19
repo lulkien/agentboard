@@ -215,10 +215,12 @@ fn fetch(conn: &Connection, id: i64) -> Result<Row, String> {
         .ok_or_else(|| format!("no such task {}", short(id)))
 }
 
+mod dispatch;
 mod render;
 mod sessions;
 mod tasks;
 
+pub use dispatch::dispatch;
 pub use render::{brief, children, get, list};
 pub use sessions::{register_session, send, sessions, tail};
 pub use tasks::{Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note, report, wait};

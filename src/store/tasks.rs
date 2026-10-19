@@ -1,3 +1,4 @@
+use super::render::stamp;
 use super::{DEFAULT_TTL_S, STATUS_LIST, fetch, get, log_event, norm, now_ms, open, short};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, CAP_LAST, clip_marked, field};
 use rusqlite::{OptionalExtension, params};
@@ -53,11 +54,12 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
                     let conn2 = open()?;
                     match fetch(&conn2, x) {
                         Ok(r) => Ok(format!(
-                            "{} {} by {}{}, not claimable",
+                            "{} {} by {}{} — manager: agentboard status {} ready",
                             short(x),
                             r.status,
                             r.assignee.as_deref().unwrap_or("nobody"),
-                            if r.lease_until.is_some() { " (lease)" } else { "" }
+                            r.lease_until.map_or(String::new(), |l| format!(" (lease {}m left, until {}Z)", ((l - now_ms()).max(0) + 59_999) / 60_000, stamp(l))),
+                            short(x)
                         )),
                         Err(_) => Err(format!("no such task {}", short(x))),
                     }
@@ -81,9 +83,11 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
         let r = fetch(&tx, task)?;
         tx.commit().map_err(|e| e.to_string())?;
         let mut out = format!("{} working (lease {}m) {}\n", short(r.id), ttl_s / 60, r.title);
-        out.push_str(&field("description", &r.description, CAP_DESCRIPTION, false, &short(r.id)));
-        out.push_str(&field("goal", &r.goal, CAP_GOAL, false, &short(r.id)));
-        return Ok(out.trim_end().to_owned());
+        // claim is the worker's entry point, not a display path: the prompt
+        // arrives byte-for-byte (newlines, fences) and uncapped.
+        out.push_str(&field("description", &r.description, CAP_DESCRIPTION, true, &short(r.id)));
+        out.push_str(&field("goal", &r.goal, CAP_GOAL, true, &short(r.id)));
+        return Ok(out);
     }
     Err("claim contention: retry".to_owned())
 }
