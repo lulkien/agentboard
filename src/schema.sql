@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS tasks(
   title        TEXT NOT NULL,
   description  TEXT NOT NULL DEFAULT '',      -- context: repo, files, situation
   goal         TEXT NOT NULL DEFAULT '',      -- how to do it + definition of done
-  status       TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|review|done|dropped
+  status       TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|needs_fix|review|done|dropped
   assignee     TEXT,
   priority     INTEGER NOT NULL DEFAULT 100,
   parent       INTEGER REFERENCES tasks(id),

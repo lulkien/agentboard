@@ -36,7 +36,7 @@ completion is one row; nothing is mutable history.
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |
 | `task_wait` | delta only | server-side long-poll for the answer |
-| `board_brief` | ~1 screen | counts + open tasks + `EPIC` rollup lines + recent completions |
+| `board_brief` | ~1 screen | counts + open tasks + `EPIC` rollup lines (done/non-dropped children, open epics only) + recent completions |
 | `session_list` | 1 line/session | registered tmux sessions and their task |
 | `session_register` | ack | map session → task |
 | `session_tail` | N lines | last N lines of a tmux pane |

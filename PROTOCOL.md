@@ -8,7 +8,7 @@ Never guess a missing requirement. `task_ask` with ONE narrow question, then `ta
 
 ## Workflow: epic, implement, review, fix
 
-Work that needs review runs as one loop. A task with children is an epic; `board_brief` shows one `EPIC T27 2/4 done <title>` line per epic with open children. Nothing closes an epic automatically.
+Work that needs review runs as one loop. A task with children is an epic; `board_brief` shows one `EPIC T27 2/4 done <title>` line per open epic that still has open children. Dropped children are left out of the total. Nothing closes an epic automatically.
 
 1. Manager opens the epic: `task_add(title, ...)`.
 2. Manager adds the implement task with `parent=<epic>`. Hand the worker only the task id.

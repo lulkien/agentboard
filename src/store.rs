@@ -471,10 +471,11 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
                     let conn2 = open()?;
                     match fetch(&conn2, x) {
                         Ok(r) => Ok(format!(
-                            "{} {} by {} (lease), not claimable",
+                            "{} {} by {}{}, not claimable",
                             short(x),
                             r.status,
-                            r.assignee.as_deref().unwrap_or("nobody")
+                            r.assignee.as_deref().unwrap_or("nobody"),
+                            if r.lease_until.is_some() { " (lease)" } else { "" }
                         )),
                         Err(_) => Err(format!("no such task {}", short(x))),
                     }
@@ -682,10 +683,12 @@ pub fn brief(since_min: i64) -> Result<String, String> {
         ));
     }
     // A task with children is an epic. Report progress only while some child is
-    // still open; closing the epic is the manager's call, never automatic.
+    // still open and the epic itself is not closed; dropped children do not
+    // count toward the total. Closing the epic is the manager's call, never automatic.
     let mut stmt = conn
         .prepare(
-            "SELECT p.id, p.title, SUM(c.status='done'), COUNT(*) FROM tasks p JOIN tasks c ON c.parent=p.id
+            "SELECT p.id, p.title, SUM(c.status='done'), SUM(c.status!='dropped') FROM tasks p JOIN tasks c ON c.parent=p.id
+             WHERE p.status NOT IN ('done','dropped')
              GROUP BY p.id HAVING SUM(c.status NOT IN ('done','dropped')) > 0 ORDER BY p.id",
         )
         .map_err(|e| e.to_string())?;
