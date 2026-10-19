@@ -71,6 +71,13 @@ run $B --db "$D" note T1 --bogus;                                      check "no
 run $B --db "$D" get T1 --full;                                        check "--bogus stored" $(has "$out" "--bogus" && echo 0 || echo 1)
 run $B --db "$D" note T1 -- "- after dashdash";                        check "-- separator" $rc
 
+# session registry verbs parse (liveness itself is stub-driven in dispatch.sh)
+run $B --db "$D" register tmp-row;                                     check "register" $rc
+run $B --db "$D" unregister tmp-row;                                   check "unregister removes the row, exit 0" $([ $rc -eq 0 ] && has "$out" "removed" && echo 0 || echo 1)
+run $B --db "$D" unregister tmp-row;                                   check "unregister of an unknown name exits 1" $([ $rc -eq 1 ] && has "$err" "no registered session" && echo 0 || echo 1)
+run $B sessions prune --bogus;                                         check "sessions prune rejects unknown flags, exit 1" $([ $rc -eq 1 ] && has "$err" "'--bogus'" && echo 0 || echo 1)
+run $B sessions prune --help;                                          check "sessions prune --help documents --dry-run" $([ $rc -eq 0 ] && has "$out" "--dry-run" && echo 0 || echo 1)
+
 # no args = MCP server on stdio, not a help print
 init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cli.sh","version":"0"}}}'
 for mode in "" "serve"; do

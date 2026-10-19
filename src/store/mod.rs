@@ -240,7 +240,7 @@ mod wait;
 
 pub use dispatch::dispatch;
 pub use render::{brief, children, get, list};
-pub use sessions::{register_session, send, sessions, tail};
+pub use sessions::{prune, register_session, send, sessions, tail, unregister};
 pub use tasks::{
     ClaimError, NewTask, Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note,
     report,

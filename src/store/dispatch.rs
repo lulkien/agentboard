@@ -1,5 +1,6 @@
 use super::proc;
 use super::render::stamp;
+use super::sessions::Liveness;
 use super::tasks::{Patch, apply};
 use super::{fetch, log_event, now_ms, open, short};
 use crate::clip::clip;
@@ -43,6 +44,76 @@ fn deliver(name: &str, text: &str) -> Result<String, String> {
         .map_err(|tmux_err| format!("dispatch to {name} failed (herdr: {herdr_err}; {tmux_err})"))
 }
 
+/// What a session name is worth as a dispatch target.
+enum Candidate {
+    /// No row: never registered.
+    Missing,
+    /// A row exists but no pane answers to the name.
+    Stale,
+    Live,
+}
+
+impl Candidate {
+    fn of(conn: &rusqlite::Connection, live: &Liveness, name: &str) -> Result<Self, String> {
+        let agent: Option<String> = conn
+            .query_row(
+                "SELECT agent FROM sessions WHERE name=?",
+                params![name],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        Ok(match agent {
+            None => Self::Missing,
+            Some(a) if live.alive(name, &a) => Self::Live,
+            Some(_) => Self::Stale,
+        })
+    }
+}
+
+/// Picks the pane to prompt: the task's assignee if its pane is live, else
+/// `--to` if live. A registry row alone proves nothing (rows never expire), so a
+/// dead assignee row must not capture the dispatch.
+fn resolve(
+    conn: &rusqlite::Connection,
+    assignee: Option<&str>,
+    to: Option<&str>,
+    id: i64,
+) -> Result<String, String> {
+    let live = Liveness::new();
+    let a = assignee
+        .map(|n| Candidate::of(conn, &live, n))
+        .transpose()?;
+    if let (Some(Candidate::Live), Some(n)) = (&a, assignee) {
+        return Ok(n.to_owned());
+    }
+    let t = to.map(|n| Candidate::of(conn, &live, n)).transpose()?;
+    if let (Some(Candidate::Live), Some(n)) = (&t, to) {
+        return Ok(n.to_owned());
+    }
+    let mut why = Vec::new();
+    if let (Some(Candidate::Stale), Some(n)) = (&a, assignee) {
+        why.push(format!(
+            "{} has assignee {n:?} but that session row is stale: no live pane answers to it (`agentboard sessions prune` removes dead rows)",
+            short(id)
+        ));
+    }
+    match (&t, to) {
+        (Some(Candidate::Stale), Some(n)) => why.push(format!(
+            "session {n:?} is registered but not live (stale row; `agentboard sessions prune`)"
+        )),
+        (Some(_), Some(n)) => why.push(format!(
+            "no registered session {n:?} (agentboard register <name>)"
+        )),
+        _ if why.is_empty() => why.push(format!(
+            "{} has no registered assignee; pass --to <session>",
+            short(id)
+        )),
+        _ => why.push("pass --to <live session>".to_owned()),
+    }
+    Err(why.join("; "))
+}
+
 /// Tells a pane to claim task `id`. Refuses unless the task is `ready`; `force`
 /// resets it through the normal status->ready path first. `print_only` touches
 /// nothing: no reset, no event, no herdr/tmux.
@@ -74,31 +145,7 @@ pub fn dispatch(
     if print_only {
         return Ok(text);
     }
-    let registered = |name: &str| -> Result<bool, String> {
-        conn.query_row("SELECT 1 FROM sessions WHERE name=?", params![name], |_| {
-            Ok(())
-        })
-        .optional()
-        .map(|r| r.is_some())
-        .map_err(|e| e.to_string())
-    };
-    let target = match task.assignee.as_deref() {
-        Some(a) if registered(a)? => a.to_owned(),
-        _ => match to {
-            Some(t) if registered(t)? => t.to_owned(),
-            Some(t) => {
-                return Err(format!(
-                    "no registered session {t:?} (agentboard register <name>)"
-                ));
-            }
-            None => {
-                return Err(format!(
-                    "{} has no registered assignee; pass --to <session>",
-                    short(id)
-                ));
-            }
-        },
-    };
+    let target = resolve(&conn, task.assignee.as_deref(), to, id)?;
     drop(conn);
     let mut out = String::new();
     if task.status != "ready" {

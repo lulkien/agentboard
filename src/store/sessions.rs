@@ -12,28 +12,58 @@ struct SessionRow {
     seen: i64,
 }
 
+fn rows(conn: &rusqlite::Connection) -> Result<Vec<SessionRow>, String> {
+    let mut stmt = conn
+        .prepare("SELECT name,agent,task_id,seen FROM sessions ORDER BY seen DESC")
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], |r| {
+        Ok(SessionRow {
+            name: r.get(0)?,
+            agent: r.get(1)?,
+            task: r.get(2)?,
+            seen: r.get(3)?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .map_err(|e| e.to_string())
+}
+
+/// Which panes answer right now. A row is only a claim that a pane exists; this
+/// is the check. tmux is asked per name, herdr once, and only if tmux cannot
+/// vouch for a name.
+pub struct Liveness {
+    herdr: std::cell::OnceCell<Option<Vec<(String, String)>>>,
+}
+
+impl Liveness {
+    pub fn new() -> Self {
+        Self {
+            herdr: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// `None` when herdr cannot answer (missing, hung, bad exit), `Some(empty)`
+    /// when it answers with no agents: the difference decides whether a prune is safe.
+    fn herdr(&self) -> Option<&[(String, String)]> {
+        self.herdr.get_or_init(herdr_agents).as_deref()
+    }
+
+    pub fn alive(&self, name: &str, agent: &str) -> bool {
+        tmux_alive(name)
+            || self
+                .herdr()
+                .is_some_and(|a| a.iter().any(|(n, k)| n == name && k == agent))
+    }
+}
+
 pub fn sessions() -> Result<String, String> {
     let conn = open()?;
-    let names: Vec<SessionRow> = {
-        let mut stmt = conn
-            .prepare("SELECT name,agent,task_id,seen FROM sessions ORDER BY seen DESC")
-            .map_err(|e| e.to_string())?;
-        stmt.query_map([], |r| {
-            Ok(SessionRow {
-                name: r.get(0)?,
-                agent: r.get(1)?,
-                task: r.get(2)?,
-                seen: r.get(3)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.to_string())?
-    };
+    let names = rows(&conn)?;
     if names.is_empty() {
         return Ok("(no sessions registered)".to_owned());
     }
-    let herdr = herdr_agents();
+    let live = Liveness::new();
     let mut out = String::new();
     for SessionRow {
         name,
@@ -42,7 +72,7 @@ pub fn sessions() -> Result<String, String> {
         seen,
     } in names
     {
-        let alive = tmux_alive(&name) || herdr.iter().any(|(n, a)| *n == name && *a == agent);
+        let alive = live.alive(&name, &agent);
         out.push_str(&format!(
             "{name} {agent} {} {} {}\n",
             if alive { "up" } else { "gone" },
@@ -51,6 +81,59 @@ pub fn sessions() -> Result<String, String> {
         ));
     }
     Ok(out.trim_end().to_owned())
+}
+
+/// Deletes rows whose pane is not alive. Rows never expire on their own, and a
+/// dead row captures a dispatch to its name, so this is the supported cleanup.
+/// Refuses when neither tmux nor herdr answers: every row would look dead.
+pub fn prune(dry_run: bool) -> Result<String, String> {
+    let conn = open()?;
+    let all = rows(&conn)?;
+    let live = Liveness::new();
+    let herdr_up = live.herdr().is_some();
+    if !herdr_up && !tmux_up() {
+        return Err("prune: neither tmux nor herdr answers, so no session can be judged dead; start the session host, or remove one row with `agentboard unregister <name>`".to_owned());
+    }
+    let why = if herdr_up {
+        "not a tmux session, not a herdr agent"
+    } else {
+        "not a tmux session (herdr unreachable: checked against tmux only)"
+    };
+    let (verb, done) = if dry_run {
+        ("would remove", "would prune")
+    } else {
+        ("removed", "pruned")
+    };
+    let (mut out, mut dead, mut kept) = (String::new(), 0, 0);
+    for r in &all {
+        if live.alive(&r.name, &r.agent) {
+            kept += 1;
+            continue;
+        }
+        if !dry_run {
+            conn.execute("DELETE FROM sessions WHERE name=?", params![r.name])
+                .map_err(|e| e.to_string())?;
+        }
+        dead += 1;
+        out.push_str(&format!("{verb} {} ({}): {why}\n", r.name, r.agent));
+    }
+    out.push_str(&if dead == 0 {
+        format!("nothing to prune ({kept} live)")
+    } else {
+        format!("{done} {dead}, kept {kept}")
+    });
+    Ok(out)
+}
+
+pub fn unregister(name: &str) -> Result<String, String> {
+    let conn = open()?;
+    let n = conn
+        .execute("DELETE FROM sessions WHERE name=?", params![name])
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err(format!("no registered session {name:?}"));
+    }
+    Ok(format!("ok session {name} removed"))
 }
 
 pub fn register_session(
@@ -77,12 +160,19 @@ fn tmux_alive(name: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// Live herdr agents as (name, agent type). Missing binary, hang, bad exit or bad
-/// JSON all mean "none". Bounded by the shared runner (deadline, group kill).
-fn herdr_agents() -> Vec<(String, String)> {
+/// A tmux server is up and answering (a `has-session` miss alone cannot tell
+/// "no such session" from "no tmux at all").
+fn tmux_up() -> bool {
+    proc::run(Command::new("tmux").arg("list-sessions")).is_ok_and(|o| o.status.success())
+}
+
+/// Live herdr agents as (name, agent type). `None`: herdr did not answer (missing
+/// binary, hang, bad exit). Bad JSON is an answer with no agents. Bounded by the
+/// shared runner (deadline, group kill).
+fn herdr_agents() -> Option<Vec<(String, String)>> {
     match proc::run(Command::new("herdr").args(["agent", "list"])) {
-        Ok(o) if o.status.success() => parse_herdr_agents(&o.stdout),
-        _ => Vec::new(),
+        Ok(o) if o.status.success() => Some(parse_herdr_agents(&o.stdout)),
+        _ => None,
     }
 }
 

@@ -90,6 +90,21 @@ Then register the pane once so the board can map task → session:
 
     agentboard register claude1 --agent claude --task T7
 
+Session rows do not expire: a pane that died hours ago still has its row, and the
+row alone proves nothing. `dispatch` therefore only targets a **live** pane (a
+tmux session of that name, or a herdr agent with that name and the registered
+kind): the task's assignee if live, else `--to` if live, else an error that
+names both and says which row is stale. A dead assignee row cannot swallow a
+dispatch meant for a live `--to`. Clean up with:
+
+    agentboard sessions prune --dry-run   # list the dead rows, delete nothing
+    agentboard sessions prune             # delete them, printing each and why
+    agentboard unregister claude1         # remove one row by name
+
+`prune` refuses when neither tmux nor herdr answers (every row would look dead).
+If only herdr is down it judges by tmux alone and says so, so herdr-hosted rows
+are removed too: run it with herdr up.
+
 ## CLI
 
     agentboard --help                 # every command, flag and default

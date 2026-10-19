@@ -168,8 +168,13 @@ pub enum Cmd {
         #[arg(long, default_value_t = 120, allow_negative_numbers = true)]
         since: i64,
     },
-    /// Registered agent sessions
-    Sessions,
+    /// Registered agent sessions (`sessions prune` removes dead rows)
+    Sessions {
+        #[command(subcommand)]
+        action: Option<SessionsCmd>,
+    },
+    /// Remove one registered session row
+    Unregister { name: String },
     /// Map a tmux/herdr session to a task
     Register {
         name: String,
@@ -204,4 +209,14 @@ pub enum Cmd {
     },
     /// Where the database lives
     Path,
+}
+
+#[derive(Subcommand)]
+pub enum SessionsCmd {
+    /// Delete rows whose tmux session / herdr agent is gone
+    Prune {
+        /// List what would be removed; delete nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
 }

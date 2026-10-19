@@ -11,7 +11,8 @@ trap 'rm -rf "$S"' EXIT
 mkdir "$S/bin"
 export AGENTBOARD_DB=$S/d.db AGENTBOARD_ACTOR=boss LOG=$S/calls
 # herdr: HERDR_MODE ok|fail|hang (hang = a shell with a backgrounded sleep, so a
-# kill that spares descendants leaves a live process). tmux: TMUX_MODE ok|fail|hang. Every call is logged.
+# kill that spares descendants leaves a live process; HERDR_AGENTS lists live agents).
+# tmux: TMUX_MODE ok|fail|hang|down, TMUX_LIVE names the sessions that exist. Every call is logged.
 cat >"$S/bin/herdr" <<'STUB'
 #!/bin/sh
 echo "herdr $*" >>"$LOG"
@@ -19,13 +20,28 @@ case "${HERDR_MODE:-ok}" in
   fail) echo "no such pane" >&2; exit 1 ;;
   hang) echo $$ >"$(dirname "$LOG")/herdr.pid"; sleep 30 & echo $! >"$(dirname "$LOG")/sleep.pid"; wait ;;
 esac
+if [ "$1 $2" = "agent list" ]; then   # HERDR_AGENTS="name:kind name:kind"
+  agents=""
+  for pair in ${HERDR_AGENTS:-}; do agents="$agents{\"name\":\"${pair%%:*}\",\"agent\":\"${pair##*:}\"},"; done
+  echo "{\"result\":{\"agents\":[${agents%,}]}}"
+fi
 exit 0
 STUB
 cat >"$S/bin/tmux" <<'STUB'
 #!/bin/sh
 echo "tmux $*" >>"$LOG"
-[ "${TMUX_MODE:-ok}" = fail ] && { echo "no server running" >&2; exit 1; }
-[ "${TMUX_MODE:-ok}" = hang ] && { echo $$ >"$(dirname "$LOG")/tmux.pid"; sleep 30; }
+# down: no server at all. Otherwise liveness answers (TMUX_LIVE="a b" = only those
+# sessions exist; unset = every name exists), and fail/hang hit only the transport.
+[ "${TMUX_MODE:-ok}" = down ] && { echo "no server running" >&2; exit 1; }
+case "$1" in
+  has-session)
+    [ -z "${TMUX_LIVE+x}" ] && exit 0
+    case " $TMUX_LIVE " in *" $3 "*) exit 0 ;; esac
+    echo "can't find session: $3" >&2; exit 1 ;;
+  send-keys|capture-pane)
+    [ "${TMUX_MODE:-ok}" = fail ] && { echo "no server running" >&2; exit 1; }
+    [ "${TMUX_MODE:-ok}" = hang ] && { echo $$ >"$(dirname "$LOG")/tmux.pid"; sleep 30; } ;;
+esac
 exit 0
 STUB
 chmod +x "$S/bin/herdr" "$S/bin/tmux"
@@ -68,7 +84,7 @@ check "--force: herdr got exactly one prompt" $([ "$(calls 'herdr agent prompt w
 run $B dispatch T1
 check "ready task: exit 0 via herdr" $([ $rc -eq 0 ] && has "$out" "dispatched to w1 via herdr:" && echo 0 || echo 1)
 check "exactly one dispatch event, body names target and path" $([ "$(events T1 dispatch)" = 1 ] && $B get T1 --full | grep -q "dispatch [0-9]*s: w1 via herdr$" && echo 0 || echo 1)
-check "tmux not touched on herdr success" $([ "$(calls tmux)" = 0 ] && echo 0 || echo 1)
+check "tmux gets no keys on herdr success (only liveness probes)" $([ "$(calls 'tmux send-keys')" = 0 ] && echo 0 || echo 1)
 
 # target resolution: registered assignee wins, then --to, else an error
 run $B dispatch T3 --to w2
@@ -128,12 +144,58 @@ check "tmux hang: send exits 1 at the deadline" $([ $rc -eq 1 ] && has "$err" "t
 # stdout must not stall it (the old ad-hoc runner joined the reader and waited
 # for the descendant, 30s here), and the stub tree dies with the deadline.
 t0=$(date +%s%N)
-HERDR_MODE=hang run $B sessions
+TMUX_LIVE="" HERDR_MODE=hang run $B sessions
 ms=$(( ($(date +%s%N) - t0) / 1000000 ))
 check "sessions with a stdout-holding herdr: returns at the deadline (${ms}ms), exit 0, rows intact" $([ $rc -eq 0 ] && [ $ms -lt 2500 ] && has "$out" "w1" && echo 0 || echo 1)
 check "sessions: herdr stub shell AND its sleep are dead" $(gone "$S/herdr.pid" && gone "$S/sleep.pid" && echo 0 || echo 1)
 HERDR_MODE=fail run $B sessions
 check "sessions with a failing herdr still lists the registry" $([ $rc -eq 0 ] && has "$out" "w1" && echo 0 || echo 1)
+
+# --- stale rows: a registry row is a claim, not proof of a live pane ----------
+# w1 and w2 are live tmux sessions; ghost* have rows but no pane anywhere; hv is
+# alive only as a herdr agent of the same kind.
+export TMUX_LIVE="w1 w2"
+$B register ghost >/dev/null; $B register ghost2 >/dev/null; $B register hv --agent claude >/dev/null
+$B add s1 --assignee ghost >/dev/null; $B add s2 --assignee ghost >/dev/null; $B add s3 --assignee ghost >/dev/null
+$B add s4 --assignee nobody >/dev/null; $B add s5 --assignee ghost >/dev/null; : >"$LOG"
+S1=$($B ls --limit 50 | awk '$0 ~ / s1$/ {print $1}'); S2=$($B ls --limit 50 | awk '$0 ~ / s2$/ {print $1}')
+S3=$($B ls --limit 50 | awk '$0 ~ / s3$/ {print $1}'); S4=$($B ls --limit 50 | awk '$0 ~ / s4$/ {print $1}')
+S5=$($B ls --limit 50 | awk '$0 ~ / s5$/ {print $1}')
+
+run $B dispatch "$S1" --to w2
+check "stale assignee row cannot capture the dispatch: --to w2 gets it" $([ $rc -eq 0 ] && has "$out" "dispatched to w2 via herdr" && ! has "$(<"$LOG")" "prompt ghost" && echo 0 || echo 1)
+run $B dispatch "$S2"
+check "stale assignee, no --to: exit 1, names the assignee and the stale row" $([ $rc -eq 1 ] && has "$err" '"ghost"' && has "$err" "stale" && has "$err" "sessions prune" && echo 0 || echo 1)
+check "stale refusal sent nothing and logged nothing" $([ "$(calls 'herdr agent prompt ghost')" = 0 ] && [ "$(events "$S2" dispatch)" = 0 ] && echo 0 || echo 1)
+run $B dispatch "$S3" --to ghost2
+check "stale assignee AND stale --to: error names both" $([ $rc -eq 1 ] && has "$err" '"ghost"' && has "$err" '"ghost2"' && has "$err" "not live" && echo 0 || echo 1)
+run $B dispatch "$S4" --to ghost2
+check "unregistered assignee + stale --to: exit 1 'not live'" $([ $rc -eq 1 ] && has "$err" "not live" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude" run $B dispatch "$S5" --to hv
+check "herdr-only pane (same kind) counts as live" $([ $rc -eq 0 ] && has "$out" "dispatched to hv via herdr" && echo 0 || echo 1)
+$B add s6 --assignee hv >/dev/null; S6=$($B ls --limit 50 | awk '$0 ~ / s6$/ {print $1}')
+HERDR_AGENTS="hv:codex" run $B dispatch "$S6" --to w1
+check "herdr agent of a different kind does not vouch for the row" $([ $rc -eq 0 ] && has "$out" "dispatched to w1 via" && echo 0 || echo 1)
+
+# prune
+HERDR_AGENTS="hv:claude" run $B sessions prune --dry-run
+check "prune --dry-run lists exactly the dead rows" $([ $rc -eq 0 ] && has "$out" "would remove ghost (agent)" && has "$out" "would remove ghost2 (agent)" && ! has "$out" "would remove w1" && ! has "$out" "would remove hv" && has "$out" "would prune 2, kept 3" && echo 0 || echo 1)
+run $B sessions;                                                       check "--dry-run deleted nothing" $(has "$out" "ghost " && has "$out" "ghost2 " && echo 0 || echo 1)
+TMUX_MODE=down HERDR_MODE=fail run $B sessions prune
+check "prune refuses when neither tmux nor herdr answers" $([ $rc -eq 1 ] && has "$err" "neither tmux nor herdr answers" && echo 0 || echo 1)
+run $B sessions;                                                       check "refused prune deleted nothing" $(has "$out" "ghost " && has "$out" "hv " && echo 0 || echo 1)
+HERDR_MODE=fail run $B sessions prune --dry-run
+check "herdr down but tmux up: prune proceeds and says it checked tmux only" $([ $rc -eq 0 ] && has "$out" "herdr unreachable" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude" run $B sessions prune
+check "prune removes exactly the dead rows" $([ $rc -eq 0 ] && has "$out" "removed ghost (agent)" && has "$out" "removed ghost2 (agent)" && has "$out" "pruned 2, kept 3" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude" run $B sessions
+check "live rows (tmux w1 w2, herdr hv) survive; dead rows are gone" $(has "$out" "w1 " && has "$out" "w2 " && has "$out" "hv " && ! has "$out" "ghost" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude" run $B sessions prune
+check "second prune: nothing to prune" $(has "$out" "nothing to prune (3 live)" && echo 0 || echo 1)
+$B register tmp >/dev/null
+run $B unregister tmp;                                                 check "unregister removes one row" $([ $rc -eq 0 ] && has "$out" "ok session tmp removed" && echo 0 || echo 1)
+run $B unregister tmp;                                                 check "unregister of an unknown name exits 1" $([ $rc -eq 1 ] && has "$err" "no registered session" && echo 0 || echo 1)
+unset TMUX_LIVE
 
 echo "$pass/$total passed"
 [ "$pass" -eq "$total" ]

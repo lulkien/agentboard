@@ -12,7 +12,7 @@ mod store;
 
 use clap::Parser;
 use clap::error::ErrorKind;
-use cli::{Cli, Cmd};
+use cli::{Cli, Cmd, SessionsCmd};
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 
@@ -111,7 +111,11 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
             store::apply(actor, tid(&id)?, &patch)
         }
         Cmd::Brief { since } => store::brief(since),
-        Cmd::Sessions => store::sessions(),
+        Cmd::Sessions { action: None } => store::sessions(),
+        Cmd::Sessions {
+            action: Some(SessionsCmd::Prune { dry_run }),
+        } => store::prune(dry_run),
+        Cmd::Unregister { name } => store::unregister(&name),
         Cmd::Register { name, agent, task } => {
             let task = task.as_deref().map(tid).transpose()?;
             let cwd = std::env::current_dir()
