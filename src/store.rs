@@ -122,6 +122,9 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("migrate v1->v2: {e}"))
 }
 
+/// Canonical status names, for error messages.
+const STATUS_LIST: &str = "ready|working|blocking|needs_fix|review|done|dropped";
+
 /// Canonical statuses. Old names stay accepted as aliases so in-flight agents
 /// that still say running/blocked keep working.
 pub fn norm(raw: &str) -> Option<&'static str> {
@@ -129,6 +132,7 @@ pub fn norm(raw: &str) -> Option<&'static str> {
         "triage" | "ready" => Some("ready"),
         "running" | "working" | "started" => Some("working"),
         "blocked" | "blocking" => Some("blocking"),
+        "needs_fix" | "needs-fix" | "need fix" | "needs fix" | "need-fix" | "need_fix" | "fix" => Some("needs_fix"),
         "review" => Some("review"),
         "done" => Some("done"),
         "dropped" => Some("dropped"),
@@ -153,6 +157,7 @@ fn code(status: &str) -> &str {
         "ready" | "triage" => "rdy",
         "working" | "running" => "wrk",
         "blocking" | "blocked" => "blk",
+        "needs_fix" => "fix",
         "review" => "rev",
         "done" => "don",
         "dropped" => "drp",
@@ -274,7 +279,7 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
     let mut args: Vec<String> = Vec::new();
     match status {
         Some(s) => {
-            let want = norm(s).ok_or_else(|| format!("bad status {s:?} (ready|working|blocking|review|done|dropped)"))?;
+            let want = norm(s).ok_or_else(|| format!("bad status {s:?} ({STATUS_LIST})"))?;
             sql.push_str(" AND status=?");
             args.push(want.to_owned());
         }
@@ -284,7 +289,7 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
         sql.push_str(" AND assignee=?");
         args.push(a.to_owned());
     }
-    sql.push_str(" ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'working' THEN 1 WHEN 'review' THEN 2 WHEN 'ready' THEN 3 ELSE 4 END, priority, id LIMIT ?");
+    sql.push_str(" ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'needs_fix' THEN 1 WHEN 'working' THEN 2 WHEN 'review' THEN 3 WHEN 'ready' THEN 4 ELSE 5 END, priority, id LIMIT ?");
     args.push(limit.to_string());
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows: Vec<Row> = stmt
@@ -352,6 +357,10 @@ pub fn get(id: i64) -> Result<String, String> {
             out.push_str(&format!("lease: {}m left\n", left / 60_000));
         }
     }
+    if let Some(line) = children_summary(&conn, r.id)? {
+        out.push_str(&line);
+        out.push('\n');
+    }
     out.push_str(&field("description", &r.description, 4000));
     out.push_str(&field("goal", &r.goal, 2000));
     out.push_str(&field("report", r.report.as_deref().unwrap_or(""), 6000));
@@ -374,6 +383,61 @@ pub fn get(id: i64) -> Result<String, String> {
         for (seq, actor, kind, body, ts) in evs.iter().rev() {
             out.push_str(&format!("  #{seq} {actor} {kind} {}: {}\n", ago(*ts), clip(body, 220)));
         }
+    }
+    Ok(out.trim_end().to_owned())
+}
+
+/// Canonical status order for summaries: most urgent first.
+const STATUS_ORDER: [&str; 7] = ["blocking", "needs_fix", "working", "review", "ready", "done", "dropped"];
+
+/// `children: 4 (2 done, 1 working, 1 needs_fix)`, or None for a leaf task.
+fn children_summary(conn: &Connection, id: i64) -> Result<Option<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT status, COUNT(*) FROM tasks WHERE parent=? GROUP BY status")
+        .map_err(|e| e.to_string())?;
+    let counts: Vec<(String, i64)> = stmt
+        .query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    let total: i64 = counts.iter().map(|(_, n)| n).sum();
+    if total == 0 {
+        return Ok(None);
+    }
+    let mut parts = Vec::new();
+    for st in STATUS_ORDER {
+        if let Some((_, n)) = counts.iter().find(|(s, _)| s == st) {
+            parts.push(format!("{n} {st}"));
+        }
+    }
+    Ok(Some(format!("children: {total} ({})", parts.join(", "))))
+}
+
+/// One compact line per direct child, ordered by id: id, status, assignee, age, title.
+pub fn children(parent: i64) -> Result<String, String> {
+    let conn = open()?;
+    fetch(&conn, parent)?;
+    let mut stmt = conn
+        .prepare("SELECT id,status,assignee,updated_at,title FROM tasks WHERE parent=? ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(i64, String, Option<String>, i64, String)> = stmt
+        .query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    if rows.is_empty() {
+        return Ok(format!("{} has no children", short(parent)));
+    }
+    let mut out = String::new();
+    for (id, status, assignee, upd, title) in rows {
+        out.push_str(&format!(
+            "{} {} {:<9} {:>4} {}\n",
+            short(id),
+            code(&status),
+            assignee.as_deref().unwrap_or("-"),
+            ago(upd),
+            clip(&title, 64)
+        ));
     }
     Ok(out.trim_end().to_owned())
 }
@@ -462,7 +526,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let cur = fetch(&tx, id)?;
     let now = now_ms();
     let status = match p.status {
-        Some(raw) => norm(raw).ok_or_else(|| format!("bad status {raw:?} (ready|working|blocking|review|done|dropped)"))?,
+        Some(raw) => norm(raw).ok_or_else(|| format!("bad status {raw:?} ({STATUS_LIST})"))?,
         None => cur.status.as_str(),
     };
     let moved = status != cur.status;
@@ -499,6 +563,8 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             "UPDATE tasks SET status=?, needs=?, updated_at=?, lease_until=NULL, started_at=NULL, completed_at=NULL WHERE id=?",
             params![status, needs, now, id],
         ),
+        // `needs_fix` waits on someone else's fix, so it holds no lease. Same for
+        // blocking and review.
         _ => tx.execute(
             "UPDATE tasks SET status=?, needs=?, updated_at=?, lease_until=NULL WHERE id=?",
             params![status, needs, now, id],
@@ -509,6 +575,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         (true, "done") => "done",
         (true, "review") => "review",
         (true, "blocking") => "block",
+        (true, "needs_fix") => "needs_fix",
         (true, "working") => {
             match cur.status.as_str() {
                 "blocking" => "answer",
@@ -594,7 +661,7 @@ pub fn brief(since_min: i64) -> Result<String, String> {
     out.push('\n');
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {COLS} FROM tasks WHERE status NOT IN ('done','dropped') ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'working' THEN 1 WHEN 'review' THEN 2 ELSE 3 END, priority, id LIMIT 25"
+            "SELECT {COLS} FROM tasks WHERE status NOT IN ('done','dropped') ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'needs_fix' THEN 1 WHEN 'working' THEN 2 WHEN 'review' THEN 3 ELSE 4 END, priority, id LIMIT 25"
         ))
         .map_err(|e| e.to_string())?;
     let rows: Vec<Row> = stmt
@@ -613,6 +680,22 @@ pub fn brief(since_min: i64) -> Result<String, String> {
             clip(&r.title, 60),
             if wait.is_empty() { String::new() } else { format!(" [{wait}]") }
         ));
+    }
+    // A task with children is an epic. Report progress only while some child is
+    // still open; closing the epic is the manager's call, never automatic.
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.id, p.title, SUM(c.status='done'), COUNT(*) FROM tasks p JOIN tasks c ON c.parent=p.id
+             GROUP BY p.id HAVING SUM(c.status NOT IN ('done','dropped')) > 0 ORDER BY p.id",
+        )
+        .map_err(|e| e.to_string())?;
+    let epics: Vec<(i64, String, i64, i64)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    for (id, title, done_n, total) in epics {
+        out.push_str(&format!("EPIC {} {done_n}/{total} done {}\n", short(id), clip(&title, 60)));
     }
     let mut stmt = conn
         .prepare("SELECT id,report FROM tasks WHERE status='done' AND updated_at>=? ORDER BY updated_at DESC LIMIT 8")

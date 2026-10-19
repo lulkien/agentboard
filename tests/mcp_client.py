@@ -129,6 +129,27 @@ def main():
     s.call("task_add", title="high", priority=1)
     expect("claim next honours priority", s.call("task_claim"), "high")
 
+    # Epic workflow: parent roundtrip, needs_fix (+ alias), children, rollup.
+    expect("add epic", s.call("task_add", title="epic: ship it", description="epic"), "ready")
+    epic = s.call("task_list", limit=50)
+    epic_id = [l.split()[0] for l in epic.splitlines() if "epic: ship it" in l][0]
+    expect("add child with parent", s.call("task_add", title="implement it", parent=epic_id), "ready")
+    child_id = f"T{int(epic_id[1:]) + 1}"
+    expect("parent roundtrip on get", s.call("task_get", id=child_id), f"parent: {epic_id}")
+    s.call("task_add", title="review it", parent=epic_id)
+    expect("needs_fix accepted", s.call("task_update", id=child_id, status="needs_fix"), f"{child_id} needs_fix")
+    s.call("task_update", id=child_id, status="working")
+    expect("need fix alias accepted", s.call("task_update", id=child_id, status="need fix"), f"{child_id} needs_fix")
+    got = s.call("task_get", id=child_id)
+    ok = "needs_fix" in got and "lease:" not in got
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "needs_fix clears lease")
+    expect("needs_fix listed as fix", s.call("task_list", status="needs-fix"), f"{child_id} fix")
+    kids = s.call("task_children", id=epic_id)
+    expect("children lists child", kids, child_id, "fix", "implement it", "review it")
+    expect("get shows children line", s.call("task_get", id=epic_id), "children: 2 (1 needs_fix, 1 ready)")
+    expect("brief shows epic line", s.call("board_brief"), f"EPIC {epic_id} 0/2 done epic: ship it")
+
     expect("session list", s.call("session_list"), "session")
     s.close()
     print(f"\n{sum(checks)}/{len(checks)} checks passed")

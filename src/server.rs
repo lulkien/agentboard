@@ -1,4 +1,4 @@
-//! MCP surface: 11 tools, text-only results, short acks.
+//! MCP surface: 12 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
@@ -69,7 +69,7 @@ pub struct AddArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListArgs {
-    /// ready|working|blocking|review|done|dropped. Omit for all open work.
+    /// ready|working|blocking|needs_fix|review|done|dropped. Omit for all open work.
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
@@ -98,7 +98,7 @@ pub struct ClaimArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdateArgs {
     pub id: String,
-    /// ready|working|blocking|review|done|dropped. Omit to keep the current one.
+    /// ready|working|blocking|needs_fix|review|done|dropped. Omit to keep the current one.
     #[serde(default)]
     pub status: Option<String>,
     /// Worker's findings or outcome. Stored as the task report.
@@ -202,6 +202,12 @@ impl Board {
         run!(store::get(id))
     }
 
+    #[tool(name = "task_children", description = "Direct children of a task (epic), one compact line each: id, status, assignee, age, title. Ordered by id.", annotations(title = "List children", read_only_hint = true))]
+    async fn task_children(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_id(&a.id).map_err(err)?;
+        run!(store::children(id))
+    }
+
     #[tool(name = "task_claim", description = "Atomically claim a task (or the next ready one) and return its description + goal. Claim expires after ttl_min; heartbeat to extend.", annotations(title = "Claim task", read_only_hint = false, destructive_hint = false))]
     async fn task_claim(&self, Parameters(a): Parameters<ClaimArgs>) -> Result<CallToolResult, ErrorData> {
         let id = match a.id.as_deref() {
@@ -212,7 +218,7 @@ impl Board {
         run!(store::claim(&actor(), id, ttl * 60))
     }
 
-    #[tool(name = "task_update", description = "Write back to the board: status (ready|working|blocking|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.", annotations(title = "Update task", read_only_hint = false, destructive_hint = false))]
+    #[tool(name = "task_update", description = "Write back to the board: status (ready|working|blocking|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.", annotations(title = "Update task", read_only_hint = false, destructive_hint = false))]
     async fn task_update(&self, Parameters(a): Parameters<UpdateArgs>) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         let who = actor();

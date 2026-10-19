@@ -21,6 +21,7 @@ agentboard — task board + tmux bridge for a team of CLI agents
   agentboard add <title> [--description D | --spec D] [--goal G] [--status S] [--assignee A] [--priority N] [--parent T1]
   agentboard ls [--status S] [--assignee A] [--limit N]
   agentboard get <T1>
+  agentboard children <T1>
   agentboard claim [<T1>] [--ttl MIN]
   agentboard heartbeat <T1> [--ttl MIN]
   agentboard note <T1> <text>
@@ -29,7 +30,7 @@ agentboard — task board + tmux bridge for a team of CLI agents
   agentboard answer <T1> <text>
   agentboard done <T1> <summary> [--commit REF]
   agentboard review <T1> <summary>
-  agentboard status <T1> <status> [note]
+  agentboard status <T1> <status> [note]   (ready|working|blocking|needs_fix|review|done|dropped)
   agentboard block <T1> <reason>
   agentboard wait <T1> [--timeout SEC] [--after SEQ]
   agentboard brief [--since MIN]
@@ -124,6 +125,7 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             store::list(flag(argv, "--status").as_deref(), flag(argv, "--assignee").as_deref(), limit)
         }
         "get" => store::get(tid(pos.get(1))?),
+        "children" => store::children(tid(pos.get(1))?),
         "claim" => {
             let id = pos.get(1).map(|p| store::parse_id(p)).transpose()?;
             let ttl: i64 = flag(argv, "--ttl").and_then(|p| p.parse().ok()).unwrap_or(30);

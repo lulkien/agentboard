@@ -16,9 +16,10 @@ Three tables (`src/schema.sql`):
     sessions  name, agent, cwd, task_id, seen, status    -- tmux registry
 
 Statuses: `ready → working → (blocking → working)* → review → done`,
-plus `dropped`. `needs='input'` marks "blocked on a human", which is the only
+plus `needs_fix` (review found work, waiting for a fix; shown as `fix`) and
+`dropped`. `needs='input'` marks "blocked on a human", which is the only
 thing that should ever interrupt you. Input aliases `running`→`working`,
-`blocked`→`blocking`, `triage`→`ready` accepted on input.
+`blocked`→`blocking`, `triage`→`ready`, `need fix`/`needs-fix`/`fix`→`needs_fix` accepted on input.
 
 `events` is the file you used to write. Every note, question, answer, claim and
 completion is one row; nothing is mutable history.
@@ -30,11 +31,12 @@ completion is one row; nothing is mutable history.
 | `task_add` | 1 line | create; returns `T7` (takes `title, description, goal, status, assignee, priority, parent`) |
 | `task_list` | 1 line/task | open work, ordered by urgency |
 | `task_get` | ~10 lines | description, goal, timestamps, lease, report, note, last 8 events |
+| `task_children` | 1 line/child | direct children of an epic: id, status, assignee, age, title |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |
 | `task_wait` | delta only | server-side long-poll for the answer |
-| `board_brief` | ~1 screen | counts + open tasks + recent completions |
+| `board_brief` | ~1 screen | counts + open tasks + `EPIC` rollup lines + recent completions |
 | `session_list` | 1 line/session | registered tmux sessions and their task |
 | `session_register` | ack | map session → task |
 | `session_tail` | N lines | last N lines of a tmux pane |
@@ -90,7 +92,7 @@ Then register the pane once so the board can map task → session:
 
 ## CLI
 
-    agentboard add|ls|get|claim|note|ask|answer|done|review|block|brief
+    agentboard add|ls|get|children|claim|note|ask|answer|done|review|block|brief
     agentboard wait T7 [--after 42] [--timeout 60]
     agentboard sessions|register|tail|send
     agentboard path                    # where the db lives
