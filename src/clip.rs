@@ -60,7 +60,11 @@ pub fn field(label: &str, value: &str, max: usize, full: bool, tag: &str) -> Str
         (shown, None) => format!("{label}:\n{shown}\n"),
         (shown, Some(total)) => {
             let raw = value.chars().count();
-            let unit = if raw == total { String::new() } else { format!(" (newline = 3 chars; {raw} raw)") };
+            let unit = if raw == total {
+                String::new()
+            } else {
+                format!(" (newline = 3 chars; {raw} raw)")
+            };
             format!(
                 "{label}:\n{shown} [truncated {label}: {max} of {total} chars shown{unit}; full text: `agentboard get {tag} --full` or task_get id={tag} full=true]\n"
             )

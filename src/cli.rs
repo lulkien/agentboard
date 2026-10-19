@@ -91,31 +91,58 @@ pub enum Cmd {
         ttl: i64,
     },
     /// Record a progress note
-    Note { id: String, #[arg(allow_hyphen_values = true)] text: String },
+    Note {
+        id: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// Write the task report without moving it
-    Report { id: String, #[arg(allow_hyphen_values = true)] text: String },
+    Report {
+        id: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// Block on a question
-    Ask { id: String, #[arg(allow_hyphen_values = true)] question: String },
+    Ask {
+        id: String,
+        #[arg(allow_hyphen_values = true)]
+        question: String,
+    },
     /// Answer a blocked task and resume it
-    Answer { id: String, #[arg(allow_hyphen_values = true)] text: String },
+    Answer {
+        id: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// Finish a task
     Done {
         id: String,
-        #[arg(allow_hyphen_values = true)] summary: String,
+        #[arg(allow_hyphen_values = true)]
+        summary: String,
         #[arg(long)]
         commit: Option<String>,
     },
     /// Move a task to review
     Review {
         id: String,
-        #[arg(allow_hyphen_values = true)] summary: String,
+        #[arg(allow_hyphen_values = true)]
+        summary: String,
         #[arg(long)]
         commit: Option<String>,
     },
     /// Set a status (ready|working|blocking|needs_fix|review|done|dropped)
-    Status { id: String, status: String, #[arg(allow_hyphen_values = true)] note: Option<String> },
+    Status {
+        id: String,
+        status: String,
+        #[arg(allow_hyphen_values = true)]
+        note: Option<String>,
+    },
     /// Block a task with a reason
-    Block { id: String, #[arg(allow_hyphen_values = true)] reason: String },
+    Block {
+        id: String,
+        #[arg(allow_hyphen_values = true)]
+        reason: String,
+    },
     /// Block until watched tasks match; exit 0 matched, 3 timeout
     #[command(long_about = WAIT_HELP)]
     Wait {
@@ -158,7 +185,11 @@ pub enum Cmd {
         lines: usize,
     },
     /// Type a line into a pane
-    Send { name: String, #[arg(allow_hyphen_values = true)] text: String },
+    Send {
+        name: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// Tell a registered pane to claim a task
     Dispatch {
         id: String,

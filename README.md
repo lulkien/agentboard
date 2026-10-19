@@ -118,6 +118,9 @@ Default db: `$XDG_STATE_HOME/agentboard/board.db`.
     bash tests/wait.sh            # long-poll returns on the event, not the timeout
     ./target/release/agentboard < tests/mcp-smoke.jsonl   # handshake + tool list
 
+Static gates, run before every commit (no CI): `cargo fmt --check` and
+`cargo clippy --all-targets -- -D warnings`; both must print nothing.
+
 Cold start: ~5 MB RSS, `brief` in <10 ms. One claim, process included, is ~1.4 ms.
 
 ## Field test (real Claude Code, sonnet)

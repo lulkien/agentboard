@@ -37,8 +37,12 @@ fn claim_err(e: store::ClaimError) -> ErrorData {
 }
 
 /// Runs a blocking store call (tmux subprocess) off the async runtime threads.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tokio::task::spawn_blocking(f).await.map_err(|e| format!("task join: {e}"))?
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("task join: {e}"))?
 }
 
 macro_rules! run {
@@ -210,11 +214,20 @@ pub struct RegisterArgs {
 impl Board {
     #[must_use]
     pub fn new() -> Self {
-        Self { tool_router: Self::tool_router() }
+        Self {
+            tool_router: Self::tool_router(),
+        }
     }
 
-    #[tool(name = "task_add", description = "Create a task. description holds everything the worker needs (repo path, files, situation); goal holds how to do it and the definition of done. Returns its short id (T7).", annotations(title = "Add task", read_only_hint = false, destructive_hint = false))]
-    async fn task_add(&self, Parameters(a): Parameters<AddArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "task_add",
+        description = "Create a task. description holds everything the worker needs (repo path, files, situation); goal holds how to do it and the definition of done. Returns its short id (T7).",
+        annotations(title = "Add task", read_only_hint = false, destructive_hint = false)
+    )]
+    async fn task_add(
+        &self,
+        Parameters(a): Parameters<AddArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let parent = match a.parent.as_deref() {
             Some(p) => Some(store::parse_id(p).map_err(err)?),
             None => None,
@@ -235,43 +248,94 @@ impl Board {
         run!(store::add(&actor(), &task))
     }
 
-    #[tool(name = "task_list", description = "Open tasks, one compact line each: id, status, assignee, title.", annotations(title = "List tasks", read_only_hint = true))]
-    async fn task_list(&self, Parameters(a): Parameters<ListArgs>) -> Result<CallToolResult, ErrorData> {
-        run!(store::list(a.status.as_deref(), a.assignee.as_deref(), a.limit.unwrap_or(20).clamp(1, 200)))
+    #[tool(
+        name = "task_list",
+        description = "Open tasks, one compact line each: id, status, assignee, title.",
+        annotations(title = "List tasks", read_only_hint = true)
+    )]
+    async fn task_list(
+        &self,
+        Parameters(a): Parameters<ListArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        run!(store::list(
+            a.status.as_deref(),
+            a.assignee.as_deref(),
+            a.limit.unwrap_or(20).clamp(1, 200)
+        ))
     }
 
-    #[tool(name = "task_get", description = "Task record: status, timestamps, description, goal, report, note, recent events. Long fields end in a `[truncated <field>: N of M chars ...]` marker; pass full=true to get them whole and verbatim. Manager reads this to collect a worker's result.", annotations(title = "Get task", read_only_hint = true))]
-    async fn task_get(&self, Parameters(a): Parameters<GetArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "task_get",
+        description = "Task record: status, timestamps, description, goal, report, note, recent events. Long fields end in a `[truncated <field>: N of M chars ...]` marker; pass full=true to get them whole and verbatim. Manager reads this to collect a worker's result.",
+        annotations(title = "Get task", read_only_hint = true)
+    )]
+    async fn task_get(
+        &self,
+        Parameters(a): Parameters<GetArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         run!(store::get(id, a.full))
     }
 
-    #[tool(name = "task_children", description = "Direct children of a task (epic), one compact line each: id, status, assignee, age, title. Ordered by id.", annotations(title = "List children", read_only_hint = true))]
-    async fn task_children(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "task_children",
+        description = "Direct children of a task (epic), one compact line each: id, status, assignee, age, title. Ordered by id.",
+        annotations(title = "List children", read_only_hint = true)
+    )]
+    async fn task_children(
+        &self,
+        Parameters(a): Parameters<IdArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         run!(store::children(id))
     }
 
-    #[tool(name = "task_claim", description = "Atomically claim a task (or the next ready one) and return its description + goal. Claim expires after ttl_min; heartbeat to extend.", annotations(title = "Claim task", read_only_hint = false, destructive_hint = false))]
-    async fn task_claim(&self, Parameters(a): Parameters<ClaimArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "task_claim",
+        description = "Atomically claim a task (or the next ready one) and return its description + goal. Claim expires after ttl_min; heartbeat to extend.",
+        annotations(title = "Claim task", read_only_hint = false, destructive_hint = false)
+    )]
+    async fn task_claim(
+        &self,
+        Parameters(a): Parameters<ClaimArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let id = match a.id.as_deref() {
             Some(s) => Some(store::parse_id(s).map_err(err)?),
             None => None,
         };
         let ttl = a.ttl_min.unwrap_or(30).clamp(1, 720);
-        store::claim(&actor(), id, ttl * 60).map(text).map_err(claim_err)
+        store::claim(&actor(), id, ttl * 60)
+            .map(text)
+            .map_err(claim_err)
     }
 
-    #[tool(name = "task_update", description = "Write back to the board: status (ready|working|blocking|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.", annotations(title = "Update task", read_only_hint = false, destructive_hint = false))]
-    async fn task_update(&self, Parameters(a): Parameters<UpdateArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "task_update",
+        description = "Write back to the board: status (ready|working|blocking|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.",
+        annotations(
+            title = "Update task",
+            read_only_hint = false,
+            destructive_hint = false
+        )
+    )]
+    async fn task_update(
+        &self,
+        Parameters(a): Parameters<UpdateArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         let who = actor();
         let ttl_s = a.ttl_min.unwrap_or(30).clamp(1, 720) * 60;
-        let beat = if a.heartbeat { Some(store::heartbeat(&who, id, ttl_s).map_err(err)?) } else { None };
+        let beat = if a.heartbeat {
+            Some(store::heartbeat(&who, id, ttl_s).map_err(err)?)
+        } else {
+            None
+        };
         if a.status.is_none() && a.report.is_none() && a.note.is_none() && a.commit.is_none() {
             return match beat {
                 Some(ack) => Ok(text(ack)),
-                None => Err(err("nothing to do: pass status, report, note, commit or heartbeat".to_owned())),
+                None => Err(err(
+                    "nothing to do: pass status, report, note, commit or heartbeat".to_owned(),
+                )),
             };
         }
         let patch = store::Patch {
@@ -285,55 +349,120 @@ impl Board {
         run!(store::apply(&who, id, &patch))
     }
 
-    #[tool(name = "task_ask", description = "Block on a human decision. Sets status=blocking/needs=input; the answer arrives as an event. Follow with task_wait, passing the #seq from the ack as after_seq. Ask ONE narrow question per call: compound questions get partial answers.", annotations(title = "Ask and block", read_only_hint = false, destructive_hint = false))]
-    async fn task_ask(&self, Parameters(a): Parameters<AskArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "task_ask",
+        description = "Block on a human decision. Sets status=blocking/needs=input; the answer arrives as an event. Follow with task_wait, passing the #seq from the ack as after_seq. Ask ONE narrow question per call: compound questions get partial answers.",
+        annotations(
+            title = "Ask and block",
+            read_only_hint = false,
+            destructive_hint = false
+        )
+    )]
+    async fn task_ask(
+        &self,
+        Parameters(a): Parameters<AskArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         run!(store::ask(&actor(), id, &a.question))
     }
 
-    #[tool(name = "task_wait", description = "Server-side long-poll over a set of tasks. Selectors (union, at least one): id, ids, epic (direct children), open (not done/dropped). Filters: status (CSV, current status; already true returns at once), kind (CSV, new event kinds); both given = both hold; none = any new event. after_seq: only events past it. FIRST LINE is `matched:` (then per task `T7 review claude1` and its new event lines) or `timeout:` (then every watched status and the tail of the freshest task). Unknown task, status or kind is an error. Prefer this over repeated task_get.", annotations(title = "Wait for change", read_only_hint = true))]
-    async fn task_wait(&self, Parameters(a): Parameters<WaitArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "task_wait",
+        description = "Server-side long-poll over a set of tasks. Selectors (union, at least one): id, ids, epic (direct children), open (not done/dropped). Filters: status (CSV, current status; already true returns at once), kind (CSV, new event kinds); both given = both hold; none = any new event. after_seq: only events past it. FIRST LINE is `matched:` (then per task `T7 review claude1` and its new event lines) or `timeout:` (then every watched status and the tail of the freshest task). Unknown task, status or kind is an error. Prefer this over repeated task_get.",
+        annotations(title = "Wait for change", read_only_hint = true)
+    )]
+    async fn task_wait(
+        &self,
+        Parameters(a): Parameters<WaitArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let ms = a.timeout_s.unwrap_or(60).clamp(1, 300) * 1000;
         let ids: Vec<String> = a.id.into_iter().chain(a.ids).collect();
-        run!(store::wait(store::Wait {
-            ids: &ids,
-            epic: a.epic.as_deref(),
-            open: a.open,
-            status: a.status.as_deref(),
-            kind: a.kind.as_deref(),
-            after: a.after_seq,
-            timeout_ms: ms,
-        })
-        .await.map(|o| o.text))
+        run!(
+            store::wait(store::Wait {
+                ids: &ids,
+                epic: a.epic.as_deref(),
+                open: a.open,
+                status: a.status.as_deref(),
+                kind: a.kind.as_deref(),
+                after: a.after_seq,
+                timeout_ms: ms,
+            })
+            .await
+            .map(|o| o.text)
+        )
     }
 
-    #[tool(name = "board_brief", description = "Team status in one screen: counts, open tasks ordered by urgency, recent completions. Use for standup/reporting.", annotations(title = "Board brief", read_only_hint = true, idempotent_hint = true))]
-    async fn board_brief(&self, Parameters(a): Parameters<BriefArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "board_brief",
+        description = "Team status in one screen: counts, open tasks ordered by urgency, recent completions. Use for standup/reporting.",
+        annotations(title = "Board brief", read_only_hint = true, idempotent_hint = true)
+    )]
+    async fn board_brief(
+        &self,
+        Parameters(a): Parameters<BriefArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         run!(store::brief(a.since_min.unwrap_or(120).clamp(1, 20_160)))
     }
 
-    #[tool(name = "session_list", description = "Registered agent sessions (tmux or herdr) and what task each holds.", annotations(title = "List sessions", read_only_hint = true))]
-    async fn session_list(&self, Parameters(_): Parameters<Empty>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "session_list",
+        description = "Registered agent sessions (tmux or herdr) and what task each holds.",
+        annotations(title = "List sessions", read_only_hint = true)
+    )]
+    async fn session_list(
+        &self,
+        Parameters(_): Parameters<Empty>,
+    ) -> Result<CallToolResult, ErrorData> {
         run!(blocking(store::sessions).await)
     }
 
-    #[tool(name = "session_register", description = "Register this session's tmux name so the board can map task -> pane.", annotations(title = "Register session", read_only_hint = false, destructive_hint = false))]
-    async fn session_register(&self, Parameters(a): Parameters<RegisterArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "session_register",
+        description = "Register this session's tmux name so the board can map task -> pane.",
+        annotations(
+            title = "Register session",
+            read_only_hint = false,
+            destructive_hint = false
+        )
+    )]
+    async fn session_register(
+        &self,
+        Parameters(a): Parameters<RegisterArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let task = match a.task_id.as_deref() {
             Some(t) => Some(store::parse_id(t).map_err(err)?),
             None => None,
         };
-        run!(store::register_session(&a.name, a.agent.as_deref().unwrap_or("agent"), a.cwd.as_deref().unwrap_or(""), task))
+        run!(store::register_session(
+            &a.name,
+            a.agent.as_deref().unwrap_or("agent"),
+            a.cwd.as_deref().unwrap_or(""),
+            task
+        ))
     }
 
-    #[tool(name = "session_tail", description = "Last N lines of a tmux pane. Cheap way to see what an agent is actually doing.", annotations(title = "Tail pane", read_only_hint = true))]
-    async fn session_tail(&self, Parameters(a): Parameters<TailArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "session_tail",
+        description = "Last N lines of a tmux pane. Cheap way to see what an agent is actually doing.",
+        annotations(title = "Tail pane", read_only_hint = true)
+    )]
+    async fn session_tail(
+        &self,
+        Parameters(a): Parameters<TailArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let lines = a.lines.unwrap_or(40).clamp(1, 400);
         run!(blocking(move || store::tail(&a.name, lines)).await)
     }
 
-    #[tool(name = "session_send", description = "Type a line into a tmux pane and press Enter (steer another agent).", annotations(title = "Send keys", read_only_hint = false, destructive_hint = true))]
-    async fn session_send(&self, Parameters(a): Parameters<SendArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        name = "session_send",
+        description = "Type a line into a tmux pane and press Enter (steer another agent).",
+        annotations(title = "Send keys", read_only_hint = false, destructive_hint = true)
+    )]
+    async fn session_send(
+        &self,
+        Parameters(a): Parameters<SendArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         run!(blocking(move || store::send(&a.name, &a.text)).await)
     }
 }

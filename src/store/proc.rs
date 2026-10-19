@@ -13,7 +13,10 @@ const MAX_BYTES: u64 = 1 << 20;
 /// Deadline for one herdr/tmux call. `AGENTBOARD_DELIVER_TIMEOUT_MS` overrides
 /// the 2s default so a test can prove the kill path in milliseconds.
 fn deadline() -> Duration {
-    let ms = std::env::var("AGENTBOARD_DELIVER_TIMEOUT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(2000);
+    let ms = std::env::var("AGENTBOARD_DELIVER_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2000);
     Duration::from_millis(ms)
 }
 
@@ -55,7 +58,11 @@ pub fn run(cmd: &mut Command) -> Result<Output, String> {
             Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
                 // `kill -KILL -- -PGID`: the group id is the child's pid (process_group(0)).
-                let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", child.id())]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+                let _ = Command::new("kill")
+                    .args(["-KILL", "--", &format!("-{}", child.id())])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("timed out after {}ms", limit.as_millis()));

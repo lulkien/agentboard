@@ -15,7 +15,15 @@ pub struct NewTask<'a> {
 }
 
 pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
-    let NewTask { title, description, goal, status, assignee, priority, parent } = *task;
+    let NewTask {
+        title,
+        description,
+        goal,
+        status,
+        assignee,
+        priority,
+        parent,
+    } = *task;
     let conn = open()?;
     if let Some(p) = parent {
         fetch(&conn, p).map_err(|_| format!("add: no such parent task {}", short(p)))?;

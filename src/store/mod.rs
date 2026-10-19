@@ -69,10 +69,14 @@ fn open() -> Result<Connection, String> {
         .map_err(|e| e.to_string())?;
     // A failed init is retried on the next open instead of being cached for the
     // life of a long-running MCP server.
-    let mut done = INIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut done = INIT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if !*done {
-        conn.execute_batch("PRAGMA journal_mode=WAL").map_err(|e| e.to_string())?;
-        conn.execute_batch(SCHEMA).map_err(|e| format!("schema: {e}"))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL")
+            .map_err(|e| e.to_string())?;
+        conn.execute_batch(SCHEMA)
+            .map_err(|e| format!("schema: {e}"))?;
         migrate(&conn)?;
         *done = true;
     }
@@ -88,16 +92,21 @@ fn open() -> Result<Connection, String> {
 /// the transaction open; dropping the connection rolls it back (DDL is
 /// transactional in SQLite), so no partial schema survives.
 fn migrate(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| format!("migrate v1->v2: {e}"))?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("migrate v1->v2: {e}"))?;
     let cols: Vec<String> = {
-        let mut stmt = conn.prepare("PRAGMA table_info(tasks)").map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(tasks)")
+            .map_err(|e| e.to_string())?;
         stmt.query_map([], |r| r.get::<_, String>(1))
             .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
             .collect()
     };
     if cols.iter().any(|c| c == "description") {
-        return conn.execute_batch("COMMIT").map_err(|e| format!("migrate v1->v2: {e}"));
+        return conn
+            .execute_batch("COMMIT")
+            .map_err(|e| format!("migrate v1->v2: {e}"));
     }
     conn.execute_batch(
         "ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';
@@ -132,7 +141,9 @@ pub fn norm(raw: &str) -> Option<&'static str> {
         "triage" | "ready" => Some("ready"),
         "running" | "working" | "started" => Some("working"),
         "blocked" | "blocking" => Some("blocking"),
-        "needs_fix" | "needs-fix" | "need fix" | "needs fix" | "need-fix" | "need_fix" | "fix" => Some("needs_fix"),
+        "needs_fix" | "needs-fix" | "need fix" | "needs fix" | "need-fix" | "need_fix" | "fix" => {
+            Some("needs_fix")
+        }
         "review" => Some("review"),
         "done" => Some("done"),
         "dropped" => Some("dropped"),
@@ -149,11 +160,17 @@ pub fn short(id: i64) -> String {
 
 pub fn parse_id(raw: &str) -> Result<i64, String> {
     let t = raw.trim().trim_start_matches(['T', 't', '#']);
-    t.parse::<i64>().map_err(|_| format!("bad task id {raw:?} (want T3 or 3)"))
+    t.parse::<i64>()
+        .map_err(|_| format!("bad task id {raw:?} (want T3 or 3)"))
 }
 
-
-fn log_event(conn: &Connection, task: i64, actor: &str, kind: &str, body: &str) -> Result<i64, String> {
+fn log_event(
+    conn: &Connection,
+    task: i64,
+    actor: &str,
+    kind: &str,
+    body: &str,
+) -> Result<i64, String> {
     conn.execute(
         "INSERT INTO events(task_id,actor,kind,body,ts) VALUES(?,?,?,?,?)",
         params![task, actor, kind, body, now_ms()],
@@ -161,7 +178,6 @@ fn log_event(conn: &Connection, task: i64, actor: &str, kind: &str, body: &str) 
     .map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
 }
-
 
 struct Row {
     id: i64,
@@ -225,5 +241,8 @@ mod wait;
 pub use dispatch::dispatch;
 pub use render::{brief, children, get, list};
 pub use sessions::{register_session, send, sessions, tail};
-pub use tasks::{ClaimError, NewTask, Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note, report};
+pub use tasks::{
+    ClaimError, NewTask, Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note,
+    report,
+};
 pub use wait::{Wait, wait};

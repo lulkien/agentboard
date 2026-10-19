@@ -1,7 +1,7 @@
+use super::proc;
 use super::render::stamp;
 use super::tasks::{Patch, apply};
 use super::{fetch, log_event, now_ms, open, short};
-use super::proc;
 use crate::clip::clip;
 use rusqlite::{OptionalExtension, params};
 use std::process::Command;
@@ -23,7 +23,11 @@ fn herdr_prompt(name: &str, text: &str) -> Result<(), String> {
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
     let stderr = stderr.trim();
-    Err(if stderr.is_empty() { out.status.to_string() } else { clip(stderr, 160) })
+    Err(if stderr.is_empty() {
+        out.status.to_string()
+    } else {
+        clip(stderr, 160)
+    })
 }
 
 /// Submits `text` to a registered pane: herdr first, tmux as fallback. Returns

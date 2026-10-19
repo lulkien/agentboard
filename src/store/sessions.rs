@@ -18,17 +18,30 @@ pub fn sessions() -> Result<String, String> {
         let mut stmt = conn
             .prepare("SELECT name,agent,task_id,seen FROM sessions ORDER BY seen DESC")
             .map_err(|e| e.to_string())?;
-        stmt.query_map([], |r| Ok(SessionRow { name: r.get(0)?, agent: r.get(1)?, task: r.get(2)?, seen: r.get(3)? }))
-            .map_err(|e| e.to_string())?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|e| e.to_string())?
+        stmt.query_map([], |r| {
+            Ok(SessionRow {
+                name: r.get(0)?,
+                agent: r.get(1)?,
+                task: r.get(2)?,
+                seen: r.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?
     };
     if names.is_empty() {
         return Ok("(no sessions registered)".to_owned());
     }
     let herdr = herdr_agents();
     let mut out = String::new();
-    for SessionRow { name, agent, task, seen } in names {
+    for SessionRow {
+        name,
+        agent,
+        task,
+        seen,
+    } in names
+    {
         let alive = tmux_alive(&name) || herdr.iter().any(|(n, a)| *n == name && *a == agent);
         out.push_str(&format!(
             "{name} {agent} {} {} {}\n",
@@ -40,7 +53,12 @@ pub fn sessions() -> Result<String, String> {
     Ok(out.trim_end().to_owned())
 }
 
-pub fn register_session(name: &str, agent: &str, cwd: &str, task: Option<i64>) -> Result<String, String> {
+pub fn register_session(
+    name: &str,
+    agent: &str,
+    cwd: &str,
+    task: Option<i64>,
+) -> Result<String, String> {
     let conn = open()?;
     if let Some(t) = task {
         fetch(&conn, t)?;
@@ -55,7 +73,8 @@ pub fn register_session(name: &str, agent: &str, cwd: &str, task: Option<i64>) -
 }
 
 fn tmux_alive(name: &str) -> bool {
-    proc::run(Command::new("tmux").args(["has-session", "-t", name])).is_ok_and(|o| o.status.success())
+    proc::run(Command::new("tmux").args(["has-session", "-t", name]))
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Live herdr agents as (name, agent type). Missing binary, hang, bad exit or bad
@@ -77,7 +96,12 @@ fn parse_herdr_agents(json: &[u8]) -> Vec<(String, String)> {
         .as_array()
         .map(|a| {
             a.iter()
-                .filter_map(|x| Some((x["name"].as_str()?.to_owned(), x["agent"].as_str().unwrap_or_default().to_owned())))
+                .filter_map(|x| {
+                    Some((
+                        x["name"].as_str()?.to_owned(),
+                        x["agent"].as_str().unwrap_or_default().to_owned(),
+                    ))
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -86,13 +110,27 @@ fn parse_herdr_agents(json: &[u8]) -> Vec<(String, String)> {
 /// Last N lines of a tmux pane, trimmed and capped: the cheap way to see what an
 /// agent is doing without asking it for a status report.
 pub fn tail(name: &str, lines: usize) -> Result<String, String> {
-    let out = proc::run(Command::new("tmux").args(["capture-pane", "-p", "-t", name, "-S", &format!("-{lines}")]))
-        .map_err(|e| format!("tmux: {e}"))?;
+    let out = proc::run(Command::new("tmux").args([
+        "capture-pane",
+        "-p",
+        "-t",
+        name,
+        "-S",
+        &format!("-{lines}"),
+    ]))
+    .map_err(|e| format!("tmux: {e}"))?;
     if !out.status.success() {
-        return Err(format!("tmux: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "tmux: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    let mut rows: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
+    let mut rows: Vec<&str> = text
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.is_empty())
+        .collect();
     while rows.len() > lines {
         rows.remove(0);
     }
@@ -113,10 +151,17 @@ pub fn send(name: &str, text: &str) -> Result<String, String> {
     // `-l --` types the text literally: without `--` a line starting with "-"
     // is parsed as a tmux option, and without `-l` words like "Up" are key names.
     for keys in [&["-l", "--", text][..], &["Enter"][..]] {
-        let out = proc::run(Command::new("tmux").args(["send-keys", "-t", name]).args(keys))
-            .map_err(|e| format!("tmux: {e}"))?;
+        let out = proc::run(
+            Command::new("tmux")
+                .args(["send-keys", "-t", name])
+                .args(keys),
+        )
+        .map_err(|e| format!("tmux: {e}"))?;
         if !out.status.success() {
-            return Err(format!("tmux send-keys failed for {name}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+            return Err(format!(
+                "tmux send-keys failed for {name}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
         }
     }
     Ok(format!("ok sent {} bytes to {name}", text.len()))
@@ -129,7 +174,10 @@ mod tests {
     #[test]
     fn parses_herdr_agent_list_and_skips_unnamed() {
         let sample = br#"{"id":"cli:agent:list","result":{"agents":[{"agent":"hermes","pane_id":"wB:p1"},{"agent":"claude","name":"coder","pane_id":"wB:p5"}],"type":"agent_list"}}"#;
-        assert_eq!(parse_herdr_agents(sample), vec![("coder".to_owned(), "claude".to_owned())]);
+        assert_eq!(
+            parse_herdr_agents(sample),
+            vec![("coder".to_owned(), "claude".to_owned())]
+        );
         assert!(parse_herdr_agents(b"not json").is_empty());
         assert!(parse_herdr_agents(b"{}").is_empty());
     }
