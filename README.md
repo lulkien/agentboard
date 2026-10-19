@@ -187,3 +187,5 @@ done. Those nine rules live in `PROTOCOL.md` — paste them into `CLAUDE.md` or
 `AGENTS.md` once per worker. A skill is for the orchestrator (dispatch, answer
 asks, read `board_brief`), not for the worker.
 
+The orchestrator's playbook lives in `skills/`; see [skills/README.md](skills/README.md).
+
