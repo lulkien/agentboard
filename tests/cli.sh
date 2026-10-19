@@ -125,6 +125,39 @@ done
 run $B --db "$E" brief
 check "brief: one EPIC line per open epic with progress and path, then tasks that belong to no epic" $(has "$out" "EPIC E1 0/3 done $S/proj Ship it" && has "$out" "EPIC E2 0/0 done $S/not/there/yet (does not exist) Later" && ! has "$out" "EPIC E5" && has "$out" "T4 " && ! has "$out" "T1 rdy" && echo 0 || echo 1)
 
+# --- edit: amend a spec, guarded by the lease -----------------------------------
+X=$S/x.db
+run $B --db "$X" epic add "Epic" --goal "g1"
+run $B --db "$X" add "typo titel" --description "old text" --epic E1 --assignee zed
+run $B --db "$X" edit T1 --title "typo title" --spec "new description" --priority 7
+check "edit of a ready task lands and names the changed fields" $([ $rc -eq 0 ] && has "$out" "T1 edited title, description, priority #" && echo 0 || echo 1)
+run $B --db "$X" get T1 --full
+check "edit shows in the task and its timeline with old/new lengths" $(has "$out" "title: typo title" && has "$out" "priority 7" && has "$out" "new description" && has "$out" "edit 0s: title 10->10, description 8->15, priority 100->7" && echo 0 || echo 1)
+run $B --db "$X" edit T1 --assignee "";                                check "empty --assignee clears it" $([ $rc -eq 0 ] && has "$out" "T1 edited assignee" && echo 0 || echo 1)
+before=$($B --db "$X" get T1 --full)
+run $B --db "$X" edit T1 --title "typo title" --priority 7
+check "edit with every value equal to the current one writes nothing" $([ $rc -eq 0 ] && [ "$out" = "T1 unchanged" ] && [ "$($B --db "$X" get T1 --full)" = "$before" ] && echo 0 || echo 1)
+run $B --db "$X" edit T1;                                              check "edit with no field is a usage error, exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
+run $B --db "$X" edit T1 --title "  ";                                check "edit to an empty title: exit 1" $([ $rc -eq 1 ] && has "$err" "title cannot be empty" && echo 0 || echo 1)
+run $B --db "$X" edit T1 --path /x;                                    check "--path on a task: exit 1" $([ $rc -eq 1 ] && has "$err" "--path is for epics" && echo 0 || echo 1)
+run $B --db "$X" edit T99 --title x;                                   check "edit of an unknown task: exit 1" $([ $rc -eq 1 ] && has "$err" "no such task T99" && echo 0 || echo 1)
+run $B --actor=worker --db "$X" claim T1
+before=$($B --db "$X" get T1 --full)
+run $B --db "$X" edit T1 --goal "changed under the worker"
+check "edit while working with a live lease is refused with the lease text, exit 1" $([ $rc -eq 1 ] && has "$err" "agentboard: T1 working by worker (lease" && has "$err" "manager: agentboard status T1 ready" && echo 0 || echo 1)
+check "the refused edit leaves the row and timeline byte-identical" $([ "$($B --db "$X" get T1 --full)" = "$before" ] && echo 0 || echo 1)
+$B --db "$X" status T1 ready >/dev/null
+run $B --db "$X" edit T1 --goal "changed after release";               check "edit lands again once the manager frees the task" $([ $rc -eq 0 ] && has "$out" "T1 edited goal" && echo 0 || echo 1)
+
+run $B --db "$X" epic get E1 >/dev/null
+run $B --db "$X" edit E1 --title "Epic two" --path "$S/proj/"
+check "edit of an epic: title and normalised path" $([ $rc -eq 0 ] && has "$out" "E1 edited title, path #" && echo 0 || echo 1)
+run $B --db "$X" epic get E1
+check "epic shows the new title, path and the edit event" $(has "$out" "title: Epic two" && has "$out" "path: $S/proj" && ! has "$out" "path: $S/proj/" && has "$out" "edit 0s: title 4->8, path 0->$((${#S} + 5))" && echo 0 || echo 1)
+run $B --db "$X" edit E1 --priority 3;                                 check "--priority on an epic: exit 1" $([ $rc -eq 1 ] && has "$err" "are for tasks" && echo 0 || echo 1)
+run $B --db "$X" edit E1;                                              check "epic edit with no field: exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
+run $B --db "$X" edit E1 --title "Epic two";                           check "epic edit with equal values: unchanged" $([ "$out" = "E1 unchanged" ] && echo 0 || echo 1)
+
 # a board file from before epics is refused, untouched, with the way out
 O=$S/old.db
 python3 - "$O" <<'PY'

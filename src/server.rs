@@ -1,4 +1,4 @@
-//! MCP surface: 16 tools, text-only results, short acks.
+//! MCP surface: 18 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
@@ -121,6 +121,38 @@ pub struct EpicUpdateArgs {
     pub status: String,
     #[serde(default)]
     pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EditArgs {
+    /// Task id, T7.
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub priority: Option<i64>,
+    /// Empty string clears it.
+    #[serde(default)]
+    pub assignee: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EpicEditArgs {
+    /// Epic id, E3.
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub goal: Option<String>,
+    /// Project root; `~` expands, a relative path resolves against the server's cwd. Empty string clears it.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -401,6 +433,47 @@ impl Board {
             &a.status,
             a.note.as_deref()
         ))
+    }
+
+    #[tool(
+        name = "task_edit",
+        description = "Amend a task's spec: title, description, goal, priority, assignee (only the fields you pass). Logs an `edit` event with old/new lengths. Refused while the task is working with a live lease (the worker is reading it); the manager frees it with task_update status=ready. Returns the changed field names.",
+        annotations(title = "Edit task", read_only_hint = false, destructive_hint = false)
+    )]
+    async fn task_edit(
+        &self,
+        Parameters(a): Parameters<EditArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_id(&a.id).map_err(err)?;
+        let edit = store::TaskEdit {
+            title: a.title.as_deref(),
+            description: a.description.as_deref(),
+            goal: a.goal.as_deref(),
+            priority: a.priority,
+            assignee: a.assignee.as_deref(),
+        };
+        store::edit(&actor(), id, &edit)
+            .map(text)
+            .map_err(claim_err)
+    }
+
+    #[tool(
+        name = "epic_edit",
+        description = "Amend an epic's spec: title, description, goal, path (only the fields you pass). Logs an `edit` event with old/new lengths. Returns the changed field names.",
+        annotations(title = "Edit epic", read_only_hint = false, destructive_hint = false)
+    )]
+    async fn epic_edit(
+        &self,
+        Parameters(a): Parameters<EpicEditArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_epic_id(&a.id).map_err(err)?;
+        let edit = store::EpicEdit {
+            title: a.title.as_deref(),
+            description: a.description.as_deref(),
+            goal: a.goal.as_deref(),
+            path: a.path.as_deref(),
+        };
+        run!(store::epic_edit(&actor(), id, &edit))
     }
 
     #[tool(

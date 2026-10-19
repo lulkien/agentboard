@@ -456,6 +456,27 @@ def main():
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"task created during --open wait matches :: rc={r.returncode} {r.stdout.splitlines()[:3]}")
 
+    # task_edit / epic_edit: amend a spec; the lease guard refuses a held task.
+    ed = s.call("task_add", title="edit me", description="v1", goal="g").split()[0]
+    expect("task_edit returns the changed field list, not the row", s.call("task_edit", id=ed, title="edited", description="version two", priority=3), f"{ed} edited title, description, priority #")
+    expect("edit lands and logs old/new lengths", s.call("task_get", id=ed), "title: edited", "priority 3", "title 7->6, description 2->11, priority 100->3")
+    expect("edit with equal values is a no-op", s.call("task_edit", id=ed, title="edited"), f"{ed} unchanged")
+    expect("edit with no field is refused", refusal_text(lambda: s.call("task_edit", id=ed)), "nothing to edit")
+    s.call("task_claim", id=ed)
+    before = s.call("task_get", id=ed, full=True)
+    expect("edit of a held task is refused like a claim (internal_error, lease text)", refusal_text(lambda: s.call("task_edit", id=ed, goal="moved under the worker")), "-32603", f"{ed} working by claude1", "lease", f"manager: agentboard status {ed} ready")
+    ok = s.call("task_get", id=ed, full=True) == before
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "the refused edit left the row and timeline byte-identical")
+    s.call("task_update", id=ed, status="ready")
+    expect("edit lands once the manager frees the task", s.call("task_edit", id=ed, goal="moved"), f"{ed} edited goal")
+    expect("task_edit refuses an epic id", refusal_text(lambda: s.call("task_edit", id=epic_id, title="x")), "is an epic id")
+    expect("epic_edit returns the changed field list", s.call("epic_edit", id=epic_id, title="epic: shipped", path="/tmp/agentboard-no-such-project/sub/"), f"{epic_id} edited title, path #", "warning: path /tmp/agentboard-no-such-project/sub does not exist")
+    expect("epic edit shows in the epic and its timeline", s.call("epic_get", id=epic_id), "title: epic: shipped", "path: /tmp/agentboard-no-such-project/sub", "title 13->13, path 31->35")
+    expect("epic_edit with no field is refused", refusal_text(lambda: s.call("epic_edit", id=epic_id)), "nothing to edit")
+    expect("epic_edit refuses a task id", refusal_text(lambda: s.call("epic_edit", id=ed, title="x")), "is a task id")
+    expect("the tools are listed", " ".join(t["name"] for t in s.rpc("tools/list", {})["tools"]), "task_edit", "epic_edit")
+
     expect("session list", s.call("session_list"), "session")
     s.close()
     print(f"\n{sum(checks)}/{len(checks)} checks passed")

@@ -1,6 +1,7 @@
 use super::render::stamp;
 use super::{
-    DEFAULT_TTL_S, STATUS_LIST, Subject, fetch, log_event, norm, now_ms, open, short, short_epic,
+    DEFAULT_TTL_S, Row, STATUS_LIST, Subject, fetch, field_names, log_event, norm, now_ms, open,
+    short, short_epic, text_change,
 };
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use rusqlite::{OptionalExtension, params};
@@ -84,6 +85,81 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     Ok(format!("{} {status}", short(id)))
 }
 
+/// New spec text for a task; `None` leaves a field alone. An empty `assignee`
+/// clears it.
+pub struct TaskEdit<'a> {
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub goal: Option<&'a str>,
+    pub priority: Option<i64>,
+    pub assignee: Option<&'a str>,
+}
+
+/// Amends a task's spec. A task a worker holds (`working` with a live lease) is
+/// refused: that worker is reading this text. Logs one `edit` event naming each
+/// changed field with its old/new length; nothing is written when no value moved.
+pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError> {
+    if e.title.is_none()
+        && e.description.is_none()
+        && e.goal.is_none()
+        && e.priority.is_none()
+        && e.assignee.is_none()
+    {
+        return Err(String::from(
+            "nothing to edit: pass title, description, goal, priority or assignee",
+        )
+        .into());
+    }
+    if e.title.is_some_and(|t| t.trim().is_empty()) {
+        return Err(String::from("title cannot be empty").into());
+    }
+    let mut conn = open()?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let cur = fetch(&tx, id)?;
+    if cur.status == "working" && cur.lease_until.is_some_and(|l| l >= now_ms()) {
+        return Err(ClaimError::Held(held_text(&cur)));
+    }
+    let mut diffs = Vec::new();
+    let title = text_change(&mut diffs, "title", &cur.title, e.title);
+    let description = text_change(&mut diffs, "description", &cur.description, e.description);
+    let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
+    let assignee = text_change(
+        &mut diffs,
+        "assignee",
+        cur.assignee.as_deref().unwrap_or(""),
+        e.assignee,
+    );
+    let priority = e.priority.unwrap_or(cur.priority);
+    if priority != cur.priority {
+        diffs.push(format!("priority {}->{priority}", cur.priority));
+    }
+    if diffs.is_empty() {
+        return Ok(format!("{} unchanged", short(id)));
+    }
+    tx.execute(
+        "UPDATE tasks SET title=?, description=?, goal=?, assignee=?, priority=?, updated_at=? WHERE id=?",
+        params![
+            title,
+            description,
+            goal,
+            (!assignee.is_empty()).then_some(assignee),
+            priority,
+            now_ms(),
+            id
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let seq = log_event(&tx, Subject::Task(id), actor, "edit", &diffs.join(", "))?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(format!(
+        "{} edited {} #{seq}",
+        short(id),
+        field_names(&diffs)
+    ))
+}
+
 /// Re-parents an existing task (`None` clears it). The only write that can make
 /// a cycle, so the walk up the ancestors happens here, in the same transaction.
 pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, String> {
@@ -156,6 +232,22 @@ impl std::fmt::Display for ClaimError {
     }
 }
 
+/// The refusal for a task somebody holds: who, the lease, and the manager's way out.
+fn held_text(r: &Row) -> String {
+    format!(
+        "{} {} by {}{} — manager: agentboard status {} ready",
+        short(r.id),
+        r.status,
+        r.assignee.as_deref().unwrap_or("nobody"),
+        r.lease_until.map_or(String::new(), |l| format!(
+            " (lease {}m left, until {}Z)",
+            ((l - now_ms()).max(0) + 59_999) / 60_000,
+            stamp(l)
+        )),
+        short(r.id)
+    )
+}
+
 /// Claims a specific task, or the next ready one. Atomic: BEGIN IMMEDIATE + guarded UPDATE.
 pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimError> {
     let mut conn = open()?;
@@ -187,18 +279,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
                     match fetch(&conn2, x) {
                         // A refusal is an error: `agentboard claim T7 && ...` must not
                         // read "somebody else has it" as "claimed".
-                        Ok(r) => Err(ClaimError::Held(format!(
-                            "{} {} by {}{} — manager: agentboard status {} ready",
-                            short(x),
-                            r.status,
-                            r.assignee.as_deref().unwrap_or("nobody"),
-                            r.lease_until.map_or(String::new(), |l| format!(
-                                " (lease {}m left, until {}Z)",
-                                ((l - now_ms()).max(0) + 59_999) / 60_000,
-                                stamp(l)
-                            )),
-                            short(x)
-                        ))),
+                        Ok(r) => Err(ClaimError::Held(held_text(&r))),
                         Err(_) => Err(format!("no such task {}", short(x)).into()),
                     }
                 }

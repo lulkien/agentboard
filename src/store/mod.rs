@@ -215,6 +215,34 @@ fn log_event(
     Ok(conn.last_insert_rowid())
 }
 
+/// The value to store for a text field an edit may set, noting `name old->new`
+/// (character lengths) in `diffs` when it moves.
+fn text_change<'a>(
+    diffs: &mut Vec<String>,
+    name: &str,
+    old: &'a str,
+    new: Option<&'a str>,
+) -> &'a str {
+    let value = new.unwrap_or(old);
+    if value != old {
+        diffs.push(format!(
+            "{name} {}->{}",
+            old.chars().count(),
+            value.chars().count()
+        ));
+    }
+    value
+}
+
+/// `title, goal` out of `["title 12->15", "goal 3->9"]`.
+fn field_names(diffs: &[String]) -> String {
+    let names: Vec<&str> = diffs
+        .iter()
+        .filter_map(|d| d.split_whitespace().next())
+        .collect();
+    names.join(", ")
+}
+
 struct Row {
     id: i64,
     status: String,
@@ -278,12 +306,12 @@ mod tasks;
 mod wait;
 
 pub use dispatch::dispatch;
-pub use epics::{epic_add, epic_get, epic_list, epic_status};
+pub use epics::{EpicEdit, epic_add, epic_edit, epic_get, epic_list, epic_status};
 pub use render::{brief, children, get, list};
 pub use sessions::{prune, register_session, send, sessions, tail, unregister};
 pub use tasks::{
-    ClaimError, NewTask, Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note,
-    report, set_parent,
+    ClaimError, NewTask, Patch, TaskEdit, add, answer, apply, ask, block, claim, edit, finish,
+    heartbeat, note, report, set_parent,
 };
 pub use wait::{Wait, wait};
 

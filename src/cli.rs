@@ -66,6 +66,26 @@ pub enum Cmd {
         #[command(subcommand)]
         action: EpicCmd,
     },
+    /// Amend a task's or epic's spec; refused while a worker holds the task
+    Edit {
+        /// T3 or E3
+        id: String,
+        #[arg(long, allow_hyphen_values = true)]
+        title: Option<String>,
+        #[arg(long, alias = "spec", allow_hyphen_values = true)]
+        description: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        goal: Option<String>,
+        /// Tasks only
+        #[arg(long, allow_negative_numbers = true)]
+        priority: Option<i64>,
+        /// Tasks only; empty clears it
+        #[arg(long)]
+        assignee: Option<String>,
+        /// Epics only: project root, normalised like `epic add`; empty clears it
+        #[arg(long, allow_hyphen_values = true)]
+        path: Option<String>,
+    },
     /// Set (or `none` to clear) a task's parent task
     Parent {
         id: String,

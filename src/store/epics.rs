@@ -3,7 +3,7 @@
 //! the work belongs to.
 
 use super::render::{recent_events, status_summary, when};
-use super::{Subject, log_event, now_ms, open, short_epic};
+use super::{Subject, field_names, log_event, now_ms, open, short_epic, text_change};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, clip, clip_marked};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Component, Path, PathBuf};
@@ -231,6 +231,57 @@ pub fn epic_status(
     let seq = log_event(&tx, Subject::Epic(id), actor, kind, note.unwrap_or(""))?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} {want} #{seq}", short_epic(id)))
+}
+
+/// New spec text for an epic; `None` leaves a field alone. An empty `path`
+/// clears it.
+pub struct EpicEdit<'a> {
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub goal: Option<&'a str>,
+    pub path: Option<&'a str>,
+}
+
+/// Amends an epic's spec. Epics are never leased, so there is no lease guard.
+/// Logs one `edit` event naming each changed field with its old/new length;
+/// nothing is written when no value moved.
+pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, String> {
+    if e.title.is_none() && e.description.is_none() && e.goal.is_none() && e.path.is_none() {
+        return Err("nothing to edit: pass title, description, goal or path".to_owned());
+    }
+    if e.title.is_some_and(|t| t.trim().is_empty()) {
+        return Err("title cannot be empty".to_owned());
+    }
+    let cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
+    let home = std::env::var("HOME").ok();
+    let path = e.path.map(|p| normalize_path(p, &cwd, home.as_deref()));
+    let mut conn = open()?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let cur = fetch_epic(&tx, id)?;
+    let mut diffs = Vec::new();
+    let title = text_change(&mut diffs, "title", &cur.title, e.title);
+    let description = text_change(&mut diffs, "description", &cur.description, e.description);
+    let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
+    let path = text_change(&mut diffs, "path", &cur.path, path.as_deref());
+    if diffs.is_empty() {
+        return Ok(format!("{} unchanged", short_epic(id)));
+    }
+    tx.execute(
+        "UPDATE epics SET title=?, description=?, goal=?, path=?, updated_at=? WHERE id=?",
+        params![title, description, goal, path, now_ms(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    let seq = log_event(&tx, Subject::Epic(id), actor, "edit", &diffs.join(", "))?;
+    tx.commit().map_err(|e| e.to_string())?;
+    let mut out = format!("{} edited {} #{seq}", short_epic(id), field_names(&diffs));
+    if diffs.iter().any(|d| d.starts_with("path ")) && !path_note(path).is_empty() {
+        out.push_str(&format!(
+            "\nwarning: path {path} does not exist (yet); the epic is edited anyway"
+        ));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
