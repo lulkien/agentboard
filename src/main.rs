@@ -30,7 +30,7 @@ agentboard — task board + tmux bridge for a team of CLI agents
   agentboard review <T1> <summary>
   agentboard status <T1> <status> [note]
   agentboard block <T1> <reason>
-  agentboard wait <T1> [--timeout SEC]
+  agentboard wait <T1> [--timeout SEC] [--after SEQ]
   agentboard brief [--since MIN]
   agentboard sessions
   agentboard register <tmux-name> [--agent claude|hermes] [--task T1]
@@ -41,9 +41,9 @@ agentboard — task board + tmux bridge for a team of CLI agents
 Global: --actor NAME (default $AGENTBOARD_ACTOR, else 'agent'), --db PATH
 ";
 
-const VALUE_FLAGS: [&str; 19] = [
+const VALUE_FLAGS: [&str; 18] = [
     "--actor", "--db", "--spec", "--description", "--goal", "--assignee", "--priority", "--parent", "--status", "--limit",
-    "--after", "--ttl", "--commit", "--timeout", "--since", "--agent", "--task", "--lines", "--board",
+    "--after", "--ttl", "--commit", "--timeout", "--since", "--agent", "--task", "--lines",
 ];
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -111,7 +111,7 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             let parent = flag(argv, "--parent").map(|p| store::parse_id(&p)).transpose()?;
             let prio = flag(argv, "--priority").and_then(|p| p.parse().ok()).unwrap_or(100);
             let description = flag(argv, "--description").or_else(|| flag(argv, "--spec")).unwrap_or_default();
-            let goal = flag(argv, "--goal").unwrap_or_else(|| description.clone());
+            let goal = flag(argv, "--goal").unwrap_or_default();
             let status = match flag(argv, "--status") {
                 Some(raw) => store::norm(&raw).ok_or_else(|| format!("bad status {raw:?}"))?,
                 None => "ready",
@@ -179,17 +179,8 @@ async fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let actor = flag(&argv, "--actor")
-        .or_else(|| std::env::var("AGENTBOARD_ACTOR").ok())
-        .unwrap_or_else(|| "agent".to_owned());
-    if flag(&argv, "--actor").is_some() {
-        // SAFETY: single-threaded, before any worker task is spawned.
-        unsafe { std::env::set_var("AGENTBOARD_ACTOR", &actor) };
-    }
-    if let Some(db) = flag(&argv, "--db") {
-        // SAFETY: single-threaded, before any worker task is spawned.
-        unsafe { std::env::set_var("AGENTBOARD_DB", db) };
-    }
+    store::set_overrides(flag(&argv, "--db"), flag(&argv, "--actor"));
+    let actor = store::default_actor();
 
     let pos = positional(&argv);
     let cmd = pos.first().map_or("serve", String::as_str);

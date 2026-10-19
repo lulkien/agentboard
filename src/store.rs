@@ -14,7 +14,33 @@ pub fn now_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0))
 }
 
+static DB_OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static ACTOR_OVERRIDE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Process-wide `--db` / `--actor` from the CLI. Kept in statics instead of
+/// `std::env::set_var`, which is unsound once the tokio runtime has threads.
+pub fn set_overrides(db: Option<String>, actor: Option<String>) {
+    if let Some(d) = db {
+        let _ = DB_OVERRIDE.set(PathBuf::from(d));
+    }
+    if let Some(a) = actor {
+        let _ = ACTOR_OVERRIDE.set(a);
+    }
+}
+
+/// Actor name: `--actor`, else `$AGENTBOARD_ACTOR`, else "agent".
+pub fn default_actor() -> String {
+    ACTOR_OVERRIDE
+        .get()
+        .cloned()
+        .or_else(|| std::env::var("AGENTBOARD_ACTOR").ok())
+        .unwrap_or_else(|| "agent".to_owned())
+}
+
 pub fn db_path() -> PathBuf {
+    if let Some(p) = DB_OVERRIDE.get() {
+        return p.clone();
+    }
     if let Ok(p) = std::env::var("AGENTBOARD_DB") {
         return PathBuf::from(p);
     }
@@ -41,18 +67,28 @@ fn open() -> Result<Connection, String> {
     // "database is locked".
     conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         .map_err(|e| e.to_string())?;
-    let ready = INIT.get_or_init(|| {
+    // A failed init is retried on the next open instead of being cached for the
+    // life of a long-running MCP server.
+    let mut done = INIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !*done {
         conn.execute_batch("PRAGMA journal_mode=WAL").map_err(|e| e.to_string())?;
         conn.execute_batch(SCHEMA).map_err(|e| format!("schema: {e}"))?;
-        migrate(&conn)
-    });
-    ready.clone()?;
+        migrate(&conn)?;
+        *done = true;
+    }
+    drop(done);
     Ok(conn)
 }
 
 /// Bring a v1 database (title/spec/status/result/created/updated) up to v2
 /// (description/goal/report/note + created_at/started_at/completed_at).
+///
+/// The version check runs inside the write transaction, so two processes
+/// opening a v1 file at once cannot both try to ALTER it. A failed batch leaves
+/// the transaction open; dropping the connection rolls it back (DDL is
+/// transactional in SQLite), so no partial schema survives.
 fn migrate(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| format!("migrate v1->v2: {e}"))?;
     let cols: Vec<String> = {
         let mut stmt = conn.prepare("PRAGMA table_info(tasks)").map_err(|e| e.to_string())?;
         stmt.query_map([], |r| r.get::<_, String>(1))
@@ -61,11 +97,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             .collect()
     };
     if cols.iter().any(|c| c == "description") {
-        return Ok(());
+        return conn.execute_batch("COMMIT").map_err(|e| format!("migrate v1->v2: {e}"));
     }
     conn.execute_batch(
-        "BEGIN IMMEDIATE;
-         ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';
+        "ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';
          ALTER TABLE tasks ADD COLUMN goal TEXT NOT NULL DEFAULT '';
          ALTER TABLE tasks ADD COLUMN report TEXT;
          ALTER TABLE tasks ADD COLUMN note TEXT;
@@ -102,7 +137,7 @@ pub fn norm(raw: &str) -> Option<&'static str> {
 }
 
 /// Schema + WAL applied once per process; later opens are pure connection setup.
-static INIT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+static INIT: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 
 pub fn short(id: i64) -> String {
     format!("T{id}")
@@ -506,14 +541,19 @@ pub fn block(actor: &str, id: i64, reason: &str) -> Result<String, String> {
     apply(actor, id, &Patch { status: Some("blocking"), report: None, note: Some(reason), commit: None, needs: None, ttl_s: 0 })
 }
 
-pub fn heartbeat(_actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
+pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
     let conn = open()?;
     let lease = now_ms() + ttl_s * 1000;
+    // Only the holder may extend: a stale owner must not refresh a lease that
+    // another agent reclaimed after expiry.
     let n = conn
-        .execute("UPDATE tasks SET lease_until=?, updated_at=? WHERE id=? AND status='working'", params![lease, now_ms(), id])
+        .execute(
+            "UPDATE tasks SET lease_until=?, updated_at=? WHERE id=? AND status='working' AND (assignee IS NULL OR assignee=?)",
+            params![lease, now_ms(), id, actor],
+        )
         .map_err(|e| e.to_string())?;
     if n != 1 {
-        return Err(format!("{} not working", short(id)));
+        return Err(format!("{} not working or not held by {actor}", short(id)));
     }
     Ok(format!("ok {} lease {}m", short(id), ttl_s / 60))
 }

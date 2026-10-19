@@ -16,7 +16,7 @@ const NAME: &str = "agentboard";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn actor() -> String {
-    std::env::var("AGENTBOARD_ACTOR").unwrap_or_else(|_| "agent".to_owned())
+    store::default_actor()
 }
 
 fn text(s: String) -> CallToolResult {
@@ -25,6 +25,11 @@ fn text(s: String) -> CallToolResult {
 
 fn err(e: String) -> ErrorData {
     ErrorData::invalid_params(e, None)
+}
+
+/// Runs a blocking store call (tmux subprocess) off the async runtime threads.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tokio::task::spawn_blocking(f).await.map_err(|e| format!("task join: {e}"))?
 }
 
 macro_rules! run {
@@ -64,7 +69,7 @@ pub struct AddArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListArgs {
-    /// ready|running|blocked|review|done|dropped. Omit for all open work.
+    /// ready|working|blocking|review|done|dropped. Omit for all open work.
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
@@ -113,7 +118,7 @@ pub struct UpdateArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AskArgs {
     pub id: String,
-    /// The question. Sets status=blocked, needs=input until someone answers.
+    /// The question. Sets status=blocking, needs=input until someone answers.
     pub question: String,
 }
 
@@ -226,7 +231,7 @@ impl Board {
         run!(store::apply(&who, id, &patch))
     }
 
-    #[tool(name = "task_ask", description = "Block on a human decision. Sets status=blocked/needs=input; the answer arrives as an event. Follow with task_wait, passing the #seq from the ack as after_seq. Ask ONE narrow question per call: compound questions get partial answers.", annotations(title = "Ask and block", read_only_hint = false, destructive_hint = false))]
+    #[tool(name = "task_ask", description = "Block on a human decision. Sets status=blocking/needs=input; the answer arrives as an event. Follow with task_wait, passing the #seq from the ack as after_seq. Ask ONE narrow question per call: compound questions get partial answers.", annotations(title = "Ask and block", read_only_hint = false, destructive_hint = false))]
     async fn task_ask(&self, Parameters(a): Parameters<AskArgs>) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         run!(store::ask(&actor(), id, &a.question))
@@ -246,7 +251,7 @@ impl Board {
 
     #[tool(name = "session_list", description = "Registered agent sessions (tmux) and what task each holds.", annotations(title = "List sessions", read_only_hint = true))]
     async fn session_list(&self, Parameters(_): Parameters<Empty>) -> Result<CallToolResult, ErrorData> {
-        run!(store::sessions())
+        run!(blocking(store::sessions).await)
     }
 
     #[tool(name = "session_register", description = "Register this session's tmux name so the board can map task -> pane.", annotations(title = "Register session", read_only_hint = false, destructive_hint = false))]
@@ -260,12 +265,13 @@ impl Board {
 
     #[tool(name = "session_tail", description = "Last N lines of a tmux pane. Cheap way to see what an agent is actually doing.", annotations(title = "Tail pane", read_only_hint = true))]
     async fn session_tail(&self, Parameters(a): Parameters<TailArgs>) -> Result<CallToolResult, ErrorData> {
-        run!(store::tail(&a.name, a.lines.unwrap_or(40).clamp(1, 400)))
+        let lines = a.lines.unwrap_or(40).clamp(1, 400);
+        run!(blocking(move || store::tail(&a.name, lines)).await)
     }
 
     #[tool(name = "session_send", description = "Type a line into a tmux pane and press Enter (steer another agent).", annotations(title = "Send keys", read_only_hint = false, destructive_hint = true))]
     async fn session_send(&self, Parameters(a): Parameters<SendArgs>) -> Result<CallToolResult, ErrorData> {
-        run!(store::send(&a.name, &a.text))
+        run!(blocking(move || store::send(&a.name, &a.text)).await)
     }
 }
 

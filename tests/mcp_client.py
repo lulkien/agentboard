@@ -14,10 +14,10 @@ DB = os.path.join(ROOT, ".probe/client.db")
 
 
 class Session:
-    def __init__(self):
+    def __init__(self, actor="claude1"):
         self.p = subprocess.Popen(
             [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
-            env={**os.environ, "AGENTBOARD_DB": DB, "AGENTBOARD_ACTOR": "claude1"},
+            env={**os.environ, "AGENTBOARD_DB": DB, "AGENTBOARD_ACTOR": actor},
         )
         self.id = 0
         self.rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
@@ -64,6 +64,14 @@ def main():
     expect("claim twice", s.call("task_claim", id="T1"), "T1 working by claude1")
     expect("note", s.call("task_update", id="T1", note="outline done"), "T1 working #")
     expect("heartbeat", s.call("task_update", id="T1", heartbeat=True), "lease")
+    intruder = Session(actor="intruder")
+    expect("claim by other while leased", intruder.call("task_claim", id="T1"), "not claimable")
+    try:
+        intruder.call("task_update", id="T1", heartbeat=True)
+        expect("heartbeat by non-holder rejected", "accepted")
+    except RuntimeError as e:
+        expect("heartbeat by non-holder rejected", str(e), "not held by intruder")
+    intruder.close()
     expect("done", s.call("task_update", id="T1", status="done", report="shipped 4f2a1c", commit="4f2a1c"), "T1 done")
 
     # ask must block, and wait must return on the answer without client polling.
