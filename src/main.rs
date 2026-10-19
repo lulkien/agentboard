@@ -22,6 +22,7 @@ agentboard — task board + tmux bridge for a team of CLI agents
   agentboard ls [--status S] [--assignee A] [--limit N]
   agentboard get <T1>
   agentboard claim [<T1>] [--ttl MIN]
+  agentboard heartbeat <T1> [--ttl MIN]
   agentboard note <T1> <text>
   agentboard report <T1> <text>
   agentboard ask <T1> <question>
@@ -125,8 +126,12 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
         "get" => store::get(tid(pos.get(1))?),
         "claim" => {
             let id = pos.get(1).map(|p| store::parse_id(p)).transpose()?;
-            let ttl = flag(argv, "--ttl").and_then(|p| p.parse().ok()).unwrap_or(30);
-            store::claim(actor, id, ttl * 60)
+            let ttl: i64 = flag(argv, "--ttl").and_then(|p| p.parse().ok()).unwrap_or(30);
+            store::claim(actor, id, ttl.clamp(1, 720) * 60)
+        }
+        "heartbeat" => {
+            let ttl: i64 = flag(argv, "--ttl").and_then(|p| p.parse().ok()).unwrap_or(30);
+            store::heartbeat(actor, tid(pos.get(1))?, ttl.clamp(1, 720) * 60)
         }
         "note" => store::note(actor, tid(pos.get(1))?, req(pos.get(2), "text")?),
         "report" => store::report(actor, tid(pos.get(1))?, req(pos.get(2), "text")?),
@@ -148,9 +153,9 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             store::apply(actor, tid(pos.get(1))?, &patch)
         }
         "wait" => {
-            let secs = flag(argv, "--timeout").and_then(|p| p.parse().ok()).unwrap_or(60);
+            let secs: u64 = flag(argv, "--timeout").and_then(|p| p.parse().ok()).unwrap_or(60);
             let after = flag(argv, "--after").and_then(|p| p.parse().ok());
-            store::wait(tid(pos.get(1))?, after, secs * 1000).await
+            store::wait(tid(pos.get(1))?, after, secs.saturating_mul(1000)).await
         }
         "brief" => store::brief(flag(argv, "--since").and_then(|p| p.parse().ok()).unwrap_or(120)),
         "sessions" => store::sessions(),

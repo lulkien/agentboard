@@ -190,10 +190,18 @@ fn log_event(conn: &Connection, task: i64, actor: &str, kind: &str, body: &str) 
 
 pub fn add(actor: &str, title: &str, description: &str, goal: &str, status: &str, assignee: Option<&str>, priority: i64, parent: Option<i64>) -> Result<String, String> {
     let conn = open()?;
+    if let Some(p) = parent {
+        fetch(&conn, p).map_err(|_| format!("add: no such parent task {}", short(p)))?;
+    }
+    // A task created already `working` belongs to its creator unless named.
+    let assignee = assignee.or_else(|| (status == "working").then_some(actor));
     let now = now_ms();
+    // A `working` task needs a lease, or a dead holder could never be reclaimed.
+    let lease = (status == "working").then(|| now + DEFAULT_TTL_S * 1000);
+    let started = (status == "working").then_some(now);
     conn.execute(
-        "INSERT INTO tasks(title,description,goal,status,assignee,priority,parent,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        params![title, description, goal, status, assignee, priority, parent, now, now],
+        "INSERT INTO tasks(title,description,goal,status,assignee,priority,parent,created_at,updated_at,lease_until,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        params![title, description, goal, status, assignee, priority, parent, now, now, lease, started],
     )
     .map_err(|e| format!("add: {e}"))?;
     let id = conn.last_insert_rowid();
@@ -471,10 +479,16 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let ttl = if p.ttl_s > 0 { p.ttl_s } else { DEFAULT_TTL_S };
     match status {
         "working" => {
-            let lease = cur.lease_until.map_or(now + ttl * 1000, |old| old.max(now + ttl * 1000));
+            // Only entering `working` (or a missing lease) sets one: plain notes and
+            // reports must not keep a dead holder's lease alive. Heartbeat extends.
+            let lease = match cur.lease_until {
+                Some(old) if !moved => old,
+                Some(old) => old.max(now + ttl * 1000),
+                None => now + ttl * 1000,
+            };
             tx.execute(
-                "UPDATE tasks SET status=?, needs=?, updated_at=?, lease_until=?, started_at=COALESCE(started_at,?), completed_at=NULL WHERE id=?",
-                params![status, needs, now, lease, now, id],
+                "UPDATE tasks SET status=?, needs=?, updated_at=?, lease_until=?, assignee=COALESCE(assignee,?), started_at=COALESCE(started_at,?), completed_at=NULL WHERE id=?",
+                params![status, needs, now, lease, actor, now, id],
             )
         }
         "done" | "dropped" => tx.execute(
@@ -548,7 +562,7 @@ pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
     // another agent reclaimed after expiry.
     let n = conn
         .execute(
-            "UPDATE tasks SET lease_until=?, updated_at=? WHERE id=? AND status='working' AND (assignee IS NULL OR assignee=?)",
+            "UPDATE tasks SET lease_until=?, updated_at=? WHERE id=? AND status='working' AND assignee=?",
             params![lease, now_ms(), id, actor],
         )
         .map_err(|e| e.to_string())?;
@@ -731,16 +745,30 @@ pub fn tail(name: &str, lines: usize) -> Result<String, String> {
         rows.remove(0);
     }
     let joined = rows.join("\n");
-    Ok(if joined.len() > 6000 { joined[joined.len() - 6000..].to_owned() } else { joined })
+    if joined.len() <= 6000 {
+        return Ok(joined);
+    }
+    // Keep the newest 6000 bytes, moving the cut forward to a char boundary:
+    // TUI panes are full of multibyte box-drawing characters.
+    let mut cut = joined.len() - 6000;
+    while !joined.is_char_boundary(cut) {
+        cut += 1;
+    }
+    Ok(joined[cut..].to_owned())
 }
 
 pub fn send(name: &str, text: &str) -> Result<String, String> {
-    let st = std::process::Command::new("tmux")
-        .args(["send-keys", "-t", name, text, "Enter"])
-        .status()
-        .map_err(|e| format!("tmux: {e}"))?;
-    if !st.success() {
-        return Err(format!("tmux send-keys failed for {name}"));
+    // `-l --` types the text literally: without `--` a line starting with "-"
+    // is parsed as a tmux option, and without `-l` words like "Up" are key names.
+    for keys in [&["-l", "--", text][..], &["Enter"][..]] {
+        let out = std::process::Command::new("tmux")
+            .args(["send-keys", "-t", name])
+            .args(keys)
+            .output()
+            .map_err(|e| format!("tmux: {e}"))?;
+        if !out.status.success() {
+            return Err(format!("tmux send-keys failed for {name}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        }
     }
     Ok(format!("ok sent {} bytes to {name}", text.len()))
 }

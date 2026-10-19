@@ -100,7 +100,7 @@ Default db: `$XDG_STATE_HOME/agentboard/board.db`.
 
 ## Tests
 
-    python3 tests/mcp_client.py   # 14 checks over real stdio: claim, ask→wait, acks
+    python3 tests/mcp_client.py   # 21 checks over real stdio: claim, ask→wait, acks
     ./tests/race.sh               # 8 concurrent claimers: 80 claims, 80 unique, ~124 ms
     bash tests/wait.sh            # long-poll returns on the event, not the timeout
     ./target/release/agentboard < tests/mcp-smoke.jsonl   # handshake + tool list

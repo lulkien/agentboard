@@ -63,7 +63,10 @@ def main():
     expect("claim returns description+goal", s.call("task_claim", id="T1", ttl_min=5), "T1 working", "one page, SCM_RIGHTS", "verification")
     expect("claim twice", s.call("task_claim", id="T1"), "T1 working by claude1")
     expect("note", s.call("task_update", id="T1", note="outline done"), "T1 working #")
+    expect("note does not extend lease", s.call("task_get", id="T1"), "lease: 4m left")
     expect("heartbeat", s.call("task_update", id="T1", heartbeat=True), "lease")
+    expect("heartbeat with note", s.call("task_update", id="T1", heartbeat=True, ttl_min=60, note="still going"), "T1 working #")
+    expect("heartbeat applied alongside note", s.call("task_get", id="T1"), "lease: 59m left")
     intruder = Session(actor="intruder")
     expect("claim by other while leased", intruder.call("task_claim", id="T1"), "not claimable")
     try:
@@ -116,6 +119,15 @@ def main():
         ok = "no such task" in str(e)
         checks.append(ok)
         print(("PASS " if ok else "FAIL ") + f"claim missing task -> {e}")
+
+    try:
+        s.call("task_add", title="orphan", parent="T99")
+        expect("missing parent rejected", "accepted")
+    except RuntimeError as e:
+        expect("missing parent rejected", str(e), "no such parent task T99")
+    s.call("task_add", title="low", priority=50)
+    s.call("task_add", title="high", priority=1)
+    expect("claim next honours priority", s.call("task_claim"), "high")
 
     expect("session list", s.call("session_list"), "session")
     s.close()

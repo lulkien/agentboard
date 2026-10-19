@@ -110,9 +110,12 @@ pub struct UpdateArgs {
     /// Commit or PR reference.
     #[serde(default)]
     pub commit: Option<String>,
-    /// Refresh the claim lease (only meaningful while working).
+    /// Refresh the claim lease (holder only, while working). Combines with other fields.
     #[serde(default)]
     pub heartbeat: bool,
+    /// Lease minutes for heartbeat or a move to working (default 30, max 720).
+    #[serde(default)]
+    pub ttl_min: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -213,11 +216,12 @@ impl Board {
     async fn task_update(&self, Parameters(a): Parameters<UpdateArgs>) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         let who = actor();
+        let ttl_s = a.ttl_min.unwrap_or(30).clamp(1, 720) * 60;
+        let beat = if a.heartbeat { Some(store::heartbeat(&who, id, ttl_s).map_err(err)?) } else { None };
         if a.status.is_none() && a.report.is_none() && a.note.is_none() && a.commit.is_none() {
-            return if a.heartbeat {
-                run!(store::heartbeat(&who, id, store::DEFAULT_TTL_S))
-            } else {
-                Err(err("nothing to do: pass status, report, note or commit".to_owned()))
+            return match beat {
+                Some(ack) => Ok(text(ack)),
+                None => Err(err("nothing to do: pass status, report, note, commit or heartbeat".to_owned())),
             };
         }
         let patch = store::Patch {
@@ -226,7 +230,7 @@ impl Board {
             note: a.note.as_deref(),
             commit: a.commit.as_deref(),
             needs: None,
-            ttl_s: store::DEFAULT_TTL_S,
+            ttl_s,
         };
         run!(store::apply(&who, id, &patch))
     }
