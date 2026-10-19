@@ -8,7 +8,7 @@ B=$PWD/target/release/agentboard
 rm -f "$DB" "$DB-wal" "$DB-shm"
 export AGENTBOARD_DB=$DB
 
-AGENTBOARD_ACTOR=hermes $B add "wait test" --spec "blocked work order" >/dev/null
+AGENTBOARD_ACTOR=hermes $B add "wait test" --description "blocked work order" >/dev/null
 
 ( sleep 1.5; AGENTBOARD_ACTOR=human $B note T1 "go ahead, use nix" >/dev/null ) &
 

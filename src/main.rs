@@ -18,15 +18,17 @@ const USAGE: &str = "\
 agentboard — task board + tmux bridge for a team of CLI agents
 
   agentboard                     MCP server on stdio (default)
-  agentboard add <title> [--spec S] [--assignee A] [--priority N] [--parent T1]
+  agentboard add <title> [--description D | --spec D] [--goal G] [--status S] [--assignee A] [--priority N] [--parent T1]
   agentboard ls [--status S] [--assignee A] [--limit N]
   agentboard get <T1>
   agentboard claim [<T1>] [--ttl MIN]
   agentboard note <T1> <text>
+  agentboard report <T1> <text>
   agentboard ask <T1> <question>
   agentboard answer <T1> <text>
   agentboard done <T1> <summary> [--commit REF]
   agentboard review <T1> <summary>
+  agentboard status <T1> <status> [note]
   agentboard block <T1> <reason>
   agentboard wait <T1> [--timeout SEC]
   agentboard brief [--since MIN]
@@ -39,9 +41,9 @@ agentboard — task board + tmux bridge for a team of CLI agents
 Global: --actor NAME (default $AGENTBOARD_ACTOR, else 'agent'), --db PATH
 ";
 
-const VALUE_FLAGS: [&str; 17] = [
-    "--actor", "--db", "--spec", "--assignee", "--priority", "--parent", "--status", "--limit", "--after",
-    "--ttl", "--commit", "--timeout", "--since", "--agent", "--task", "--lines", "--board",
+const VALUE_FLAGS: [&str; 19] = [
+    "--actor", "--db", "--spec", "--description", "--goal", "--assignee", "--priority", "--parent", "--status", "--limit",
+    "--after", "--ttl", "--commit", "--timeout", "--since", "--agent", "--task", "--lines", "--board",
 ];
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -108,14 +110,13 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             let title = req(pos.get(1), "title")?;
             let parent = flag(argv, "--parent").map(|p| store::parse_id(&p)).transpose()?;
             let prio = flag(argv, "--priority").and_then(|p| p.parse().ok()).unwrap_or(100);
-            store::add(
-                actor,
-                title,
-                &flag(argv, "--spec").unwrap_or_default(),
-                flag(argv, "--assignee").as_deref(),
-                prio,
-                parent,
-            )
+            let description = flag(argv, "--description").or_else(|| flag(argv, "--spec")).unwrap_or_default();
+            let goal = flag(argv, "--goal").unwrap_or_else(|| description.clone());
+            let status = match flag(argv, "--status") {
+                Some(raw) => store::norm(&raw).ok_or_else(|| format!("bad status {raw:?}"))?,
+                None => "ready",
+            };
+            store::add(actor, title, &description, &goal, status, flag(argv, "--assignee").as_deref(), prio, parent)
         }
         "ls" | "list" => {
             let limit = flag(argv, "--limit").and_then(|p| p.parse().ok()).unwrap_or(20);
@@ -128,11 +129,24 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             store::claim(actor, id, ttl * 60)
         }
         "note" => store::note(actor, tid(pos.get(1))?, req(pos.get(2), "text")?),
+        "report" => store::report(actor, tid(pos.get(1))?, req(pos.get(2), "text")?),
         "ask" => store::ask(actor, tid(pos.get(1))?, req(pos.get(2), "question")?),
         "answer" => store::answer(actor, tid(pos.get(1))?, req(pos.get(2), "text")?),
         "done" => store::finish(actor, tid(pos.get(1))?, "done", req(pos.get(2), "summary")?, flag(argv, "--commit").as_deref()),
         "review" => store::finish(actor, tid(pos.get(1))?, "review", req(pos.get(2), "summary")?, flag(argv, "--commit").as_deref()),
         "block" => store::block(actor, tid(pos.get(1))?, req(pos.get(2), "reason")?),
+        "status" => {
+            let want = req(pos.get(2), "status")?;
+            let patch = store::Patch {
+                status: Some(want),
+                report: None,
+                note: pos.get(3).map(String::as_str),
+                commit: None,
+                needs: None,
+                ttl_s: 0,
+            };
+            store::apply(actor, tid(pos.get(1))?, &patch)
+        }
         "wait" => {
             let secs = flag(argv, "--timeout").and_then(|p| p.parse().ok()).unwrap_or(60);
             let after = flag(argv, "--after").and_then(|p| p.parse().ok());

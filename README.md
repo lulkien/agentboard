@@ -9,14 +9,16 @@ somebody reads it" with a board that answers in one line and costs few tokens.
 
 Three tables (`src/schema.sql`):
 
-    tasks     id, board, title, spec, status, assignee, priority, parent,
-              needs, result, commit_ref, lease_until, created, updated
+    tasks     id, board, title, description, goal, status, assignee, priority, parent,
+              needs, report, commit_ref, lease_until, created_at, updated_at,
+              started_at, completed_at
     events    seq, task_id, actor, kind, body, ts        -- append-only report log
     sessions  name, agent, cwd, task_id, seen, status    -- tmux registry
 
-Statuses: `triage → ready → running → (blocked → running)* → review → done`,
+Statuses: `ready → working → (blocking → working)* → review → done`,
 plus `dropped`. `needs='input'` marks "blocked on a human", which is the only
-thing that should ever interrupt you.
+thing that should ever interrupt you. Input aliases `running`→`working`,
+`blocked`→`blocking`, `triage`→`ready` accepted on input.
 
 `events` is the file you used to write. Every note, question, answer, claim and
 completion is one row; nothing is mutable history.
@@ -25,11 +27,11 @@ completion is one row; nothing is mutable history.
 
 | tool | cost | what it does |
 |---|---|---|
-| `task_add` | 1 line | create; returns `T7` |
+| `task_add` | 1 line | create; returns `T7` (takes `title, description, goal, status, assignee, priority, parent`) |
 | `task_list` | 1 line/task | open work, ordered by urgency |
-| `task_get` | ~10 lines | spec + lease + last 8 events |
-| `task_claim` | work order | atomic claim, **returns the spec** so no follow-up `get` |
-| `task_update` | 1 line ack | note and/or status; `result=` when finishing |
+| `task_get` | ~10 lines | description, goal, timestamps, lease, report, note, last 8 events |
+| `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
+| `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |
 | `task_wait` | delta only | server-side long-poll for the answer |
 | `board_brief` | ~1 screen | counts + open tasks + recent completions |

@@ -27,13 +27,6 @@ fn err(e: String) -> ErrorData {
     ErrorData::invalid_params(e, None)
 }
 
-/// Unwraps an internal `Result<String, String>` inside a multi-step handler.
-macro_rules! s {
-    ($e:expr) => {
-        $e.map_err(err)?
-    };
-}
-
 macro_rules! run {
     ($e:expr) => {
         $e.map(text).map_err(err)
@@ -49,9 +42,15 @@ pub struct Board {
 pub struct AddArgs {
     /// One-line task title.
     pub title: String,
-    /// Full work order: context, files, acceptance criteria. Keep it tight.
+    /// Everything the worker needs: repo path, files, situation, constraints.
     #[serde(default)]
-    pub spec: String,
+    pub description: String,
+    /// How the work is done and how it is judged finished (definition of done).
+    #[serde(default)]
+    pub goal: String,
+    /// Initial status (default ready).
+    #[serde(default)]
+    pub status: Option<String>,
     /// Who should do it (profile or tmux session name).
     #[serde(default)]
     pub assignee: Option<String>,
@@ -94,19 +93,19 @@ pub struct ClaimArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdateArgs {
     pub id: String,
-    /// ready|running|blocked|review|done|dropped. Omit to only append a note.
+    /// ready|working|blocking|review|done|dropped. Omit to keep the current one.
     #[serde(default)]
     pub status: Option<String>,
+    /// Worker's findings or outcome. Stored as the task report.
+    #[serde(default)]
+    pub report: Option<String>,
     /// Free-form progress note / decision / question answer.
     #[serde(default)]
     pub note: Option<String>,
-    /// Final summary when finishing; also stored as the task result.
-    #[serde(default)]
-    pub result: Option<String>,
     /// Commit or PR reference.
     #[serde(default)]
     pub commit: Option<String>,
-    /// Refresh the claim lease (only meaningful while running).
+    /// Refresh the claim lease (only meaningful while working).
     #[serde(default)]
     pub heartbeat: bool,
 }
@@ -171,13 +170,17 @@ impl Board {
         Self { tool_router: Self::tool_router() }
     }
 
-    #[tool(name = "task_add", description = "Create a task. Returns its short id (T7).", annotations(title = "Add task", read_only_hint = false, destructive_hint = false))]
+    #[tool(name = "task_add", description = "Create a task. description holds everything the worker needs (repo path, files, situation); goal holds how to do it and the definition of done. Returns its short id (T7).", annotations(title = "Add task", read_only_hint = false, destructive_hint = false))]
     async fn task_add(&self, Parameters(a): Parameters<AddArgs>) -> Result<CallToolResult, ErrorData> {
         let parent = match a.parent.as_deref() {
             Some(p) => Some(store::parse_id(p).map_err(err)?),
             None => None,
         };
-        run!(store::add(&actor(), &a.title, &a.spec, a.assignee.as_deref(), a.priority.unwrap_or(100), parent))
+        let status = match a.status.as_deref() {
+            Some(raw) => store::norm(raw).ok_or_else(|| err(format!("bad status {raw:?}")))?,
+            None => "ready",
+        };
+        run!(store::add(&actor(), &a.title, &a.description, &a.goal, status, a.assignee.as_deref(), a.priority.unwrap_or(100), parent))
     }
 
     #[tool(name = "task_list", description = "Open tasks, one compact line each: id, status, assignee, title.", annotations(title = "List tasks", read_only_hint = true))]
@@ -185,13 +188,13 @@ impl Board {
         run!(store::list(a.status.as_deref(), a.assignee.as_deref(), a.limit.unwrap_or(20).clamp(1, 200)))
     }
 
-    #[tool(name = "task_get", description = "One task: spec, lease, last events.", annotations(title = "Get task", read_only_hint = true))]
+    #[tool(name = "task_get", description = "Full task record: status, timestamps, description, goal, report, note, recent events. Manager reads this to collect a worker's result.", annotations(title = "Get task", read_only_hint = true))]
     async fn task_get(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         run!(store::get(id))
     }
 
-    #[tool(name = "task_claim", description = "Atomically claim a task (or the next ready one). Returns the full spec — do not call task_get afterwards. Claim expires after ttl_min; heartbeat to extend.", annotations(title = "Claim task", read_only_hint = false, destructive_hint = false))]
+    #[tool(name = "task_claim", description = "Atomically claim a task (or the next ready one) and return its description + goal. Claim expires after ttl_min; heartbeat to extend.", annotations(title = "Claim task", read_only_hint = false, destructive_hint = false))]
     async fn task_claim(&self, Parameters(a): Parameters<ClaimArgs>) -> Result<CallToolResult, ErrorData> {
         let id = match a.id.as_deref() {
             Some(s) => Some(store::parse_id(s).map_err(err)?),
@@ -201,33 +204,26 @@ impl Board {
         run!(store::claim(&actor(), id, ttl * 60))
     }
 
-    #[tool(name = "task_update", description = "Report progress: append a note and/or move status (running|blocked|review|done|dropped). Use result= when finishing. Returns a short ack.", annotations(title = "Update task", read_only_hint = false, destructive_hint = false))]
+    #[tool(name = "task_update", description = "Write back to the board: status (ready|working|blocking|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.", annotations(title = "Update task", read_only_hint = false, destructive_hint = false))]
     async fn task_update(&self, Parameters(a): Parameters<UpdateArgs>) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
         let who = actor();
-        let status = a.status.as_deref().unwrap_or(if a.heartbeat { "running" } else { "" });
-        let mut acks: Vec<String> = Vec::new();
-        if let Some(n) = a.note.as_deref().filter(|n| !n.trim().is_empty()) {
-            acks.push(s!(store::note(&who, id, n)));
+        if a.status.is_none() && a.report.is_none() && a.note.is_none() && a.commit.is_none() {
+            return if a.heartbeat {
+                run!(store::heartbeat(&who, id, store::DEFAULT_TTL_S))
+            } else {
+                Err(err("nothing to do: pass status, report, note or commit".to_owned()))
+            };
         }
-        match status {
-            "done" => acks.push(s!(store::finish(&who, id, "done", a.result.as_deref().or(a.note.as_deref()).unwrap_or(""), a.commit.as_deref()))),
-            "review" => acks.push(s!(store::finish(&who, id, "review", a.result.as_deref().or(a.note.as_deref()).unwrap_or(""), a.commit.as_deref()))),
-            "blocked" => acks.push(s!(store::block(&who, id, a.note.as_deref().unwrap_or("blocked")))),
-            "running" => {
-                if a.heartbeat {
-                    acks.push(s!(store::heartbeat(&who, id, store::DEFAULT_TTL_S)));
-                } else {
-                    acks.push(s!(store::answer(&who, id, a.note.as_deref().unwrap_or("resumed"))));
-                }
-            }
-            "" => {}
-            other => acks.push(s!(store::set_status_public(&who, id, other, a.note.as_deref().unwrap_or("")))),
-        }
-        if acks.is_empty() {
-            return Err(err("nothing to do: pass status, note or result".to_owned()));
-        }
-        Ok(text(acks.join("; ")))
+        let patch = store::Patch {
+            status: a.status.as_deref(),
+            report: a.report.as_deref(),
+            note: a.note.as_deref(),
+            commit: a.commit.as_deref(),
+            needs: None,
+            ttl_s: store::DEFAULT_TTL_S,
+        };
+        run!(store::apply(&who, id, &patch))
     }
 
     #[tool(name = "task_ask", description = "Block on a human decision. Sets status=blocked/needs=input; the answer arrives as an event. Follow with task_wait, passing the #seq from the ack as after_seq. Ask ONE narrow question per call: compound questions get partial answers.", annotations(title = "Ask and block", read_only_hint = false, destructive_hint = false))]

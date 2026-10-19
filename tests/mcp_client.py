@@ -58,18 +58,18 @@ def main():
         checks.append(ok)
         print(("PASS " if ok else "FAIL ") + label + " :: " + got.replace("\n", " | ")[:120])
 
-    expect("add", s.call("task_add", title="write fd docs", spec="one page, SCM_RIGHTS", assignee="claude1", priority=5), "T1 ready")
+    expect("add", s.call("task_add", title="write fd docs", description="one page, SCM_RIGHTS", goal="verification", assignee="claude1", priority=5), "T1 ready")
     expect("list", s.call("task_list"), "T1 rdy")
-    expect("claim returns spec", s.call("task_claim", id="T1", ttl_min=5), "T1 running", "one page, SCM_RIGHTS")
-    expect("claim twice", s.call("task_claim", id="T1"), "T1 running by claude1")
-    expect("note", s.call("task_update", id="T1", note="outline done"), "ok T1 #")
+    expect("claim returns description+goal", s.call("task_claim", id="T1", ttl_min=5), "T1 working", "one page, SCM_RIGHTS", "verification")
+    expect("claim twice", s.call("task_claim", id="T1"), "T1 working by claude1")
+    expect("note", s.call("task_update", id="T1", note="outline done"), "T1 working #")
     expect("heartbeat", s.call("task_update", id="T1", heartbeat=True), "lease")
-    expect("done", s.call("task_update", id="T1", status="done", result="shipped 4f2a1c", commit="4f2a1c"), "T1 done")
+    expect("done", s.call("task_update", id="T1", status="done", report="shipped 4f2a1c", commit="4f2a1c"), "T1 done")
 
     # ask must block, and wait must return on the answer without client polling.
-    s.call("task_add", title="needs a decision")
+    s.call("task_add", title="needs a decision", description="choose one", goal="decided")
     s.call("task_claim", id="T2")
-    expect("ask", s.call("task_ask", id="T2", question="nix or libc?"), "T2 blocked", "#")
+    expect("ask", s.call("task_ask", id="T2", question="nix or libc?"), "T2 blocking", "#")
 
     answer_at = {}
 
@@ -83,13 +83,13 @@ def main():
     threading.Thread(target=answer_later, daemon=True).start()
     t0 = time.time()
     got = s.call("task_wait", id="T2", timeout_s=10)
-    expect("wait returns on answer", got, "T2 running", "use nix")
+    expect("wait returns on answer", got, "T2 working", "use nix")
     latency = time.time() - t0
     ok = latency < 5 and latency >= 1.0
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"wait latency {latency:.2f}s (timeout was 10s)")
 
-    expect("brief", s.call("board_brief", since_min=60), "1 don", "T2 run")
+    expect("brief", s.call("board_brief", since_min=60), "1 don", "T2 wrk")
 
     try:
         s.call("task_get", id="T77")
