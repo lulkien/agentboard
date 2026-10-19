@@ -30,7 +30,7 @@ completion is one row; nothing is mutable history.
 |---|---|---|
 | `task_add` | 1 line | create; returns `T7` (takes `title, description, goal, status, assignee, priority, parent`) |
 | `task_list` | 1 line/task | open work, ordered by urgency |
-| `task_get` | ~10 lines | description, goal, timestamps, lease, report, note, last 8 events |
+| `task_get` | ~10 lines | description, goal, timestamps, lease, report, note, last 8 events; long fields end in a `[truncated <field>: N of M chars ...]` marker, `full=true` returns them (and event bodies) whole |
 | `task_children` | 1 line/child | direct children of an epic: id, status, assignee, age, title |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
@@ -93,6 +93,7 @@ Then register the pane once so the board can map task → session:
 ## CLI
 
     agentboard add|ls|get|children|claim|note|ask|answer|done|review|block|brief
+    agentboard get T7 --full          # description/goal/report/note/events unclipped, byte-for-byte
     agentboard wait T7 [--after 42] [--timeout 60]
     agentboard sessions|register|tail|send
     agentboard path                    # where the db lives
@@ -102,7 +103,7 @@ Default db: `$XDG_STATE_HOME/agentboard/board.db`.
 
 ## Tests
 
-    python3 tests/mcp_client.py   # 21 checks over real stdio: claim, ask→wait, acks
+    python3 tests/mcp_client.py   # real stdio checks: claim, ask→wait, acks
     ./tests/race.sh               # 8 concurrent claimers: 80 claims, 80 unique, ~124 ms
     bash tests/wait.sh            # long-poll returns on the event, not the timeout
     ./target/release/agentboard < tests/mcp-smoke.jsonl   # handshake + tool list

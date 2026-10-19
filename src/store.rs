@@ -1,6 +1,7 @@
 //! Storage + operations. One SQLite file, WAL, short-immediate transactions.
 //! Every operation opens its own connection: cheap, and safe under concurrency.
 
+use crate::clip::{CAP_DESCRIPTION, CAP_EVENT, CAP_GOAL, CAP_LAST, CAP_NOTE, CAP_REPORT, clip, clip_marked, field};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -175,15 +176,6 @@ fn ago(ts_ms: i64) -> String {
     }
 }
 
-fn clip(s: &str, max: usize) -> String {
-    let one_line = s.replace('\n', " ⏎ ");
-    if one_line.chars().count() <= max {
-        return one_line;
-    }
-    let cut: String = one_line.chars().take(max).collect();
-    format!("{cut}…")
-}
-
 fn log_event(conn: &Connection, task: i64, actor: &str, kind: &str, body: &str) -> Result<i64, String> {
     conn.execute(
         "INSERT INTO events(task_id,actor,kind,body,ts) VALUES(?,?,?,?,?)",
@@ -317,20 +309,12 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
     Ok(out.trim_end().to_owned())
 }
 
-/// Fills in any caller-supplied long field, or "-" when absent.
-fn field(label: &str, value: &str, max: usize) -> String {
-    if value.is_empty() {
-        String::new()
-    } else {
-        format!("{label}:\n{}\n", clip(value, max))
-    }
-}
-
 fn when(ts: i64) -> String {
     format!("{} ({}Z)", ago(ts), stamp(ts))
 }
 
-pub fn get(id: i64) -> Result<String, String> {
+/// `full` returns description, goal, report and note unclipped and verbatim.
+pub fn get(id: i64, full: bool) -> Result<String, String> {
     let conn = open()?;
     let r = fetch(&conn, id)?;
     let mut out = format!(
@@ -361,10 +345,10 @@ pub fn get(id: i64) -> Result<String, String> {
         out.push_str(&line);
         out.push('\n');
     }
-    out.push_str(&field("description", &r.description, 4000));
-    out.push_str(&field("goal", &r.goal, 2000));
-    out.push_str(&field("report", r.report.as_deref().unwrap_or(""), 6000));
-    out.push_str(&field("note", r.note.as_deref().unwrap_or(""), 800));
+    out.push_str(&field("description", &r.description, CAP_DESCRIPTION, full, &short(r.id)));
+    out.push_str(&field("goal", &r.goal, CAP_GOAL, full, &short(r.id)));
+    out.push_str(&field("report", r.report.as_deref().unwrap_or(""), CAP_REPORT, full, &short(r.id)));
+    out.push_str(&field("note", r.note.as_deref().unwrap_or(""), CAP_NOTE, full, &short(r.id)));
     if let Some(c) = &r.commit_ref {
         out.push_str(&format!("commit: {c}\n"));
     }
@@ -380,8 +364,14 @@ pub fn get(id: i64) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     if !evs.is_empty() {
         out.push_str("events:\n");
+        let t = short(r.id);
         for (seq, actor, kind, body, ts) in evs.iter().rev() {
-            out.push_str(&format!("  #{seq} {actor} {kind} {}: {}\n", ago(*ts), clip(body, 220)));
+            let text = if full {
+                body.clone()
+            } else {
+                clip_marked(body, CAP_EVENT, &format!("`agentboard get {t} --full` or task_get id={t} full=true"))
+            };
+            out.push_str(&format!("  #{seq} {actor} {kind} {}: {text}\n", ago(*ts)));
         }
     }
     Ok(out.trim_end().to_owned())
@@ -499,12 +489,8 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
         let r = fetch(&tx, task)?;
         tx.commit().map_err(|e| e.to_string())?;
         let mut out = format!("{} working (lease {}m) {}\n", short(r.id), ttl_s / 60, r.title);
-        if !r.description.is_empty() {
-            out.push_str(&format!("description:\n{}\n", clip(&r.description, 4000)));
-        }
-        if !r.goal.is_empty() {
-            out.push_str(&format!("goal:\n{}\n", clip(&r.goal, 2500)));
-        }
+        out.push_str(&field("description", &r.description, CAP_DESCRIPTION, false, &short(r.id)));
+        out.push_str(&field("goal", &r.goal, CAP_GOAL, false, &short(r.id)));
         return Ok(out.trim_end().to_owned());
     }
     Err("claim contention: retry".to_owned())
@@ -748,7 +734,8 @@ pub async fn wait(id: i64, after: Option<i64>, timeout_ms: u64) -> Result<String
             if !evs.is_empty() {
                 let mut out = format!("{} {}\n", short(id), r.status);
                 for (seq, actor, kind, body) in evs {
-                    out.push_str(&format!("#{seq} {actor} {kind}: {}\n", clip(&body, 400)));
+                    // The delta is what the caller asked for (answers live here): never clipped.
+                    out.push_str(&format!("#{seq} {actor} {kind}: {body}\n"));
                 }
                 return Ok(out.trim_end().to_owned());
             }
@@ -759,7 +746,7 @@ pub async fn wait(id: i64, after: Option<i64>, timeout_ms: u64) -> Result<String
                     short(id),
                     r.status,
                     timeout_ms / 1000,
-                    clip(&get(id).unwrap_or_default(), 400)
+                    clip_marked(&get(id, false).unwrap_or_default(), CAP_LAST, &format!("task_get id={} for the record", short(id)))
                 ));
             }
         }

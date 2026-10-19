@@ -5,6 +5,7 @@
 //! Both call the same `store` functions, so claim/lease/status semantics exist
 //! in exactly one place.
 
+mod clip;
 mod server;
 mod store;
 
@@ -20,7 +21,7 @@ agentboard — task board + tmux bridge for a team of CLI agents
   agentboard                     MCP server on stdio (default)
   agentboard add <title> [--description D | --spec D] [--goal G] [--status S] [--assignee A] [--priority N] [--parent T1]
   agentboard ls [--status S] [--assignee A] [--limit N]
-  agentboard get <T1>
+  agentboard get <T1> [--full]      (--full: description/goal/report/note/events unclipped, verbatim)
   agentboard children <T1>
   agentboard claim [<T1>] [--ttl MIN]
   agentboard heartbeat <T1> [--ttl MIN]
@@ -124,7 +125,7 @@ async fn dispatch(cmd: &str, pos: &[String], argv: &[String], actor: &str) -> Re
             let limit = flag(argv, "--limit").and_then(|p| p.parse().ok()).unwrap_or(20);
             store::list(flag(argv, "--status").as_deref(), flag(argv, "--assignee").as_deref(), limit)
         }
-        "get" => store::get(tid(pos.get(1))?),
+        "get" => store::get(tid(pos.get(1))?, has(argv, "--full")),
         "children" => store::children(tid(pos.get(1))?),
         "claim" => {
             let id = pos.get(1).map(|p| store::parse_id(p)).transpose()?;

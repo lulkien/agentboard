@@ -54,6 +54,21 @@ Create the task with `task_add(title, description, goal, priority, assignee, par
 | started_at | When work began |
 | completed_at | When status reached done/dropped |
 
+## Long text and truncation
+
+`task_get` and `task_claim` fold newlines to ` ⏎ ` (3 chars) and cap long fields so a read stays cheap: description 4000, goal 4000, report 6000, note 800. Caps, counts and markers are all in chars of the folded view, so a text with many short lines hits the cap sooner than its raw length suggests. A field over its cap ends in a marker, never silently:
+
+    [truncated description: 4000 of 5000 chars shown; full text: `agentboard get T7 --full` or task_get id=T7 full=true]
+    [truncated description: 4000 of 6800 chars shown (newline = 3 chars; 3400 raw); full text: ...]
+
+The marker names the field, the chars shown, the folded length (plus the raw length when newlines make them differ) and the way to the rest. A worker that sees it must fetch the full value before acting: `task_get(id, full=true)` over MCP, `agentboard get T7 --full` on the CLI. `full` returns description, goal, report, note and the event bodies of the last-8 events unclipped, byte-for-byte, with real newlines and no marker.
+
+Other clips, all marked or absent:
+
+- `get` events (last 8): cut at 220 chars with `[truncated: 220 of N chars; ...]`; `full` returns them whole.
+- `task_wait` / `agentboard wait`: event bodies are returned whole (answers arrive here). On timeout the `last:` tail is cut at 400 chars with a `[truncated: 400 of N chars; task_get id=T7 for the record]` marker.
+- Titles are cut at 60-64 chars with a bare `…` in `task_list`, `task_children` and `board_brief`, and `board_brief` result lines at 80; those are one compact line per task by design. Read `task_get` for the whole title.
+
 ## Status meanings
 
 - `ready` — waiting to be claimed (alias: `triage`)

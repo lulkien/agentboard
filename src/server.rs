@@ -86,6 +86,15 @@ pub struct IdArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetArgs {
+    /// Task id, T7 or 7.
+    pub id: String,
+    /// true returns description, goal, report, note and event bodies unclipped and verbatim. Default false: long fields are cut with a `[truncated ...]` marker.
+    #[serde(default)]
+    pub full: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ClaimArgs {
     /// Specific task, or omit to take the next ready one.
     #[serde(default)]
@@ -196,10 +205,10 @@ impl Board {
         run!(store::list(a.status.as_deref(), a.assignee.as_deref(), a.limit.unwrap_or(20).clamp(1, 200)))
     }
 
-    #[tool(name = "task_get", description = "Full task record: status, timestamps, description, goal, report, note, recent events. Manager reads this to collect a worker's result.", annotations(title = "Get task", read_only_hint = true))]
-    async fn task_get(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
+    #[tool(name = "task_get", description = "Task record: status, timestamps, description, goal, report, note, recent events. Long fields end in a `[truncated <field>: N of M chars ...]` marker; pass full=true to get them whole and verbatim. Manager reads this to collect a worker's result.", annotations(title = "Get task", read_only_hint = true))]
+    async fn task_get(&self, Parameters(a): Parameters<GetArgs>) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
-        run!(store::get(id))
+        run!(store::get(id, a.full))
     }
 
     #[tool(name = "task_children", description = "Direct children of a task (epic), one compact line each: id, status, assignee, age, title. Ordered by id.", annotations(title = "List children", read_only_hint = true))]
