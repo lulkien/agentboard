@@ -33,7 +33,7 @@ fn rows(conn: &rusqlite::Connection) -> Result<Vec<SessionRow>, String> {
 /// is the check. tmux is asked per name, herdr once, and only if tmux cannot
 /// vouch for a name.
 pub struct Liveness {
-    herdr: std::cell::OnceCell<Option<Vec<(String, String)>>>,
+    herdr: std::cell::OnceCell<Option<Vec<HerdrAgent>>>,
 }
 
 impl Liveness {
@@ -45,15 +45,25 @@ impl Liveness {
 
     /// `None` when herdr cannot answer (missing, hung, bad exit), `Some(empty)`
     /// when it answers with no agents: the difference decides whether a prune is safe.
-    fn herdr(&self) -> Option<&[(String, String)]> {
+    fn herdr(&self) -> Option<&[HerdrAgent]> {
         self.herdr.get_or_init(herdr_agents).as_deref()
+    }
+
+    /// The working directory herdr reports for a named agent. tmux reports none,
+    /// and an unreachable herdr or an agent without a cwd is "unknown", never a
+    /// reason to warn.
+    pub fn cwd(&self, name: &str) -> Option<String> {
+        self.herdr()?
+            .iter()
+            .find(|h| h.name == name)
+            .and_then(|h| h.cwd.clone())
     }
 
     pub fn alive(&self, name: &str, agent: &str) -> bool {
         tmux_alive(name)
             || self
                 .herdr()
-                .is_some_and(|a| a.iter().any(|(n, k)| n == name && k == agent))
+                .is_some_and(|a| a.iter().any(|h| h.name == name && h.kind == agent))
     }
 }
 
@@ -160,6 +170,14 @@ fn tmux_alive(name: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
+/// One entry of `herdr agent list`.
+#[derive(Debug, PartialEq)]
+struct HerdrAgent {
+    name: String,
+    kind: String,
+    cwd: Option<String>,
+}
+
 /// A tmux server is up and answering (a `has-session` miss alone cannot tell
 /// "no such session" from "no tmux at all").
 fn tmux_up() -> bool {
@@ -169,7 +187,7 @@ fn tmux_up() -> bool {
 /// Live herdr agents as (name, agent type). `None`: herdr did not answer (missing
 /// binary, hang, bad exit). Bad JSON is an answer with no agents. Bounded by the
 /// shared runner (deadline, group kill).
-fn herdr_agents() -> Option<Vec<(String, String)>> {
+fn herdr_agents() -> Option<Vec<HerdrAgent>> {
     match proc::run(Command::new("herdr").args(["agent", "list"])) {
         Ok(o) if o.status.success() => Some(parse_herdr_agents(&o.stdout)),
         _ => None,
@@ -178,7 +196,7 @@ fn herdr_agents() -> Option<Vec<(String, String)>> {
 
 /// Parses the `herdr agent list` envelope (`.result.agents[]`). Agents without a
 /// `name` (unnamed panes) are skipped.
-fn parse_herdr_agents(json: &[u8]) -> Vec<(String, String)> {
+fn parse_herdr_agents(json: &[u8]) -> Vec<HerdrAgent> {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(json) else {
         return Vec::new();
     };
@@ -187,10 +205,11 @@ fn parse_herdr_agents(json: &[u8]) -> Vec<(String, String)> {
         .map(|a| {
             a.iter()
                 .filter_map(|x| {
-                    Some((
-                        x["name"].as_str()?.to_owned(),
-                        x["agent"].as_str().unwrap_or_default().to_owned(),
-                    ))
+                    Some(HerdrAgent {
+                        name: x["name"].as_str()?.to_owned(),
+                        kind: x["agent"].as_str().unwrap_or_default().to_owned(),
+                        cwd: x["cwd"].as_str().map(str::to_owned),
+                    })
                 })
                 .collect()
         })
@@ -259,14 +278,25 @@ pub fn send(name: &str, text: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_herdr_agents;
+    use super::{HerdrAgent, parse_herdr_agents};
 
     #[test]
     fn parses_herdr_agent_list_and_skips_unnamed() {
-        let sample = br#"{"id":"cli:agent:list","result":{"agents":[{"agent":"hermes","pane_id":"wB:p1"},{"agent":"claude","name":"coder","pane_id":"wB:p5"}],"type":"agent_list"}}"#;
+        let sample = br#"{"id":"cli:agent:list","result":{"agents":[{"agent":"hermes","pane_id":"wB:p1"},{"agent":"claude","name":"coder","cwd":"/work/app","pane_id":"wB:p5"},{"agent":"codex","name":"nocwd"}],"type":"agent_list"}}"#;
         assert_eq!(
             parse_herdr_agents(sample),
-            vec![("coder".to_owned(), "claude".to_owned())]
+            vec![
+                HerdrAgent {
+                    name: "coder".to_owned(),
+                    kind: "claude".to_owned(),
+                    cwd: Some("/work/app".to_owned())
+                },
+                HerdrAgent {
+                    name: "nocwd".to_owned(),
+                    kind: "codex".to_owned(),
+                    cwd: None
+                },
+            ]
         );
         assert!(parse_herdr_agents(b"not json").is_empty());
         assert!(parse_herdr_agents(b"{}").is_empty());

@@ -73,62 +73,47 @@ fn open() -> Result<Connection, String> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if !*done {
+        // First: a refused file is left exactly as it was (no WAL switch, no DDL).
+        check_schema(&conn)?;
         conn.execute_batch("PRAGMA journal_mode=WAL")
             .map_err(|e| e.to_string())?;
         conn.execute_batch(SCHEMA)
             .map_err(|e| format!("schema: {e}"))?;
-        migrate(&conn)?;
         *done = true;
     }
     drop(done);
     Ok(conn)
 }
 
-/// Bring a v1 database (title/spec/status/result/created/updated) up to v2
-/// (description/goal/report/note + created_at/started_at/completed_at).
-///
-/// The version check runs inside the write transaction, so two processes
-/// opening a v1 file at once cannot both try to ALTER it. A failed batch leaves
-/// the transaction open; dropping the connection rolls it back (DDL is
-/// transactional in SQLite), so no partial schema survives.
-fn migrate(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|e| format!("migrate v1->v2: {e}"))?;
-    let cols: Vec<String> = {
+/// Refuses a board file written before epics existed. There is no migration by
+/// design (history is expendable): half-migrating a live board is worse than
+/// asking the operator to move the file aside.
+fn check_schema(conn: &Connection) -> Result<(), String> {
+    let cols = |table: &str| -> Result<Vec<String>, String> {
         let mut stmt = conn
-            .prepare("PRAGMA table_info(tasks)")
+            .prepare(&format!("PRAGMA table_info({table})"))
             .map_err(|e| e.to_string())?;
         stmt.query_map([], |r| r.get::<_, String>(1))
             .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .collect()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())
     };
-    if cols.iter().any(|c| c == "description") {
-        return conn
-            .execute_batch("COMMIT")
-            .map_err(|e| format!("migrate v1->v2: {e}"));
+    let tasks = cols("tasks")?;
+    if tasks.is_empty() {
+        return Ok(()); // fresh file: the schema creates everything
     }
-    conn.execute_batch(
-        "ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';
-         ALTER TABLE tasks ADD COLUMN goal TEXT NOT NULL DEFAULT '';
-         ALTER TABLE tasks ADD COLUMN report TEXT;
-         ALTER TABLE tasks ADD COLUMN note TEXT;
-         ALTER TABLE tasks ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
-         ALTER TABLE tasks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
-         ALTER TABLE tasks ADD COLUMN started_at INTEGER;
-         ALTER TABLE tasks ADD COLUMN completed_at INTEGER;
-         UPDATE tasks SET description=spec, goal=spec, report=result,
-                          created_at=created, updated_at=updated;
-         UPDATE tasks SET status=CASE status WHEN 'running' THEN 'working'
-                              WHEN 'blocked' THEN 'blocking'
-                              WHEN 'triage' THEN 'ready' ELSE status END;
-         ALTER TABLE tasks DROP COLUMN spec;
-         ALTER TABLE tasks DROP COLUMN result;
-         ALTER TABLE tasks DROP COLUMN created;
-         ALTER TABLE tasks DROP COLUMN updated;
-         COMMIT;",
-    )
-    .map_err(|e| format!("migrate v1->v2: {e}"))
+    let old = tasks.iter().any(|c| c == "parent")
+        || !tasks.iter().any(|c| c == "epic_id")
+        || cols("epics")?.is_empty()
+        || !cols("events")?.iter().any(|c| c == "epic_id");
+    if old {
+        let p = db_path();
+        return Err(format!(
+            "this board file predates epics and cannot be used; move it aside and start fresh (there is no migration): mv {0} {0}.old",
+            p.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Canonical status names, for error messages.
@@ -158,22 +143,73 @@ pub fn short(id: i64) -> String {
     format!("T{id}")
 }
 
+pub fn short_epic(id: i64) -> String {
+    format!("E{id}")
+}
+
+/// A task id: `T3`, `t3`, `#3` or `3`. An epic id is refused with a pointer to the
+/// right verb, so a mixed-up id never silently hits the wrong table.
 pub fn parse_id(raw: &str) -> Result<i64, String> {
-    let t = raw.trim().trim_start_matches(['T', 't', '#']);
-    t.parse::<i64>()
+    let t = raw.trim();
+    if t.starts_with(['E', 'e']) {
+        return Err(format!(
+            "{t} is an epic id; this takes a task id (T3 or 3). Epics: `agentboard epic get {t}` / `children {t}`"
+        ));
+    }
+    t.trim_start_matches(['T', 't', '#'])
+        .parse::<i64>()
         .map_err(|_| format!("bad task id {raw:?} (want T3 or 3)"))
+}
+
+/// An epic id: `E3` or `e3`. The prefix is required (a bare number is a task).
+pub fn parse_epic_id(raw: &str) -> Result<i64, String> {
+    let t = raw.trim();
+    if t.starts_with(['T', 't', '#']) {
+        return Err(format!(
+            "{t} is a task id; an epic id looks like E3 (`agentboard epic ls` lists them)"
+        ));
+    }
+    t.strip_prefix(['E', 'e'])
+        .and_then(|n| n.parse::<i64>().ok())
+        .ok_or_else(|| format!("bad epic id {raw:?} (want E3)"))
+}
+
+/// Either kind of id, for the few verbs that take both (`children`).
+pub enum Ref {
+    Task(i64),
+    Epic(i64),
+}
+
+pub fn parse_ref(raw: &str) -> Result<Ref, String> {
+    if raw.trim().starts_with(['E', 'e']) {
+        parse_epic_id(raw).map(Ref::Epic)
+    } else {
+        parse_id(raw).map(Ref::Task)
+    }
+}
+
+/// What an event is about. One timeline serves both; the schema CHECK makes
+/// exactly one of the two columns set.
+#[derive(Clone, Copy)]
+enum Subject {
+    Task(i64),
+    Epic(i64),
 }
 
 fn log_event(
     conn: &Connection,
-    task: i64,
+    on: Subject,
     actor: &str,
     kind: &str,
     body: &str,
 ) -> Result<i64, String> {
+    let (task, epic) = match on {
+        Subject::Task(id) => (Some(id), None),
+        Subject::Epic(id) => (None, Some(id)),
+    };
     conn.execute(
-        "INSERT INTO events(task_id,actor,kind,body,ts) VALUES(?,?,?,?,?)",
-        params![task, actor, kind, body, now_ms()],
+        "INSERT INTO events(task_id,epic_id,actor,kind,body,ts) VALUES(?,?,?,?,?,?)",
+        params![task, epic, actor, kind, body, now_ms()],
     )
     .map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
@@ -196,10 +232,11 @@ struct Row {
     note: Option<String>,
     commit_ref: Option<String>,
     priority: i64,
-    parent: Option<i64>,
+    epic_id: Option<i64>,
+    parent_id: Option<i64>,
 }
 
-const COLS: &str = "id,status,assignee,needs,title,description,goal,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,parent";
+const COLS: &str = "id,status,assignee,needs,title,description,goal,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id";
 
 fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
     Ok(Row {
@@ -219,7 +256,8 @@ fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         note: r.get(13)?,
         commit_ref: r.get(14)?,
         priority: r.get(15)?,
-        parent: r.get(16)?,
+        epic_id: r.get(16)?,
+        parent_id: r.get(17)?,
     })
 }
 
@@ -232,6 +270,7 @@ fn fetch(conn: &Connection, id: i64) -> Result<Row, String> {
 }
 
 mod dispatch;
+mod epics;
 mod proc;
 mod render;
 mod sessions;
@@ -239,10 +278,52 @@ mod tasks;
 mod wait;
 
 pub use dispatch::dispatch;
+pub use epics::{epic_add, epic_get, epic_list, epic_status};
 pub use render::{brief, children, get, list};
 pub use sessions::{prune, register_session, send, sessions, tail, unregister};
 pub use tasks::{
     ClaimError, NewTask, Patch, add, answer, apply, ask, block, claim, finish, heartbeat, note,
-    report,
+    report, set_parent,
 };
 pub use wait::{Wait, wait};
+
+#[cfg(test)]
+mod tests {
+    use super::{Connection, SCHEMA, check_schema};
+
+    #[test]
+    fn fresh_and_current_files_pass_the_schema_check() {
+        let c = Connection::open_in_memory().unwrap();
+        check_schema(&c).unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        check_schema(&c).unwrap();
+    }
+
+    #[test]
+    fn a_pre_epics_board_is_refused_untouched() {
+        for ddl in [
+            // the old shape: tasks.parent, no epics, events without epic_id
+            "CREATE TABLE tasks(id INTEGER PRIMARY KEY, title TEXT, parent INTEGER);
+             CREATE TABLE events(seq INTEGER PRIMARY KEY, task_id INTEGER);",
+            // tasks already migrated but no epics table
+            "CREATE TABLE tasks(id INTEGER PRIMARY KEY, epic_id INTEGER, parent_id INTEGER);
+             CREATE TABLE events(seq INTEGER PRIMARY KEY, task_id INTEGER, epic_id INTEGER);",
+        ] {
+            let c = Connection::open_in_memory().unwrap();
+            c.execute_batch(ddl).unwrap();
+            let err = check_schema(&c).unwrap_err();
+            assert!(
+                err.contains("predates epics") && err.contains("mv "),
+                "{err}"
+            );
+            let tables: i64 = c
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(tables <= 2, "the check must not create anything: {tables}");
+        }
+    }
+}

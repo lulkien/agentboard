@@ -7,13 +7,22 @@ somebody reads it" with a board that answers in one line and costs few tokens.
 
 ## Model
 
-Three tables (`src/schema.sql`):
+Four tables (`src/schema.sql`):
 
-    tasks     id, board, title, description, goal, status, assignee, priority, parent,
-              needs, report, commit_ref, lease_until, created_at, updated_at,
+    epics     id, title, description, goal, status, path, created_at, updated_at,
+              completed_at                               -- E1, E2...; never leased
+    tasks     id, board, title, description, goal, status, assignee, priority, epic_id,
+              parent_id, needs, report, commit_ref, lease_until, created_at, updated_at,
               started_at, completed_at
-    events    seq, task_id, actor, kind, body, ts        -- append-only report log
+    events    seq, task_id | epic_id, actor, kind, body, ts  -- append-only, one timeline
     sessions  name, agent, cwd, task_id, seen, status    -- tmux registry
+
+An **epic** is not a task: it has its own ids (`E1`), is never claimed, leased or
+dispatched, and carries the project `path` its work belongs to. A task points at an
+epic (`epic_id`) and optionally at another task (`parent_id`, a subtask that
+inherits the parent's epic; cycles and cross-epic parents are refused). A board
+file written before epics is refused with the command to move it aside: there is
+no migration.
 
 Statuses: `ready → working → (blocking → working)* → review → done`,
 plus `needs_fix` (review found work, waiting for a fix; shown as `fix`) and
@@ -28,15 +37,19 @@ completion is one row; nothing is mutable history.
 
 | tool | cost | what it does |
 |---|---|---|
-| `task_add` | 1 line | create; returns `T7` (takes `title, description, goal, status, assignee, priority, parent`) |
+| `task_add` | 1 line | create; returns `T7` (takes `title, description, goal, status, assignee, priority, epic, parent`) |
 | `task_list` | 1 line/task | open work, ordered by urgency |
 | `task_get` | ~10 lines | description, goal, timestamps, lease, report, note, last 8 events; long fields end in a `[truncated <field>: N of M chars ...]` marker, `full=true` returns them (and event bodies) whole |
-| `task_children` | 1 line/child | direct children of an epic: id, status, assignee, age, title |
+| `task_children` | 1 line/task | an epic id (`E3`) lists every task in it, a task id (`T7`) its subtasks: id, status, assignee, age, title |
+| `epic_add` | 1-2 lines | create an epic (`title, description, goal, path`); returns `E3`, plus a warning line if `path` does not exist yet |
+| `epic_list` | 1 line/epic | epics (default open): id, status, done/total, path, title |
+| `epic_get` | ~10 lines | status, path, task counts, description, goal, last 8 events; `full=true` unclipped |
+| `epic_update` | 1 line ack | set an epic `open`/`done`/`dropped`; closing is never automatic |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |
 | `task_wait` | delta only | server-side long-poll over `id`/`ids`/`epic`/`open` with `status`/`kind` filters; first line `matched:` or `timeout:` |
-| `board_brief` | ~1 screen | counts + open tasks + `EPIC` rollup lines (done/non-dropped children, open epics only) + recent completions |
+| `board_brief` | ~1 screen | counts + one `EPIC` line per open epic (done/non-dropped tasks, blocking/needs_fix counts, path) + open tasks that belong to no epic + recent completions |
 | `session_list` | 1 line/session | registered sessions and their task; `up` means a live tmux session of that name, or a herdr agent with that name and the registered agent type |
 | `session_register` | ack | map session → task |
 | `session_tail` | N lines | last N lines of a tmux pane (tmux only; herdr-only sessions fail) |

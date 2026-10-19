@@ -2,7 +2,7 @@ use super::proc;
 use super::render::stamp;
 use super::sessions::Liveness;
 use super::tasks::{Patch, apply};
-use super::{fetch, log_event, now_ms, open, short};
+use super::{Subject, fetch, log_event, now_ms, open, short, short_epic};
 use crate::clip::clip;
 use rusqlite::{OptionalExtension, params};
 use std::process::Command;
@@ -76,18 +76,16 @@ impl Candidate {
 /// dead assignee row must not capture the dispatch.
 fn resolve(
     conn: &rusqlite::Connection,
+    live: &Liveness,
     assignee: Option<&str>,
     to: Option<&str>,
     id: i64,
 ) -> Result<String, String> {
-    let live = Liveness::new();
-    let a = assignee
-        .map(|n| Candidate::of(conn, &live, n))
-        .transpose()?;
+    let a = assignee.map(|n| Candidate::of(conn, live, n)).transpose()?;
     if let (Some(Candidate::Live), Some(n)) = (&a, assignee) {
         return Ok(n.to_owned());
     }
-    let t = to.map(|n| Candidate::of(conn, &live, n)).transpose()?;
+    let t = to.map(|n| Candidate::of(conn, live, n)).transpose()?;
     if let (Some(Candidate::Live), Some(n)) = (&t, to) {
         return Ok(n.to_owned());
     }
@@ -145,9 +143,30 @@ pub fn dispatch(
     if print_only {
         return Ok(text);
     }
-    let target = resolve(&conn, task.assignee.as_deref(), to, id)?;
+    let live = Liveness::new();
+    let target = resolve(&conn, &live, task.assignee.as_deref(), to, id)?;
+    // Warn, never refuse: only when the epic names a path and the pane reports a
+    // cwd, and the cwd is not that path or under it.
+    let warning = match task.epic_id {
+        Some(e) => {
+            let epic = super::epics::fetch_epic(&conn, e)?;
+            live.cwd(&target)
+                .filter(|cwd| {
+                    !epic.path.is_empty() && !std::path::Path::new(cwd).starts_with(&epic.path)
+                })
+                .map(|cwd| {
+                    format!(
+                        "warning: {} belongs to epic {} rooted at {}, but session {target:?} reports cwd {cwd} (outside it); dispatching anyway\n",
+                        short(id),
+                        short_epic(e),
+                        epic.path
+                    )
+                })
+        }
+        None => None,
+    };
     drop(conn);
-    let mut out = String::new();
+    let mut out = warning.unwrap_or_default();
     if task.status != "ready" {
         // Reset before sending: the pane claims immediately and must find it ready.
         apply(
@@ -172,7 +191,7 @@ pub fn dispatch(
     let conn = open()?;
     log_event(
         &conn,
-        id,
+        Subject::Task(id),
         actor,
         "dispatch",
         &format!("{target} via {path}"),

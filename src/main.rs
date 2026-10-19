@@ -12,7 +12,7 @@ mod store;
 
 use clap::Parser;
 use clap::error::ErrorKind;
-use cli::{Cli, Cmd, SessionsCmd};
+use cli::{Cli, Cmd, EpicCmd, SessionsCmd};
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 
@@ -52,8 +52,10 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
             status,
             assignee,
             priority,
+            epic,
             parent,
         } => {
+            let epic = epic.as_deref().map(store::parse_epic_id).transpose()?;
             let parent = parent.as_deref().map(tid).transpose()?;
             let status = match status {
                 Some(raw) => store::norm(&raw).ok_or_else(|| format!("bad status {raw:?}"))?,
@@ -66,6 +68,7 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
                 status,
                 assignee: assignee.as_deref(),
                 priority,
+                epic,
                 parent,
             };
             store::add(actor, &task)
@@ -76,7 +79,34 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
             limit,
         } => store::list(status.as_deref(), assignee.as_deref(), limit),
         Cmd::Get { id, full } => store::get(tid(&id)?, full),
-        Cmd::Children { id } => store::children(tid(&id)?),
+        Cmd::Children { id } => store::children(store::parse_ref(&id)?),
+        Cmd::Parent { id, parent } => {
+            let parent = if parent.trim().eq_ignore_ascii_case("none") {
+                None
+            } else {
+                Some(tid(&parent)?)
+            };
+            store::set_parent(actor, tid(&id)?, parent)
+        }
+        Cmd::Epic { action } => match action {
+            EpicCmd::Add {
+                title,
+                description,
+                goal,
+                path,
+            } => store::epic_add(
+                actor,
+                &title,
+                &description.unwrap_or_default(),
+                &goal.unwrap_or_default(),
+                path.as_deref(),
+            ),
+            EpicCmd::Ls { status } => store::epic_list(status.as_deref()),
+            EpicCmd::Get { id, full } => store::epic_get(store::parse_epic_id(&id)?, full),
+            EpicCmd::Status { id, status, note } => {
+                store::epic_status(actor, store::parse_epic_id(&id)?, &status, note.as_deref())
+            }
+        },
         Cmd::Claim { id, ttl } => store::claim(
             actor,
             id.as_deref().map(tid).transpose()?,

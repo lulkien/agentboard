@@ -1,4 +1,4 @@
-//! MCP surface: 12 tools, text-only results, short acks.
+//! MCP surface: 16 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
@@ -75,9 +75,52 @@ pub struct AddArgs {
     /// Lower runs first. Default 100.
     #[serde(default)]
     pub priority: Option<i64>,
-    /// Parent task id, e.g. T3.
+    /// Epic the work belongs to, e.g. E3. A subtask inherits its parent's epic.
+    #[serde(default)]
+    pub epic: Option<String>,
+    /// Parent task id, e.g. T3 (a subtask link, such as a fix task under the review that found it).
     #[serde(default)]
     pub parent: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EpicAddArgs {
+    /// One-line epic title.
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// What done looks like for the whole epic.
+    #[serde(default)]
+    pub goal: String,
+    /// Project root the work belongs to. `~` expands, a relative path resolves against the server's cwd, it need not exist yet.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EpicListArgs {
+    /// open|done|dropped. Default open.
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EpicGetArgs {
+    /// Epic id, E3.
+    pub id: String,
+    /// true returns description, goal and event bodies unclipped and verbatim.
+    #[serde(default)]
+    pub full: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EpicUpdateArgs {
+    /// Epic id, E3.
+    pub id: String,
+    /// open|done|dropped. Closing an epic is the manager's call, never automatic.
+    pub status: String,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -155,7 +198,7 @@ pub struct WaitArgs {
     /// Task ids to watch.
     #[serde(default)]
     pub ids: Vec<String>,
-    /// Watch every direct child of this epic (not the epic itself).
+    /// Watch every task in this epic (E3).
     #[serde(default)]
     pub epic: Option<String>,
     /// Watch every task whose status is not done/dropped.
@@ -221,7 +264,7 @@ impl Board {
 
     #[tool(
         name = "task_add",
-        description = "Create a task. description holds everything the worker needs (repo path, files, situation); goal holds how to do it and the definition of done. Returns its short id (T7).",
+        description = "Create a task. description holds everything the worker needs (repo path, files, situation); goal holds how to do it and the definition of done. epic (E3) says which epic it belongs to; parent (T7) makes it a subtask and inherits the parent's epic. Returns its short id (T7).",
         annotations(title = "Add task", read_only_hint = false, destructive_hint = false)
     )]
     async fn task_add(
@@ -230,6 +273,10 @@ impl Board {
     ) -> Result<CallToolResult, ErrorData> {
         let parent = match a.parent.as_deref() {
             Some(p) => Some(store::parse_id(p).map_err(err)?),
+            None => None,
+        };
+        let epic = match a.epic.as_deref() {
+            Some(e) => Some(store::parse_epic_id(e).map_err(err)?),
             None => None,
         };
         let status = match a.status.as_deref() {
@@ -243,6 +290,7 @@ impl Board {
             status,
             assignee: a.assignee.as_deref(),
             priority: a.priority.unwrap_or(100),
+            epic,
             parent,
         };
         run!(store::add(&actor(), &task))
@@ -279,15 +327,80 @@ impl Board {
 
     #[tool(
         name = "task_children",
-        description = "Direct children of a task (epic), one compact line each: id, status, assignee, age, title. Ordered by id.",
+        description = "Tasks under an id, one compact line each: id, status, assignee, age, title, ordered by id. A task id (T7) lists its subtasks; an epic id (E3) lists every task in the epic.",
         annotations(title = "List children", read_only_hint = true)
     )]
     async fn task_children(
         &self,
         Parameters(a): Parameters<IdArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let id = store::parse_id(&a.id).map_err(err)?;
-        run!(store::children(id))
+        let of = store::parse_ref(&a.id).map_err(err)?;
+        run!(store::children(of))
+    }
+
+    #[tool(
+        name = "epic_add",
+        description = "Create an epic: a project-scoped group of tasks (E1, E2...). It is never claimed, leased or dispatched. path is the project root the work belongs to; dispatch warns when a pane's cwd is outside it. Returns its id (E3); adds a warning line if the path does not exist yet.",
+        annotations(title = "Add epic", read_only_hint = false, destructive_hint = false)
+    )]
+    async fn epic_add(
+        &self,
+        Parameters(a): Parameters<EpicAddArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        run!(store::epic_add(
+            &actor(),
+            &a.title,
+            &a.description,
+            &a.goal,
+            a.path.as_deref()
+        ))
+    }
+
+    #[tool(
+        name = "epic_list",
+        description = "Epics, one line each: id, status, done/total tasks, path, title. Default open.",
+        annotations(title = "List epics", read_only_hint = true)
+    )]
+    async fn epic_list(
+        &self,
+        Parameters(a): Parameters<EpicListArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        run!(store::epic_list(a.status.as_deref()))
+    }
+
+    #[tool(
+        name = "epic_get",
+        description = "Epic record: status, path, task counts, description, goal, recent events. Long fields end in a `[truncated ...]` marker; full=true returns them whole.",
+        annotations(title = "Get epic", read_only_hint = true)
+    )]
+    async fn epic_get(
+        &self,
+        Parameters(a): Parameters<EpicGetArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_epic_id(&a.id).map_err(err)?;
+        run!(store::epic_get(id, a.full))
+    }
+
+    #[tool(
+        name = "epic_update",
+        description = "Set an epic open|done|dropped, with an optional note. Closing is the manager's call, never automatic.",
+        annotations(
+            title = "Update epic",
+            read_only_hint = false,
+            destructive_hint = false
+        )
+    )]
+    async fn epic_update(
+        &self,
+        Parameters(a): Parameters<EpicUpdateArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_epic_id(&a.id).map_err(err)?;
+        run!(store::epic_status(
+            &actor(),
+            id,
+            &a.status,
+            a.note.as_deref()
+        ))
     }
 
     #[tool(

@@ -1,7 +1,7 @@
 //! `wait`: server-side long-poll over a set of tasks. One connection and one
 //! query per poll, whatever the size of the set.
 
-use super::{STATUS_LIST, fetch, get, norm, open, parse_id, short};
+use super::{STATUS_LIST, fetch, get, norm, open, parse_epic_id, parse_id, short};
 use crate::clip::{CAP_LAST, clip_marked};
 use rusqlite::{Connection, params};
 use std::time::{Duration, Instant};
@@ -95,8 +95,8 @@ fn expand(
         Ok(())
     };
     if let Some(e) = epic {
-        fetch(conn, e)?;
-        column("SELECT id FROM tasks WHERE parent=?", &[e])?;
+        super::epics::fetch_epic(conn, e)?;
+        column("SELECT id FROM tasks WHERE epic_id=?", &[e])?;
     }
     if open {
         column(
@@ -230,9 +230,9 @@ pub async fn wait(w: Wait<'_>) -> Result<Outcome, String> {
         .iter()
         .map(|s| parse_id(s))
         .collect::<Result<Vec<_>, _>>()?;
-    let epic = w.epic.map(parse_id).transpose()?;
+    let epic = w.epic.map(parse_epic_id).transpose()?;
     if ids.is_empty() && epic.is_none() && !w.open {
-        return Err("wait: name tasks (wait T1 T2), --epic T<n> or --open".to_owned());
+        return Err("wait: name tasks (wait T1 T2), --epic E<n> or --open".to_owned());
     }
 
     // Set and watermark come from the connection that polls, in one read
@@ -339,16 +339,23 @@ mod tests {
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(super::super::SCHEMA).unwrap();
-        // T1 epic (open), T2 child working, T3 child done, T4 loose ready.
-        for (id, status, parent) in [
+        // E1 holds T2 (working) and T3 (done); E2 is empty; T1 and T4 belong to no epic.
+        for id in [1, 2] {
+            conn.execute(
+                "INSERT INTO epics(id,title,created_at,updated_at) VALUES(?,?,0,0)",
+                params![id, format!("e{id}")],
+            )
+            .unwrap();
+        }
+        for (id, status, epic) in [
             (1, "working", None),
             (2, "working", Some(1)),
             (3, "done", Some(1)),
             (4, "ready", None),
         ] {
             conn.execute(
-                "INSERT INTO tasks(id,title,status,parent,created_at,updated_at) VALUES(?,?,?,?,0,0)",
-                params![id, format!("t{id}"), status, parent],
+                "INSERT INTO tasks(id,title,status,epic_id,created_at,updated_at) VALUES(?,?,?,?,0,0)",
+                params![id, format!("t{id}"), status, epic],
             )
             .unwrap();
         }
@@ -402,7 +409,7 @@ mod tests {
         assert_eq!(
             expand(&c, &[], Some(1), false).unwrap(),
             vec![2, 3],
-            "epic selects children, not itself"
+            "epic selects the tasks in it"
         );
         assert_eq!(
             expand(&c, &[], None, true).unwrap(),
@@ -418,9 +425,13 @@ mod tests {
                 .unwrap_err()
                 .contains("no such task")
         );
-        assert!(expand(&c, &[], Some(9), false).is_err());
         assert!(
-            expand(&c, &[], Some(4), false)
+            expand(&c, &[], Some(9), false)
+                .unwrap_err()
+                .contains("no such epic")
+        );
+        assert!(
+            expand(&c, &[], Some(2), false)
                 .unwrap_err()
                 .contains("match no tasks")
         );

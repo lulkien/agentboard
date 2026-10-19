@@ -12,7 +12,7 @@ const WAIT_HELP: &str = "Block until a watched task matches.
 
 Selectors (union, at least one; ids need no flag):
   T1 T2...   those tasks
-  --epic T1  its direct children (not T1)
+  --epic E1  every task in that epic
   --open     every task not done/dropped, re-evaluated while waiting (new tasks count)
 
 --status CSV  current status in CSV (ready|working|blocking|needs_fix|review|done|dropped); already true => returns at once
@@ -54,9 +54,23 @@ pub enum Cmd {
         assignee: Option<String>,
         #[arg(long, default_value_t = 100, allow_negative_numbers = true)]
         priority: i64,
-        /// Parent task, e.g. T1
+        /// Epic the work belongs to, e.g. E1 (a subtask inherits its parent's)
+        #[arg(long)]
+        epic: Option<String>,
+        /// Parent task (a subtask link), e.g. T1
         #[arg(long)]
         parent: Option<String>,
+    },
+    /// Epics: project-scoped groups of tasks (E1, E2...)
+    Epic {
+        #[command(subcommand)]
+        action: EpicCmd,
+    },
+    /// Set (or `none` to clear) a task's parent task
+    Parent {
+        id: String,
+        /// A task id, or `none`
+        parent: String,
     },
     /// List open tasks
     #[command(alias = "list")]
@@ -75,7 +89,7 @@ pub enum Cmd {
         #[arg(long)]
         full: bool,
     },
-    /// List the direct children of a task
+    /// Subtasks of a task (T7) or every task in an epic (E3)
     Children { id: String },
     /// Claim a task, or the next ready one
     Claim {
@@ -218,5 +232,41 @@ pub enum SessionsCmd {
         /// List what would be removed; delete nothing
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum EpicCmd {
+    /// Create an epic
+    Add {
+        #[arg(allow_hyphen_values = true)]
+        title: String,
+        #[arg(long, alias = "spec", allow_hyphen_values = true)]
+        description: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        goal: Option<String>,
+        /// Project root; ~ expands, relative resolves against the cwd, need not exist yet
+        #[arg(long, allow_hyphen_values = true)]
+        path: Option<String>,
+    },
+    /// List epics (default: open)
+    Ls {
+        /// open|done|dropped
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Show an epic
+    Get {
+        id: String,
+        /// Description/goal/events unclipped, verbatim
+        #[arg(long)]
+        full: bool,
+    },
+    /// Set an epic open|done|dropped (closing is never automatic)
+    Status {
+        id: String,
+        status: String,
+        #[arg(allow_hyphen_values = true)]
+        note: Option<String>,
     },
 }

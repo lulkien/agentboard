@@ -65,6 +65,16 @@ def main():
         print(f"FAIL claim {args} was accepted, expected a refusal :: {got[:100]}")
         return got
 
+    def refusal_text(call):
+        """Error text of a call that must be refused; success is recorded as a failure."""
+        try:
+            got = call()
+        except RuntimeError as e:
+            return str(e)
+        checks.append(False)
+        print(f"FAIL call was accepted, expected a refusal :: {got[:100]}")
+        return got
+
     def expect(label, got, *needles):
         ok = all(n in got for n in needles)
         checks.append(ok)
@@ -141,15 +151,16 @@ def main():
     s.call("task_add", title="high", priority=1)
     expect("claim next honours priority", s.call("task_claim"), "high")
 
-    # Epic workflow: parent roundtrip, needs_fix (+ alias), children, rollup.
-    expect("add epic", s.call("task_add", title="epic: ship it", description="epic"), "ready")
-    epic = s.call("task_list", limit=50)
-    epic_id = [l.split()[0] for l in epic.splitlines() if "epic: ship it" in l][0]
-    reply = s.call("task_add", title="implement it", parent=epic_id)
-    expect("add child with parent", reply, "ready")
+    # Epic workflow: epic roundtrip, needs_fix (+ alias), children, rollup.
+    epic_path = "/tmp/agentboard-no-such-project/"
+    added = s.call("epic_add", title="epic: ship it", description="epic", path=epic_path)
+    expect("add epic with a path that does not exist", added, "E1 open /tmp/agentboard-no-such-project", "warning: path /tmp/agentboard-no-such-project does not exist")
+    epic_id = added.split()[0]
+    reply = s.call("task_add", title="implement it", epic=epic_id)
+    expect("add task in the epic", reply, "ready")
     child_id = reply.split()[0]
-    expect("parent roundtrip on get", s.call("task_get", id=child_id), f"parent: {epic_id}")
-    review_id = s.call("task_add", title="review it", parent=epic_id).split()[0]
+    expect("epic roundtrip on get", s.call("task_get", id=child_id), f"epic: {epic_id} epic: ship it [/tmp/agentboard-no-such-project]")
+    review_id = s.call("task_add", title="review it", epic=epic_id).split()[0]
     expect("needs_fix accepted", s.call("task_update", id=child_id, status="needs_fix"), f"{child_id} needs_fix")
     s.call("task_update", id=child_id, status="working")
     expect("need fix alias accepted", s.call("task_update", id=child_id, status="need fix"), f"{child_id} needs_fix")
@@ -165,6 +176,7 @@ def main():
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "children line carries fix code on the right id")
     expect("children of leaf", s.call("task_children", id=child_id), "has no children")
+    expect("children of an unknown epic errors", refusal_text(lambda: s.call("task_children", id="E99")), "no such epic E99")
     for bad in ("T9999", "nonsense", ""):
         try:
             s.call("task_children", id=bad)
@@ -191,26 +203,49 @@ def main():
     ok = idx[child_id] < idx[review_id]
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "list orders needs_fix above working")
+    # brief lists tasks that belong to no epic; ordering is checked on two of those.
+    lf = s.call("task_add", title="loose fix").split()[0]
+    lw = s.call("task_add", title="loose work").split()[0]
+    s.call("task_update", id=lf, status="needs_fix")
+    s.call("task_claim", id=lw)
     brief = s.call("board_brief").splitlines()
     bidx = {l.split()[0]: i for i, l in enumerate(brief) if l.split()}
-    ok = bidx[child_id] < bidx[review_id]
+    ok = bidx[lf] < bidx[lw] and child_id not in bidx
     checks.append(ok)
-    print(("PASS " if ok else "FAIL ") + "brief orders needs_fix above working")
+    print(("PASS " if ok else "FAIL ") + "brief orders needs_fix above working; epic tasks are not listed individually")
     s.call("task_update", id=review_id, status="ready")
-    expect("get shows children line", s.call("task_get", id=epic_id), "children: 2 (1 needs_fix, 1 ready)")
-    expect("brief shows epic line", s.call("board_brief"), f"EPIC {epic_id} 0/2 done epic: ship it")
+    expect("epic_get shows the task counts and path", s.call("epic_get", id=epic_id), "tasks: 2 (1 needs_fix, 1 ready)", "path: /tmp/agentboard-no-such-project (does not exist)")
+    expect("brief shows the epic line with its path", s.call("board_brief"), f"EPIC {epic_id} 0/2 done [1 needs_fix] /tmp/agentboard-no-such-project (does not exist) epic: ship it")
 
-    # Dropped children leave the denominator; closed epics drop out; nesting is one level.
-    dropped_id = s.call("task_add", title="abandoned", parent=epic_id).split()[0]
+    # Dropped tasks leave the denominator; subtasks inherit the epic; closed epics drop out.
+    dropped_id = s.call("task_add", title="abandoned", epic=epic_id).split()[0]
     s.call("task_update", id=dropped_id, status="dropped")
-    done_id = s.call("task_add", title="finished", parent=epic_id).split()[0]
+    done_id = s.call("task_add", title="finished", epic=epic_id).split()[0]
     s.call("task_update", id=done_id, status="done")
-    expect("rollup excludes dropped", s.call("board_brief"), f"EPIC {epic_id} 1/3 done epic: ship it")
-    sub_id = s.call("task_add", title="sub-epic", parent=epic_id).split()[0]
-    s.call("task_add", title="grandchild", parent=sub_id)
-    brief = s.call("board_brief")
-    expect("nested epic rolls up one level", brief, f"EPIC {epic_id} 1/4 done", f"EPIC {sub_id} 0/1 done")
-    s.call("task_update", id=epic_id, status="done")
+    expect("rollup excludes dropped", s.call("board_brief"), f"EPIC {epic_id} 1/3 done")
+    sub_id = s.call("task_add", title="fix found by review", parent=review_id).split()[0]
+    got = s.call("task_get", id=sub_id)
+    expect("subtask inherits its parent's epic", got, f"epic: {epic_id}", f"parent: {review_id}")
+    expect("subtask counts in the epic", s.call("epic_get", id=epic_id), "tasks: 5")
+    expect("children of the parent task = its subtasks", s.call("task_children", id=review_id), sub_id, "fix found by review")
+    other = s.call("epic_add", title="other epic").split()[0]
+    expect("explicit epic that disagrees with the parent is refused", refusal_text(lambda: s.call("task_add", title="x", parent=review_id, epic=other)), f"not {other}")
+    expect("task id for epic is refused with a hint", refusal_text(lambda: s.call("task_add", title="x", epic=review_id)), "is a task id", "E3")
+    expect("epic id for parent is refused with a hint", refusal_text(lambda: s.call("task_add", title="x", parent=epic_id)), "is an epic id", "epic get")
+    expect("unknown epic is refused", refusal_text(lambda: s.call("task_add", title="x", epic="E99")), "no such epic E99")
+    # An epic is never leased: every task verb refuses an E id.
+    for verb, args in (("task_claim", {"id": epic_id}), ("task_get", {"id": epic_id}), ("task_update", {"id": epic_id, "status": "done"}),
+                       ("task_ask", {"id": epic_id, "question": "q"}), ("task_wait", {"id": epic_id, "timeout_s": 1})):
+        expect(f"{verb} refuses an epic id", refusal_text(lambda: s.call(verb, **args)), "is an epic id")
+    expect("epic_list shows the open epic", s.call("epic_list"), f"{epic_id} open 1/4 done /tmp/agentboard-no-such-project (does not exist) epic: ship it")
+    expect("epic_get refuses a task id", refusal_text(lambda: s.call("epic_get", id=child_id)), "is a task id")
+    expect("epic_update closes", s.call("epic_update", id=epic_id, status="done", note="shipped"), f"{epic_id} done #")
+    ok = f"{epic_id} open" not in s.call("epic_list") and "other epic" in s.call("epic_list")
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "closed epic leaves epic_list; the other open epic stays")
+    expect("closed epic can be listed by status", s.call("epic_list", status="done"), f"{epic_id} done")
+    expect("epic_get shows its timeline", s.call("epic_get", id=epic_id), "done", "shipped", "completed:")
+    expect("bad epic status refused", refusal_text(lambda: s.call("epic_update", id=epic_id, status="finished")), "bad epic status")
     ok = f"EPIC {epic_id} " not in s.call("board_brief")
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "closed epic has no EPIC line")
@@ -375,19 +410,27 @@ def main():
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"hits ordered by task id then seq :: {groups}")
     # --epic selects children only; epic + ids is a deduplicated union.
-    ep = s.call("task_add", title="wait epic").split()[0]
-    c1 = s.call("task_add", title="child 1", parent=ep).split()[0]
-    c2 = s.call("task_add", title="child 2", parent=ep).split()[0]
+    ep = s.call("epic_add", title="wait epic").split()[0]
+    c1 = s.call("task_add", title="child 1", epic=ep).split()[0]
+    c2 = s.call("task_add", title="child 2", epic=ep).split()[0]
     r = cli_wait("--epic", ep, "--status", "ready")
     heads = [l.split()[0] for l in r.stdout.splitlines() if l.startswith("T")]
     ok = r.returncode == 0 and r.stdout.startswith("matched: 2 of 2 watched") and heads == [c1, c2]
     checks.append(ok)
-    print(("PASS " if ok else "FAIL ") + f"--epic watches the children, not the epic :: {heads}")
-    r = cli_wait(c2, ep, "--epic", ep, c1, "--status", "ready")
+    print(("PASS " if ok else "FAIL ") + f"--epic watches the tasks in the epic :: {heads}")
+    r = cli_wait(c2, "--epic", ep, c1, "--status", "ready")
     heads = [l.split()[0] for l in r.stdout.splitlines() if l.startswith("T")]
-    ok = r.returncode == 0 and r.stdout.startswith("matched: 3 of 3 watched") and heads == [ep, c1, c2]
+    ok = r.returncode == 0 and r.stdout.startswith("matched: 2 of 2 watched") and heads == [c1, c2]
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"epic + ids union is deduplicated :: {heads}")
+    r = cli_wait(ep, "--status", "ready")
+    ok = r.returncode == 1 and "is an epic id" in r.stderr
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"wait refuses an epic id as a task :: {r.stderr.strip()[:80]}")
+    r = cli_wait("--epic", c1)
+    ok = r.returncode == 1 and "is a task id" in r.stderr
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"wait --epic refuses a task id :: {r.stderr.strip()[:80]}")
     # --status and --kind together: both must hold.
     wc = s.call("task_add", title="wait C").split()[0]
     wd = s.call("task_add", title="wait D").split()[0]

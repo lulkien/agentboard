@@ -78,6 +78,68 @@ run $B --db "$D" unregister tmp-row;                                   check "un
 run $B sessions prune --bogus;                                         check "sessions prune rejects unknown flags, exit 1" $([ $rc -eq 1 ] && has "$err" "'--bogus'" && echo 0 || echo 1)
 run $B sessions prune --help;                                          check "sessions prune --help documents --dry-run" $([ $rc -eq 0 ] && has "$out" "--dry-run" && echo 0 || echo 1)
 
+# --- epics: own table, own ids, project path -----------------------------------
+E=$S/e.db
+mkdir -p "$S/proj"
+run $B --db "$E" epic add "Ship it" --path "$S/proj/" --goal "g"
+check "epic add with a path: E1 open, trailing slash stripped, existing dir => no warning" $([ $rc -eq 0 ] && [ "$out" = "E1 open $S/proj" ] && echo 0 || echo 1)
+run $B --db "$E" epic add "Later" --path "$S/not/there/yet"
+check "epic add with a missing path warns once and still creates it" $([ $rc -eq 0 ] && has "$out" "E2 open $S/not/there/yet" && [ "$(grep -c '^warning:' <<<"$out")" = 1 ] && echo 0 || echo 1)
+run bash -c "cd '$S' && export HOME=/home/xx && '$B' --db '$E' epic add Rel --path ./proj/../proj/sub && '$B' --db '$E' epic add Home --path '~/work/'"
+check "relative path resolves against the cwd, ~ against HOME, both stored absolute" $(has "$out" "E3 open $S/proj/sub" && has "$out" "E4 open /home/xx/work" && echo 0 || echo 1)
+run $B --db "$E" epic add "No path"
+check "epic without a path is fine" $([ "$out" = "E5 open" ] && echo 0 || echo 1)
+run $B --db "$E" epic ls
+check "epic ls: open epics with counts, path and the does-not-exist mark" $(has "$out" "E1 open 0/0 done $S/proj Ship it" && has "$out" "$S/not/there/yet (does not exist) Later" && echo 0 || echo 1)
+run $B --db "$E" epic get E2
+check "epic get marks a missing path" $(has "$out" "path: $S/not/there/yet (does not exist)" && echo 0 || echo 1)
+run $B --db "$E" epic status E5 dropped "not needed"
+check "epic status E5 dropped" $([ $rc -eq 0 ] && has "$out" "E5 dropped #" && echo 0 || echo 1)
+run $B --db "$E" epic ls --status dropped;                             check "epic ls --status dropped" $(has "$out" "E5 dropped" && echo 0 || echo 1)
+run $B --db "$E" epic status E5 finished;                              check "epic status rejects an unknown status, exit 1" $([ $rc -eq 1 ] && has "$err" "bad epic status" && echo 0 || echo 1)
+run $B --db "$E" epic get E99;                                         check "epic get of an unknown epic exits 1" $([ $rc -eq 1 ] && has "$err" "no such epic E99" && echo 0 || echo 1)
+
+# tasks point at an epic and/or another task
+run $B --db "$E" add impl --epic E1;                                   check "add --epic E1" $([ $rc -eq 0 ] && echo 0 || echo 1)
+run $B --db "$E" add review --epic E1
+run $B --db "$E" add "fix it" --parent T2
+check "subtask --parent T2 inherits the epic" $([ $rc -eq 0 ] && $B --db "$E" get T3 | grep -q "^epic: E1 Ship it" && $B --db "$E" get T3 | grep -q "^parent: T2" && echo 0 || echo 1)
+run $B --db "$E" children E1;                                          check "children E1 = every task in the epic" $(has "$out" "T1 " && has "$out" "T2 " && has "$out" "T3 " && echo 0 || echo 1)
+run $B --db "$E" children T2;                                          check "children T2 = its subtasks only" $(has "$out" "T3 " && ! has "$out" "T1 " && echo 0 || echo 1)
+run $B --db "$E" wait --epic E1 --status ready --timeout 1;            check "wait --epic E1 watches the epic's tasks" $([ $rc -eq 0 ] && has "$out" "matched: 3 of 3 watched" && echo 0 || echo 1)
+
+# the invariants and the two id spaces
+run $B --db "$E" add x --epic E2 --parent T2
+check "explicit epic that disagrees with the parent's: exit 1" $([ $rc -eq 1 ] && has "$err" "parent T2 belongs to E1, not E2" && echo 0 || echo 1)
+run $B --db "$E" parent T2 T3;                                         check "re-parenting into your own subtree is a cycle: exit 1" $([ $rc -eq 1 ] && has "$err" "cycle: T2 is already an ancestor of T3" && echo 0 || echo 1)
+run $B --db "$E" parent T2 T2;                                         check "self-parent: exit 1" $([ $rc -eq 1 ] && has "$err" "cannot be its own parent" && echo 0 || echo 1)
+run $B --db "$E" add loose; run $B --db "$E" parent T4 T2
+check "cross-epic parent (T4 has no epic, T2 is in E1): exit 1" $([ $rc -eq 1 ] && has "$err" "cross-epic parent" && echo 0 || echo 1)
+run $B --db "$E" parent T3 none;                                       check "parent <T> none clears the link" $([ $rc -eq 0 ] && has "$out" "T3 no parent" && echo 0 || echo 1)
+run $B --db "$E" add x --epic T1;                                      check "a T id for --epic: exit 1 with a hint" $([ $rc -eq 1 ] && has "$err" "T1 is a task id" && has "$err" "E3" && echo 0 || echo 1)
+run $B --db "$E" add x --epic 1;                                       check "a bare number for --epic: exit 1" $([ $rc -eq 1 ] && has "$err" "bad epic id" && echo 0 || echo 1)
+run $B --db "$E" add x --parent E1;                                    check "an E id for --parent: exit 1 with a hint" $([ $rc -eq 1 ] && has "$err" "E1 is an epic id" && has "$err" "epic get E1" && echo 0 || echo 1)
+for v in "claim E1" "get E1" "status E1 done" "note E1 hi" "report E1 hi" "done E1 s" "review E1 s" "ask E1 q" "heartbeat E1" "dispatch E1" "wait E1" "parent E1 none"; do
+  run $B --db "$E" $v;                                                 check "'$v' refuses an epic id (an epic is never leased): exit 1" $([ $rc -eq 1 ] && has "$err" "E1 is an epic id" && echo 0 || echo 1)
+done
+run $B --db "$E" brief
+check "brief: one EPIC line per open epic with progress and path, then tasks that belong to no epic" $(has "$out" "EPIC E1 0/3 done $S/proj Ship it" && has "$out" "EPIC E2 0/0 done $S/not/there/yet (does not exist) Later" && ! has "$out" "EPIC E5" && has "$out" "T4 " && ! has "$out" "T1 rdy" && echo 0 || echo 1)
+
+# a board file from before epics is refused, untouched, with the way out
+O=$S/old.db
+python3 - "$O" <<'PY'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.executescript("CREATE TABLE tasks(id INTEGER PRIMARY KEY, title TEXT, parent INTEGER); INSERT INTO tasks(title) VALUES('old');")
+c.commit()
+PY
+before=$(sha1sum "$O" | cut -d' ' -f1)
+run $B --db "$O" ls
+check "old board: exit 1, says it predates epics and how to move it aside" $([ $rc -eq 1 ] && has "$err" "predates epics" && has "$err" "mv $O $O.old" && echo 0 || echo 1)
+run $B --db "$O" add nope;                                             check "old board: writes refused too" $([ $rc -eq 1 ] && has "$err" "predates epics" && echo 0 || echo 1)
+check "old board file is byte-identical afterwards (never half-migrated)" $([ "$(sha1sum "$O" | cut -d' ' -f1)" = "$before" ] && [ ! -e "$O-wal" ] && echo 0 || echo 1)
+run $B --db "$O" path;                                                 check "'path' still works on an old board (it names the file to move)" $([ $rc -eq 0 ] && [ "$out" = "$O" ] && echo 0 || echo 1)
+
 # no args = MCP server on stdio, not a help print
 init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cli.sh","version":"0"}}}'
 for mode in "" "serve"; do

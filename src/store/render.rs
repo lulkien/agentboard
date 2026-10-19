@@ -1,4 +1,4 @@
-use super::{COLS, Row, STATUS_LIST, fetch, norm, now_ms, open, read_row, short};
+use super::{COLS, Ref, Row, STATUS_LIST, fetch, norm, now_ms, open, read_row, short, short_epic};
 use crate::clip::{
     CAP_DESCRIPTION, CAP_EVENT, CAP_GOAL, CAP_NOTE, CAP_REPORT, clip, clip_marked, field,
 };
@@ -82,7 +82,7 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
     Ok(out.trim_end().to_owned())
 }
 
-fn when(ts: i64) -> String {
+pub(super) fn when(ts: i64) -> String {
     format!("{} ({}Z)", ago(ts), stamp(ts))
 }
 
@@ -98,7 +98,20 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
         r.priority
     );
     out.push_str(&format!("title: {}\n", r.title));
-    if let Some(p) = r.parent {
+    if let Some(e) = r.epic_id {
+        let epic = super::epics::fetch_epic(&conn, e)?;
+        out.push_str(&format!(
+            "epic: {} {}{}\n",
+            short_epic(e),
+            clip(&epic.title, 60),
+            if epic.path.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", epic.path)
+            }
+        ));
+    }
+    if let Some(p) = r.parent_id {
         out.push_str(&format!("parent: {}\n", short(p)));
     }
     out.push_str(&format!("created: {}\n", when(r.created_at)));
@@ -114,7 +127,7 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
             out.push_str(&format!("lease: {}m left\n", left / 60_000));
         }
     }
-    if let Some(line) = children_summary(&conn, r.id)? {
+    if let Some(line) = status_summary(&conn, "parent_id", r.id, "children")? {
         out.push_str(&line);
         out.push('\n');
     }
@@ -143,35 +156,51 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
     if let Some(c) = &r.commit_ref {
         out.push_str(&format!("commit: {c}\n"));
     }
+    let t = short(r.id);
+    out.push_str(&recent_events(
+        &conn,
+        "task_id",
+        r.id,
+        full,
+        &format!("`agentboard get {t} --full` or task_get id={t} full=true"),
+    )?);
+    Ok(out.trim_end().to_owned())
+}
+
+/// The last 8 events of a task or an epic (`col` is `task_id` or `epic_id`) as an
+/// `events:` block, oldest first; bodies are clipped with a marker unless `full`.
+pub(super) fn recent_events(
+    conn: &Connection,
+    col: &str,
+    id: i64,
+    full: bool,
+    hint: &str,
+) -> Result<String, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT seq,actor,kind,body,ts FROM events WHERE task_id=? ORDER BY seq DESC LIMIT 8",
-        )
+        .prepare(&format!(
+            "SELECT seq,actor,kind,body,ts FROM events WHERE {col}=? ORDER BY seq DESC LIMIT 8"
+        ))
         .map_err(|e| e.to_string())?;
     let evs: Vec<(i64, String, String, String, i64)> = stmt
-        .query_map(params![r.id], |e| {
+        .query_map(params![id], |e| {
             Ok((e.get(0)?, e.get(1)?, e.get(2)?, e.get(3)?, e.get(4)?))
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
-    if !evs.is_empty() {
-        out.push_str("events:\n");
-        let t = short(r.id);
-        for (seq, actor, kind, body, ts) in evs.iter().rev() {
-            let text = if full {
-                body.clone()
-            } else {
-                clip_marked(
-                    body,
-                    CAP_EVENT,
-                    &format!("`agentboard get {t} --full` or task_get id={t} full=true"),
-                )
-            };
-            out.push_str(&format!("  #{seq} {actor} {kind} {}: {text}\n", ago(*ts)));
-        }
+    if evs.is_empty() {
+        return Ok(String::new());
     }
-    Ok(out.trim_end().to_owned())
+    let mut out = String::from("events:\n");
+    for (seq, actor, kind, body, ts) in evs.iter().rev() {
+        let text = if full {
+            body.clone()
+        } else {
+            clip_marked(body, CAP_EVENT, hint)
+        };
+        out.push_str(&format!("  #{seq} {actor} {kind} {}: {text}\n", ago(*ts)));
+    }
+    Ok(out)
 }
 
 /// Canonical status order for summaries: most urgent first.
@@ -185,10 +214,18 @@ const STATUS_ORDER: [&str; 7] = [
     "dropped",
 ];
 
-/// `children: 4 (2 done, 1 working, 1 needs_fix)`, or None for a leaf task.
-fn children_summary(conn: &Connection, id: i64) -> Result<Option<String>, String> {
+/// `children: 4 (2 done, 1 working, 1 needs_fix)`, or None when there are none.
+/// `col` is `parent_id` (subtasks) or `epic_id` (an epic's tasks).
+pub(super) fn status_summary(
+    conn: &Connection,
+    col: &str,
+    id: i64,
+    label: &str,
+) -> Result<Option<String>, String> {
     let mut stmt = conn
-        .prepare("SELECT status, COUNT(*) FROM tasks WHERE parent=? GROUP BY status")
+        .prepare(&format!(
+            "SELECT status, COUNT(*) FROM tasks WHERE {col}=? GROUP BY status"
+        ))
         .map_err(|e| e.to_string())?;
     let counts: Vec<(String, i64)> = stmt
         .query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -205,25 +242,37 @@ fn children_summary(conn: &Connection, id: i64) -> Result<Option<String>, String
             parts.push(format!("{n} {st}"));
         }
     }
-    Ok(Some(format!("children: {total} ({})", parts.join(", "))))
+    Ok(Some(format!("{label}: {total} ({})", parts.join(", "))))
 }
 
-/// One compact line per direct child, ordered by id: id, status, assignee, age, title.
-pub fn children(parent: i64) -> Result<String, String> {
+/// One compact line per task, ordered by id: id, status, assignee, age, title.
+/// For a task these are its subtasks (`parent_id`); for an epic, every task in it.
+pub fn children(of: Ref) -> Result<String, String> {
     let conn = open()?;
-    fetch(&conn, parent)?;
+    let (label, col, id) = match of {
+        Ref::Task(id) => {
+            fetch(&conn, id)?;
+            (short(id), "parent_id", id)
+        }
+        Ref::Epic(id) => {
+            super::epics::fetch_epic(&conn, id)?;
+            (short_epic(id), "epic_id", id)
+        }
+    };
     let mut stmt = conn
-        .prepare("SELECT id,status,assignee,updated_at,title FROM tasks WHERE parent=? ORDER BY id")
+        .prepare(&format!(
+            "SELECT id,status,assignee,updated_at,title FROM tasks WHERE {col}=? ORDER BY id"
+        ))
         .map_err(|e| e.to_string())?;
     let rows: Vec<(i64, String, Option<String>, i64, String)> = stmt
-        .query_map(params![parent], |r| {
+        .query_map(params![id], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
     if rows.is_empty() {
-        return Ok(format!("{} has no children", short(parent)));
+        return Ok(format!("{label} has no children"));
     }
     let mut out = String::new();
     for (id, status, assignee, upd, title) in rows {
@@ -266,9 +315,48 @@ pub fn brief(since_min: i64) -> Result<String, String> {
     head.push(format!("{done} done/{}m", since_min));
     out.push_str(&head.join(", "));
     out.push('\n');
+    // One line per open epic: progress, the project path, and only the counts a
+    // manager must act on. Its tasks are one `children E<n>` away. Dropped tasks
+    // leave the denominator; closing an epic is the manager's call, never automatic.
+    let mut stmt = conn
+        .prepare("SELECT id,title,path FROM epics WHERE status='open' ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let epics: Vec<(i64, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    for (id, title, path) in epics {
+        let (done_n, total) = super::epics::counts(&conn, id)?;
+        let urgent: Vec<String> = ["blocking", "needs_fix"]
+            .iter()
+            .filter_map(|st| {
+                let n: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM tasks WHERE epic_id=? AND status=?",
+                        params![id, st],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                (n > 0).then(|| format!("{n} {st}"))
+            })
+            .collect();
+        out.push_str(&format!(
+            "EPIC {} {done_n}/{total} done{} {}{} {}\n",
+            short_epic(id),
+            if urgent.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", urgent.join(", "))
+            },
+            if path.is_empty() { "-" } else { &path },
+            super::epics::path_note(&path),
+            clip(&title, 60)
+        ));
+    }
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {COLS} FROM tasks WHERE status NOT IN ('done','dropped') ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'needs_fix' THEN 1 WHEN 'working' THEN 2 WHEN 'review' THEN 3 ELSE 4 END, priority, id LIMIT 25"
+            "SELECT {COLS} FROM tasks WHERE status NOT IN ('done','dropped') AND epic_id IS NULL ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'needs_fix' THEN 1 WHEN 'working' THEN 2 WHEN 'review' THEN 3 ELSE 4 END, priority, id LIMIT 25"
         ))
         .map_err(|e| e.to_string())?;
     let rows: Vec<Row> = stmt
@@ -294,28 +382,6 @@ pub fn brief(since_min: i64) -> Result<String, String> {
             } else {
                 format!(" [{wait}]")
             }
-        ));
-    }
-    // A task with children is an epic. Report progress only while some child is
-    // still open and the epic itself is not closed; dropped children do not
-    // count toward the total. Closing the epic is the manager's call, never automatic.
-    let mut stmt = conn
-        .prepare(
-            "SELECT p.id, p.title, SUM(c.status='done'), SUM(c.status!='dropped') FROM tasks p JOIN tasks c ON c.parent=p.id
-             WHERE p.status NOT IN ('done','dropped')
-             GROUP BY p.id HAVING SUM(c.status NOT IN ('done','dropped')) > 0 ORDER BY p.id",
-        )
-        .map_err(|e| e.to_string())?;
-    let epics: Vec<(i64, String, i64, i64)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.to_string())?;
-    for (id, title, done_n, total) in epics {
-        out.push_str(&format!(
-            "EPIC {} {done_n}/{total} done {}\n",
-            short(id),
-            clip(&title, 60)
         ));
     }
     let mut stmt = conn

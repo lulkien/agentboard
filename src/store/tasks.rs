@@ -1,5 +1,7 @@
 use super::render::stamp;
-use super::{DEFAULT_TTL_S, STATUS_LIST, fetch, log_event, norm, now_ms, open, short};
+use super::{
+    DEFAULT_TTL_S, STATUS_LIST, Subject, fetch, log_event, norm, now_ms, open, short, short_epic,
+};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use rusqlite::{OptionalExtension, params};
 
@@ -11,7 +13,40 @@ pub struct NewTask<'a> {
     pub status: &'a str,
     pub assignee: Option<&'a str>,
     pub priority: i64,
+    pub epic: Option<i64>,
     pub parent: Option<i64>,
+}
+
+/// The epic a new task lands in: the explicit one, else the parent's. An
+/// explicit epic that disagrees with the parent's is an error: a subtask lives in
+/// its parent's epic.
+fn resolve_epic(
+    conn: &rusqlite::Connection,
+    epic: Option<i64>,
+    parent: Option<i64>,
+) -> Result<Option<i64>, String> {
+    let parent_epic = match parent {
+        Some(p) => {
+            let row =
+                fetch(conn, p).map_err(|_| format!("add: no such parent task {}", short(p)))?;
+            Some((p, row.epic_id))
+        }
+        None => None,
+    };
+    if let Some(e) = epic {
+        super::epics::fetch_epic(conn, e)
+            .map_err(|_| format!("add: no such epic {}", short_epic(e)))?;
+    }
+    match (epic, parent_epic) {
+        (Some(e), Some((p, pe))) if pe != Some(e) => Err(format!(
+            "add: parent {} belongs to {}, not {} (a subtask lives in its parent's epic)",
+            short(p),
+            pe.map_or("no epic".to_owned(), short_epic),
+            short_epic(e)
+        )),
+        (None, Some((_, pe))) => Ok(pe),
+        (e, _) => Ok(e),
+    }
 }
 
 pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
@@ -22,26 +57,83 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         status,
         assignee,
         priority,
+        epic,
         parent,
     } = *task;
-    let conn = open()?;
-    if let Some(p) = parent {
-        fetch(&conn, p).map_err(|_| format!("add: no such parent task {}", short(p)))?;
-    }
+    let mut conn = open()?;
+    // Read the parent/epic and insert in one write transaction: the invariant
+    // must hold for the row that lands, not for the row we looked at.
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let epic = resolve_epic(&tx, epic, parent)?;
     // A task created already `working` belongs to its creator unless named.
     let assignee = assignee.or_else(|| (status == "working").then_some(actor));
     let now = now_ms();
     // A `working` task needs a lease, or a dead holder could never be reclaimed.
     let lease = (status == "working").then(|| now + DEFAULT_TTL_S * 1000);
     let started = (status == "working").then_some(now);
-    conn.execute(
-        "INSERT INTO tasks(title,description,goal,status,assignee,priority,parent,created_at,updated_at,lease_until,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        params![title, description, goal, status, assignee, priority, parent, now, now, lease, started],
+    tx.execute(
+        "INSERT INTO tasks(title,description,goal,status,assignee,priority,epic_id,parent_id,created_at,updated_at,lease_until,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        params![title, description, goal, status, assignee, priority, epic, parent, now, now, lease, started],
     )
     .map_err(|e| format!("add: {e}"))?;
-    let id = conn.last_insert_rowid();
-    log_event(&conn, id, actor, "add", title)?;
+    let id = tx.last_insert_rowid();
+    log_event(&tx, Subject::Task(id), actor, "add", title)?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} {status}", short(id)))
+}
+
+/// Re-parents an existing task (`None` clears it). The only write that can make
+/// a cycle, so the walk up the ancestors happens here, in the same transaction.
+pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, String> {
+    let mut conn = open()?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let task = fetch(&tx, id)?;
+    if let Some(p) = parent {
+        if p == id {
+            return Err(format!("{} cannot be its own parent", short(id)));
+        }
+        let new_parent = fetch(&tx, p)?;
+        if new_parent.epic_id != task.epic_id {
+            return Err(format!(
+                "cross-epic parent: {} belongs to {} but {} belongs to {}",
+                short(id),
+                task.epic_id.map_or("no epic".to_owned(), short_epic),
+                short(p),
+                new_parent.epic_id.map_or("no epic".to_owned(), short_epic)
+            ));
+        }
+        // Walk up from the new parent: meeting `id` means `id` is its ancestor.
+        let mut at = new_parent.parent_id;
+        let mut steps = 0;
+        while let Some(a) = at {
+            if a == id || steps > 10_000 {
+                return Err(format!(
+                    "cycle: {} is already an ancestor of {}",
+                    short(id),
+                    short(p)
+                ));
+            }
+            at = fetch(&tx, a)?.parent_id;
+            steps += 1;
+        }
+    }
+    tx.execute(
+        "UPDATE tasks SET parent_id=?, updated_at=? WHERE id=?",
+        params![parent, now_ms(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    let body = parent.map_or("parent cleared".to_owned(), |p| {
+        format!("parent -> {}", short(p))
+    });
+    log_event(&tx, Subject::Task(id), actor, "edit", &body)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(parent.map_or(format!("{} no parent", short(id)), |p| {
+        format!("{} parent {}", short(id), short(p))
+    }))
 }
 
 /// Why a claim failed. `Held` is the legitimate refusal (somebody holds the
@@ -125,7 +217,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
             tx.rollback().map_err(|e| e.to_string())?;
             continue;
         }
-        log_event(&tx, task, actor, "claim", "")?;
+        log_event(&tx, Subject::Task(task), actor, "claim", "")?;
         let r = fetch(&tx, task)?;
         tx.commit().map_err(|e| e.to_string())?;
         let mut out = format!(
@@ -239,7 +331,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         }
     };
     let body = p.note.or(p.report).unwrap_or("");
-    let seq = log_event(&tx, id, actor, kind, body)?;
+    let seq = log_event(&tx, Subject::Task(id), actor, kind, body)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} {status} #{seq}", short(id)))
 }

@@ -22,7 +22,11 @@ case "${HERDR_MODE:-ok}" in
 esac
 if [ "$1 $2" = "agent list" ]; then   # HERDR_AGENTS="name:kind name:kind"
   agents=""
-  for pair in ${HERDR_AGENTS:-}; do agents="$agents{\"name\":\"${pair%%:*}\",\"agent\":\"${pair##*:}\"},"; done
+  for pair in ${HERDR_AGENTS:-}; do   # name:kind or name:kind:cwd
+    name=${pair%%:*}; rest=${pair#*:}; kind=${rest%%:*}; cwd=""
+    case "$rest" in *:*) cwd=",\"cwd\":\"${rest#*:}\"" ;; esac
+    agents="$agents{\"name\":\"$name\",\"agent\":\"$kind\"$cwd},"
+  done
   echo "{\"result\":{\"agents\":[${agents%,}]}}"
 fi
 exit 0
@@ -195,6 +199,35 @@ check "second prune: nothing to prune" $(has "$out" "nothing to prune (3 live)" 
 $B register tmp >/dev/null
 run $B unregister tmp;                                                 check "unregister removes one row" $([ $rc -eq 0 ] && has "$out" "ok session tmp removed" && echo 0 || echo 1)
 run $B unregister tmp;                                                 check "unregister of an unknown name exits 1" $([ $rc -eq 1 ] && has "$err" "no registered session" && echo 0 || echo 1)
+
+# --- epic path vs the pane's cwd: warn, never refuse, never guess -----------------
+# (hv is a live herdr agent; w1 is a live tmux session, which reports no cwd)
+$B epic add app --path /srv/app >/dev/null; $B epic add nopath >/dev/null
+EA=E1; EN=E2
+for n in 1 2 3 4 5 6; do $B add "p$n" --assignee hv --epic $EA >/dev/null; done
+$B add q1 --assignee hv --epic $EN >/dev/null; $B add q2 --assignee w1 --epic $EA >/dev/null
+id() { $B ls --limit 80 | awk -v t="$1" '$NF == t {print $1}'; }
+P1=$(id p1); P2=$(id p2); P3=$(id p3); P4=$(id p4); P5=$(id p5); P6=$(id p6); Q1=$(id q1); Q2=$(id q2)
+: >"$LOG"
+HERDR_AGENTS="hv:claude:/elsewhere" run $B dispatch "$P1"
+check "pane cwd outside the epic path: one warning naming both, dispatch still goes" $([ $rc -eq 0 ] && [ "$(grep -c '^warning:' <<<"$out")" = 1 ] && has "$out" "$P1 belongs to epic E1 rooted at /srv/app" && has "$out" 'session "hv" reports cwd /elsewhere' && has "$out" "dispatched to hv via herdr" && echo 0 || echo 1)
+check "a warned dispatch still logs its dispatch event and sends the prompt" $([ "$(events "$P1" dispatch)" = 1 ] && [ "$(calls 'herdr agent prompt hv')" = 1 ] && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude:/srv/app/packages/web" run $B dispatch "$P2"
+check "pane cwd under the epic path: no warning" $([ $rc -eq 0 ] && ! has "$out" "warning" && has "$out" "dispatched to hv" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude:/srv/app" run $B dispatch "$P3"
+check "pane cwd equal to the epic path: no warning" $([ $rc -eq 0 ] && ! has "$out" "warning" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude:/srv/application" run $B dispatch "$P4"
+check "a sibling that merely shares the prefix (/srv/application) is outside /srv/app: warning" $([ $rc -eq 0 ] && has "$out" "warning: " && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude" run $B dispatch "$P5"
+check "herdr reports no cwd: unknown, no warning" $([ $rc -eq 0 ] && ! has "$out" "warning" && echo 0 || echo 1)
+run $B dispatch "$Q2"
+check "tmux target (no cwd source): no warning" $([ $rc -eq 0 ] && ! has "$out" "warning" && has "$out" "dispatched to w1" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude:/elsewhere" run $B dispatch "$Q1"
+check "epic without a path: no warning" $([ $rc -eq 0 ] && ! has "$out" "warning" && echo 0 || echo 1)
+HERDR_AGENTS="hv:claude:/elsewhere" run $B dispatch "$P6" --print
+check "--print stays silent about cwd (touches nothing)" $([ $rc -eq 0 ] && ! has "$out" "warning" && echo 0 || echo 1)
+run $B dispatch E1
+check "dispatch refuses an epic id" $([ $rc -eq 1 ] && has "$err" "E1 is an epic id" && echo 0 || echo 1)
 unset TMUX_LIVE
 
 echo "$pass/$total passed"

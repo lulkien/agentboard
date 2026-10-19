@@ -8,25 +8,23 @@ Never guess a missing requirement. `task_ask` with ONE narrow question, then `ta
 
 ## Workflow: epic, implement, review, fix
 
-Work that needs review runs as one loop. A task with children is an epic; `board_brief` shows one `EPIC T27 2/4 done <title>` line per open epic that still has open children. Dropped children are left out of the total. Nothing closes an epic automatically.
+Work that needs review runs as one loop. An epic is not a task: it has its own table and ids (`E1`, `E2`...), is never claimed, leased or dispatched, and names the project the work belongs to (`path`). Tasks point at an epic (`epic=E1`) and optionally at another task (`parent=T7`, a subtask). `board_brief` shows one `EPIC E1 2/4 done [1 blocking] /abs/path <title>` line per open epic, then the open tasks that belong to no epic. Dropped tasks are left out of the total. Nothing closes an epic automatically.
 
-1. Manager opens the epic: `task_add(title, ...)`.
-2. Manager adds the implement task with `parent=<epic>`. Hand the worker only the task id.
+1. Manager opens the epic: `epic_add(title, goal, path=<project root>)` (CLI: `agentboard epic add "..." --path /abs/dir`). A path that does not exist yet is accepted with a warning.
+2. Manager adds the implement task with `epic=<E id>`. Hand the worker only the task id.
 3. Agent claims it, implements, then `task_update(report=..., status=review|done)`.
 4. Manager polls `task_get` / `board_brief` (no tight loops; `task_wait` blocks server-side) and reads `report`.
-5. Manager adds a review task with `parent=<epic>`; the reviewer claims it.
-6. Reviewer either sets the review task `done`, or files a fix task with `parent=<review task>` (`task_add`) and sets the review task `needs_fix`.
+5. Manager adds a review task with `epic=<E id>`; the reviewer claims it.
+6. Reviewer either sets the review task `done`, or files a fix task with `parent=<review task>` (`task_add`; it inherits the epic) and sets the review task `needs_fix`.
 7. Manager delegates the fix. The fixer claims the fix task, fixes, sets it `done` with a report.
 8. Manager delegates verification to the same reviewer agent that filed the fix (no separate checker task). It re-checks its own findings and sets the review task `done`.
-9. Manager closes the epic (`done`) once every child is terminal (`done` or `dropped`).
+9. Manager closes the epic once every task is terminal (`done` or `dropped`): `epic_update(id, status=done)`.
 
-Inspect an epic with `task_children(id)` (CLI: `agentboard children T27`); `task_get` appends `children: N (2 done, 1 working, ...)`.
+Inspect with `epic_get(E1)` (task counts, path, timeline) and `task_children(id)`: an epic id lists every task in it, a task id lists its subtasks (CLI: `agentboard children E1` / `T27`). `task_get` shows `epic:` and `parent:` lines and, for a task with subtasks, `children: N (2 done, ...)`.
 
-`needs_fix` means review found work and is waiting for a fix. It holds no lease. From `needs_fix` a task may go to `working` or `review`, or back to `ready` to restart.
+The two id spaces never mix: `E` ids go to epic verbs and `epic=`/`--epic`, `T` ids to task verbs and `parent=`; the wrong one is refused with a hint. A subtask must live in its parent's epic; a self-parent, a cycle and a cross-epic parent are errors (`agentboard parent T5 T3|none` re-parents). `dispatch` warns (never refuses) when a task's epic has a path and the target pane's cwd, as herdr reports it, is outside it.
 
-## Manager flow
-
-Create the task with `task_add(title, description, goal, priority, assignee, parent)`. `description` holds everything the worker needs: repo path, files, situation, constraints. `goal` holds how to do it and the definition of done. Do not block — poll `task_get` or `board_brief` for status changes. When status is `review` or `done`, read `report` for the outcome.
+Create the task with `task_add(title, description, goal, priority, assignee, epic, parent)`. `description` holds everything the worker needs: repo path, files, situation, constraints. `goal` holds how to do it and the definition of done. Do not block — poll `task_get` or `board_brief` for status changes. When status is `review` or `done`, read `report` for the outcome.
 
 ## Worker flow
 
@@ -43,7 +41,8 @@ Create the task with `task_add(title, description, goal, priority, assignee, par
 | status | ready \| working \| blocking \| needs_fix \| review \| done \| dropped |
 | assignee | Profile or tmux session name |
 | priority | Lower runs first (default 100) |
-| parent | Parent task id (e.g., T3); a task with children is an epic |
+| epic | Epic id (e.g., E3) the work belongs to; inherited from `parent` when omitted |
+| parent | Parent task id (e.g., T3): a subtask link, such as a fix task under the review that found it |
 | needs | Input type the task waits for (e.g., input) |
 | report | Worker's findings/outcome |
 | note | Free-form progress note |
