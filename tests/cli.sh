@@ -33,6 +33,8 @@ run $B --db "$D" get T1;                                               check "ac
 run $B --db "$D" add four --spec "via spec";                           check "--spec accepted" $rc
 run $B --db "$D" get T4;                                               check "--spec is --description" $(has "$out" "via spec" && echo 0 || echo 1)
 run $B --db "$D" claim T1; run $B --db "$D" claim T2
+run $B --db "$D" claim T1;                                             check "claim of a held task exits 1 with the refusal text" $([ $rc -eq 1 ] && has "$err" "agentboard: T1 working by" && has "$err" "manager: agentboard status T1 ready" && echo 0 || echo 1)
+run $B --db "$S/empty.db" claim;                                       check "id-less claim on an empty board: exit 0, no ready tasks" $([ $rc -eq 0 ] && has "$out" "no ready tasks" && echo 0 || echo 1)
 run $B wait T1 T2 --db "$D" --status working;                          check "wait T1 T2 --db X after positionals: match exit 0" $rc
 run $B --db "$D" wait T1 T2 --status done --timeout 1;                 check "wait timeout exits 3" $([ $rc -eq 3 ] && echo 0 || echo 1)
 check "timeout first line" $(has "$out" "timeout:" && echo 0 || echo 1)

@@ -209,13 +209,14 @@ fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
 
 fn fetch(conn: &Connection, id: i64) -> Result<Row, String> {
     let sql = format!("SELECT {COLS} FROM tasks WHERE id=?");
-    conn.query_row(&sql, params![id], |r| read_row(r))
+    conn.query_row(&sql, params![id], read_row)
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("no such task {}", short(id)))
 }
 
 mod dispatch;
+mod proc;
 mod render;
 mod sessions;
 mod tasks;

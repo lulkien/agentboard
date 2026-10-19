@@ -53,6 +53,18 @@ def main():
     s = Session()
     checks = []
 
+    def refusal(sess, **args):
+        """Text of a task_claim that the server refused (an MCP error, not a reply)."""
+        try:
+            got = sess.call("task_claim", **args)
+        except RuntimeError as e:
+            return str(e)
+        # The claim succeeded: that is the failure. Record it; the text is returned
+        # only so the caller's needle check cannot hide it.
+        checks.append(False)
+        print(f"FAIL claim {args} was accepted, expected a refusal :: {got[:100]}")
+        return got
+
     def expect(label, got, *needles):
         ok = all(n in got for n in needles)
         checks.append(ok)
@@ -61,14 +73,14 @@ def main():
     expect("add", s.call("task_add", title="write fd docs", description="one page, SCM_RIGHTS", goal="verification", assignee="claude1", priority=5), "T1 ready")
     expect("list", s.call("task_list"), "T1 rdy")
     expect("claim returns description+goal", s.call("task_claim", id="T1", ttl_min=5), "T1 working", "one page, SCM_RIGHTS", "verification")
-    expect("claim twice", s.call("task_claim", id="T1"), "T1 working by claude1")
+    expect("claim twice is refused", refusal(s, id="T1"), "T1 working by claude1")
     expect("note", s.call("task_update", id="T1", note="outline done"), "T1 working #")
     expect("note does not extend lease", s.call("task_get", id="T1"), "lease: 4m left")
     expect("heartbeat", s.call("task_update", id="T1", heartbeat=True), "lease")
     expect("heartbeat with note", s.call("task_update", id="T1", heartbeat=True, ttl_min=60, note="still going"), "T1 working #")
     expect("heartbeat applied alongside note", s.call("task_get", id="T1"), "lease: 59m left")
     intruder = Session(actor="intruder")
-    expect("claim by other while leased", intruder.call("task_claim", id="T1"), "lease 60m left, until", "manager: agentboard status T1 ready")
+    expect("claim by other while leased is refused (internal_error, not invalid_params)", refusal(intruder, id="T1"), "-32603", "lease 60m left, until", "manager: agentboard status T1 ready")
     try:
         intruder.call("task_update", id="T1", heartbeat=True)
         expect("heartbeat by non-holder rejected", "accepted")
@@ -160,8 +172,8 @@ def main():
         except RuntimeError as e:
             checks.append(True)
             print(f"PASS children bad id {bad!r} errors :: {e}")
-    expect("needs_fix claimable only via lease msg", s.call("task_claim", id=child_id), f"{child_id} needs_fix", "manager: agentboard status")
-    ok = "(lease)" not in s.call("task_claim", id=child_id)
+    expect("needs_fix claimable only via lease msg", refusal(s, id=child_id), f"{child_id} needs_fix", "manager: agentboard status")
+    ok = "(lease)" not in refusal(s, id=child_id)
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "no (lease) text for lease-less needs_fix")
     for alias in ("needs-fix", "fix", "Needs Fix"):

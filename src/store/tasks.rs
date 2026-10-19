@@ -3,7 +3,16 @@ use super::{DEFAULT_TTL_S, STATUS_LIST, fetch, log_event, norm, now_ms, open, sh
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use rusqlite::{OptionalExtension, params};
 
-pub fn add(actor: &str, title: &str, description: &str, goal: &str, status: &str, assignee: Option<&str>, priority: i64, parent: Option<i64>) -> Result<String, String> {
+pub fn add(
+    actor: &str,
+    title: &str,
+    description: &str,
+    goal: &str,
+    status: &str,
+    assignee: Option<&str>,
+    priority: i64,
+    parent: Option<i64>,
+) -> Result<String, String> {
     let conn = open()?;
     if let Some(p) = parent {
         fetch(&conn, p).map_err(|_| format!("add: no such parent task {}", short(p)))?;
@@ -30,20 +39,21 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
     let now = now_ms();
     let lease = now + ttl_s * 1000;
     for _ in 0..8 {
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| e.to_string())?;
         let cand: Option<(i64, String)> = {
             let (sql, arg): (String, Vec<i64>) = match id {
-                Some(x) => (format!("SELECT id,status FROM tasks WHERE id=? AND (status='ready' OR (lease_until IS NOT NULL AND lease_until < ?))"), vec![x, now]),
+                Some(x) => ("SELECT id,status FROM tasks WHERE id=? AND (status='ready' OR (lease_until IS NOT NULL AND lease_until < ?))".to_string(), vec![x, now]),
                 None => ("SELECT id,status FROM tasks WHERE status='ready' ORDER BY priority, id LIMIT 1".to_owned(), vec![]),
             };
             let mut stmt = tx.prepare(&sql).map_err(|e| e.to_string())?;
-            let found = stmt
-                .query_row(rusqlite::params_from_iter(arg.iter()), |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-                })
-                .optional()
-                .map_err(|e| e.to_string())?;
-            found
+
+            stmt.query_row(rusqlite::params_from_iter(arg.iter()), |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })
+            .optional()
+            .map_err(|e| e.to_string())?
         };
         let Some((task, _st)) = cand else {
             tx.commit().map_err(|e| e.to_string())?;
@@ -52,12 +62,18 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
                     // Distinguish "does not exist" from "somebody is on it".
                     let conn2 = open()?;
                     match fetch(&conn2, x) {
-                        Ok(r) => Ok(format!(
+                        // A refusal is an error: `agentboard claim T7 && ...` must not
+                        // read "somebody else has it" as "claimed".
+                        Ok(r) => Err(format!(
                             "{} {} by {}{} — manager: agentboard status {} ready",
                             short(x),
                             r.status,
                             r.assignee.as_deref().unwrap_or("nobody"),
-                            r.lease_until.map_or(String::new(), |l| format!(" (lease {}m left, until {}Z)", ((l - now_ms()).max(0) + 59_999) / 60_000, stamp(l))),
+                            r.lease_until.map_or(String::new(), |l| format!(
+                                " (lease {}m left, until {}Z)",
+                                ((l - now_ms()).max(0) + 59_999) / 60_000,
+                                stamp(l)
+                            )),
                             short(x)
                         )),
                         Err(_) => Err(format!("no such task {}", short(x))),
@@ -81,10 +97,21 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, String>
         log_event(&tx, task, actor, "claim", "")?;
         let r = fetch(&tx, task)?;
         tx.commit().map_err(|e| e.to_string())?;
-        let mut out = format!("{} working (lease {}m) {}\n", short(r.id), ttl_s / 60, r.title);
+        let mut out = format!(
+            "{} working (lease {}m) {}\n",
+            short(r.id),
+            ttl_s / 60,
+            r.title
+        );
         // claim is the worker's entry point, not a display path: the prompt
         // arrives byte-for-byte (newlines, fences) and uncapped.
-        out.push_str(&field("description", &r.description, CAP_DESCRIPTION, true, &short(r.id)));
+        out.push_str(&field(
+            "description",
+            &r.description,
+            CAP_DESCRIPTION,
+            true,
+            &short(r.id),
+        ));
         out.push_str(&field("goal", &r.goal, CAP_GOAL, true, &short(r.id)));
         return Ok(out);
     }
@@ -104,7 +131,9 @@ pub struct Patch<'a> {
 
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let mut conn = open()?;
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
     let cur = fetch(&tx, id)?;
     let now = now_ms();
     let status = match p.status {
@@ -113,15 +142,21 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     };
     let moved = status != cur.status;
     if let Some(rp) = p.report {
-        tx.execute("UPDATE tasks SET report=? WHERE id=?", params![rp, id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE tasks SET report=? WHERE id=?", params![rp, id])
+            .map_err(|e| e.to_string())?;
     }
     if let Some(n) = p.note.filter(|n| !n.trim().is_empty()) {
-        tx.execute("UPDATE tasks SET note=? WHERE id=?", params![n, id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE tasks SET note=? WHERE id=?", params![n, id])
+            .map_err(|e| e.to_string())?;
     }
     if let Some(c) = p.commit {
-        tx.execute("UPDATE tasks SET commit_ref=? WHERE id=?", params![c, id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE tasks SET commit_ref=? WHERE id=?", params![c, id])
+            .map_err(|e| e.to_string())?;
     }
-    let needs = p.needs.map(str::to_owned).or_else(|| (status == "blocking").then(|| "input".to_owned()));
+    let needs = p
+        .needs
+        .map(str::to_owned)
+        .or_else(|| (status == "blocking").then(|| "input".to_owned()));
     let ttl = if p.ttl_s > 0 { p.ttl_s } else { DEFAULT_TTL_S };
     match status {
         "working" => {
@@ -158,16 +193,18 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         (true, "review") => "review",
         (true, "blocking") => "block",
         (true, "needs_fix") => "needs_fix",
-        (true, "working") => {
-            match cur.status.as_str() {
-                "blocking" => "answer",
-                "ready" => "claim",
-                _ => "edit",
-            }
-        }
+        (true, "working") => match cur.status.as_str() {
+            "blocking" => "answer",
+            "ready" => "claim",
+            _ => "edit",
+        },
         (true, _) => "edit",
         (false, _) => {
-            if p.report.is_some() { "report" } else { "note" }
+            if p.report.is_some() {
+                "report"
+            } else {
+                "note"
+            }
         }
     };
     let body = p.note.or(p.report).unwrap_or("");
@@ -177,31 +214,102 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
 }
 
 pub fn note(actor: &str, id: i64, body: &str) -> Result<String, String> {
-    apply(actor, id, &Patch { status: None, report: None, note: Some(body), commit: None, needs: None, ttl_s: 0 })
+    apply(
+        actor,
+        id,
+        &Patch {
+            status: None,
+            report: None,
+            note: Some(body),
+            commit: None,
+            needs: None,
+            ttl_s: 0,
+        },
+    )
 }
 
 /// Writes the worker's report without moving the task.
 pub fn report(actor: &str, id: i64, body: &str) -> Result<String, String> {
-    apply(actor, id, &Patch { status: None, report: Some(body), note: None, commit: None, needs: None, ttl_s: 0 })
+    apply(
+        actor,
+        id,
+        &Patch {
+            status: None,
+            report: Some(body),
+            note: None,
+            commit: None,
+            needs: None,
+            ttl_s: 0,
+        },
+    )
 }
 
 pub fn ask(actor: &str, id: i64, question: &str) -> Result<String, String> {
-    apply(actor, id, &Patch { status: Some("blocking"), report: None, note: Some(question), commit: None, needs: Some("input"), ttl_s: 0 })
+    apply(
+        actor,
+        id,
+        &Patch {
+            status: Some("blocking"),
+            report: None,
+            note: Some(question),
+            commit: None,
+            needs: Some("input"),
+            ttl_s: 0,
+        },
+    )
 }
 
 pub fn answer(actor: &str, id: i64, text: &str) -> Result<String, String> {
     // Resume with a fresh lease in the same transaction: no steal window.
-    apply(actor, id, &Patch { status: Some("working"), report: None, note: Some(text), commit: None, needs: None, ttl_s: DEFAULT_TTL_S })
+    apply(
+        actor,
+        id,
+        &Patch {
+            status: Some("working"),
+            report: None,
+            note: Some(text),
+            commit: None,
+            needs: None,
+            ttl_s: DEFAULT_TTL_S,
+        },
+    )
 }
 
 /// Arbitrary status moves for reopen/drop.
-
-pub fn finish(actor: &str, id: i64, status: &str, summary: &str, commit: Option<&str>) -> Result<String, String> {
-    apply(actor, id, &Patch { status: Some(status), report: Some(summary), note: None, commit, needs: None, ttl_s: 0 })
+pub fn finish(
+    actor: &str,
+    id: i64,
+    status: &str,
+    summary: &str,
+    commit: Option<&str>,
+) -> Result<String, String> {
+    apply(
+        actor,
+        id,
+        &Patch {
+            status: Some(status),
+            report: Some(summary),
+            note: None,
+            commit,
+            needs: None,
+            ttl_s: 0,
+        },
+    )
 }
 
 pub fn block(actor: &str, id: i64, reason: &str) -> Result<String, String> {
-    apply(actor, id, &Patch { status: Some("blocking"), report: None, note: Some(reason), commit: None, needs: None, ttl_s: 0 })
+    apply(
+        actor,
+        id,
+        &Patch {
+            status: Some("blocking"),
+            report: None,
+            note: Some(reason),
+            commit: None,
+            needs: None,
+            ttl_s: 0,
+        },
+    )
 }
 
 pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {

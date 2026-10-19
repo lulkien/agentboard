@@ -1,5 +1,7 @@
 use super::{COLS, Row, STATUS_LIST, fetch, norm, now_ms, open, read_row, short};
-use crate::clip::{CAP_DESCRIPTION, CAP_EVENT, CAP_GOAL, CAP_NOTE, CAP_REPORT, clip, clip_marked, field};
+use crate::clip::{
+    CAP_DESCRIPTION, CAP_EVENT, CAP_GOAL, CAP_NOTE, CAP_REPORT, clip, clip_marked, field,
+};
 use rusqlite::{Connection, params};
 
 fn code(status: &str) -> &str {
@@ -52,7 +54,7 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
     args.push(limit.to_string());
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows: Vec<Row> = stmt
-        .query_map(rusqlite::params_from_iter(args.iter()), |r| read_row(r))
+        .query_map(rusqlite::params_from_iter(args.iter()), read_row)
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<Row>>>()
         .map_err(|e| e.to_string())?;
@@ -62,7 +64,11 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
     let mut out = String::new();
     for r in &rows {
         let who = r.assignee.as_deref().unwrap_or("-");
-        let flag = if r.needs.as_deref() == Some("input") { " [input]" } else { "" };
+        let flag = if r.needs.as_deref() == Some("input") {
+            " [input]"
+        } else {
+            ""
+        };
         out.push_str(&format!(
             "{} {} {:<9} {:>4} {}{}\n",
             short(r.id),
@@ -112,15 +118,35 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
         out.push_str(&line);
         out.push('\n');
     }
-    out.push_str(&field("description", &r.description, CAP_DESCRIPTION, full, &short(r.id)));
+    out.push_str(&field(
+        "description",
+        &r.description,
+        CAP_DESCRIPTION,
+        full,
+        &short(r.id),
+    ));
     out.push_str(&field("goal", &r.goal, CAP_GOAL, full, &short(r.id)));
-    out.push_str(&field("report", r.report.as_deref().unwrap_or(""), CAP_REPORT, full, &short(r.id)));
-    out.push_str(&field("note", r.note.as_deref().unwrap_or(""), CAP_NOTE, full, &short(r.id)));
+    out.push_str(&field(
+        "report",
+        r.report.as_deref().unwrap_or(""),
+        CAP_REPORT,
+        full,
+        &short(r.id),
+    ));
+    out.push_str(&field(
+        "note",
+        r.note.as_deref().unwrap_or(""),
+        CAP_NOTE,
+        full,
+        &short(r.id),
+    ));
     if let Some(c) = &r.commit_ref {
         out.push_str(&format!("commit: {c}\n"));
     }
     let mut stmt = conn
-        .prepare("SELECT seq,actor,kind,body,ts FROM events WHERE task_id=? ORDER BY seq DESC LIMIT 8")
+        .prepare(
+            "SELECT seq,actor,kind,body,ts FROM events WHERE task_id=? ORDER BY seq DESC LIMIT 8",
+        )
         .map_err(|e| e.to_string())?;
     let evs: Vec<(i64, String, String, String, i64)> = stmt
         .query_map(params![r.id], |e| {
@@ -136,7 +162,11 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
             let text = if full {
                 body.clone()
             } else {
-                clip_marked(body, CAP_EVENT, &format!("`agentboard get {t} --full` or task_get id={t} full=true"))
+                clip_marked(
+                    body,
+                    CAP_EVENT,
+                    &format!("`agentboard get {t} --full` or task_get id={t} full=true"),
+                )
             };
             out.push_str(&format!("  #{seq} {actor} {kind} {}: {text}\n", ago(*ts)));
         }
@@ -145,7 +175,15 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
 }
 
 /// Canonical status order for summaries: most urgent first.
-const STATUS_ORDER: [&str; 7] = ["blocking", "needs_fix", "working", "review", "ready", "done", "dropped"];
+const STATUS_ORDER: [&str; 7] = [
+    "blocking",
+    "needs_fix",
+    "working",
+    "review",
+    "ready",
+    "done",
+    "dropped",
+];
 
 /// `children: 4 (2 done, 1 working, 1 needs_fix)`, or None for a leaf task.
 fn children_summary(conn: &Connection, id: i64) -> Result<Option<String>, String> {
@@ -178,7 +216,9 @@ pub fn children(parent: i64) -> Result<String, String> {
         .prepare("SELECT id,status,assignee,updated_at,title FROM tasks WHERE parent=? ORDER BY id")
         .map_err(|e| e.to_string())?;
     let rows: Vec<(i64, String, Option<String>, i64, String)> = stmt
-        .query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .query_map(params![parent], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
@@ -213,9 +253,16 @@ pub fn brief(since_min: i64) -> Result<String, String> {
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
     let done: i64 = conn
-        .query_row("SELECT COUNT(*) FROM tasks WHERE status='done' AND updated_at>=?", params![cutoff], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE status='done' AND updated_at>=?",
+            params![cutoff],
+            |r| r.get(0),
+        )
         .unwrap_or(0);
-    let mut head: Vec<String> = counts.iter().map(|(s, n)| format!("{n} {}", code(s))).collect();
+    let mut head: Vec<String> = counts
+        .iter()
+        .map(|(s, n)| format!("{n} {}", code(s)))
+        .collect();
     head.push(format!("{done} done/{}m", since_min));
     out.push_str(&head.join(", "));
     out.push('\n');
@@ -225,12 +272,16 @@ pub fn brief(since_min: i64) -> Result<String, String> {
         ))
         .map_err(|e| e.to_string())?;
     let rows: Vec<Row> = stmt
-        .query_map([], |r| read_row(r))
+        .query_map([], read_row)
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
     for r in &rows {
-        let wait = if r.needs.as_deref() == Some("input") { "ON INPUT" } else { "" };
+        let wait = if r.needs.as_deref() == Some("input") {
+            "ON INPUT"
+        } else {
+            ""
+        };
         out.push_str(&format!(
             "{} {} {} {} {}{}\n",
             short(r.id),
@@ -238,7 +289,11 @@ pub fn brief(since_min: i64) -> Result<String, String> {
             r.assignee.as_deref().unwrap_or("-"),
             ago(r.updated_at),
             clip(&r.title, 60),
-            if wait.is_empty() { String::new() } else { format!(" [{wait}]") }
+            if wait.is_empty() {
+                String::new()
+            } else {
+                format!(" [{wait}]")
+            }
         ));
     }
     // A task with children is an epic. Report progress only while some child is
@@ -257,7 +312,11 @@ pub fn brief(since_min: i64) -> Result<String, String> {
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
     for (id, title, done_n, total) in epics {
-        out.push_str(&format!("EPIC {} {done_n}/{total} done {}\n", short(id), clip(&title, 60)));
+        out.push_str(&format!(
+            "EPIC {} {done_n}/{total} done {}\n",
+            short(id),
+            clip(&title, 60)
+        ));
     }
     let mut stmt = conn
         .prepare("SELECT id,report FROM tasks WHERE status='done' AND updated_at>=? ORDER BY updated_at DESC LIMIT 8")
@@ -270,7 +329,11 @@ pub fn brief(since_min: i64) -> Result<String, String> {
     if !dones.is_empty() {
         out.push_str("done:\n");
         for (id, res) in dones {
-            out.push_str(&format!("  {} {}\n", short(id), clip(res.as_deref().unwrap_or(""), 80)));
+            out.push_str(&format!(
+                "  {} {}\n",
+                short(id),
+                clip(res.as_deref().unwrap_or(""), 80)
+            ));
         }
     }
     Ok(out.trim_end().to_owned())

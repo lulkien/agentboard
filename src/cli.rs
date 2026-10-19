@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 
 const EXIT_CODES: &str = "Exit codes: 0 success or wait matched, 3 wait timed out, 1 any error (bad flag, unknown task, ...).\n\
 With no command, agentboard serves MCP on stdio.\n\
-Values that begin with '-' are taken literally (`note T1 --bogus` stores \"--bogus\"); prefer --flag=value when unsure.";
+Free-text values that begin with '-' are taken literally (`note T1 --bogus` stores \"--bogus\"); prefer --flag=value when unsure.";
 
 const WAIT_HELP: &str = "Block until a watched task matches.
 

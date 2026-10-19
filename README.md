@@ -99,16 +99,21 @@ Then register the pane once so the board can map task → session:
 unknown task, bad value) is exit 1 with an `agentboard: ` prefix on stderr;
 `wait` exits 0 on a match and 3 on a timeout, and its output starts with
 `matched:` or `timeout:` (the same markers lead `task_wait`, which has no exit
-code). Values that begin with `-` are taken literally, so `note T7 "- done"`
+code). Free-text values that begin with `-` are taken literally, so `note T7 "- done"`
 works and `note T7 --bogus` stores `--bogus`; prefer `--flag=value` when unsure.
 
 Global: `--actor NAME`, `--db PATH` (or `$AGENTBOARD_DB`).
+`$AGENTBOARD_DELIVER_TIMEOUT_MS` (default 2000) bounds each herdr/tmux call made by
+`dispatch`, `send`, `tail` and `sessions`: a wedged pane client is killed (with its
+process group) at the deadline instead of hanging the caller, and `dispatch` falls
+back from herdr to tmux. Lower it only to test the kill path.
 Default db: `$XDG_STATE_HOME/agentboard/board.db`.
 
 ## Tests
 
     python3 tests/mcp_client.py   # real stdio checks: claim, ask→wait, acks
     bash tests/cli.sh             # CLI contract: exit codes, stderr, flag spellings, no ANSI
+    bash tests/dispatch.sh        # dispatch with stub herdr/tmux: refusal, --force, fallback, hang killed at the deadline
     ./tests/race.sh               # 8 concurrent claimers: 80 claims, 80 unique, ~124 ms
     bash tests/wait.sh            # long-poll returns on the event, not the timeout
     ./target/release/agentboard < tests/mcp-smoke.jsonl   # handshake + tool list

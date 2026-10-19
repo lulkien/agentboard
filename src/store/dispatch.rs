@@ -1,7 +1,10 @@
 use super::render::stamp;
 use super::tasks::{Patch, apply};
 use super::{fetch, log_event, now_ms, open, short};
+use super::proc;
+use crate::clip::clip;
 use rusqlite::{OptionalExtension, params};
+use std::process::Command;
 
 /// The line a worker pane receives. Fixed wording: the pane runs claim itself.
 fn line(id: i64) -> String {
@@ -11,21 +14,29 @@ fn line(id: i64) -> String {
     )
 }
 
+/// Runs `herdr agent prompt` under the shared deadline. `Err` is the one-line
+/// reason herdr did not deliver: spawn failure, bad exit, or timeout.
+fn herdr_prompt(name: &str, text: &str) -> Result<(), String> {
+    let out = proc::run(Command::new("herdr").args(["agent", "prompt", name, text]))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = stderr.trim();
+    Err(if stderr.is_empty() { out.status.to_string() } else { clip(stderr, 160) })
+}
+
 /// Submits `text` to a registered pane: herdr first, tmux as fallback. Returns
-/// the path that worked so the operator can see which one ran.
-fn deliver(name: &str, text: &str) -> Result<&'static str, String> {
-    let herdr = std::process::Command::new("herdr")
-        .args(["agent", "prompt", name, text])
-        .stdin(std::process::Stdio::null())
-        .output();
-    let herdr_err = match herdr {
-        Ok(o) if o.status.success() => return Ok("herdr"),
-        Ok(o) => format!("herdr: {}", String::from_utf8_lossy(&o.stderr).trim()),
-        Err(e) => format!("herdr: {e}"),
+/// the path that worked; a tmux win names why herdr did not, so the event and the
+/// printed line explain the fallback.
+fn deliver(name: &str, text: &str) -> Result<String, String> {
+    let herdr_err = match herdr_prompt(name, text) {
+        Ok(()) => return Ok("herdr".to_owned()),
+        Err(reason) => reason,
     };
     super::sessions::send(name, text)
-        .map(|_| "tmux")
-        .map_err(|tmux_err| format!("dispatch to {name} failed ({herdr_err}; {tmux_err})"))
+        .map(|_| format!("tmux (herdr: {herdr_err})"))
+        .map_err(|tmux_err| format!("dispatch to {name} failed (herdr: {herdr_err}; {tmux_err})"))
 }
 
 /// Tells a pane to claim task `id`. Refuses unless the task is `ready`; `force`

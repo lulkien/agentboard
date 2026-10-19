@@ -27,6 +27,11 @@ fn err(e: String) -> ErrorData {
     ErrorData::invalid_params(e, None)
 }
 
+/// A claim refused because someone holds the task is not a malformed request.
+fn refused(e: String) -> ErrorData {
+    ErrorData::internal_error(e, None)
+}
+
 /// Runs a blocking store call (tmux subprocess) off the async runtime threads.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tokio::task::spawn_blocking(f).await.map_err(|e| format!("task join: {e}"))?
@@ -241,7 +246,7 @@ impl Board {
             None => None,
         };
         let ttl = a.ttl_min.unwrap_or(30).clamp(1, 720);
-        run!(store::claim(&actor(), id, ttl * 60))
+        store::claim(&actor(), id, ttl * 60).map(text).map_err(refused)
     }
 
     #[tool(name = "task_update", description = "Write back to the board: status (ready|working|blocking|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.", annotations(title = "Update task", read_only_hint = false, destructive_hint = false))]

@@ -1,6 +1,8 @@
+use super::proc;
 use super::render::ago;
 use super::{fetch, now_ms, open, short};
 use rusqlite::params;
+use std::process::Command;
 use std::time::Duration;
 
 pub fn sessions() -> Result<String, String> {
@@ -46,10 +48,7 @@ pub fn register_session(name: &str, agent: &str, cwd: &str, task: Option<i64>) -
 }
 
 fn tmux_alive(name: &str) -> bool {
-    std::process::Command::new("tmux")
-        .args(["has-session", "-t", name])
-        .status()
-        .is_ok_and(|s| s.success())
+    proc::run(Command::new("tmux").args(["has-session", "-t", name])).is_ok_and(|o| o.status.success())
 }
 
 const HERDR_TIMEOUT: Duration = Duration::from_secs(2);
@@ -117,9 +116,7 @@ fn parse_herdr_agents(json: &[u8]) -> Vec<(String, String)> {
 /// Last N lines of a tmux pane, trimmed and capped: the cheap way to see what an
 /// agent is doing without asking it for a status report.
 pub fn tail(name: &str, lines: usize) -> Result<String, String> {
-    let out = std::process::Command::new("tmux")
-        .args(["capture-pane", "-p", "-t", name, "-S", &format!("-{lines}")])
-        .output()
+    let out = proc::run(Command::new("tmux").args(["capture-pane", "-p", "-t", name, "-S", &format!("-{lines}")]))
         .map_err(|e| format!("tmux: {e}"))?;
     if !out.status.success() {
         return Err(format!("tmux: {}", String::from_utf8_lossy(&out.stderr).trim()));
@@ -146,10 +143,7 @@ pub fn send(name: &str, text: &str) -> Result<String, String> {
     // `-l --` types the text literally: without `--` a line starting with "-"
     // is parsed as a tmux option, and without `-l` words like "Up" are key names.
     for keys in [&["-l", "--", text][..], &["Enter"][..]] {
-        let out = std::process::Command::new("tmux")
-            .args(["send-keys", "-t", name])
-            .args(keys)
-            .output()
+        let out = proc::run(Command::new("tmux").args(["send-keys", "-t", name]).args(keys))
             .map_err(|e| format!("tmux: {e}"))?;
         if !out.status.success() {
             return Err(format!("tmux send-keys failed for {name}: {}", String::from_utf8_lossy(&out.stderr).trim()));
