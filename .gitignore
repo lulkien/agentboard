@@ -1,5 +1,5 @@
-/target
 /.probe
 *.db
 *.db-wal
 *.db-shm
+.codebase-memory/
