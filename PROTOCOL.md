@@ -4,21 +4,28 @@ The board is the only status channel. No `NOTES.md`, `STATUS.md`, or summary fil
 
 Never guess a missing requirement. `task_ask` with ONE narrow question, then `task_wait(after_seq=<#seq from ack>)`. If the answer is partial, ask again.
 
-`done` means verified — run the check the goal names and put its output in `report`. `review` when a human should look (API changes, irreversible ops). Notes are for the next reader: decisions, surprises, commands worth rerunning.
+`done` means verified — run the check the goal names and put its output in `report`. `review` means ready for a second pair of eyes: the reviewer in the loop below, or a human when the change is an API break or an irreversible operation. It is not a finished state; `done` is. Notes are for the next reader: decisions, surprises, commands worth rerunning.
 
 ## Workflow: epic, implement, review, fix
 
 Work that needs review runs as one loop. An epic is not a task: it has its own table and ids (`E1`, `E2`...), is never claimed, leased or dispatched, and names the project the work belongs to (`path`). Tasks point at an epic (`epic=E1`) and optionally at another task (`parent=T7`, a subtask). `board_brief` shows one `EPIC E1 2/4 done [1 blocking] /abs/path <title>` line per open epic, then the open tasks that belong to no epic. Dropped tasks are left out of the total. Nothing closes an epic automatically.
 
 1. Manager opens the epic: `epic_add(title, goal, path=<project root>)` (CLI: `agentboard epic add "..." --path /abs/dir`). A path that does not exist yet is accepted with a warning.
-2. Manager adds the implement task with `epic=<E id>`. Hand the worker only the task id.
-3. Agent claims it, implements, then `task_update(report=..., status=review|done)`.
-4. Manager polls `task_get` / `board_brief` (no tight loops; `task_wait` blocks server-side) and reads `report`.
-5. Manager adds a review task with `epic=<E id>`; the reviewer claims it.
-6. Reviewer either sets the review task `done`, or files a fix task with `parent=<review task>` (`task_add`; it inherits the epic) and sets the review task `needs_fix`.
-7. Manager delegates the fix. The fixer claims the fix task, fixes, sets it `done` with a report.
-8. Manager delegates verification to the same reviewer agent that filed the fix (no separate checker task). It re-checks its own findings and sets the review task `done`.
-9. Manager closes the epic once every task is terminal (`done` or `dropped`): `epic_update(id, status=done)`.
+2. Manager adds the implement task with `epic=<E id>` and dispatches it. Hand the worker only the task id; the row carries description and goal.
+3. Worker claims it with `task_claim`, does the work, records decisions with `task_update(note=...)`, and finishes with `task_update(report=..., status="review")`. The report names files and pastes the output of the check the goal asked for.
+4. Manager reads `report` (`task_get`, or `task_wait` to block server-side — never a poll loop), files a review task with `epic=<E id>`, and dispatches the reviewer.
+5. Reviewer claims the review task, reads the diff and the report. Clean: `task_update(id, report=<what was checked>, status="done")` on the review task. Findings: the reviewer files the fix task itself — `task_add(..., parent=<review task id>)`, which inherits the epic — and sets its own review task `needs_fix`.
+6. Coder claims the fix task, fixes only the listed findings, answers each finding in `report`, and sets the fix task `review`. The coder never sets a fix task `done`, never closes a review task, and there is no `fixed` status: on a fix task `review` means fixed and awaiting re-check.
+7. Reviewer re-checks its own findings — the same reviewer, no separate checker task. Every finding closed: set the **fix** task `done` with the evidence in `report`, then re-read the file and set the review task `done`. Anything still open: write a `note` naming it on the fix task and set that fix task `needs_fix`; the review task stays `needs_fix`. Loop back to step 6.
+8. Manager re-runs the gates the goal names, in that tree, before believing any report — a report is a claim, not proof — then closes the epic once every task is `done` or `dropped`: `epic_update(id, status="done")`.
+
+Status ownership in this loop is fixed:
+
+- Coder: `ready`/`needs_fix` → `working` → `review`. Nothing else.
+- Reviewer: `review` → `done` or `needs_fix`, on a fix task and on a review task alike.
+- Manager: `ready` (re-arm a crashed task), `dropped`, `done` on an implement task it owns, and epic status.
+
+A fix task reaching `done` is the reviewer's signature and its `report` must carry the evidence. The same loop as diagrams: [docs/workflow.md](docs/workflow.md).
 
 Inspect with `epic_get(E1)` (task counts, path, timeline) and `task_children(id)`: an epic id lists every task in it, a task id lists its subtasks (CLI: `agentboard children E1` / `T27`). `task_get` shows `epic:` and `parent:` lines and, for a task with subtasks, `children: N (2 done, ...)`.
 
@@ -78,7 +85,7 @@ Other clips, all marked or absent:
 - `working` — actively being done (alias: `running`)
 - `blocking` — waiting on external input (alias: `blocked`)
 - `needs_fix` — review found work, waiting for a fix (aliases: `need fix`, `needs-fix`, `fix`)
-- `review` — human should review
+- `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation
 - `done` — verified complete
 - `dropped` — abandoned
 

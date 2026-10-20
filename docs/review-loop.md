@@ -1,6 +1,6 @@
 # Review loop
 
-This document describes the review loop used by this project. It matches `src/schema.sql`; `PROTOCOL.md` steps 6–8 are stale (see Divergence).
+This document describes the review loop used by this project. [PROTOCOL.md](../PROTOCOL.md) is the authority for it, and [workflow.md](workflow.md) carries the same rules as diagrams.
 
 ## Topology
 
@@ -30,10 +30,6 @@ Each pane runs its own `agentboard` MCP server. The actor name is recorded in ev
 
 Only the reviewer sets a fix task `done`. The coder never sets a fix task `done` and never closes a review task.
 
-### Divergence from PROTOCOL.md
-
-`PROTOCOL.md` steps 6–8 are stale: step 7 still lets the fixer set the fix task `done`. The authoritative rule is in this document: the fix task reaches `done`, and only the reviewer sets it (the coder stops at `review`).
-
 ## Fix-task lifecycle
 
 ```
@@ -61,80 +57,13 @@ No `NOTES.md` / `STATUS.md` files. The board is the only status channel.
 
 ## Diagrams
 
-### Loop flowchart (with reopen edge)
-
-```mermaid
-flowchart TD
-    subgraph MGR["Manager"]
-        A["epic_add + implement task (epic=E)"]
-        B["Read report (task_get / board_brief / task_wait)"]
-        C["Create review task (epic=E), dispatch reviewer"]
-        D["Delegate fix task to coder (dispatch)"]
-        Z["epic_update done when all tasks terminal"]
-    end
-
-    subgraph CODER["Coder"]
-        I1["Claim implement task, work, notes"]
-        I2["task_update report + status=review"]
-        F1["Claim fix task, fix listed findings"]
-        F2["task_update report + status=review"]
-    end
-
-    subgraph REV["Reviewer"]
-        R0["Claim review task, read diff"]
-        R1{"Changes needed?"}
-        RD["task_update report + status=done (review task)"]
-        RF["task_add fix task parent=review_task"]
-        RN["task_update status=needs_fix (review task)"]
-        X1["Re-check fix against own findings"]
-        X2{"All checks PASS?"}
-        XN["note remaining findings on fix task"]
-        XF["task_update status=needs_fix (fix task)"]
-        FD["task_update report + status=done (fix task)"]
-    end
-
-    A --> B
-    B --> C
-    C --> R0
-    R0 --> R1
-    R1 -- no --> RD
-    R1 -- yes --> RF
-    RF --> RN
-    RN --> D
-    D --> F1
-    F1 --> F2
-    F2 --> X1
-    X1 --> X2
-    X2 -- yes --> FD
-    FD --> RD
-    RD --> Z
-    X2 -- no --> XN
-    XN --> XF
-    XF --> D
-```
-
-### Fix-task state diagram
-
-```mermaid
-stateDiagram-v2
-    [*] --> ready
-    ready --> working : coder claims
-    working --> review : coder reports (fixed)
-    review --> needs_fix : reviewer reopens with note
-    needs_fix --> working : coder claims again
-    review --> done : reviewer sets done when every finding is closed
-    done --> [*]
-    needs_fix --> done : reviewer sets done when every finding is closed
-    working --> dropped : coder abandons
-    review --> dropped : reviewer drops
-    needs_fix --> dropped : reviewer drops
-```
+The loop and the fix-task lifecycle are drawn in [workflow.md](workflow.md), together with the status-ownership table. They are kept in one place so the prose here and the pictures cannot drift.
 
 ## Wait mechanism
 
 - **Board-level wait**: `task_wait` (MCP) or `agentboard wait` (CLI) blocks server-side until watched tasks match a status/kind filter. Returns only the delta. No polling by hand.
-- **Pane-level watch**: `agentboard tail` / `session_tail` are **tmux-only** on this build. For herdr panes, use `herdr pane read <pane_id>` or `herdr agent read <name>` to watch the other agent.
-- Never read the SQLite file directly. The board and the pane are the two authoritative sources.
+- **Pane-level watch**: `agentboard tail` / `session_tail` read a herdr pane first (`herdr pane read`), and fall back to tmux; `send`/`session_send` do the same with `herdr pane send-text`. Either bridge's failure is reported with the bridge that failed.
+- Never read the board's storage file directly. The board and the pane are the two authoritative sources.
 
 ## Status reference
 
