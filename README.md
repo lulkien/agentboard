@@ -156,8 +156,10 @@ Claude Code, one session per herdr pane:
 The command is exec'd directly, not through a shell, so `$HOME` and `~` are passed
 literally and fail with `ENOENT` — verified: `["$HOME/.cargo/bin/agentboard","--help"]`
 raises `No such file or directory`, while bare `agentboard` resolves on `PATH`. Use the
-bare name (installed to `~/.cargo/bin`, which is on `PATH`), or a hardcoded absolute path
-when you need one specific build.
+bare name: it needs no home directory, so the same config works for any user on any
+machine. Two cases want a literal absolute path instead — a client that does not inherit
+your `PATH` (some GUI launchers), or one specific build — and then paste what
+`command -v agentboard` prints for that machine.
 
 Then register the pane once so the board can map task → session:
 
