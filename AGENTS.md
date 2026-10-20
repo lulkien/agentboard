@@ -18,6 +18,7 @@ Run these from the repo root. A change is not done until each prints what is bes
 |---|---|
 | `cargo build --release` | `Finished` |
 | `cargo test` | `test result: ok. 12 passed` |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test --no-default-features --features surreal` | `test result: ok. 14 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
 | `python3 tests/mcp_client.py` | `121/121 checks passed` |
 | `bash tests/cli.sh` | `111/111 passed` |
 | `bash tests/dispatch.sh` | `59/59 passed` |
@@ -30,6 +31,10 @@ The suites drive `target/release/agentboard`: build release before running them.
 Add or change behaviour with a test in the suite that owns that kind of check
 (`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`
 for the bridge). When a count changes, update the expectation here.
+
+A change under `src/store/surreal/` is not done on a box where any of its tests
+printed `SKIP` (no `surreal` binary): run the `AGENTBOARD_REQUIRE_SURREAL=1` row, which
+turns a skip into a failure. SKIP is fine on a device that builds the sqlite binary.
 
 ## Layout
 

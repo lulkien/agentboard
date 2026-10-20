@@ -92,7 +92,7 @@ On the first board call in a process:
    ```
    stdout and stderr go to `<state dir>/surreal.log`.
 3. Poll `/health` every 100 ms for a bounded window (about 10 s). On 200, connect.
-4. Two processes racing: both see a refusal and both spawn. Only one server wins the port; the loser's `surreal` exits with a bind error, and the loser's agentboard re-probes `/health`, which now answers, and connects. The loser's exit text lands in the same log.
+4. Two processes racing: starters are **serialised by a lock**, the port does not decide it. After a failed probe a starter takes `<state dir>/surreal.start.lock` (`START_LOCK` in `src/store/surreal/serve.rs`, taken with `acquire_named`, waiting up to twice the start-up deadline), re-probes `/health`, and spawns only if nothing answers. A waiter that gets the lock finds the winner's server up and connects without spawning. Losing the port is no protection: the server that loses it exits with code 1, but only after it has opened and touched the data directory, and two servers on one SurrealKV directory corrupt it. Reproduced with the real 2.7.0 binary: a control (one server, kill, restart) keeps table `t` and row `t:1`; with a second server on the same directory, the next `DEFINE` fails with `Versioned error: A deserialization error occured: Invalid revision `24` for type `DefineTableStatement``, and after a restart the row is gone (`SELECT * FROM t` returns `[]`). The test is `two_starters_race_and_both_end_up_connected` (two threads, fresh port, asserts exactly one spawn); with the start lock removed it failed 5 of 5 runs at `exactly one starter spawns ... left: 2 right: 1`. **Residual gap:** a server started by hand or by another tool on the same directory is not covered by the lock.
 5. Binary missing, or `/health` never answers: one line, no hang, non-zero exit:
    ```
    board server unavailable: ran `surreal db start --no-banner --bind 127.0.0.1:18720 ... surrealkv://<dir>`; see <state dir>/surreal.log. Install: curl -sSf https://install.surrealdb.com | sh -s -- --version 2.7.0
@@ -134,7 +134,7 @@ A holder that dies releases the lock (the kernel drops it on process exit). A ho
 ### 7. Tests
 
 - **Default suite, sqlite, unchanged.** `cargo test`, `tests/cli.sh`, `tests/dispatch.sh`, `tests/race.sh`, `tests/wait.sh` and `tests/mcp_client.py` keep their counts (AGENTS.md table). They drive the built binary through `AGENTBOARD_DB` and argv/MCP only, so they do not know which feature produced it; the default build is what they run against.
-- **Surreal unit tests:** `cargo test --no-default-features --features surreal`.
+- **Surreal unit tests:** `cargo test --no-default-features --features surreal` (14 tests today). Tests that need a real server start a throwaway one on a random port; when no `surreal` binary is found they print `SKIP <name>: ...` and pass, which is right on a device that builds the sqlite binary. On the surreal host that would prove nothing, so `AGENTBOARD_REQUIRE_SURREAL=1` turns every SKIP into a panic naming the missing binary. A surreal-feature change is not done on a box where any of those tests printed SKIP; `AGENTS.md` carries the command (`AGENTBOARD_REQUIRE_SURREAL=1 cargo test --no-default-features --features surreal` ends `ok. 14 passed`, and its `--nocapture` output has no SKIP).
 - **`tests/surreal.sh` (new).** Expects `target/release/agentboard` built with `--features surreal` and a `surreal` binary. It picks a random free port, creates a throwaway data dir under `$TMPDIR`, starts `surreal db start` there, points `AGENTBOARD_SURREAL_URL` at the port, then:
   1. CRUD through the CLI over WebSocket (add, get, update, ls, done).
   2. The `tests/race.sh` property: 8 worker processes, 80 claims, expecting `claims=80 unique=80`.
@@ -237,7 +237,9 @@ An already-open process never saw another process's writes (ready stayed 8 acros
 | Server is not atomic under contention | Duplicate claims, lost counter updates | Cross-process file lock around every store operation (Decision 6). Removing it must fail `tests/surreal.sh`. |
 | Wedged or dead lock holder | Waiters hang, or a dead holder blocks | Dead holder: the kernel releases flock on exit. Stuck holder: bounded `try_lock` wait (about 5 s), then one error line naming the lock path. Not yet exercised. |
 | Daemon lifecycle | A new long-lived process the tool did not have | agentboard starts it; nothing stops it. It outlives the CLI call. It does not survive a reboot; the next board call starts it again. Stopping is `pkill -f 'surreal db start'`, or a future `agentboard stop`. |
-| Two starters racing | Duplicate spawn | Port bind is the arbiter; the loser exits and re-probes (Decision 4). No test yet. |
+| Two starters racing | A second server on the same directory corrupts the store (`Invalid revision ... DefineTableStatement`, rows lost) | Start-up is serialised by `<state dir>/surreal.start.lock`; the waiter re-probes and finds the winner's server (Decision 4). Test `two_starters_race_and_both_end_up_connected`, mutation-checked. A server started by hand or by another tool on the same directory is not covered. |
+| `connect` hangs on a wedged server | A server that answers `/health` and `/version` but never completes the WebSocket upgrade blocked a verb past 25 s | The whole handshake, sign-in and bootstrap run under a 10 s timeout (`Timing::connect`) and fail with `board server unavailable: did not complete the WebSocket handshake within N ms for ...`. Test `a_server_that_wedges_after_health_cannot_hang_connect`; with the timeout removed it fails (`connect must return within 3 s`). |
+| MSRV 1.89 | `File::try_lock` and `unlock` (the write lock) are stable from Rust 1.89 | `rust-version` is raised from 1.88 to 1.89 in `Cargo.toml`, and the `incompatible_msrv` allows are gone. The dependency tree already peaks at 1.88 (`time`, `rmcp-macros`, `serde_with`), so 1.89 is the first version the surreal build can honestly claim; an allow would hide a real floor. Cost: sqlite-only devices, which never touch the lock, get the same floor. Accepted: one number everywhere beats a per-feature MSRV, which cargo cannot express. |
 | Schema bootstrap on a fresh dir | First call must create tables | Idempotent `DEFINE ... IF NOT EXISTS` plus the `meta:schema` marker; covered by `tests/surreal.sh`. |
 | `agentboard path` | Prints a file today | Prints the data dir in the surreal build (Decision 3). |
 | Old sqlite file in a surreal data dir | The server cannot open a file as a directory | Before spawning, if `<dir>` is a regular file, refuse: `path '<dir>' is a SQLite file, not a SurrealDB directory. Move it aside (mv '<dir>' '<dir>.old') and retry.` Embedded SurrealKV rejected a file with `Not a directory (os error 20)`; the server's own text is not measured. |
@@ -284,9 +286,11 @@ One list; everything else above was measured as stated.
 - The lock: a holder killed with `kill -9` releasing it, a `SIGSTOP`ed holder and the bounded-wait error, per-operation lock latency, and one lock spanning a multi-statement store operation. Only a per-statement lock was measured.
 - Several threads of one process contending through the lock and one connection (the rmcp server); the measured clients were separate processes.
 - Run counts: the counter test ran once per variant (unguarded, CAS, lock), so the lock's 160/160 is one run; the claim test ran 10 times per variant. The mutation check in `tests/surreal.sh` assumes unguarded counter loss repeats; it was seen in 2 of 2 counter runs without the lock (unguarded 147, CAS 142 of 160).
-- Auto-serve end to end: detached spawn, bounded poll, two-starter race, missing-binary line.
-- Server error text when pointed at a regular file; `/version` and marker-check behaviour against a stale server.
-- Schema `DEFINE` statements on the server (executed on the embedded engine in an earlier spike only, output not retained).
+- Server error text when pointed at a regular file; `/version` against a real server of another version (only the pure check is tested).
+- The `events` ASSERT (exactly one of `task_id` / `epic_id`): the schema applies on the server, but no row was inserted to show it fires.
+- A server started by hand or by another tool on the same directory (outside the start lock).
+- `connect` holds the write lock only during bootstrap; the per-operation hold across store operations arrives with the ports. Per-operation lock latency is unmeasured.
+- The surreal tests pass by skipping when no `surreal` binary exists and `AGENTBOARD_REQUIRE_SURREAL` is unset (see Tests).
 - Lease timestamps stored as `int` ms.
 - MVCC isolation beyond the claim and counter cases above.
 - Crash and WAL behaviour: no `kill -9` of the server mid-write.
