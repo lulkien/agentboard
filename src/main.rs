@@ -27,7 +27,31 @@ use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 
 use server::Board;
+use std::path::Path;
 use std::process::ExitCode;
+
+/// A board path of the wrong kind for this build is refused before anything else
+/// runs: a SQLite file where the surreal build wants a data directory, or a
+/// directory where the sqlite build wants a file.
+#[cfg(all(feature = "surreal", not(feature = "sqlite")))]
+fn path_refusal(p: &Path) -> Option<String> {
+    p.is_file().then(|| {
+        let p = p.display();
+        format!(
+            "path '{p}' is a SQLite file, not a SurrealDB directory. Move it aside (mv '{p}' '{p}.old') and retry."
+        )
+    })
+}
+
+#[cfg(not(all(feature = "surreal", not(feature = "sqlite"))))]
+fn path_refusal(p: &Path) -> Option<String> {
+    p.is_dir().then(|| {
+        let p = p.display();
+        format!(
+            "path '{p}' is a directory, not a SQLite board file. Point --db or AGENTBOARD_DB at a file, or move it aside (mv '{p}' '{p}.old') and retry."
+        )
+    })
+}
 
 fn tid(raw: &str) -> Result<i64, String> {
     store::parse_id(raw)
@@ -54,7 +78,7 @@ async fn serve() -> ExitCode {
 fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
     match cmd {
         Cmd::Serve | Cmd::Wait { .. } => unreachable!("handled in main"),
-        Cmd::Path => Ok(store::db_path().display().to_string()),
+        Cmd::Path => store::board_path().map(|p| p.display().to_string()),
         Cmd::Add {
             title,
             description,
@@ -260,6 +284,15 @@ async fn main() -> ExitCode {
     };
     store::set_overrides(cli.db, cli.actor);
     let actor = store::default_actor();
+    // `path` only prints the path and `serve` has its own start-up; every other verb
+    // reaches the store, so a board path of the wrong kind stops it first.
+    if !matches!(cli.cmd, None | Some(Cmd::Serve | Cmd::Path)) {
+        let refused = store::board_path().and_then(|p| path_refusal(&p).map_or(Ok(()), Err));
+        if let Err(e) = refused {
+            eprintln!("agentboard: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
 
     let result = match cli.cmd {
         None | Some(Cmd::Serve) => return serve().await,
@@ -275,5 +308,64 @@ async fn main() -> ExitCode {
             eprintln!("agentboard: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn each_build_says_only_its_own_db_help() {
+        let help = Cli::command().render_long_help().to_string();
+        let sqlite = "Database path (default $AGENTBOARD_DB, else the state dir)";
+        let surreal = "Data directory of the local board server";
+        if cfg!(feature = "surreal") {
+            assert!(help.contains(surreal) && !help.contains(sqlite), "{help}");
+        } else {
+            assert!(help.contains(sqlite) && !help.contains(surreal), "{help}");
+        }
+    }
+
+    #[test]
+    fn the_path_verb_and_the_store_resolve_the_same_board_path() {
+        // `--db` wins, in both builds, and `path` is the store's own resolution.
+        store::set_overrides(Some("/tmp/agentboard-path-test/board".to_owned()), None);
+        let want = std::path::PathBuf::from("/tmp/agentboard-path-test/board");
+        assert_eq!(store::board_path().unwrap(), want);
+        assert_eq!(
+            dispatch(Cmd::Path, "a").unwrap(),
+            want.display().to_string()
+        );
+    }
+
+    #[test]
+    fn a_board_path_of_the_wrong_kind_is_refused_with_one_line() {
+        let root = std::env::temp_dir().join(format!("ab-pathkind-{}", std::process::id()));
+        let (file, dir) = (root.join("a-file"), root.join("a-dir"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&file, b"x").unwrap();
+        let (file_s, dir_s) = (file.display(), dir.display());
+        if cfg!(feature = "surreal") {
+            assert_eq!(
+                path_refusal(&file).unwrap(),
+                format!(
+                    "path '{file_s}' is a SQLite file, not a SurrealDB directory. Move it aside (mv '{file_s}' '{file_s}.old') and retry."
+                )
+            );
+            assert!(path_refusal(&dir).is_none());
+        } else {
+            assert_eq!(
+                path_refusal(&dir).unwrap(),
+                format!(
+                    "path '{dir_s}' is a directory, not a SQLite board file. Point --db or AGENTBOARD_DB at a file, or move it aside (mv '{dir_s}' '{dir_s}.old') and retry."
+                )
+            );
+            assert!(path_refusal(&file).is_none());
+        }
+        assert!(path_refusal(&root.join("missing")).is_none());
+        assert!(!path_refusal(&file).unwrap_or_default().contains('\n'));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -37,6 +37,22 @@ pub fn default_actor() -> String {
         .unwrap_or_else(|| "agent".to_owned())
 }
 
+/// Where the board lives for this build, resolved exactly as the store resolves it:
+/// the SQLite board file, or the data directory the local SurrealDB server owns.
+/// `--db`, then `$AGENTBOARD_DB`, then the state dir. (The sqlite function, below, is
+/// also the answer for the unsupported feature sets: `main.rs` has already stopped
+/// those with a `compile_error!`.)
+#[cfg(all(feature = "surreal", not(feature = "sqlite")))]
+pub fn board_path() -> Result<PathBuf, String> {
+    surreal::Settings::from_env().map(|s| s.dir)
+}
+
+#[cfg(not(all(feature = "surreal", not(feature = "sqlite"))))]
+pub fn board_path() -> Result<PathBuf, String> {
+    Ok(db_path())
+}
+
+#[cfg(not(all(feature = "surreal", not(feature = "sqlite"))))]
 pub fn db_path() -> PathBuf {
     if let Some(p) = DB_OVERRIDE.get() {
         return p.clone();

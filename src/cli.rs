@@ -21,14 +21,19 @@ Both filters => both must hold; neither => any new event. --after: only events w
 
 Exit 0 and first line `matched:`; exit 3 and first line `timeout:`.";
 
+/// `--db` means a different thing in each build, so each build says its own.
+#[cfg(not(feature = "surreal"))]
+const DB_HELP: &str = "Database path (default $AGENTBOARD_DB, else the state dir)";
+#[cfg(feature = "surreal")]
+const DB_HELP: &str = "Data directory of the local board server (default $AGENTBOARD_DB, else the state dir's `surreal`)";
+
 #[derive(Parser)]
 #[command(name = "agentboard", version, about = "Task board + tmux bridge for a team of CLI agents", after_help = EXIT_CODES)]
 pub struct Cli {
     /// Actor name for events (default $AGENTBOARD_ACTOR, else 'agent')
     #[arg(long, global = true, value_name = "NAME")]
     pub actor: Option<String>,
-    /// Database path (default $AGENTBOARD_DB, else the state dir)
-    #[arg(long, global = true, value_name = "PATH")]
+    #[arg(long, global = true, value_name = "PATH", help = DB_HELP)]
     pub db: Option<String>,
     #[command(subcommand)]
     pub cmd: Option<Cmd>,

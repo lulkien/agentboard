@@ -14,7 +14,8 @@
 #   (k) dispatch - --print, refusal, --force reset, send, fallback line, warnings, sqlite vs surreal
 #   (l) wait     - match, timeout, ask/answer, --open, --epic, --after, bad arguments, identical
 #   (m) waitdeath- the server killed under a running wait: one line and exit 1, not a hang
-# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath)
+#   (n) cli      - `path` prints the data directory, a sqlite file / `--db <file>` is refused, a bad marker is one line
+# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath|cli)
 # runs one phase after the builds.
 # Needs a `surreal` binary. A missing one is a failure, never a skip.
 set -u
@@ -615,6 +616,46 @@ if want waitdeath; then
   check "wait ends with one line when the server dies" $?
   # and no server of ours is left running (the process is named surreal-db on this box)
   if ps -eo pid,args | rg -F "$DIR/data" | rg -v ' rg ' | rg -q surreal; then check "no server left behind" 1; else check "no server left behind" 0; fi
+fi
+
+# ---- (n) the CLI adapter in the surreal build --------------------------------------
+if want cli; then
+  echo "== (n) cli: path, wrong-kind board paths, schema marker"
+  clifail=0
+  # `path`: the surreal data directory, resolved like the store does; it creates nothing
+  got=$(env -u AGENTBOARD_DB XDG_STATE_HOME="$T/cli-state" "$T/ab-surreal" path)
+  echo "path (default):        $got"
+  [ "$got" = "$T/cli-state/agentboard/surreal" ] && [ ! -e "$T/cli-state" ] || clifail=1
+  got=$(AGENTBOARD_DB="$T/some-dir" "$T/ab-surreal" path); echo "path (AGENTBOARD_DB):  $got"
+  [ "$got" = "$T/some-dir" ] || clifail=1
+  got=$("$T/ab-surreal" --db "$T/other-dir" path); echo "path (--db):           $got"
+  [ "$got" = "$T/other-dir" ] || clifail=1
+  got=$(env -u AGENTBOARD_DB XDG_STATE_HOME="$T/cli-state" "$T/ab-sqlite" path); echo "path (sqlite build):   $got"
+  [ "$got" = "$T/cli-state/agentboard/board.db" ] || clifail=1
+  # a SQLite file where the data directory belongs: refused, nothing else printed, nothing created
+  AGENTBOARD_DB="$T/cli-sqlite.db" "$T/ab-sqlite" add x >/dev/null
+  want_line="agentboard: path '$T/cli-sqlite.db' is a SQLite file, not a SurrealDB directory. Move it aside (mv '$T/cli-sqlite.db' '$T/cli-sqlite.db.old') and retry."
+  for how in env flag; do
+    if [ "$how" = env ]; then out=$(AGENTBOARD_DB="$T/cli-sqlite.db" "$T/ab-surreal" ls 2>&1); else out=$(env -u AGENTBOARD_DB "$T/ab-surreal" --db "$T/cli-sqlite.db" ls 2>&1); fi
+    rc=$?
+    echo "sqlite file via $how: rc=$rc: $out" | cut -c1-200
+    [ "$rc" = 1 ] && [ "$out" = "$want_line" ] || clifail=1
+  done
+  [ -f "$T/cli-sqlite.db" ] && [ ! -e "$T/cli-sqlite.db.old" ] && [ -z "$(ls -A "$T" | rg '^cli-sqlite.db/')" ] || clifail=1
+  # the reverse: a directory given to the sqlite build
+  mkdir -p "$T/cli-a-dir"
+  out=$(AGENTBOARD_DB="$T/cli-a-dir" "$T/ab-sqlite" ls 2>&1); rc=$?
+  echo "directory to the sqlite build: rc=$rc: $out" | cut -c1-200
+  [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] && printf '%s' "$out" | rg -q "is a directory, not a SQLite board file" || clifail=1
+  # a wrong schema marker through the CLI: the store's one line, unchanged
+  new_server cli; prime
+  curl -s -u root:root -H 'surreal-ns: agentboard' -H 'surreal-db: board' -H 'Accept: application/json' \
+    -H 'Content-Type: text/plain' --data 'UPDATE meta:schema SET version = 99' "http://127.0.0.1:$PORT/sql" >/dev/null
+  out=$(ab ls 2>&1); rc=$?
+  echo "wrong marker: rc=$rc: $out" | cut -c1-200
+  [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] && printf '%s' "$out" | rg -q '^agentboard: board schema mismatch: found schema version 99, want version 1\.' || clifail=1
+  stop_server
+  check "cli adapter: path, wrong-kind refusals, marker line" $clifail
 fi
 
 echo
