@@ -114,20 +114,30 @@ agentboard --actor <manager> wait T7 --status review,needs_fix,blocking --timeou
 
 ## 6. Review loop
 
+**The coder tests its own behaviour; the reviewer reviews logic.** The worker that made
+the change runs every gate its goal names — build, suites, and a throwaway-board proof
+for behaviour changes — and pastes the real output into `report` before it sets `review`;
+a row that arrives with a gate unrun is reopened, not accepted. The reviewer reads the
+diff for logic, edge cases and whether the pasted evidence proves the claim: it does not
+re-run the coder's suites, and one spot command when a claim looks wrong is the whole
+allowance. Nothing is duplicated for ceremony — a second full run mostly teaches the
+author to trust somebody else's transcript.
+
 ```
 task  ->  review  ->  fix  ->  re-check  ->  done  ->  renew
 ```
 
-1. Worker claims, works, finishes `report` + `status=review`.
+1. Worker claims, works, tests it itself, pastes the gate lines into `report`, sets `review`.
 2. Manager reads report, files review task under same epic, dispatches reviewer.
-3. Reviewer reads diff + report: clean → review task `done`; findings → files fix task
-   itself (`parent=<review task>`), sets own row `needs_fix`.
+3. Reviewer reads the diff for logic, edge cases and the evidence: clean → review task
+   `done`; findings → files fix task itself (`parent=<review task>`), sets own row `needs_fix`.
 4. Coder fixes, answers each finding in `report`, sets fix task `review`. Coder never
    sets fix task `done`, never closes review task.
 5. Reviewer re-checks own findings. All closed → fix task `done` with evidence, then
    review task `done`. Still open → `note` naming it, fix task `needs_fix`, loop.
-6. Manager re-runs gates in tree, closes task + epic when every row `done` or
-   `dropped`.
+6. Manager checks the report against the goal, then closes task + epic when every row
+   `done` or `dropped` — any re-run of a gate goes to an idle worker, not the manager's
+   shell, and never back to the coder's reviewer.
 
 Status ownership: coder `ready`/`needs_fix` → `working` → `review`; reviewer `review` →
 `done`|`needs_fix` on both kinds; manager `ready` (re-arm crashed row), `dropped`, `done`
