@@ -6,6 +6,9 @@ agentboard. Each `skills/<name>/` is one skill (a `SKILL.md` plus optional
 
 - `agentboard-manager` — the manager's operating loop: file, dispatch, watch,
   gate, review.
+- `team-manager` — the same job as an operating procedure any agent can follow:
+  topology and actors, epic/task/subtask recipes, dispatch and wait, the review
+  loop, the renew-conversation cycle, recovery table.
 
 ## Install
 
@@ -22,5 +25,6 @@ stale; re-run the installer with `--force` after pulling.
 
 ## Companion skills
 
-`agentboard-manager` refers to `herdr-kit` and `subagent-team-setup`. Those live
-outside this repo.
+`team-manager` and `agentboard-manager` both assume the `herdr` skill for pane
+mechanics, and one of `claude-code` / `opencode` for the worker that sits in a
+pane. Those live outside this repo.
