@@ -117,11 +117,15 @@ agentboard --actor <manager> wait T7 --status review,needs_fix,blocking --timeou
 **The coder tests its own behaviour; the reviewer reviews logic.** The worker that made
 the change runs every gate its goal names — build, suites, and a throwaway-board proof
 for behaviour changes — and pastes the real output into `report` before it sets `review`;
-a row that arrives with a gate unrun is reopened, not accepted. The reviewer reads the
-diff for logic, edge cases and whether the pasted evidence proves the claim: it does not
-re-run the coder's suites, and one spot command when a claim looks wrong is the whole
-allowance. Nothing is duplicated for ceremony — a second full run mostly teaches the
-author to trust somebody else's transcript.
+a row that arrives with a gate unrun is reopened, not accepted. **Every executable step
+belongs to the coder**, not just tests: `cargo install`, a build for the target,
+`devtool_build` / `devtool_deploy_target`, flashing a board, running the binary there and
+driving the flow that proves it. The reviewer is a team lead: it reads the diff and the
+pasted evidence, reviews the logic and the edge cases, and files feedback — it does not
+build, deploy, install, flash or drive hardware, and it does not re-run the coder's suites
+(one spot command when a claim looks wrong is the whole allowance). Nothing is duplicated
+for ceremony — a second full run mostly teaches the author to trust somebody else's
+transcript.
 
 ```
 task  ->  review  ->  fix  ->  re-check  ->  done  ->  renew
