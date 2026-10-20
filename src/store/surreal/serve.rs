@@ -148,19 +148,10 @@ pub fn unavailable(s: &Settings, why: &str) -> String {
     )
 }
 
-fn spawn(bin: &Path, s: &Settings) -> Result<std::process::Child, String> {
-    if !bin.is_file() {
-        return Err(format!("spawn {}: no such file", bin.display()));
-    }
-    std::fs::create_dir_all(&s.dir).map_err(|e| format!("data dir {}: {e}", s.dir.display()))?;
-    let log = log_path(s);
-    let out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log)
-        .map_err(|e| format!("log {}: {e}", log.display()))?;
-    let err = out.try_clone().map_err(|e| e.to_string())?;
-    let args = [
+/// The arguments the server is started with. The schema-refusal hint
+/// (`pkill -f 'bind <url>'`) must match this command line; a test holds them together.
+pub fn server_args(s: &Settings) -> Vec<String> {
+    vec![
         "db".to_owned(),
         "start".into(),
         "--no-banner".into(),
@@ -173,7 +164,22 @@ fn spawn(bin: &Path, s: &Settings) -> Result<std::process::Child, String> {
         "--password".into(),
         s.pass.clone(),
         format!("surrealkv://{}", s.dir.display()),
-    ];
+    ]
+}
+
+fn spawn(bin: &Path, s: &Settings) -> Result<std::process::Child, String> {
+    if !bin.is_file() {
+        return Err(format!("spawn {}: no such file", bin.display()));
+    }
+    std::fs::create_dir_all(&s.dir).map_err(|e| format!("data dir {}: {e}", s.dir.display()))?;
+    let log = log_path(s);
+    let out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .map_err(|e| format!("log {}: {e}", log.display()))?;
+    let err = out.try_clone().map_err(|e| e.to_string())?;
+    let args = server_args(s);
     // Own session, so the server outlives the call (and its terminal) that started
     // it. `setsid` calls setsid(2) on itself and execs when it is not a group
     // leader, which a spawned child is not, so the pid stays the server's. Without

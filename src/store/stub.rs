@@ -5,7 +5,7 @@
 use super::Ref;
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 
-const STUB: &str = "surreal backend is not implemented yet: this build has the board seam only (see docs/surrealdb-migration.md)";
+pub(super) const STUB: &str = "surreal backend is not implemented yet: this build has the board seam only (see docs/surrealdb-migration.md)";
 
 fn stub<T>() -> Result<T, String> {
     Err(STUB.to_owned())

@@ -6,6 +6,7 @@
 
 mod lock;
 mod serve;
+mod tasks;
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -16,8 +17,139 @@ use surrealdb::engine::remote::ws::{Client, Ws};
 use surrealdb::opt::auth::Root;
 use tokio::runtime::Runtime;
 
-/// Replaced by the real implementation as the ports land.
-pub use super::stub::StubBoard as SurrealBoard;
+use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
+use super::stub::StubBoard;
+
+/// Task operations are ported; everything else is still the stub.
+pub struct SurrealBoard;
+
+impl Board for SurrealBoard {
+    fn add(&self, actor: &str, task: &NewTask<'_>) -> Result<String, String> {
+        tasks::add(actor, task)
+    }
+    fn edit(&self, actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError> {
+        tasks::edit(actor, id, e)
+    }
+    fn set_parent(&self, actor: &str, id: i64, parent: Option<i64>) -> Result<String, String> {
+        tasks::set_parent(actor, id, parent)
+    }
+    fn claim(&self, actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimError> {
+        tasks::claim(actor, id, ttl_s)
+    }
+    fn apply(&self, actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
+        tasks::apply(actor, id, p)
+    }
+    fn note(&self, actor: &str, id: i64, body: &str) -> Result<String, String> {
+        tasks::note(actor, id, body)
+    }
+    fn report(&self, actor: &str, id: i64, body: &str) -> Result<String, String> {
+        tasks::report(actor, id, body)
+    }
+    fn ask(&self, actor: &str, id: i64, question: &str) -> Result<String, String> {
+        tasks::ask(actor, id, question)
+    }
+    fn answer(&self, actor: &str, id: i64, text: &str) -> Result<String, String> {
+        tasks::answer(actor, id, text)
+    }
+    fn finish(
+        &self,
+        actor: &str,
+        id: i64,
+        status: &str,
+        summary: &str,
+        commit: Option<&str>,
+    ) -> Result<String, String> {
+        tasks::finish(actor, id, status, summary, commit)
+    }
+    fn block(&self, actor: &str, id: i64, reason: &str) -> Result<String, String> {
+        tasks::block(actor, id, reason)
+    }
+    fn heartbeat(&self, actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
+        tasks::heartbeat(actor, id, ttl_s)
+    }
+    fn list(
+        &self,
+        status: Option<&str>,
+        assignee: Option<&str>,
+        limit: usize,
+    ) -> Result<String, String> {
+        tasks::list(status, assignee, limit)
+    }
+    fn get(&self, id: i64, full: bool) -> Result<String, String> {
+        tasks::get(id, full)
+    }
+    fn children(&self, of: super::Ref) -> Result<String, String> {
+        tasks::children(of)
+    }
+    fn brief(&self, since_min: i64) -> Result<String, String> {
+        StubBoard.brief(since_min)
+    }
+    fn epic_add(
+        &self,
+        actor: &str,
+        title: &str,
+        description: &str,
+        goal: &str,
+        path: Option<&str>,
+    ) -> Result<String, String> {
+        StubBoard.epic_add(actor, title, description, goal, path)
+    }
+    fn epic_list(&self, status: Option<&str>) -> Result<String, String> {
+        StubBoard.epic_list(status)
+    }
+    fn epic_get(&self, id: i64, full: bool) -> Result<String, String> {
+        StubBoard.epic_get(id, full)
+    }
+    fn epic_status(
+        &self,
+        actor: &str,
+        id: i64,
+        status: &str,
+        note: Option<&str>,
+    ) -> Result<String, String> {
+        StubBoard.epic_status(actor, id, status, note)
+    }
+    fn epic_edit(&self, actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, String> {
+        StubBoard.epic_edit(actor, id, e)
+    }
+    fn sessions(&self) -> Result<String, String> {
+        StubBoard.sessions()
+    }
+    fn prune(&self, dry_run: bool) -> Result<String, String> {
+        StubBoard.prune(dry_run)
+    }
+    fn unregister(&self, name: &str) -> Result<String, String> {
+        StubBoard.unregister(name)
+    }
+    fn register_session(
+        &self,
+        name: &str,
+        agent: &str,
+        cwd: &str,
+        task: Option<i64>,
+    ) -> Result<String, String> {
+        StubBoard.register_session(name, agent, cwd, task)
+    }
+    fn tail(&self, name: &str, lines: usize) -> Result<String, String> {
+        StubBoard.tail(name, lines)
+    }
+    fn send(&self, name: &str, text: &str) -> Result<String, String> {
+        StubBoard.send(name, text)
+    }
+    fn dispatch(
+        &self,
+        actor: &str,
+        id: i64,
+        to: Option<&str>,
+        force: bool,
+        print_only: bool,
+    ) -> Result<String, String> {
+        StubBoard.dispatch(actor, id, to, force, print_only)
+    }
+    async fn wait(&self, w: Wait<'_>) -> Result<Outcome, String> {
+        StubBoard.wait(w).await
+    }
+}
 
 /// Bumped when the schema below changes; a board with another value is refused.
 pub const SCHEMA_VERSION: i64 = 1;
@@ -125,13 +257,14 @@ pub fn check_version(url: &str, body: &str) -> Result<(), String> {
 }
 
 /// The refusal for a database that is not a current agentboard board.
-pub fn schema_refusal(found: Option<i64>, dir: &Path) -> String {
+pub fn schema_refusal(found: Option<i64>, s: &Settings) -> String {
     let found = found.map_or("no schema marker".to_owned(), |v| {
         format!("schema version {v}")
     });
     format!(
-        "board schema mismatch: found {found}, want version {SCHEMA_VERSION}. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'surreal db start'), move the data dir aside (mv {0} {0}.old) and retry.",
-        dir.display()
+        "board schema mismatch: found {found}, want version {SCHEMA_VERSION}. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {1}'), move the data dir aside (mv {0} {0}.old) and retry.",
+        s.dir.display(),
+        s.url
     )
 }
 
@@ -239,7 +372,7 @@ fn db_err(e: &surrealdb::Error) -> String {
 
 /// Brings the database to the current schema, or refuses it. The caller holds
 /// the write lock, so two processes never bootstrap at once.
-async fn bootstrap(db: &Db, dir: &Path) -> Result<Bootstrap, String> {
+async fn bootstrap(db: &Db, s: &Settings) -> Result<Bootstrap, String> {
     let mut r = db
         .query("SELECT version FROM meta:schema")
         .await
@@ -249,7 +382,7 @@ async fn bootstrap(db: &Db, dir: &Path) -> Result<Bootstrap, String> {
     if let Some(v) = found
         && v != SCHEMA_VERSION
     {
-        return Err(schema_refusal(Some(v), dir));
+        return Err(schema_refusal(Some(v), s));
     }
     if found.is_none() {
         let mut r = db.query("INFO FOR DB").await.map_err(|e| db_err(&e))?;
@@ -260,7 +393,7 @@ async fn bootstrap(db: &Db, dir: &Path) -> Result<Bootstrap, String> {
             .and_then(|t| t.as_object())
             .map_or(0, serde_json::Map::len);
         if tables > 0 {
-            return Err(schema_refusal(None, dir));
+            return Err(schema_refusal(None, s));
         }
     }
     db.query(SCHEMA)
@@ -283,44 +416,109 @@ pub fn connect(s: &Settings) -> Result<Conn, String> {
     connect_with(s, &serve::Timing::default(), None, lock::DEFAULT_WAIT)
 }
 
-/// `connect` with the budgets and the server binary injectable for tests.
+/// `connect` with the budgets and the server binary injectable for tests. Takes
+/// no lock beyond the first bootstrap.
 pub fn connect_with(
     s: &Settings,
     t: &serve::Timing,
     bin: Option<&Path>,
     lock_wait: Duration,
 ) -> Result<Conn, String> {
+    let sess = session_with(s, t, bin, lock_wait, false)?;
+    Ok(Conn {
+        db: sess.db,
+        bootstrap: sess.bootstrap,
+        spawned_pid: sess.spawned_pid,
+    })
+}
+
+/// A connected, bootstrapped database handle. A write session also holds the
+/// cross-process write lock until it is dropped: the whole read-modify-write
+/// runs inside it. A read session holds none, because every write is one
+/// server-side transaction, so a read sees a write whole or not at all.
+pub struct Session {
+    pub db: Db,
+    pub bootstrap: Bootstrap,
+    pub spawned_pid: Option<u32>,
+    _lock: Option<lock::WriteLock>,
+}
+
+/// A session with settings and budgets from the environment (what a verb uses).
+pub fn session(write: bool) -> Result<Session, String> {
+    session_with(
+        &Settings::from_env()?,
+        &serve::Timing::default(),
+        None,
+        lock::DEFAULT_WAIT,
+        write,
+    )
+}
+
+/// Runs a future on the shared runtime from the sync surface. The CLI's `main`
+/// is itself async, and `block_on` panics inside a runtime, so when the caller is
+/// already on one the future runs on a short-lived helper thread instead.
+pub fn block_on<T: Send>(fut: impl std::future::Future<Output = T> + Send) -> T {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::scope(|s| {
+            s.spawn(|| runtime().block_on(fut))
+                .join()
+                .unwrap_or_else(|e| std::panic::resume_unwind(e))
+        })
+    } else {
+        runtime().block_on(fut)
+    }
+}
+
+fn session_with(
+    s: &Settings,
+    t: &serve::Timing,
+    bin: Option<&Path>,
+    lock_wait: Duration,
+    write: bool,
+) -> Result<Session, String> {
     let served = serve::ensure_up(s, t, bin)?;
     let (_, body) = serve::http_get(&s.url, "/version", t.probe.max(Duration::from_secs(1)))
         .map_err(|e| serve::unavailable(s, &format!("/version failed ({e}) for")))?;
     check_version(&s.url, &body)?;
     std::fs::create_dir_all(&s.dir).map_err(|e| format!("data dir {}: {e}", s.dir.display()))?;
-    let _guard = lock::acquire(&s.dir, lock_wait)?;
-    runtime().block_on(async {
-        let work = async {
-            let db = Surreal::new::<Ws>(s.url.as_str())
-                .await
-                .map_err(|e| format!("board server at {}: {e}", s.url))?;
-            db.signin(Root {
-                username: &s.user,
-                password: &s.pass,
-            })
-            .await
-            .map_err(|e| format!("board server at {}: sign-in failed: {e}", s.url))?;
-            db.use_ns(NAMESPACE)
-                .use_db(DATABASE)
-                .await
-                .map_err(|e| db_err(&e))?;
-            let bootstrap = bootstrap(&db, &s.dir).await?;
-            Ok(Conn {
-                db,
-                bootstrap,
-                spawned_pid: served.spawned_pid,
-            })
-        };
-        // A server can answer /health and /version and still never finish the
-        // WebSocket upgrade; bound the whole handshake, sign-in and bootstrap.
-        match tokio::time::timeout(t.connect, work).await {
+    // A write takes the lock before it reads anything, so nothing it reads can
+    // change under it.
+    let mut guard = if write {
+        Some(lock::acquire(&s.dir, lock_wait)?)
+    } else {
+        None
+    };
+    // A server can answer /health and /version and still never finish the
+    // WebSocket upgrade; every phase is bounded.
+    let db = bounded(s, t, open_db(s))?;
+    let found = bounded(s, t, marker_version(&db))?;
+    let bootstrap = match found {
+        Some(v) if v == SCHEMA_VERSION => Bootstrap::Already,
+        Some(v) => return Err(schema_refusal(Some(v), s)),
+        None => {
+            // First use of this database: bootstrap under the lock so two
+            // processes never define the schema at once.
+            if guard.is_none() {
+                guard = Some(lock::acquire(&s.dir, lock_wait)?);
+            }
+            bounded(s, t, bootstrap(&db, s))?
+        }
+    };
+    Ok(Session {
+        db,
+        bootstrap,
+        spawned_pid: served.spawned_pid,
+        _lock: if write { guard } else { None },
+    })
+}
+
+fn bounded<T: Send>(
+    s: &Settings,
+    t: &serve::Timing,
+    fut: impl std::future::Future<Output = Result<T, String>> + Send,
+) -> Result<T, String> {
+    block_on(async {
+        match tokio::time::timeout(t.connect, fut).await {
             Ok(r) => r,
             Err(_) => Err(serve::unavailable(
                 s,
@@ -331,6 +529,32 @@ pub fn connect_with(
             )),
         }
     })
+}
+
+async fn open_db(s: &Settings) -> Result<Db, String> {
+    let db = Surreal::new::<Ws>(s.url.as_str())
+        .await
+        .map_err(|e| format!("board server at {}: {e}", s.url))?;
+    db.signin(Root {
+        username: &s.user,
+        password: &s.pass,
+    })
+    .await
+    .map_err(|e| format!("board server at {}: sign-in failed: {e}", s.url))?;
+    db.use_ns(NAMESPACE)
+        .use_db(DATABASE)
+        .await
+        .map_err(|e| db_err(&e))?;
+    Ok(db)
+}
+
+async fn marker_version(db: &Db) -> Result<Option<i64>, String> {
+    let mut r = db
+        .query("SELECT version FROM meta:schema")
+        .await
+        .map_err(|e| db_err(&e))?;
+    let marker: Vec<Marker> = r.take(0).map_err(|e| db_err(&e))?;
+    Ok(marker.first().map(|m| m.version))
 }
 
 #[cfg(test)]
@@ -415,6 +639,29 @@ mod tests {
                 "{bad}: {e}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn block_on_works_when_called_from_inside_a_runtime() {
+        // The CLI's `main` is async; `runtime().block_on` here would panic with
+        // "Cannot start a runtime from within a runtime".
+        assert_eq!(block_on(async { 7 }), 7);
+    }
+
+    #[test]
+    fn the_pkill_hint_matches_the_command_line_the_server_is_started_with() {
+        let s = Settings::defaults_for_test("/tmp/ab-hint/data", "127.0.0.1:18720");
+        let line = schema_refusal(Some(99), &s);
+        let pattern = line
+            .split_once("pkill -f '")
+            .and_then(|(_, rest)| rest.split_once('\''))
+            .map(|(p, _)| p)
+            .expect("the refusal names a pkill pattern");
+        let cmdline = serve::server_args(&s).join(" ");
+        assert!(
+            cmdline.contains(pattern),
+            "pkill pattern {pattern:?} does not match the server command line {cmdline:?}"
+        );
     }
 
     // ---- tests against a real server -------------------------------------------
@@ -589,10 +836,11 @@ mod tests {
         });
         let err = connect(&srv.settings).err().unwrap();
         let dir = srv.settings.dir.display();
+        let url = &srv.settings.url;
         assert_eq!(
             err,
             format!(
-                "board schema mismatch: found schema version 99, want version 1. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'surreal db start'), move the data dir aside (mv {dir} {dir}.old) and retry."
+                "board schema mismatch: found schema version 99, want version 1. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {url}'), move the data dir aside (mv {dir} {dir}.old) and retry."
             )
         );
         println!("wrong-marker refusal: {err}");

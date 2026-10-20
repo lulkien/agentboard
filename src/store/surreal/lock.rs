@@ -16,12 +16,14 @@ const RETRY_EVERY: Duration = Duration::from_millis(10);
 
 /// Held for the life of the value; dropping it releases the lock.
 pub struct WriteLock {
-    file: File,
+    file: Option<File>,
 }
 
 impl Drop for WriteLock {
     fn drop(&mut self) {
-        let _ = self.file.unlock();
+        if let Some(f) = &self.file {
+            let _ = f.unlock();
+        }
     }
 }
 
@@ -32,7 +34,25 @@ pub fn lock_path(dir: &Path) -> PathBuf {
 /// Takes the exclusive lock on `<dir>/board.lock`, retrying until `wait` elapses.
 // std's file locks need Rust 1.89, the `rust-version` in Cargo.toml.
 pub fn acquire(dir: &Path, wait: Duration) -> Result<WriteLock, String> {
+    if unsafe_disabled() {
+        return Ok(WriteLock { file: None });
+    }
     acquire_named(dir, LOCK_FILE, wait)
+}
+
+/// `AGENTBOARD_UNSAFE_NO_WRITE_LOCK=1` turns the write lock into a no-op. It exists
+/// only so `tests/surreal.sh` can show its contention checks fail without the lock
+/// (a mutation check), and it is compiled into debug builds only: a release binary
+/// has no such switch and ignores the variable, so a stray environment variable can
+/// never switch off the one cross-process guard.
+#[cfg(debug_assertions)]
+fn unsafe_disabled() -> bool {
+    std::env::var("AGENTBOARD_UNSAFE_NO_WRITE_LOCK").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+#[cfg(not(debug_assertions))]
+fn unsafe_disabled() -> bool {
+    false
 }
 
 /// Same lock on `<dir>/<name>`; the server start-up uses its own file.
@@ -54,7 +74,7 @@ pub fn acquire_named(dir: &Path, name: &str, wait: Duration) -> Result<WriteLock
                 let _ = file.rewind();
                 let _ = write!(file, "{}", std::process::id());
                 let _ = file.flush();
-                return Ok(WriteLock { file });
+                return Ok(WriteLock { file: Some(file) });
             }
             Err(TryLockError::WouldBlock) => {
                 if start.elapsed() >= wait {
