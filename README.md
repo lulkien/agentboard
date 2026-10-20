@@ -1,13 +1,15 @@
 # agentboard
 
-A task board shared by a handful of CLI coding agents (Claude Code in tmux,
-Hermes, subagents) plus you. 12 MCP tools over stdio, one SQLite file, no
-server to run. The point is to replace "write status to NOTES.md and hope
-somebody reads it" with a board that answers in one line and costs few tokens.
+A task board shared by a handful of CLI coding agents (Claude Code in a herdr
+pane, Hermes, subagents) plus you. 19 MCP tools over stdio and one board, stored
+either in a single SQLite file (default) or in SurrealDB. The point is to replace
+"write status to NOTES.md and hope somebody reads it" with a board that answers in
+one line and costs few tokens.
 
 ## Model
 
-Four tables (`src/schema.sql`):
+Four kinds of record — four tables in SQLite (`src/schema.sql`), four record types in
+SurrealDB (`src/store/surreal/`):
 
     epics     id, title, description, goal, status, path, created_at, updated_at,
               completed_at                               -- E1, E2...; never leased
@@ -15,7 +17,7 @@ Four tables (`src/schema.sql`):
               parent_id, needs, report, commit_ref, lease_until, created_at, updated_at,
               started_at, completed_at
     events    seq, task_id | epic_id, actor, kind, body, ts  -- append-only, one timeline
-    sessions  name, agent, cwd, task_id, seen, status    -- tmux registry
+    sessions  name, agent, cwd, task_id, seen, status    -- live panes: herdr or tmux
 
 An **epic** is not a task: it has its own ids (`E1`), is never claimed, leased or
 dispatched, and carries the project `path` its work belongs to. A task points at an
@@ -45,6 +47,8 @@ completion is one row; nothing is mutable history.
 | `epic_list` | 1 line/epic | epics (default open): id, status, done/total, path, title |
 | `epic_get` | ~10 lines | status, path, task counts, description, goal, last 8 events; `full=true` unclipped |
 | `epic_update` | 1 line ack | set an epic `open`/`done`/`dropped`; closing is never automatic |
+| `epic_edit` | 1 line ack | amend title, description, goal, path (only the fields passed); logs old/new lengths |
+| `task_edit` | 1 line ack | amend title, description, goal, priority, assignee; refused while `working` with a live lease, because the worker is reading that text |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |
@@ -52,22 +56,25 @@ completion is one row; nothing is mutable history.
 | `board_brief` | ~1 screen | counts + one `EPIC` line per open epic (done/non-dropped tasks, blocking/needs_fix counts, path) + open tasks that belong to no epic + recent completions |
 | `session_list` | 1 line/session | registered sessions and their task; `up` means a live tmux session of that name, or a herdr agent with that name and the registered agent type |
 | `session_register` | ack | map session → task |
-| `session_tail` | N lines | last N lines of a tmux pane (tmux only; herdr-only sessions fail) |
+| `session_tail` | N lines | last N lines of the agent's pane, herdr first and tmux as fallback; bounded by `$AGENTBOARD_DELIVER_TIMEOUT_MS` |
 | `session_send` | ack | type a line into a pane (steer another agent) |
 
-Twelve tools is deliberate: every tool schema is resent on every request, so a
+Nineteen tools is deliberate: every tool schema is resent on every request, so a
 wide surface is a permanent token tax. `answer` is not a tool — it is
 `task_update(status="running", note=...)`.
 
 ## Why it is shaped this way
 
-- **stdio, not HTTP.** Each client spawns its own process; there is no daemon,
-  no port, no session id. Concurrent writers are fine because SQLite is the
-  shared state (WAL, `busy_timeout=5s`).
-- **Claim = `BEGIN IMMEDIATE` + guarded `UPDATE`.** The guard is on
-  `lease_until`, so the loser of a race retries instead of double-assigning.
+- **stdio, not HTTP.** Each client spawns its own process; there is no session id.
+  Table stakes differ per backend: with SQLite the file is the shared state (WAL,
+  `busy_timeout=5s`); with SurrealDB every process talks to one local daemon over
+  `127.0.0.1:18720`, which the first caller starts and the rest reuse.
+- **Claim = one guarded write.** SQLite wraps a `BEGIN IMMEDIATE` and a guarded
+  `UPDATE`; SurrealDB runs the same guarded statement against the server. The guard
+  is on `lease_until`, so the loser of a race retries instead of double-assigning.
   Measured: 8 workers, 80 tasks, 0 duplicates, 116 ms total, ~1.4 ms per
-  cold-process claim.
+  cold-process claim. An *embedded* SurrealKV directory would break this — four
+  processes each claimed all eight tasks — which is why the daemon is required.
 - **Leases, not heartbeats-by-default.** A claim expires (30 min default) and
   becomes reclaimable; a dead session cannot wedge the board. `heartbeat=true`
   extends it.
@@ -76,28 +83,76 @@ wide surface is a permanent token tax. `answer` is not a tool — it is
 - **No agent-side polling.** `task_wait` blocks in the server (200 ms internal
   poll) and returns only the delta, so an agent waiting 10 minutes spends one
   tool call, not forty.
-- **One implementation, two front doors.** `src/store.rs` is used by both the
-  MCP handlers and the CLI. Shell hooks (Claude Code `Stop`/`PreToolUse`) can
+- **One implementation, two front doors, two backends.** `src/store/board.rs` is the
+  trait; `src/store/sqlite/` and `src/store/surreal/` implement it; the MCP handlers
+  and the CLI both go through it, so a rule exists once. Shell hooks (Claude Code `Stop`/`PreToolUse`) can
   call `agentboard note` with zero model tokens.
+
+## Storage backends
+
+Two exclusive build features. A binary carries exactly one backend, chosen at compile
+time; building with neither or with both fails on one `compile_error!` line.
+
+| | `sqlite` (default) | `surreal` |
+|---|---|---|
+| board | one file | a directory behind a SurrealDB daemon |
+| server | none | one local daemon, auto-started |
+| right for | one box, one board file, zero setup | many processes claiming at once, a real query engine |
+
+    cargo build --release                                    # sqlite
+    cargo build --release --no-default-features --features surreal
+
+Which build am I running? `agentboard path` prints a `.db` file for SQLite and a
+directory for SurrealDB. Behaviour, not a timestamp, is the proof.
+
+Where the board lives:
+
+| | path |
+|---|---|
+| sqlite | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/board.db` |
+| surreal | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/surreal` (a directory) |
+
+Surreal settings, all optional: `$AGENTBOARD_SURREAL_URL` (`127.0.0.1:18720`, loopback
+only), `$AGENTBOARD_SURREAL_USER` and `$AGENTBOARD_SURREAL_PASS` (both default `root`).
+The first call starts the daemon itself — detached, log beside the data dir — polls
+`/health`, refines the `/version` answer to 2.7.x, and answers in one line if anything
+is wrong (no binary, port taken by something else, server that never answers). The
+`surreal` binary must be on `PATH` or at `~/.surrealdb/surreal`. A server answering with
+any version other than `surrealdb-2.7.x` is refused by name, and the Rust 3.x crate is not
+usable at all on this tree: its `diskann` dependency fails to compile. Stop the daemon with
+`pkill -f 'bind 127.0.0.1:18720'`.
+
+There is no migration path between backends, and no migration path between board
+versions: switching either one means a new board. Stop every agent first — each MCP
+server is a process of the binary that started it, and an old build will happily
+recreate the old schema in the new location.
 
 ## Build and install
 
     cd ~/Projects/agentboard
-    cargo build --release            # ~4 s incremental, SQLite bundled
+    cargo build --release                                  # ~4 s incremental, SQLite bundled
+    cargo install --path . --locked                        # what every agent execs
+
+For a SurrealDB board, install the other flavour — same lockfile, different feature:
+
+    cargo install --path . --locked --no-default-features --features surreal
+
+Agents run `~/.cargo/bin/agentboard`, so install after changing the CLI or MCP surface;
+`./target/release/agentboard` is only the checkout, and `tests/mcp_client.py` drives it.
 
 Hermes (`~/.hermes/config.yaml`):
 
     mcp_servers:
       agentboard:
-        command: /home/kien1.luu/Projects/agentboard/target/release/agentboard
+        command: /home/kien1.luu/.cargo/bin/agentboard
         env:
           AGENTBOARD_ACTOR: hermes
         enabled: true
 
-Claude Code, one session per tmux pane:
+Claude Code, one session per herdr pane:
 
     claude mcp add agentboard --env AGENTBOARD_ACTOR=claude1 \
-      -- /home/kien1.luu/Projects/agentboard/target/release/agentboard
+      -- /home/kien1.luu/.cargo/bin/agentboard
 
 Then register the pane once so the board can map task → session:
 
@@ -130,12 +185,14 @@ unknown task, bad value) is exit 1 with an `agentboard: ` prefix on stderr;
 code). Free-text values that begin with `-` are taken literally, so `note T7 "- done"`
 works and `note T7 --bogus` stores `--bogus`; prefer `--flag=value` when unsure.
 
-Global: `--actor NAME`, `--db PATH` (or `$AGENTBOARD_DB`).
+Global: `--actor NAME`, `--db PATH` (or `$AGENTBOARD_DB`: a file on SQLite, a data dir
+on SurrealDB).
 `$AGENTBOARD_DELIVER_TIMEOUT_MS` (default 2000) bounds each herdr/tmux call made by
 `dispatch`, `send`, `tail` and `sessions`: a wedged pane client is killed (with its
 process group) at the deadline instead of hanging the caller, and `dispatch` falls
 back from herdr to tmux. Lower it only to test the kill path.
-Default db: `$XDG_STATE_HOME/agentboard/board.db`.
+Default board: `$XDG_STATE_HOME/agentboard/board.db` (SQLite) or
+`$XDG_STATE_HOME/agentboard/surreal` (SurrealDB).
 
 ## Tests
 
@@ -145,6 +202,17 @@ Default db: `$XDG_STATE_HOME/agentboard/board.db`.
     ./tests/race.sh               # 8 concurrent claimers: 80 claims, 80 unique, ~124 ms
     bash tests/wait.sh            # long-poll returns on the event, not the timeout
     ./target/release/agentboard < tests/mcp-smoke.jsonl   # handshake + tool list
+
+The SurrealDB backend has its own suite, which builds both feature sets and a debug
+`surreal` binary, then restores the default release build (about a minute once warm):
+
+    bash tests/surreal.sh         # parity, claims under 8 processes, auto-serve, outage, starvation
+
+Unit tests that need a live server print `SKIP` and pass when no `surreal` binary is
+found; on a box that carries one, `AGENTBOARD_REQUIRE_SURREAL=1` turns that skip into a
+failure so a surreal change cannot pass unnoticed:
+
+    AGENTBOARD_REQUIRE_SURREAL=1 cargo test --no-default-features --features surreal
 
 Static gates, run before every commit (no CI): `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings`; both must print nothing.
@@ -172,7 +240,7 @@ correct, the ordering is the client's.
 ## Not in scope
 
 No web UI, sprints, story points, attachments, or multi-user auth. One board,
-one user, a few agents. If it needs more than 12 tools, it is not this tool.
+one user, a few agents. If it needs more than 19 tools, it is not this tool.
 
 ## Do agents need a skill for this?
 
