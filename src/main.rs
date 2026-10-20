@@ -284,9 +284,10 @@ async fn main() -> ExitCode {
     };
     store::set_overrides(cli.db, cli.actor);
     let actor = store::default_actor();
-    // `path` only prints the path and `serve` has its own start-up; every other verb
-    // reaches the store, so a board path of the wrong kind stops it first.
-    if !matches!(cli.cmd, None | Some(Cmd::Serve | Cmd::Path)) {
+    // `path` only prints the path; every other verb, `serve` included, reaches the store,
+    // so a board path of the wrong kind stops it first. For `serve` that is before the
+    // transport starts: one line on stderr, nothing on stdout, no tool call needed.
+    if !matches!(cli.cmd, Some(Cmd::Path)) {
         let refused = store::board_path().and_then(|p| path_refusal(&p).map_or(Ok(()), Err));
         if let Err(e) = refused {
             eprintln!("agentboard: {e}");

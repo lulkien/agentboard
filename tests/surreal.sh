@@ -15,7 +15,9 @@
 #   (l) wait     - match, timeout, ask/answer, --open, --epic, --after, bad arguments, identical
 #   (m) waitdeath- the server killed under a running wait: one line and exit 1, not a hang
 #   (n) cli      - `path` prints the data directory, a sqlite file / `--db <file>` is refused, a bad marker is one line
-# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath|cli)
+#   (o) mcp      - serve refuses a wrong-kind board path; the MCP suite on the surreal build; a wait does
+#                  not block other tool calls
+# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath|cli|mcp)
 # runs one phase after the builds.
 # Needs a `surreal` binary. A missing one is a failure, never a skip.
 set -u
@@ -656,6 +658,109 @@ if want cli; then
   [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] && printf '%s' "$out" | rg -q '^agentboard: board schema mismatch: found schema version 99, want version 1\.' || clifail=1
   stop_server
   check "cli adapter: path, wrong-kind refusals, marker line" $clifail
+fi
+
+# ---- (o) the rmcp adapter on the surreal build -------------------------------------
+if want mcp; then
+  echo "== (o) mcp: serve's wrong-kind check, the MCP suite on the surreal build, a wait that does not block"
+  # serve refuses a board path of the wrong kind before the transport starts: one stderr line, rc 1,
+  # nothing on stdout (no protocol frame), no tool call needed.
+  AGENTBOARD_DB="$T/mcp-sqlite.db" "$T/ab-sqlite" add x >/dev/null
+  mkdir -p "$T/mcp-a-dir"
+  serve_fail=0
+  for how in serve default; do
+    if [ "$how" = serve ]; then args=(serve); else args=(); fi
+    AGENTBOARD_DB="$T/mcp-sqlite.db" "$T/ab-surreal" "${args[@]}" </dev/null >"$T/serve.out" 2>"$T/serve.err"; rc=$?
+    echo "surreal build ($how) on a sqlite file: rc=$rc stdout=$(wc -c <"$T/serve.out") bytes: $(cut -c1-130 "$T/serve.err")"
+    [ "$rc" = 1 ] && [ ! -s "$T/serve.out" ] && [ "$(wc -l <"$T/serve.err")" -eq 1 ] \
+      && rg -q "^agentboard: path '$T/mcp-sqlite.db' is a SQLite file, not a SurrealDB directory\." "$T/serve.err" || serve_fail=1
+    AGENTBOARD_DB="$T/mcp-a-dir" "$T/ab-sqlite" "${args[@]}" </dev/null >"$T/serve.out" 2>"$T/serve.err"; rc=$?
+    echo "sqlite build  ($how) on a directory: rc=$rc stdout=$(wc -c <"$T/serve.out") bytes: $(cut -c1-130 "$T/serve.err")"
+    [ "$rc" = 1 ] && [ ! -s "$T/serve.out" ] && [ "$(wc -l <"$T/serve.err")" -eq 1 ] \
+      && rg -q "^agentboard: path '$T/mcp-a-dir' is a directory, not a SQLite board file\." "$T/serve.err" || serve_fail=1
+  done
+  check "serve refuses a wrong-kind board path (stderr line, rc 1, empty stdout)" $serve_fail
+
+  # the whole MCP suite against the surreal build: a fresh server and a fresh data directory
+  new_server mcp
+  out=$(AGENTBOARD_TEST_BIN="$T/ab-surreal" AGENTBOARD_TEST_DB="$DIR/data" python3 tests/mcp_client.py 2>&1)
+  line=$(printf '%s\n' "$out" | rg '^[0-9]+/[0-9]+ checks passed$' | tail -1)
+  echo "MCP suite on the surreal build: ${line:-no summary line}"
+  printf '%s\n' "$out" | rg '^FAIL' | head -5
+  n=${line%%/*}; m=${line#*/}; m=${m%% *}
+  [ -n "$line" ] && [ "$n" = "$m" ] && [ "$n" -ge 121 ]; check "MCP suite passes on the surreal build" $?
+  stop_server
+
+  # a task_wait in flight does not block the server: another tool call is answered meanwhile
+  new_server mcp.wait
+  cat >"$T/mcp_wait.py" <<'EOF'
+import json, os, subprocess, sys, time
+p = subprocess.Popen([os.environ["BIN"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
+                     env={**os.environ, "AGENTBOARD_ACTOR": "c"})
+def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+def recv(): return json.loads(p.stdout.readline())
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}})
+recv()
+send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+def call(i, name, **a): send({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}})
+call(2, "task_add", title="waited on"); r = recv(); assert r["id"] == 2, r
+t0 = time.time()
+call(3, "task_wait", id="T1", kind="done", timeout_s=4)      # nothing will happen: a 4 s timeout
+time.sleep(0.5)
+call(4, "task_list")
+first = recv()
+meanwhile = time.time() - t0
+second = recv()
+total = time.time() - t0
+print(f"first reply id={first['id']} after {meanwhile:.1f}s; second reply id={second['id']} after {total:.1f}s")
+print("first :", first["result"]["content"][0]["text"].splitlines()[0])
+print("second:", second["result"]["content"][0]["text"].splitlines()[0])
+p.stdin.close(); p.wait(timeout=5)
+ok = first["id"] == 4 and second["id"] == 3 and meanwhile < 3.0 and total >= 3.5 \
+     and second["result"]["content"][0]["text"].startswith("timeout:")
+sys.exit(0 if ok else 1)
+EOF
+  BIN="$T/ab-surreal" python3 "$T/mcp_wait.py"; check "a pending task_wait does not block another tool call (surreal build)" $?
+  stop_server
+
+  # writes parked on the board write lock do not starve a read: two runtime workers, the lock held
+  # elsewhere, 8 task_add then a task_list on one stdio session. Every store call runs on the blocking
+  # pool, so the read is answered at once and the writes finish only after the lock frees.
+  new_server mcp.starve; prime
+  cat >"$T/mcp_starve.py" <<'EOF'
+import fcntl, json, os, subprocess, sys, time
+HOLD = 4.5
+p = subprocess.Popen([os.environ["BIN"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
+                     env={**os.environ, "AGENTBOARD_ACTOR": "c", "TOKIO_WORKER_THREADS": "2"})
+def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+def recv(): return json.loads(p.stdout.readline())
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}})
+recv()
+send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+def call(i, name, **a): send({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}})
+call(2, "task_list"); recv()                      # warm: the server is up and answering
+lock = open(os.path.join(os.environ["AGENTBOARD_DB"], "board.lock"), "a+")
+fcntl.flock(lock, fcntl.LOCK_EX)
+t0 = time.time()
+for i in range(8):
+    call(10 + i, "task_add", title=f"starve {i}")
+call(30, "task_list")
+at, got = {}, {}
+while 30 not in at:
+    r = recv(); at[r["id"]] = time.time() - t0; got[r["id"]] = r
+read_at = at[30]
+time.sleep(max(0.0, HOLD - (time.time() - t0)))
+fcntl.flock(lock, fcntl.LOCK_UN)
+while len(at) < 9:
+    r = recv(); at[r["id"]] = time.time() - t0; got[r["id"]] = r
+p.stdin.close(); p.wait(timeout=5)
+writes = [at[10 + i] for i in range(8)]
+print(f"task_list answered at {read_at:.2f}s (lock held {HOLD}s); 8 task_add answered at {min(writes):.2f}-{max(writes):.2f}s")
+ok = read_at < 1.0 and min(writes) >= HOLD - 0.5 and not any(got[10 + i]["result"].get("isError") for i in range(8))
+sys.exit(0 if ok else 1)
+EOF
+  BIN="$T/ab-surreal" python3 "$T/mcp_starve.py"; check "lock-blocked writes do not starve a read (2 workers, surreal build)" $?
+  stop_server
 fi
 
 echo

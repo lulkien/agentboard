@@ -36,13 +36,19 @@ fn claim_err(e: store::ClaimError) -> ErrorData {
     }
 }
 
-/// Runs a blocking store call (tmux subprocess) off the async runtime threads.
+/// Runs a store call off the async runtime threads. The store is synchronous: a
+/// sqlite busy timeout, the surreal write-lock retry and a tmux subprocess all park
+/// the calling thread, and parked reactor workers would stall every other tool.
+async fn offload<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("task join: {e}"))
+}
+
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| format!("task join: {e}"))?
+    offload(f).await?
 }
 
 macro_rules! run {
@@ -315,17 +321,22 @@ impl Board {
             Some(raw) => store::norm(raw).ok_or_else(|| err(format!("bad status {raw:?}")))?,
             None => "ready",
         };
-        let task = store::NewTask {
-            title: &a.title,
-            description: &a.description,
-            goal: &a.goal,
-            status,
-            assignee: a.assignee.as_deref(),
-            priority: a.priority.unwrap_or(100),
-            epic,
-            parent,
-        };
-        run!(store::add(&actor(), &task))
+        run!(
+            blocking(move || {
+                let task = store::NewTask {
+                    title: &a.title,
+                    description: &a.description,
+                    goal: &a.goal,
+                    status,
+                    assignee: a.assignee.as_deref(),
+                    priority: a.priority.unwrap_or(100),
+                    epic,
+                    parent,
+                };
+                store::add(&actor(), &task)
+            })
+            .await
+        )
     }
 
     #[tool(
@@ -337,11 +348,14 @@ impl Board {
         &self,
         Parameters(a): Parameters<ListArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        run!(store::list(
-            a.status.as_deref(),
-            a.assignee.as_deref(),
-            a.limit.unwrap_or(20).clamp(1, 200)
-        ))
+        run!(
+            blocking(move || store::list(
+                a.status.as_deref(),
+                a.assignee.as_deref(),
+                a.limit.unwrap_or(20).clamp(1, 200)
+            ))
+            .await
+        )
     }
 
     #[tool(
@@ -354,7 +368,7 @@ impl Board {
         Parameters(a): Parameters<GetArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
-        run!(store::get(id, a.full))
+        run!(blocking(move || store::get(id, a.full)).await)
     }
 
     #[tool(
@@ -367,7 +381,7 @@ impl Board {
         Parameters(a): Parameters<IdArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let of = store::parse_ref(&a.id).map_err(err)?;
-        run!(store::children(of))
+        run!(blocking(move || store::children(of)).await)
     }
 
     #[tool(
@@ -379,13 +393,16 @@ impl Board {
         &self,
         Parameters(a): Parameters<EpicAddArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        run!(store::epic_add(
-            &actor(),
-            &a.title,
-            &a.description,
-            &a.goal,
-            a.path.as_deref()
-        ))
+        run!(
+            blocking(move || store::epic_add(
+                &actor(),
+                &a.title,
+                &a.description,
+                &a.goal,
+                a.path.as_deref()
+            ))
+            .await
+        )
     }
 
     #[tool(
@@ -397,7 +414,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<EpicListArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        run!(store::epic_list(a.status.as_deref()))
+        run!(blocking(move || store::epic_list(a.status.as_deref())).await)
     }
 
     #[tool(
@@ -410,7 +427,7 @@ impl Board {
         Parameters(a): Parameters<EpicGetArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_epic_id(&a.id).map_err(err)?;
-        run!(store::epic_get(id, a.full))
+        run!(blocking(move || store::epic_get(id, a.full)).await)
     }
 
     #[tool(
@@ -427,12 +444,7 @@ impl Board {
         Parameters(a): Parameters<EpicUpdateArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_epic_id(&a.id).map_err(err)?;
-        run!(store::epic_status(
-            &actor(),
-            id,
-            &a.status,
-            a.note.as_deref()
-        ))
+        run!(blocking(move || store::epic_status(&actor(), id, &a.status, a.note.as_deref())).await)
     }
 
     #[tool(
@@ -445,16 +457,20 @@ impl Board {
         Parameters(a): Parameters<EditArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
-        let edit = store::TaskEdit {
-            title: a.title.as_deref(),
-            description: a.description.as_deref(),
-            goal: a.goal.as_deref(),
-            priority: a.priority,
-            assignee: a.assignee.as_deref(),
-        };
-        store::edit(&actor(), id, &edit)
-            .map(text)
-            .map_err(claim_err)
+        offload(move || {
+            let edit = store::TaskEdit {
+                title: a.title.as_deref(),
+                description: a.description.as_deref(),
+                goal: a.goal.as_deref(),
+                priority: a.priority,
+                assignee: a.assignee.as_deref(),
+            };
+            store::edit(&actor(), id, &edit)
+        })
+        .await
+        .map_err(err)?
+        .map(text)
+        .map_err(claim_err)
     }
 
     #[tool(
@@ -467,13 +483,18 @@ impl Board {
         Parameters(a): Parameters<EpicEditArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_epic_id(&a.id).map_err(err)?;
-        let edit = store::EpicEdit {
-            title: a.title.as_deref(),
-            description: a.description.as_deref(),
-            goal: a.goal.as_deref(),
-            path: a.path.as_deref(),
-        };
-        run!(store::epic_edit(&actor(), id, &edit))
+        run!(
+            blocking(move || {
+                let edit = store::EpicEdit {
+                    title: a.title.as_deref(),
+                    description: a.description.as_deref(),
+                    goal: a.goal.as_deref(),
+                    path: a.path.as_deref(),
+                };
+                store::epic_edit(&actor(), id, &edit)
+            })
+            .await
+        )
     }
 
     #[tool(
@@ -490,7 +511,9 @@ impl Board {
             None => None,
         };
         let ttl = a.ttl_min.unwrap_or(30).clamp(1, 720);
-        store::claim(&actor(), id, ttl * 60)
+        offload(move || store::claim(&actor(), id, ttl * 60))
+            .await
+            .map_err(err)?
             .map(text)
             .map_err(claim_err)
     }
@@ -512,7 +535,12 @@ impl Board {
         let who = actor();
         let ttl_s = a.ttl_min.unwrap_or(30).clamp(1, 720) * 60;
         let beat = if a.heartbeat {
-            Some(store::heartbeat(&who, id, ttl_s).map_err(err)?)
+            let who = who.clone();
+            Some(
+                blocking(move || store::heartbeat(&who, id, ttl_s))
+                    .await
+                    .map_err(err)?,
+            )
         } else {
             None
         };
@@ -524,15 +552,20 @@ impl Board {
                 )),
             };
         }
-        let patch = store::Patch {
-            status: a.status.as_deref(),
-            report: a.report.as_deref(),
-            note: a.note.as_deref(),
-            commit: a.commit.as_deref(),
-            needs: None,
-            ttl_s,
-        };
-        run!(store::apply(&who, id, &patch))
+        run!(
+            blocking(move || {
+                let patch = store::Patch {
+                    status: a.status.as_deref(),
+                    report: a.report.as_deref(),
+                    note: a.note.as_deref(),
+                    commit: a.commit.as_deref(),
+                    needs: None,
+                    ttl_s,
+                };
+                store::apply(&who, id, &patch)
+            })
+            .await
+        )
     }
 
     #[tool(
@@ -549,7 +582,7 @@ impl Board {
         Parameters(a): Parameters<AskArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
-        run!(store::ask(&actor(), id, &a.question))
+        run!(blocking(move || store::ask(&actor(), id, &a.question)).await)
     }
 
     #[tool(
@@ -563,18 +596,22 @@ impl Board {
     ) -> Result<CallToolResult, ErrorData> {
         let ms = a.timeout_s.unwrap_or(60).clamp(1, 300) * 1000;
         let ids: Vec<String> = a.id.into_iter().chain(a.ids).collect();
+        // The wait polls asynchronously, but its setup (sqlite open, surreal
+        // connect) parks the thread; drive the whole future on a blocking thread.
+        let rt = tokio::runtime::Handle::current();
         run!(
-            store::wait(store::Wait {
-                ids: &ids,
-                epic: a.epic.as_deref(),
-                open: a.open,
-                status: a.status.as_deref(),
-                kind: a.kind.as_deref(),
-                after: a.after_seq,
-                timeout_ms: ms,
-            })
+            blocking(move || rt
+                .block_on(store::wait(store::Wait {
+                    ids: &ids,
+                    epic: a.epic.as_deref(),
+                    open: a.open,
+                    status: a.status.as_deref(),
+                    kind: a.kind.as_deref(),
+                    after: a.after_seq,
+                    timeout_ms: ms,
+                }))
+                .map(|o| o.text))
             .await
-            .map(|o| o.text)
         )
     }
 
@@ -587,7 +624,8 @@ impl Board {
         &self,
         Parameters(a): Parameters<BriefArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        run!(store::brief(a.since_min.unwrap_or(120).clamp(1, 20_160)))
+        let mins = a.since_min.unwrap_or(120).clamp(1, 20_160);
+        run!(blocking(move || store::brief(mins)).await)
     }
 
     #[tool(
@@ -619,12 +657,15 @@ impl Board {
             Some(t) => Some(store::parse_id(t).map_err(err)?),
             None => None,
         };
-        run!(store::register_session(
-            &a.name,
-            a.agent.as_deref().unwrap_or("agent"),
-            a.cwd.as_deref().unwrap_or(""),
-            task
-        ))
+        run!(
+            blocking(move || store::register_session(
+                &a.name,
+                a.agent.as_deref().unwrap_or("agent"),
+                a.cwd.as_deref().unwrap_or(""),
+                task
+            ))
+            .await
+        )
     }
 
     #[tool(

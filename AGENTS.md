@@ -33,6 +33,8 @@ Add or change behaviour with a test in the suite that owns that kind of check
 (`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`
 for the bridge). When a count changes, update the expectation here.
 
+`tests/mcp_client.py` runs against either build: set `AGENTBOARD_TEST_BIN` to the binary and `AGENTBOARD_TEST_DB` to the board (a fresh data directory plus `AGENTBOARD_SURREAL_URL` for the surreal build); unset, it uses `target/release/agentboard` and `.probe/client.db`. `tests/surreal.sh` does this for you.
+
 A change under `src/store/surreal/` is not done on a box where any of its tests
 printed `SKIP` (no `surreal` binary): run the `AGENTBOARD_REQUIRE_SURREAL=1` row, which
 turns a skip into a failure. SKIP is fine on a device that builds the sqlite binary.
