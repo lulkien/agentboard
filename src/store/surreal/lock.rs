@@ -6,7 +6,7 @@
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{Read, Seek, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub const LOCK_FILE: &str = "board.lock";
@@ -27,7 +27,8 @@ impl Drop for WriteLock {
     }
 }
 
-pub fn lock_path(dir: &Path) -> PathBuf {
+#[cfg(test)]
+pub fn lock_path(dir: &Path) -> std::path::PathBuf {
     dir.join(LOCK_FILE)
 }
 
@@ -109,7 +110,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
 
-    fn scratch(tag: &str) -> PathBuf {
+    fn scratch(tag: &str) -> std::path::PathBuf {
         let n = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());

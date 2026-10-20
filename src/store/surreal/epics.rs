@@ -9,7 +9,7 @@ use super::tasks::{Txn, assign, int_of, recent_events, status_summary};
 use super::{Db, block_on, db_err, session};
 use crate::store::board::EpicEdit;
 use crate::store::text::{self, field_names, normalize_path, path_note, text_change, value_change};
-use crate::store::{now_ms, short_epic};
+use crate::store::{EPIC_STATUS_LIST, norm_status, now_ms, short_epic};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -54,17 +54,6 @@ pub(super) async fn fetch_epic(db: &Db, id: i64) -> Result<EpicRow, String> {
     rows.into_iter()
         .next()
         .ok_or_else(|| format!("no such epic {}", short_epic(id)))
-}
-
-const STATUS_LIST: &str = "open|done|dropped";
-
-fn norm_status(raw: &str) -> Option<&'static str> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "open" => Some("open"),
-        "done" => Some("done"),
-        "dropped" => Some("dropped"),
-        _ => None,
-    }
 }
 
 pub fn epic_add(
@@ -128,7 +117,7 @@ pub(super) async fn counts(db: &Db, epic: i64) -> Result<(i64, i64), String> {
 pub fn epic_list(status: Option<&str>) -> Result<String, String> {
     let want = match status {
         Some(s) => {
-            norm_status(s).ok_or_else(|| format!("bad epic status {s:?} ({STATUS_LIST})"))?
+            norm_status(s).ok_or_else(|| format!("bad epic status {s:?} ({EPIC_STATUS_LIST})"))?
         }
         None => "open",
     };
@@ -170,8 +159,8 @@ pub fn epic_status(
     status: &str,
     note: Option<&str>,
 ) -> Result<String, String> {
-    let want =
-        norm_status(status).ok_or_else(|| format!("bad epic status {status:?} ({STATUS_LIST})"))?;
+    let want = norm_status(status)
+        .ok_or_else(|| format!("bad epic status {status:?} ({EPIC_STATUS_LIST})"))?;
     let s = session(true)?;
     block_on(async {
         let cur = fetch_epic(&s.db, id).await?;

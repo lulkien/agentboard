@@ -6,6 +6,7 @@ use super::render::{recent_events, status_summary};
 use super::{Subject, field_names, log_event, now_ms, open, short_epic, text_change, value_change};
 use crate::store::board::EpicEdit;
 use crate::store::text::{self, EpicRow, normalize_path, path_note};
+use crate::store::{EPIC_STATUS_LIST, norm_status};
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub(super) fn fetch_epic(conn: &Connection, id: i64) -> Result<EpicRow, String> {
@@ -28,17 +29,6 @@ pub(super) fn fetch_epic(conn: &Connection, id: i64) -> Result<EpicRow, String> 
     .optional()
     .map_err(|e| e.to_string())?
     .ok_or_else(|| format!("no such epic {}", short_epic(id)))
-}
-
-const STATUS_LIST: &str = "open|done|dropped";
-
-fn norm_status(raw: &str) -> Option<&'static str> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "open" => Some("open"),
-        "done" => Some("done"),
-        "dropped" => Some("dropped"),
-        _ => None,
-    }
 }
 
 pub fn epic_add(
@@ -77,7 +67,7 @@ pub fn epic_add(
 pub fn epic_list(status: Option<&str>) -> Result<String, String> {
     let want = match status {
         Some(s) => {
-            norm_status(s).ok_or_else(|| format!("bad epic status {s:?} ({STATUS_LIST})"))?
+            norm_status(s).ok_or_else(|| format!("bad epic status {s:?} ({EPIC_STATUS_LIST})"))?
         }
         None => "open",
     };
@@ -137,8 +127,8 @@ pub fn epic_status(
     status: &str,
     note: Option<&str>,
 ) -> Result<String, String> {
-    let want =
-        norm_status(status).ok_or_else(|| format!("bad epic status {status:?} ({STATUS_LIST})"))?;
+    let want = norm_status(status)
+        .ok_or_else(|| format!("bad epic status {status:?} ({EPIC_STATUS_LIST})"))?;
     let mut conn = open()?;
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)

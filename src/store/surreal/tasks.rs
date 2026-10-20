@@ -18,11 +18,9 @@ use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
     self, EpicRow, EventRow, TaskRow, field_names, held_text, text_change, value_change,
 };
-use crate::store::{DEFAULT_TTL_S, Ref, norm, now_ms, short, short_epic};
+use crate::store::{DEFAULT_TTL_S, Ref, STATUS_LIST, norm, now_ms, short, short_epic};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-
-const STATUS_LIST: &str = "ready|working|blocking|needs_fix|review|done|dropped";
 
 /// A task row. `tid` is the integer record key (`meta::id(id)`).
 #[derive(Deserialize, Clone, Debug)]

@@ -4,9 +4,7 @@
 
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 use super::bridge;
-use super::{
-    DEFAULT_TTL_S, Ref, db_path, norm, now_ms, parse_epic_id, parse_id, short, short_epic,
-};
+use super::{DEFAULT_TTL_S, Ref, STATUS_LIST, db_path, norm, now_ms, short, short_epic};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::time::Duration;
 
@@ -73,9 +71,6 @@ fn check_schema(conn: &Connection) -> Result<(), String> {
     }
     Ok(())
 }
-
-/// Canonical status names, for error messages.
-const STATUS_LIST: &str = "ready|working|blocking|needs_fix|review|done|dropped";
 
 /// Schema + WAL applied once per process; later opens are pure connection setup.
 static INIT: std::sync::Mutex<bool> = std::sync::Mutex::new(false);

@@ -1,11 +1,13 @@
-//! A `Board` whose every operation returns the stub error. It backs the surreal
-//! build until its operations are ported, and gives `BACKEND` a value in the two
-//! unsupported feature sets, so the `compile_error!` in `main.rs` is the only error.
+//! A `Board` that exists only so `BACKEND` has a value when both or neither backend
+//! feature is on. `main.rs` raises a `compile_error!` there, and without this the
+//! forwarders in `store/mod.rs` would add a screen of follow-on errors. It is not
+//! compiled in either supported build.
 
 use super::Ref;
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 
-pub(super) const STUB: &str = "surreal backend is not implemented yet: this build has the board seam only (see docs/surrealdb-migration.md)";
+const STUB: &str =
+    "no storage backend is compiled in: enable exactly one of the `sqlite` and `surreal` features";
 
 fn stub<T>() -> Result<T, String> {
     Err(STUB.to_owned())

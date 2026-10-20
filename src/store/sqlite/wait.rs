@@ -2,58 +2,11 @@
 //! query per poll, whatever the size of the set.
 
 use super::render::get;
-use super::{STATUS_LIST, fetch, norm, open, parse_epic_id, parse_id, short};
-use crate::clip::{CAP_LAST, clip_marked};
+use super::{fetch, open};
 use crate::store::board::{Outcome, Wait};
+use crate::store::waiting::{self, Ev, Seen};
 use rusqlite::{Connection, params};
 use std::time::{Duration, Instant};
-
-/// First-line markers: MCP has no exit codes, so the verdict is in the text.
-const MATCHED: &str = "matched:";
-const TIMEOUT: &str = "timeout:";
-
-/// Every `kind` the store writes. `ask` is not one: it logs a `block` event.
-const KINDS: [&str; 11] = [
-    "add",
-    "claim",
-    "report",
-    "note",
-    "block",
-    "answer",
-    "review",
-    "done",
-    "needs_fix",
-    "edit",
-    "dispatch",
-];
-
-fn norm_kind(raw: &str) -> Option<&'static str> {
-    let k = raw.trim().to_ascii_lowercase();
-    let k = if k == "ask" { "block" } else { k.as_str() };
-    KINDS.into_iter().find(|x| *x == k)
-}
-
-/// `a,b,c` -> canonical names. An empty list or an unknown name is an error,
-/// never a filter that silently matches nothing.
-fn csv(
-    raw: &str,
-    what: &str,
-    canon: fn(&str) -> Option<&'static str>,
-    list: &str,
-) -> Result<Vec<&'static str>, String> {
-    let items: Vec<&str> = raw
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
-    if items.is_empty() {
-        return Err(format!("wait: empty --{what} list ({list})"));
-    }
-    items
-        .into_iter()
-        .map(|i| canon(i).ok_or_else(|| format!("wait: bad {what} {i:?} ({list})")))
-        .collect()
-}
 
 /// The watched set at call time: explicit ids, direct children of an epic, every
 /// open task. A missing id or epic is an error, as is an empty set without
@@ -88,46 +41,7 @@ fn expand(
             &[],
         )?;
     }
-    out.sort_unstable();
-    out.dedup();
-    if out.is_empty() && !open {
-        return Err("wait: selectors match no tasks".to_owned());
-    }
-    Ok(out)
-}
-
-struct Ev {
-    seq: i64,
-    actor: String,
-    kind: String,
-    body: String,
-}
-
-impl Ev {
-    fn line(&self) -> String {
-        // The delta is what the caller asked for (answers live here): never clipped.
-        format!("#{} {} {}: {}", self.seq, self.actor, self.kind, self.body)
-    }
-}
-
-struct Seen {
-    id: i64,
-    status: String,
-    assignee: Option<String>,
-    updated_at: i64,
-    /// Events with seq > the start watermark.
-    events: Vec<Ev>,
-}
-
-impl Seen {
-    fn header(&self) -> String {
-        format!(
-            "{} {} {}",
-            short(self.id),
-            self.status,
-            self.assignee.as_deref().unwrap_or("-")
-        )
-    }
+    waiting::finish_set(out, open)
 }
 
 /// The poll query. For `--open` a task that finishes while we wait stays watched
@@ -201,23 +115,12 @@ fn poll(
 /// `after` is the last event seq the caller already saw; without it the start is
 /// the current watermark: "wait for the next thing to happen".
 pub async fn wait(w: Wait<'_>) -> Result<Outcome, String> {
-    let statuses = w
-        .status
-        .map(|s| csv(s, "status", norm, STATUS_LIST))
-        .transpose()?;
-    let kinds = w
-        .kind
-        .map(|k| csv(k, "kind", norm_kind, &KINDS.join("|")))
-        .transpose()?;
-    let ids = w
-        .ids
-        .iter()
-        .map(|s| parse_id(s))
-        .collect::<Result<Vec<_>, _>>()?;
-    let epic = w.epic.map(parse_epic_id).transpose()?;
-    if ids.is_empty() && epic.is_none() && !w.open {
-        return Err("wait: name tasks (wait T1 T2), --epic E<n> or --open".to_owned());
-    }
+    let waiting::Parsed {
+        statuses,
+        kinds,
+        ids,
+        epic,
+    } = waiting::parse(&w)?;
 
     // Set and watermark come from the connection that polls, in one read
     // snapshot: an event landing after it has seq > start and is seen by poll #1.
@@ -242,73 +145,23 @@ pub async fn wait(w: Wait<'_>) -> Result<Outcome, String> {
     let deadline = Instant::now() + Duration::from_millis(w.timeout_ms);
     loop {
         let seen = poll(&conn, &sql, start, open_from)?;
-        let hits: Vec<(&Seen, Vec<&Ev>)> = seen
-            .iter()
-            .filter_map(|t| {
-                if !statuses
-                    .as_ref()
-                    .is_none_or(|s| s.contains(&t.status.as_str()))
-                {
-                    return None;
-                }
-                let evs: Vec<&Ev> = t
-                    .events
-                    .iter()
-                    .filter(|e| kinds.as_ref().is_none_or(|k| k.contains(&e.kind.as_str())))
-                    .collect();
-                let needs_event = kinds.is_some() || statuses.is_none();
-                (!needs_event || !evs.is_empty()).then_some((t, evs))
-            })
-            .collect();
+        let hits = waiting::hits(&seen, statuses.as_deref(), kinds.as_deref());
         if !hits.is_empty() {
-            let mut out = format!("{MATCHED} {} of {} watched\n", hits.len(), seen.len());
-            for (t, evs) in hits {
-                out.push_str(&t.header());
-                out.push('\n');
-                if evs.is_empty() {
-                    // Already in the wanted status with nothing new. The latest event
-                    // is context only: it may postdate the move that got it here.
-                    let last = conn
-                        .query_row("SELECT seq,actor,kind,body FROM events WHERE task_id=? ORDER BY seq DESC LIMIT 1", params![t.id], |r| {
-                            Ok(Ev { seq: r.get(0)?, actor: r.get(1)?, kind: r.get(2)?, body: r.get(3)? })
-                        })
-                        .ok();
-                    out.extend(last.map(|e| format!("last: {}\n", e.line())));
-                }
-                for e in evs {
-                    out.push_str(&e.line());
-                    out.push('\n');
-                }
-            }
+            let last = |id: i64| {
+                conn.query_row("SELECT seq,actor,kind,body FROM events WHERE task_id=? ORDER BY seq DESC LIMIT 1", params![id], |r| {
+                    Ok(Ev { seq: r.get(0)?, actor: r.get(1)?, kind: r.get(2)?, body: r.get(3)? })
+                })
+                .ok()
+            };
             return Ok(Outcome {
-                text: out.trim_end().to_owned(),
+                text: waiting::matched_text(seen.len(), &hits, &last),
                 timed_out: false,
             });
         }
         if Instant::now() >= deadline {
-            // Never return blind: every status, plus the tail of the freshest task.
-            let mut out = format!(
-                "{TIMEOUT} nothing matched after {}s ({} watched)\n",
-                w.timeout_ms / 1000,
-                seen.len()
-            );
-            for t in &seen {
-                out.push_str(&t.header());
-                out.push('\n');
-            }
-            if let Some(t) = seen.iter().max_by_key(|t| (t.updated_at, t.id)) {
-                let tag = short(t.id);
-                out.push_str(&format!(
-                    "last ({tag}): {}",
-                    clip_marked(
-                        &get(t.id, false).unwrap_or_default(),
-                        CAP_LAST,
-                        &format!("task_get id={tag} for the record")
-                    )
-                ));
-            }
+            let tail = waiting::freshest(&seen).map(|id| get(id, false).unwrap_or_default());
             return Ok(Outcome {
-                text: out,
+                text: waiting::timeout_text(w.timeout_ms, &seen, tail.as_deref()),
                 timed_out: true,
             });
         }
@@ -344,46 +197,6 @@ mod tests {
             .unwrap();
         }
         conn
-    }
-
-    #[test]
-    fn csv_accepts_known_names_and_aliases() {
-        assert_eq!(
-            csv("review, done", "status", norm, STATUS_LIST).unwrap(),
-            vec!["review", "done"]
-        );
-        assert_eq!(
-            csv("running", "status", norm, STATUS_LIST).unwrap(),
-            vec!["working"]
-        );
-        assert_eq!(
-            csv("ask,note", "kind", norm_kind, "k").unwrap(),
-            vec!["block", "note"]
-        );
-    }
-
-    #[test]
-    fn csv_rejects_unknown_and_empty() {
-        assert!(
-            csv("rview", "status", norm, STATUS_LIST)
-                .unwrap_err()
-                .contains("bad status \"rview\"")
-        );
-        assert!(
-            csv("note,nope", "kind", norm_kind, "k")
-                .unwrap_err()
-                .contains("bad kind \"nope\"")
-        );
-        assert!(
-            csv("", "status", norm, STATUS_LIST)
-                .unwrap_err()
-                .contains("empty --status")
-        );
-        assert!(
-            csv(" , ", "kind", norm_kind, "k")
-                .unwrap_err()
-                .contains("empty --kind")
-        );
     }
 
     #[test]

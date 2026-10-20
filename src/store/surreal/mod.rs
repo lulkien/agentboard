@@ -1,8 +1,7 @@
-//! The SurrealDB backend, compiled only under the `surreal` feature. This step is
-//! the layer every operation will sit on: settings, auto-serve, the write lock and
-//! the connect path with its schema bootstrap. The operations themselves are still
-//! the stub; `connect` is reached only from tests until the first port lands
-//! (docs/surrealdb-migration.md, Temporary debt).
+//! The SurrealDB backend, compiled only under the `surreal` feature: settings,
+//! auto-serve, the write lock, the connect path with its schema bootstrap, and one
+//! module per concern (`tasks`, `epics`, `sessions`, `render`, `dispatch`, `wait`)
+//! implementing every `Board` operation.
 
 mod dispatch;
 mod epics;
@@ -11,6 +10,7 @@ mod render;
 mod serve;
 mod sessions;
 mod tasks;
+mod wait;
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -23,9 +23,8 @@ use tokio::runtime::Runtime;
 
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 use super::bridge;
-use super::stub::StubBoard;
 
-/// Task operations are ported; everything else is still the stub.
+/// Every board operation, on SurrealDB.
 pub struct SurrealBoard;
 
 impl Board for SurrealBoard {
@@ -152,7 +151,7 @@ impl Board for SurrealBoard {
         dispatch::dispatch(actor, id, to, force, print_only)
     }
     async fn wait(&self, w: Wait<'_>) -> Result<Outcome, String> {
-        StubBoard.wait(w).await
+        wait::wait(w).await
     }
 }
 
@@ -359,6 +358,8 @@ pub enum Bootstrap {
 
 pub type Db = Surreal<Client>;
 
+/// A connection without a held lock. Used by the tests; the verbs use `Session`.
+#[cfg(test)]
 pub struct Conn {
     pub db: Db,
     pub bootstrap: Bootstrap,
@@ -417,12 +418,14 @@ async fn bootstrap(db: &Db, s: &Settings) -> Result<Bootstrap, String> {
 }
 
 /// Serve if needed, check the version, then connect, sign in and bootstrap.
+#[cfg(test)]
 pub fn connect(s: &Settings) -> Result<Conn, String> {
     connect_with(s, &serve::Timing::default(), None, lock::DEFAULT_WAIT)
 }
 
 /// `connect` with the budgets and the server binary injectable for tests. Takes
 /// no lock beyond the first bootstrap.
+#[cfg(test)]
 pub fn connect_with(
     s: &Settings,
     t: &serve::Timing,
@@ -443,7 +446,10 @@ pub fn connect_with(
 /// server-side transaction, so a read sees a write whole or not at all.
 pub struct Session {
     pub db: Db,
+    // Read by the tests only.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub bootstrap: Bootstrap,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub spawned_pid: Option<u32>,
     _lock: Option<lock::WriteLock>,
 }
@@ -860,6 +866,55 @@ mod tests {
         let err = connect(&srv.settings).err().unwrap();
         assert!(err.contains("found no schema marker"), "{err}");
         println!("missing-marker refusal: {err}");
+    }
+
+    #[test]
+    fn a_wait_cannot_outlive_a_server_that_stops_answering() {
+        let Some(srv) = start_server("waithang") else {
+            return;
+        };
+        connect(&srv.settings).unwrap(); // bootstrap the board
+        let (tx, rx) = std::sync::mpsc::channel();
+        let settings = srv.settings.clone();
+        std::thread::spawn(move || {
+            // Waits for 30 s; every database call gets a 700 ms budget.
+            let w = crate::store::board::Wait {
+                ids: &[],
+                epic: None,
+                open: true,
+                status: Some("done"),
+                kind: None,
+                after: None,
+                timeout_ms: 30_000,
+            };
+            let r = block_on(wait::wait_on(&settings, w, Duration::from_millis(700)));
+            let _ = tx.send(r.err());
+        });
+        std::thread::sleep(Duration::from_millis(500));
+        // Freeze the server: the WebSocket stays open and silent, as after a crash.
+        let pid = srv.child.id().to_string();
+        Command::new("kill").args(["-STOP", &pid]).status().unwrap();
+        let started = Instant::now();
+        let got = rx.recv_timeout(Duration::from_secs(6));
+        Command::new("kill").args(["-CONT", &pid]).status().unwrap();
+        let err = got
+            .expect("the wait must return within seconds, not outlive its 30 s timeout")
+            .expect("a wait against a frozen server must fail");
+        println!(
+            "wait on a frozen server, after {:?}: {err}",
+            started.elapsed()
+        );
+        assert!(
+            err.starts_with(
+                "board server unavailable: did not answer within 700 ms while waiting for `surreal db start"
+            ),
+            "{err}"
+        );
+        assert!(
+            err.contains("Install: curl -sSf https://install.surrealdb.com"),
+            "{err}"
+        );
+        assert!(!err.contains('\n'));
     }
 
     #[test]

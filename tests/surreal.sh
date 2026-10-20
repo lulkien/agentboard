@@ -12,7 +12,9 @@
 #   (i) sessions - register / sessions / prune / unregister against stub tmux and herdr, identical
 #   (j) render   - brief / ls filters / get / get --full / clipped titles, sqlite vs surreal, identical
 #   (k) dispatch - --print, refusal, --force reset, send, fallback line, warnings, sqlite vs surreal
-# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch)
+#   (l) wait     - match, timeout, ask/answer, --open, --epic, --after, bad arguments, identical
+#   (m) waitdeath- the server killed under a running wait: one line and exit 1, not a hang
+# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath)
 # runs one phase after the builds.
 # Needs a `surreal` binary. A missing one is a failure, never a skip.
 set -u
@@ -541,6 +543,78 @@ if want dispatch; then
     rg -q -- "$want_line" "$T/dispatch.surreal" || { echo "dispatch transcript lacks: $want_line"; check "dispatch transcript coverage" 1; }
   done
   stop_server
+fi
+
+# ---- (l) wait: same steps, same text, shapes and markers only --------------------
+wait_transcript() { # binary
+  local B=$1 BIG
+  BIG=$(python3 -c "print('tail text ' * 120)")
+  $B add "w1"; $B add "w2"; $B epic add "WE"
+  $B add "in epic" --epic E1; $B add "long one" --description "$BIG"; $B add "sub" --parent T3
+  # already matching: returns at once, with the latest event as context
+  $B wait T1 --status ready --timeout 5; echo "exit=$?"
+  $B wait T1 T2 --status ready,done --timeout 5; echo "exit=$?"
+  # nothing matches: a status line per task and the tail of the freshest, clipped with a marker
+  $B wait T4 T1 --kind done --timeout 1; echo "exit=$?"
+  # an ask / answer round trip, each delivered as a match
+  $B claim T1 >/dev/null
+  ( sleep 0.7; $B ask T1 "which one?" >/dev/null ) & $B wait T1 --kind ask --timeout 30; echo "exit=$?"; wait
+  ( sleep 0.7; $B answer T1 "the first one" >/dev/null ) & $B wait T1 --kind answer --timeout 30; echo "exit=$?"; wait
+  # --status and --kind together
+  ( sleep 0.7; $B status T1 review "done?" >/dev/null ) & $B wait T1 --status review --kind review --timeout 30; echo "exit=$?"; wait
+  # --open picks up a task created during the wait
+  ( sleep 0.7; $B add "created mid-wait" >/dev/null ) & $B wait --open --kind add --timeout 30; echo "exit=$?"; wait
+  # --epic: the tasks of the epic, subtasks included
+  ( sleep 0.7; $B note T5 "epic subtask note" >/dev/null ) & $B wait --epic E1 --kind note --timeout 30; echo "exit=$?"; wait
+  # --after: only events past a seq
+  $B wait T1 --after 0 --kind claim --timeout 5; echo "exit=$?"
+  $B wait T1 --after 999 --kind claim --timeout 1; echo "exit=$?"
+  # bad arguments: exit 1 and the same stderr, never a filter that matches nothing
+  $B wait T1 --status bogus; echo "exit=$?"
+  $B wait T1 --kind reclaim; echo "exit=$?"
+  $B wait T1 --kind ""; echo "exit=$?"
+  $B wait T1 --status " , "; echo "exit=$?"
+  $B wait; echo "exit=$?"
+  $B wait T99 --timeout 1; echo "exit=$?"
+  $B wait --epic E9 --timeout 1; echo "exit=$?"
+  $B epic add "Empty" >/dev/null; $B wait --epic E2 --timeout 1; echo "exit=$?"
+  $B wait E1 --timeout 1; echo "exit=$?"
+}
+if want wait; then
+  echo "== (l) wait: sqlite vs surreal transcripts"
+  (export AGENTBOARD_DB=$T/wait.db; wait_transcript "$T/ab-sqlite" 2>&1 | norm >"$T/wait.sqlite")
+  new_server wait
+  wait_transcript "$T/ab-surreal" 2>&1 | norm >"$T/wait.surreal"
+  if diff "$T/wait.sqlite" "$T/wait.surreal" >"$T/wait.diff"; then
+    echo "wait transcripts identical ($(wc -l <"$T/wait.sqlite") lines)"; check "wait parity" 0
+  else
+    head -40 "$T/wait.diff"; check "wait parity" 1
+  fi
+  for want_line in '^matched: 1 of 1 watched' '^last: #' '^timeout: nothing matched after N \(2 watched\)' '^last \(T[0-9]+\): ' 'truncated' 'block: which one\?' 'answer: the first one' 'review: done\?' 'add: created mid-wait' 'note: epic subtask note' '^exit=0$' '^exit=1$' '^exit=3$' 'wait: bad status "bogus"' 'wait: bad kind "reclaim"' 'wait: empty --kind' 'wait: empty --status' 'wait: name tasks' 'no such task T99' 'no such epic E9' 'match no tasks'; do
+    rg -q -- "$want_line" "$T/wait.surreal" || { echo "wait transcript lacks: $want_line"; check "wait transcript coverage" 1; }
+  done
+  stop_server
+fi
+
+# ---- (m) the server dies under a running wait ------------------------------------
+if want waitdeath; then
+  echo "== (m) server killed under a running wait: the wait ends with one line (bounded, not a hang)"
+  new_server waitdeath; prime
+  ab add "w" >/dev/null
+  start=$(date +%s)
+  ( timeout 60 "$T/ab-surreal" wait --open --status done --timeout 30 >"$DIR/wd.out" 2>&1; echo "rc=$?" >"$DIR/wd.rc" ) &
+  WPID=$!
+  sleep 1.5
+  kill -9 "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null; SERVER_PID=
+  wait $WPID
+  elapsed=$(( $(date +%s) - start ))
+  rc=$(cat "$DIR/wd.rc"); lines=$(wc -l <"$DIR/wd.out")
+  echo "wait ended with $rc after about ${elapsed}s (its own timeout was 30 s); output ($lines line): $(head -c 200 "$DIR/wd.out")"
+  # not 124 (killed by the outer timeout), exit 1, exactly one line, an agentboard error
+  [ "$rc" = "rc=1" ] && [ "$lines" -eq 1 ] && rg -q '^agentboard: board (server|database)' "$DIR/wd.out" && [ "$elapsed" -lt 25 ]
+  check "wait ends with one line when the server dies" $?
+  # and no server of ours is left running (the process is named surreal-db on this box)
+  if ps -eo pid,args | rg -F "$DIR/data" | rg -v ' rg ' | rg -q surreal; then check "no server left behind" 1; else check "no server left behind" 0; fi
 fi
 
 echo

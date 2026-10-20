@@ -5,10 +5,6 @@
 //! Both call the same `store` functions, so claim/lease/status semantics exist
 //! in exactly one place.
 
-// The surreal backend is a stub in this step and calls none of the shared helpers
-// yet. Drop this allow after the last port (docs/surrealdb-migration.md, step 7).
-#![cfg_attr(feature = "surreal", allow(dead_code))]
-
 // One backend per build. Both or neither cannot work: fail here, naming the fix.
 #[cfg(all(feature = "sqlite", feature = "surreal"))]
 compile_error!(

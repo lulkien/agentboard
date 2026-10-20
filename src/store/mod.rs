@@ -71,6 +71,22 @@ pub fn norm(raw: &str) -> Option<&'static str> {
     }
 }
 
+/// Canonical task status names, for error messages.
+pub const STATUS_LIST: &str = "ready|working|blocking|needs_fix|review|done|dropped";
+
+/// Canonical epic status names, for error messages.
+pub const EPIC_STATUS_LIST: &str = "open|done|dropped";
+
+/// An epic's status: `open`, `done` or `dropped`.
+pub fn norm_status(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "open" => Some("open"),
+        "done" => Some("done"),
+        "dropped" => Some("dropped"),
+        _ => None,
+    }
+}
+
 pub fn short(id: i64) -> String {
     format!("T{id}")
 }
@@ -124,6 +140,7 @@ pub mod board;
 pub mod bridge;
 mod proc;
 pub mod text;
+pub mod waiting;
 
 pub use board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 
@@ -132,7 +149,10 @@ pub use board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, 
 // the only error rustc prints.
 #[cfg(all(feature = "sqlite", not(feature = "surreal")))]
 mod sqlite;
-#[cfg(not(all(feature = "sqlite", not(feature = "surreal"))))]
+#[cfg(not(any(
+    all(feature = "sqlite", not(feature = "surreal")),
+    all(feature = "surreal", not(feature = "sqlite"))
+)))]
 mod stub;
 #[cfg(all(feature = "surreal", not(feature = "sqlite")))]
 mod surreal;
