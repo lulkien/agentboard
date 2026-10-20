@@ -78,6 +78,95 @@ run $B --db "$D" unregister tmp-row;                                   check "un
 run $B sessions prune --bogus;                                         check "sessions prune rejects unknown flags, exit 1" $([ $rc -eq 1 ] && has "$err" "'--bogus'" && echo 0 || echo 1)
 run $B sessions prune --help;                                          check "sessions prune --help documents --dry-run" $([ $rc -eq 0 ] && has "$out" "--dry-run" && echo 0 || echo 1)
 
+# --- tail and send: stub-driven (herdr + tmux) -----------------------------------
+# stub herdr and tmux binaries that we can control
+H=$S/hbin
+mkdir -p "$H"
+cat >"$H/herdr" <<'HERDR'
+#!/bin/sh
+echo "herdr $*" >>"$LOG"
+if [ "$1 $2" = "agent list" ]; then
+  echo '{"result":{"agents":[{"agent":"claude","name":"coder","pane_id":"wB:p1"},{"agent":"codex","name":"reviewer","pane_id":"wB:p2"}]}}'
+  exit 0
+fi
+if [ "$1 $2 $3" = "pane read wB:p1" ]; then
+  echo -e "line 1\nline 2\nline 3"
+  exit 0
+fi
+if [ "$1 $2 $3" = "pane send-text wB:p2" ] && [ "$4" = "hello world" ]; then
+  exit 0
+fi
+if [ "$1 $2 $3" = "pane send-keys wB:p2" ] && [ "$4" = "enter" ]; then
+  exit 0
+fi
+echo "no such pane" >&2
+exit 1
+HERDR
+cat >"$H/tmux" <<'TMUX'
+#!/bin/sh
+echo "tmux $*" >>"$LOG"
+if [ "$1" = "has-session" ]; then
+  exit 0
+fi
+if [ "$1" = "capture-pane" ]; then
+  echo -e "tmux line 1\ntmux line 2"
+  exit 0
+fi
+if [ "$1" = "send-keys" ]; then
+  exit 0
+fi
+exit 1
+TMUX
+chmod +x "$H/herdr" "$H/tmux"
+export PATH=$H:$PATH
+export LOG=$S/calls
+
+run $B --db "$D" register coder --agent claude;                        check "register coder for herdr tail" $rc
+run $B --db "$D" register reviewer --agent codex;                      check "register reviewer for herdr send" $rc
+
+# tail via herdr stub
+: >"$LOG"
+run $B --db "$D" tail coder --lines 2
+check "tail via herdr returns last N lines" $([ $rc -eq 0 ] && has "$out" "line 2" && has "$out" "line 3" && ! has "$out" "line 1" && echo 0 || echo 1)
+check "tail via herdr calls herdr pane read with pane_id and --lines" $(grep -q "herdr pane read wB:p1 --lines 2" "$LOG" && echo 0 || echo 1)
+
+# tail falls back to tmux stub when herdr agent not found
+: >"$LOG"
+run $B --db "$D" tail unknown --lines 1
+check "tail falls back to tmux when herdr agent missing" $([ $rc -eq 0 ] && has "$out" "tmux line" && echo 0 || echo 1)
+check "tail fallback calls tmux capture-pane" $(grep -q "tmux capture-pane -p -t unknown" "$LOG" && echo 0 || echo 1)
+
+# send via herdr stub
+: >"$LOG"
+run $B --db "$D" send reviewer "hello world"
+check "send via herdr issues send-text and send-keys enter" $([ $rc -eq 0 ] && has "$out" "ok sent" && echo 0 || echo 1)
+check "send via herdr calls send-text then send-keys enter" $(grep -q "herdr pane send-text wB:p2 hello world" "$LOG" && grep -q "herdr pane send-keys wB:p2 enter" "$LOG" && echo 0 || echo 1)
+
+# both-fail error names herdr and tmux
+: >"$LOG"
+cat >"$H/herdr" <<'HERDR'
+#!/bin/sh
+echo "herdr $*" >>"$LOG"
+if [ "$1 $2" = "agent list" ]; then
+  echo "herdr failed" >&2
+  exit 1
+fi
+exit 1
+HERDR
+cat >"$H/tmux" <<'TMUX'
+#!/bin/sh
+echo "tmux $*" >>"$LOG"
+echo "no server running" >&2
+exit 1
+TMUX
+chmod +x "$H/herdr" "$H/tmux"
+run $B --db "$D" tail nosuch --lines 1
+check "both-fail error names herdr and tmux" $([ $rc -eq 1 ] && has "$err" "herdr: not a herdr agent with pane_id" && has "$err" "tmux: no server running" && echo 0 || echo 1)
+
+# restore normal PATH
+export PATH=$(echo $PATH | sed "s|$H:||")
+unset LOG
+
 # --- epics: own table, own ids, project path -----------------------------------
 E=$S/e.db
 mkdir -p "$S/proj"

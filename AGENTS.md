@@ -17,9 +17,9 @@ Run these from the repo root. A change is not done until each prints what is bes
 | Command | Expected |
 |---|---|
 | `cargo build --release` | `Finished` |
-| `cargo test` | `test result: ok. 10 passed` |
+| `cargo test` | `test result: ok. 12 passed` |
 | `python3 tests/mcp_client.py` | `121/121 checks passed` |
-| `bash tests/cli.sh` | `102/102 passed` |
+| `bash tests/cli.sh` | `111/111 passed` |
 | `bash tests/dispatch.sh` | `59/59 passed` |
 | `bash tests/race.sh` | `claims=80 unique=80` |
 | `bash tests/wait.sh` | ends with `elapsed_ms=...`, no `FAIL` |

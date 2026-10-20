@@ -59,6 +59,15 @@ impl Liveness {
             .and_then(|h| h.cwd.clone())
     }
 
+    /// The pane_id herdr reports for a named agent. `None` if herdr unreachable,
+    /// the agent doesn't exist, or the agent has no pane_id.
+    pub fn pane_id(&self, name: &str) -> Option<String> {
+        self.herdr()?
+            .iter()
+            .find(|h| h.name == name)
+            .and_then(|h| h.pane_id.clone())
+    }
+
     pub fn alive(&self, name: &str, agent: &str) -> bool {
         tmux_alive(name)
             || self
@@ -176,6 +185,7 @@ struct HerdrAgent {
     name: String,
     kind: String,
     cwd: Option<String>,
+    pane_id: Option<String>,
 }
 
 /// A tmux server is up and answering (a `has-session` miss alone cannot tell
@@ -209,6 +219,7 @@ fn parse_herdr_agents(json: &[u8]) -> Vec<HerdrAgent> {
                         name: x["name"].as_str()?.to_owned(),
                         kind: x["agent"].as_str().unwrap_or_default().to_owned(),
                         cwd: x["cwd"].as_str().map(str::to_owned),
+                        pane_id: x["pane_id"].as_str().map(str::to_owned),
                     })
                 })
                 .collect()
@@ -216,25 +227,9 @@ fn parse_herdr_agents(json: &[u8]) -> Vec<HerdrAgent> {
         .unwrap_or_default()
 }
 
-/// Last N lines of a tmux pane, trimmed and capped: the cheap way to see what an
-/// agent is doing without asking it for a status report.
-pub fn tail(name: &str, lines: usize) -> Result<String, String> {
-    let out = proc::run(Command::new("tmux").args([
-        "capture-pane",
-        "-p",
-        "-t",
-        name,
-        "-S",
-        &format!("-{lines}"),
-    ]))
-    .map_err(|e| format!("tmux: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "tmux: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
+/// Trim, drop empty, keep newest N lines, cap to 6000 bytes at a char boundary.
+/// Used by both tmux and herdr tail paths so they cannot drift.
+fn trim_cap_tail(text: &str, lines: usize) -> String {
     let mut rows: Vec<&str> = text
         .lines()
         .map(str::trim_end)
@@ -245,7 +240,7 @@ pub fn tail(name: &str, lines: usize) -> Result<String, String> {
     }
     let joined = rows.join("\n");
     if joined.len() <= 6000 {
-        return Ok(joined);
+        return joined;
     }
     // Keep the newest 6000 bytes, moving the cut forward to a char boundary:
     // TUI panes are full of multibyte box-drawing characters.
@@ -253,10 +248,112 @@ pub fn tail(name: &str, lines: usize) -> Result<String, String> {
     while !joined.is_char_boundary(cut) {
         cut += 1;
     }
-    Ok(joined[cut..].to_owned())
+    joined[cut..].to_owned()
 }
 
+/// Last N lines of a pane. Tries herdr first (if the name is a live herdr agent
+/// with a pane_id), then falls back to tmux. Errors name both bridges.
+pub fn tail(name: &str, lines: usize) -> Result<String, String> {
+    let live = Liveness::new();
+
+    // herdr path: only if the name is a live herdr agent with a pane_id.
+    if let Some(pane_id) = live.pane_id(name) {
+        let out = proc::run(Command::new("herdr").args([
+            "pane",
+            "read",
+            &pane_id,
+            "--lines",
+            &lines.to_string(),
+        ]))
+        .map_err(|e| format!("herdr: {e}"))?;
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            return Ok(trim_cap_tail(&text, lines));
+        }
+        let herdr_err = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+        // Fall through to tmux, but remember the herdr error.
+        let tmux_result = try_tmux_tail(name, lines);
+        match tmux_result {
+            Ok(msg) => return Ok(msg),
+            Err(e) => return Err(format!("no pane {name}: herdr: {herdr_err}, tmux: {e}")),
+        }
+    }
+
+    // No herdr pane_id for this name. Try tmux, but include herdr in the error
+    // if it also fails, so the user sees both bridges were tried.
+    let tmux_result = try_tmux_tail(name, lines);
+    match tmux_result {
+        Ok(msg) => Ok(msg),
+        Err(e) => Err(format!(
+            "no pane {name}: herdr: not a herdr agent with pane_id, tmux: {e}"
+        )),
+    }
+}
+
+fn try_tmux_tail(name: &str, lines: usize) -> Result<String, String> {
+    let out = proc::run(Command::new("tmux").args([
+        "capture-pane",
+        "-p",
+        "-t",
+        name,
+        "-S",
+        &format!("-{lines}"),
+    ]))
+    .map_err(|e| format!("tmux: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+        return Err(format!("tmux: {err}"));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(trim_cap_tail(&text, lines))
+}
+
+/// Send text to a pane. Tries herdr first (if the name is a live herdr agent
+/// with a pane_id), then falls back to tmux. Errors name both bridges.
+/// Priority: herdr wins when a name is both a tmux session and a herdr agent.
 pub fn send(name: &str, text: &str) -> Result<String, String> {
+    let live = Liveness::new();
+
+    // herdr path: only if the name is a live herdr agent with a pane_id.
+    if let Some(pane_id) = live.pane_id(name) {
+        // herdr pane send-text <pane_id> <text>
+        let out = proc::run(Command::new("herdr").args(["pane", "send-text", &pane_id, text]))
+            .map_err(|e| format!("herdr: {e}"))?;
+        if !out.status.success() {
+            let herdr_err = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+            // Fall through to tmux, but remember the herdr error.
+            let tmux_result = try_tmux_send(name, text);
+            match tmux_result {
+                Ok(msg) => return Ok(msg),
+                Err(e) => return Err(format!("no pane {name}: herdr: {herdr_err}, tmux: {e}")),
+            }
+        }
+        // herdr pane send-keys <pane_id> enter
+        let out = proc::run(Command::new("herdr").args(["pane", "send-keys", &pane_id, "enter"]))
+            .map_err(|e| format!("herdr: {e}"))?;
+        if !out.status.success() {
+            let herdr_err = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+            let tmux_result = try_tmux_send(name, text);
+            match tmux_result {
+                Ok(msg) => return Ok(msg),
+                Err(e) => return Err(format!("no pane {name}: herdr: {herdr_err}, tmux: {e}")),
+            }
+        }
+        return Ok(format!("ok sent {} bytes to {name}", text.len()));
+    }
+
+    // No herdr pane_id for this name. Try tmux, but include herdr in the error
+    // if it also fails, so the user sees both bridges were tried.
+    let tmux_result = try_tmux_send(name, text);
+    match tmux_result {
+        Ok(msg) => Ok(msg),
+        Err(e) => Err(format!(
+            "no pane {name}: herdr: not a herdr agent with pane_id, tmux: {e}"
+        )),
+    }
+}
+
+fn try_tmux_send(name: &str, text: &str) -> Result<String, String> {
     // `-l --` types the text literally: without `--` a line starting with "-"
     // is parsed as a tmux option, and without `-l` words like "Up" are key names.
     for keys in [&["-l", "--", text][..], &["Enter"][..]] {
@@ -267,10 +364,8 @@ pub fn send(name: &str, text: &str) -> Result<String, String> {
         )
         .map_err(|e| format!("tmux: {e}"))?;
         if !out.status.success() {
-            return Err(format!(
-                "tmux send-keys failed for {name}: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+            return Err(format!("tmux send-keys failed for {name}: {err}"));
         }
     }
     Ok(format!("ok sent {} bytes to {name}", text.len()))
@@ -282,23 +377,53 @@ mod tests {
 
     #[test]
     fn parses_herdr_agent_list_and_skips_unnamed() {
-        let sample = br#"{"id":"cli:agent:list","result":{"agents":[{"agent":"hermes","pane_id":"wB:p1"},{"agent":"claude","name":"coder","cwd":"/work/app","pane_id":"wB:p5"},{"agent":"codex","name":"nocwd"}],"type":"agent_list"}}"#;
+        let sample = br#"{"id":"cli:agent:list","result":{"agents":[{"agent":"hermes","pane_id":"wB:p1"},{"agent":"claude","name":"coder","cwd":"/work/app","pane_id":"wB:p5"},{"agent":"codex","name":"nocwd"}]},"type":"agent_list"}"#;
         assert_eq!(
             parse_herdr_agents(sample),
             vec![
                 HerdrAgent {
                     name: "coder".to_owned(),
                     kind: "claude".to_owned(),
-                    cwd: Some("/work/app".to_owned())
+                    cwd: Some("/work/app".to_owned()),
+                    pane_id: Some("wB:p5".to_owned()),
                 },
                 HerdrAgent {
                     name: "nocwd".to_owned(),
                     kind: "codex".to_owned(),
-                    cwd: None
+                    cwd: None,
+                    pane_id: None,
                 },
             ]
         );
         assert!(parse_herdr_agents(b"not json").is_empty());
         assert!(parse_herdr_agents(b"{}").is_empty());
+    }
+
+    #[test]
+    fn parses_herdr_agent_list_with_pane_id_and_skips_unnamed() {
+        // Agent without name is skipped, agent without pane_id has None
+        let sample = br#"{"result":{"agents":[{"agent":"claude","name":"coder","pane_id":"w1:p1"},{"agent":"codex","name":"reviewer"}]}}"#;
+        let agents = parse_herdr_agents(sample);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].name, "coder");
+        assert_eq!(agents[0].pane_id, Some("w1:p1".to_owned()));
+        assert_eq!(agents[1].name, "reviewer");
+        assert_eq!(agents[1].pane_id, None);
+    }
+
+    #[test]
+    fn trim_cap_tail_keeps_newest_lines_and_caps_bytes() {
+        use super::trim_cap_tail;
+        // 10 lines, keep 5
+        let text =
+            "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n";
+        let out = trim_cap_tail(text, 5);
+        assert_eq!(out.lines().count(), 5);
+        assert!(out.starts_with("line 6"));
+        assert!(out.ends_with("line 10"));
+        // Cap test
+        let long = "x".repeat(7000);
+        let out = trim_cap_tail(&long, 10);
+        assert_eq!(out.len(), 6000);
     }
 }
