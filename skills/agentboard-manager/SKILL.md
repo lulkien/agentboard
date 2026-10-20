@@ -8,7 +8,7 @@ platforms: [linux, macos]
 metadata:
   hermes:
     tags: [agentboard, herdr, manager, delegation, review, dispatch, wait]
-    related_skills: [herdr-kit, subagent-team-setup, claude-code, opencode]
+    related_skills: [herdr, claude-code, opencode]
 ---
 
 # Being the manager
@@ -29,9 +29,10 @@ is not "is it trivial" but "is it the repo's" — file a row and let a worker ma
 edit, so every write in the tree has an author on the board. A file the coder is
 already in the middle of is the one exception worth not touching at all.
 
-This skill is the operating loop. Pane mechanics: `herdr-kit` (and `herdr --skill`,
-the authority shipped with the binary). Machine setup: `subagent-team-setup`.
-Costly mistakes: `references/pitfalls.md`.
+This skill is the operating loop. Pane mechanics: the `herdr` skill (and `herdr
+--skill`, the authority shipped with the binary). Machine setup, MCP configs and
+wrapper bins: `references/machine-provisioning.md`. Costly mistakes:
+`references/pitfalls.md`.
 
 ## When to Use
 
@@ -40,6 +41,8 @@ Costly mistakes: `references/pitfalls.md`.
 - A review round has to be commissioned, or findings turned into a fix task.
 - A worker is blocked, silent, or its task sits behind a live lease.
 - You are about to poll the board by hand — stop and use `wait`.
+- A NEW machine must run the team (claude/agentboard/MCP configs, wrapper bins,
+  verification) — `references/machine-provisioning.md`.
 
 ## The one rule that shapes everything
 
@@ -299,7 +302,7 @@ they work and report success on a task they never claimed.
 
 ## herdr: the minimum a manager needs
 
-Full pane mechanics and start flags: `herdr-kit/HERDR.md`. What the loop needs:
+Full pane mechanics and start flags: the `herdr` skill. What the loop needs:
 
 ```bash
 herdr tab list | pane list | agent list          # orientation, JSON envelopes
