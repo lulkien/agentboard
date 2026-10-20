@@ -123,9 +123,10 @@ belongs to the coder**, not just tests: `cargo install`, a build for the target,
 driving the flow that proves it. The reviewer is a team lead: it reads the diff and the
 pasted evidence, reviews the logic and the edge cases, and files feedback — it does not
 build, deploy, install, flash or drive hardware, and it does not re-run the coder's suites
-(one spot command when a claim looks wrong is the whole allowance). Nothing is duplicated
-for ceremony — a second full run mostly teaches the author to trust somebody else's
-transcript.
+as a second gate. It may still run its own small probe or one targeted command to chase an
+edge case it suspects; that is the job, and it is nothing like a full pass. Nothing is
+duplicated for ceremony — a second full run mostly teaches the author to trust somebody
+else's transcript.
 
 ```
 task  ->  review  ->  fix  ->  re-check  ->  done  ->  renew
