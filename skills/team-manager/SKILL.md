@@ -1,36 +1,48 @@
 ---
 name: team-manager
-description: "Use when any agent manages a coder and a reviewer through agentboard and herdr: file epics and tasks, dispatch, run the review loop, renew panes."
-version: 1.0.0
+description: "Use when any agent manages a coder and a reviewer through agentboard and herdr: layout, dispatch, review loop, renew cycle."
+version: 2.0.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos]
 metadata:
   hermes:
     tags: [agentboard, herdr, manager, delegation, review, orchestration]
-    related_skills: [agentboard-manager, herdr, claude-code, opencode]
+    related_skills: [agentboard-manager, claude-code, opencode]
 ---
-
 # Managing a team from the board
 
-Any agent can be the manager, and any agent can be a worker. The manager holds two
-ledgers and writes no code:
+Any agent can be manager or worker. Manager holds two ledgers, writes no code:
 
-- **agentboard** owns the work: the row is the prompt, the status is the truth, the
-  report is the claim, the event log is the history.
-- **herdr** owns the processes: tabs, panes, live agents, what they are doing now.
+- **agentboard** owns work: row = prompt, status = truth, report = claim, events =
+  history.
+- **herdr** owns processes: tabs, panes, live agents, current activity.
 
-The manager's hands are board writes, dispatch, waits, reading panes, re-running
-gates, and talking to the human. Every edit is made by a worker, including
-one-line docs and `.gitignore` entries — if it belongs to the repo, it gets a row.
+Manager does: board writes, dispatch, waits, read panes, re-run gates, talk to human.
+Every edit belongs to worker, incl. one-line docs and `.gitignore` entries — belongs to
+repo → gets row.
 
-`agentboard-manager` is the long-form playbook with the reasoning. This skill is the
-operating procedure: commands, order, and the traps that cost time.
+Rest lives: `references/herdr-mechanics.md` for pane depth (context check, layout,
+start/restart, dialogs, seat swap, teardown, traps); `scripts/` for `herdr-status`,
+`herdr-agent-open`, `herdr-team-open`; `agentboard-manager` for long-form reasoning.
+`herdr --skill` ships authority — flag disagrees → binary wins.
 
-## 1. Topology: one manager tab, one team tab
+## 1. Check ground before touching anything
 
 ```bash
-herdr tab list                     # find the manager pane; never split it
+test "${HERDR_ENV:-}" = 1 || echo NOT_INSIDE_HERDR
+herdr status                         # server up, protocol compatible
+herdr tab list; herdr pane list      # topology now, not from an earlier turn
+herdr agent list                     # name, kind, status, cwd
+agentboard brief; agentboard ls; agentboard sessions
+```
+
+Re-read topology same turn you act: stale pane id → `pane close` answers
+`pane_not_found`. Not inside herdr → say so, stop.
+
+## 2. Topology: one manager tab, one team tab
+
+```bash
 herdr tab create --cwd <repo> --label team --env AGENTBOARD_ACTOR=<coder-actor>
 herdr pane split --pane <root> --direction right --cwd <repo> \
   --env AGENTBOARD_ACTOR=<reviewer-actor> --no-focus
@@ -40,137 +52,154 @@ herdr agent start reviewer --kind claude --pane <p2> --timeout 180000 \
   -- --strict-mcp-config --mcp-config=$HOME/.claude/reviewer-mcp.json --model sonnet
 ```
 
-Rules that decide whether the log is readable later:
+`~/.local/bin/herdr-team-open <repo>` does whole move: closes live coder/reviewer,
+creates tab, splits, answers folder trust, fixes name-from-kind. `DRY=1` prints plan;
+`REVIEWER_KIND=claude|opencode` picks seat; `CODER_MODEL`/`REVIEWER_MODEL` pick models.
 
-- One actor per pane. The actor comes from the MCP config's `environment` block, and a
-  hardcoded value there beats the pane env — remove it and let each pane export its own,
-  or the event log cannot tell coder from reviewer.
-- Pane kind is a seat, not a vendor: `claude`, `opencode`, `codex` all work. Pick whichever
-  has quota, and say in the close-out which one reviewed.
-- Verify cwd in `herdr agent list` before dispatching. A pane rooted in the wrong repo is
-  the one failure that silently produces work in the wrong tree.
+Rules for readable event log:
 
-```bash
-herdr agent list                     # name, kind, status, cwd
-herdr pane read <pane> --lines 20    # what it is actually doing
-herdr agent prompt <name> "<text>"   # one turn, submitted atomically
-```
+- One actor per pane. Hardcoded actor in MCP config beats pane env — strip it, let pane
+  export own, else coder + reviewer log as one name.
+- opencode panes need `--standalone` + `--env AGENTBOARD_ACTOR=…` on tab/split; pane on
+  shared service inherits service env, both report same actor.
+- Kind = seat, not vendor: `claude`, `opencode`, `codex` all work. Say which reviewed.
+- Verify cwd in `herdr agent list` before dispatch; wrong repo = silent wrong tree.
+- `agent start` needs pane at interactive shell prompt; never creates layout.
 
-## 2. Board setup
+## 3. Board setup
 
 ```bash
-agentboard path                      # where the board lives; check the backend build
+agentboard path                      # board location; check backend build
 agentboard --actor <manager> register coder --agent claude
 agentboard --actor <manager> register reviewer --agent claude
-agentboard sessions                  # both must say "up"
+agentboard sessions                  # both "up"
 ```
 
-Register the **agent name** as herdr reports it, never a pane id. A stale row shadows a
-dispatch: `agentboard unregister <name>` or `agentboard sessions prune` removes it.
+Register **agent name** herdr reports, never pane id. Stale row shadows dispatch:
+`agentboard unregister <name>` or `agentboard sessions prune`.
 
-## 3. Epic, task, subtask
+## 4. Epic, task, subtask
 
 ```bash
-agentboard --actor <manager> epic add "<outcome>" --path /abs/repo --goal "<when it is done>"
+agentboard --actor <manager> epic add "<outcome>" --path /abs/repo --goal "<when done>"
 agentboard --actor <manager> add "<title>" --epic E4 --assignee <coder> \
   --description "<repo, files, situation, constraints>" --goal "<executable checks>"
 ```
 
-- `description` is context; `goal` is how to do it plus how it is judged finished. A goal
-  that cannot fail is not a goal: name the commands and the text they must print.
-- One row per unit of work. A fix belongs to the review that found it:
-  `--parent T7` (the epic is inherited). `agentboard children T7` then answers what that
-  review cost.
-- Two id spaces: `E<n>` goes to epic verbs and `--epic`, `T<n>` to task verbs and
-  `--parent`. The wrong one is refused by design.
-- Amend instead of refiling: `agentboard edit T7 --goal ...` while the row is `ready`;
-  a live lease refuses the edit (the worker is reading that text).
-- Long text goes in over MCP (`task_add`/`task_edit` with JSON), never into a scratch
-  `.txt` that a wrapper `cat`s. A scratch copy is a second prompt that drifts.
+- `description` = context; `goal` = how + how judged done. Goal can't fail = not goal:
+  name commands + text they must print.
+- One row per unit. Fix belongs to review that found it: `--parent T7` (epic inherited).
+  `agentboard children T7` then shows review cost.
+- Two id spaces: `E<n>` → epic verbs + `--epic`, `T<n>` → task verbs + `--parent`.
+- Amend, don't refile: `agentboard edit T7 --goal …` while `ready`; live lease refuses
+  (worker reading text).
+- Long text via MCP (`task_add`/`task_edit` JSON), never scratch `.txt` for wrapper to
+  `cat`. Second prompt copy drifts.
 
-## 4. Dispatch and wait
+## 5. Dispatch and wait
 
 ```bash
-agentboard --actor <manager> dispatch T7 --to coder      # refuses a non-ready row
+agentboard --actor <manager> dispatch T7 --to coder      # refuses non-ready row
 agentboard --actor <manager> wait T7 --status review,needs_fix,blocking --timeout 1800
 ```
 
-- Dispatch sends the row's id, not the row's text: the pane claims with its MCP tools and
-  reads `description`/`goal` itself. Never retype the spec into the prompt.
-- One row per pane at a time. A second dispatch into a working pane becomes a stray turn
-  in the middle of the work: queue the next row as `ready`.
-- Arm the watcher in the background with notify before ending the turn. No polling loops.
-- `wait --status` matches **current state**, so watching a row already in that status
-  returns at once. Watch a status the row is not in yet, or `--kind`.
-- A dispatch is not finished until its watcher is armed; a blocked delegate arrives as
-  `ask`, which is worth watching with `wait --open --kind ask`.
+- Dispatch sends id, not spec: pane claims via MCP tools, reads row itself.
+- One row per pane. Second dispatch into working pane = stray mid-task turn: queue next
+  row as `ready`.
+- Arm background watcher with notify before ending turn. No polling loops.
+- `wait --status` matches **current state**: row already in status returns at once.
+  Watch status not yet reached, or `--kind`. Blocked delegate shows as `ask` —
+  `wait --open --kind ask`.
+- Dispatch not done until watcher armed.
 
-## 5. The review loop
+## 6. Review loop
 
 ```
 task  ->  review  ->  fix  ->  re-check  ->  done  ->  renew
 ```
 
-1. Worker claims, works, finishes with `report` and `status=review`.
-2. Manager reads the report, files a review task under the same epic, dispatches the
-   reviewer.
-3. Reviewer reads the diff and the report: clean → review task `done`; findings → files
-   the fix task itself (`parent=<review task>`) and sets its own row `needs_fix`.
-4. Coder fixes, answers each finding in `report`, sets the fix task `review`. The coder
-   never sets a fix task `done`, never closes a review task.
-5. Reviewer re-checks its own findings. All closed → fix task `done` with evidence, then
+1. Worker claims, works, finishes `report` + `status=review`.
+2. Manager reads report, files review task under same epic, dispatches reviewer.
+3. Reviewer reads diff + report: clean → review task `done`; findings → files fix task
+   itself (`parent=<review task>`), sets own row `needs_fix`.
+4. Coder fixes, answers each finding in `report`, sets fix task `review`. Coder never
+   sets fix task `done`, never closes review task.
+5. Reviewer re-checks own findings. All closed → fix task `done` with evidence, then
    review task `done`. Still open → `note` naming it, fix task `needs_fix`, loop.
-6. Manager re-runs the gates in that tree before believing anything, then closes the task
-   and the epic when every row is `done` or `dropped`.
+6. Manager re-runs gates in tree, closes task + epic when every row `done` or
+   `dropped`.
 
-Status ownership is fixed: coder `ready`/`needs_fix` → `working` → `review`; reviewer
-`review` → `done`|`needs_fix` on both kinds; manager `ready` (re-arm a crashed row),
-`dropped`, `done` on an implement task, and epic status.
+Status ownership: coder `ready`/`needs_fix` → `working` → `review`; reviewer `review` →
+`done`|`needs_fix` on both kinds; manager `ready` (re-arm crashed row), `dropped`, `done`
+on implement task, epic status.
 
-A reviewer approval is a claim, not proof. Read the artifact yourself: two rounds of this
-team's reviewers approved docs and diagrams that stated the opposite of the rule they
-documented. Manager findings go on a new fix task, never into a direct edit.
+Reviewer approval = claim, not proof. Read artifact yourself — reviewers approved docs
+whose diagrams contradicted documented rule. Manager findings → new fix task, never
+direct edit.
 
-Ask for mutation checks on anything that guards: the test must fail when the guard is
-removed, and a guard that can be disabled by an env var in a release build is not a guard.
-Freeze the tree while a reviewer reads it; a diff that moves invalidates the verdict.
+Demand mutation checks on guards: test must fail when guard removed; guard disableable
+by env var in release build ≠ guard. Freeze tree while reviewer reads; moving diff
+voids verdict.
 
-## 6. Renew the pane between cycles
-
-After `done`, before the next task, clear the pane's conversation:
+## 7. Renew pane between cycles
 
 ```bash
 herdr pane send-text coder "/clear"
 herdr pane send-keys coder enter
-herdr pane read coder --lines 8          # expect an empty prompt
+herdr pane read coder --lines 8          # expect empty prompt
 ```
 
-- Only a pane sitting at its prompt. Clearing a `working` pane loses the thread of the
-  row it is on.
-- An open stats/usage overlay swallows the text: `herdr agent send-keys coder esc` first.
-- Coder and reviewer are renewed separately, each on its own cycle.
+- Only pane at prompt. Clearing `working` pane loses row thread.
+- Fix task from review = SAME cycle: not renewal point.
+- Open stats/recap/approval overlay swallows text: `herdr agent send-keys coder esc`
+  first, read pane, then `/clear`.
+- Coder + reviewer renew separately, own cycles.
 
-## 7. Recovery, in the order it pays off
+## 8. Ask, interrupt, restart
+
+```bash
+herdr pane send-text coder '/btw one line: which step now, ETA?'   # side question
+herdr pane send-keys coder enter
+herdr agent send-keys coder esc                                    # hard interrupt
+```
+
+- `/btw` answers without cancelling turn — use for "what doing" while row `working`.
+  Plain text queues as *next* user turn.
+- `agent prompt … --wait` goes in background job: foreground can die at exit 124 while
+  prompt already submitted; re-send double-prompts.
+- `blocked` = dialog, not hang: read pane, answer with key names
+  (`send-keys coder down enter`), re-check `agent list` for `idle`.
+- Swap seat mid-round on quota out: kill each TUI by process group, kill old kind's
+  background service too, reuse panes with new kind, re-register sessions, then
+  `agentboard status T<n> ready "<why>"` to free orphaned row, re-dispatch.
+- Restart with other config/model: same sequence; confirm via
+  `herdr pane process-info --pane <p>` → `foreground_processes[].argv`, not start reply.
+
+## 9. Recovery, in payoff order
 
 | Symptom | First move |
 |---|---|
-| `agent T7 working by X (lease 24m left)` | the row is held: `agentboard status T7 ready` clears it, then re-dispatch |
-| pane says `working` but the row is `ready` | read the pane; a dialog may be open (`esc`, then answer) |
-| dispatch stalls (`agent_prompt_stalled`) | an overlay or permission dialog is up: read, `esc`, re-send |
-| row claimed twice | the guard is broken; stop and fix that before the next row |
-| stray servers after a test run | `pgrep -af '<name>'` — the process name may differ from the binary name |
-| `pkill -f <pattern>` kills your own shell | bracket the pattern: `pkill -f '[s]urreal db start'` |
+| `agent T7 working by X (lease 24m left)` | row held: `agentboard status T7 ready` clears, re-dispatch |
+| `agent_prompt_stalled` | overlay/dialog up: read pane, `esc`, re-send |
+| pane `working`, row `ready` | read pane; turn ended without board write |
+| `agent_not_ready` / `blocked` at start | startup dialog: folder trust (`down enter`), read-outside-cwd (`enter`) |
+| `agent_name_taken` | previous agent still runs: kill its group, then start |
+| row claimed twice | guard broken: stop, fix before next row |
+| stray background servers | `pgrep -af '<name>'` — process name may differ from binary |
+| `pkill -f <pattern>` kills own shell | bracket it: `pkill -f '[s]urreal db start'` |
+| helper script "fix did nothing" | two copies: `diff -q ~/.local/bin/<h> scripts/<h>`, then `bash -n` |
 
-Close the team only when the user asks: kill the foreground process group per pane, then
-close the panes and the tab, and re-list to prove it.
+Close team only when asked: kill each pane's foreground process group, close panes,
+close tab, then `herdr tab list` / `herdr agent list` to prove — never claim teardown
+without fresh listing.
 
-## 8. Manager checklist for one cycle
+## 10. One cycle, start to finish
 
-1. `agentboard brief`, `agentboard ls`, `herdr agent list` — orient before touching anything.
-2. Row written with an executable goal and the right `--epic`/`--parent`.
-3. Dispatch, then arm the watcher before ending the turn.
-4. On wake: read the report, re-run the named gates yourself.
-5. Review task filed and dispatched; tree frozen while the reviewer reads.
-6. Fix tasks closed by the reviewer, not by the coder or the manager.
-7. Commit explicit paths only, on an explicit ok; never push.
-8. Renew both panes, then start the next row.
+1. `herdr status`, `agentboard brief`, `herdr agent list` — orient.
+2. Row written with executable goal, right `--epic`/`--parent`.
+3. Dispatch, arm watcher before ending turn.
+4. On wake: read report, re-run named gates yourself.
+5. Review task filed + dispatched; tree frozen while reviewer reads.
+6. Fix tasks closed by reviewer — not coder, not manager.
+7. Commit explicit paths only, on explicit ok; never push.
+8. Renew both panes, then start next row.
