@@ -3,7 +3,10 @@
 # Safe to run any time; changes nothing.
 set -u
 
-if [ "${HERDR_ENV:-}" != 1 ]; then
+# Two ways to be "inside herdr": the pane exports HERDR_ENV, or the CLI can reach
+# a running herdr server. Hermes' own tool shell is a herdr pane without the env
+# var, so the env check alone would wrongly refuse here.
+if [ "${HERDR_ENV:-}" != 1 ] && ! herdr status >/dev/null 2>&1; then
   echo "NOT_INSIDE_HERDR — herdr commands must run from a pane inside herdr" >&2
   exit 1
 fi
