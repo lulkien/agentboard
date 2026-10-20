@@ -8,7 +8,10 @@
 #   (e) outage   - server killed mid-run: the one-line serve error, not a hang
 #   (f) release  - a release binary ignores the lock-disable variable (lock held elsewhere)
 #   (g) first use- 8 simultaneous first adds, then 8 first reads, on a fresh board: one schema
-# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse) runs one phase after the builds.
+#   (h) epics    - an epic workflow transcript, sqlite vs surreal, identical
+#   (i) sessions - register / sessions / prune / unregister against stub tmux and herdr, identical
+# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions) runs one phase
+# after the builds.
 # Needs a `surreal` binary. A missing one is a failure, never a skip.
 set -u
 cd "$(dirname "$0")/.."
@@ -276,6 +279,149 @@ if want firstuse; then
   echo "== (g) first use of a fresh board: 8 simultaneous first adds (write sessions) then 8 first reads"
   first_use add; check "first use: 8 simultaneous adds" $?
   first_use ls; check "first use: 8 simultaneous reads" $?
+fi
+
+# ---- (h) epics: same steps, same text ------------------------------------------
+epic_transcript() { # binary
+  local B=$1
+  $B epic add "Proj" --goal "ship it" --description "d" --path /nonexistent-agentboard-epic
+  $B epic add "Two"
+  $B epic ls; $B epic ls --status done; $B epic ls --status bogus
+  $B add "t1" --epic E1; $B add "t2" --epic E1; $B add "t3" --epic E1; $B add "bad" --epic E9
+  $B add "other" --epic E2
+  $B get T1; $B epic get E1; $B epic get E2
+  $B status T1 done "finished"; $B status T2 dropped "no"; $B ask T3 "q?"
+  $B add "kid" --parent T1; $B add "mismatch" --epic E2 --parent T1; $B parent T4 T5
+  $B epic get E1; $B epic ls; $B children E1; $B children T1; $B children E2; $B children E9
+  $B edit E1 --title "Proj renamed" --goal "ship it now"; $B edit E1 --title "Proj renamed"; $B edit E1
+  $B edit E1 --title " "; $B edit E9 --title x; $B edit E1 --path /nonexistent-agentboard-epic2
+  $B epic status E1 done "closing"; $B epic ls; $B epic ls --status done; $B epic get E1; $B epic get E1 --full
+  $B epic status E1 open; $B epic status E1 bogus; $B epic status E9 done; $B epic get T1; $B epic get E9
+  $B get E1; $B children T9; $B get T3
+}
+if want epics; then
+  echo "== (h) epics: sqlite vs surreal transcripts"
+  (export AGENTBOARD_DB=$T/epics.db; epic_transcript "$T/ab-sqlite" 2>&1 | norm >"$T/epics.sqlite")
+  new_server epics
+  epic_transcript "$T/ab-surreal" 2>&1 | norm >"$T/epics.surreal"
+  if diff "$T/epics.sqlite" "$T/epics.surreal" >"$T/epics.diff"; then
+    echo "epic transcripts identical ($(wc -l <"$T/epics.sqlite") lines)"; check "epics parity" 0
+  else
+    cat "$T/epics.diff"; check "epics parity" 1
+  fi
+  # the transcript must really exercise the error paths, not pass by printing nothing
+  for want_line in 'no such epic E9' 'is an epic id' 'is a task id' 'bad epic status' 'title cannot be empty' 'nothing to edit' 'tasks: 3 \(' 'done #' 'dropped'; do
+    rg -q -- "$want_line" "$T/epics.surreal" || { echo "epic transcript lacks: $want_line"; check "epics transcript coverage" 1; }
+  done
+  # epic_get counts must agree with children for a mixed set: done / dropped / blocking
+  echo "-- E1 counts vs children (T2 done, T3 dropped, T4 blocking, T1 ready; a dropped task leaves the denominator):"
+  new_server epics.counts
+  ab epic add "Mixed" >/dev/null
+  ab add "x1" --epic E1 >/dev/null; ab add "x2" --epic E1 >/dev/null; ab add "x3" --epic E1 >/dev/null; ab add "x4" --epic E1 >/dev/null
+  ab status T2 done ok >/dev/null; ab status T3 dropped no >/dev/null; ab ask T4 "q" >/dev/null
+  line=$(ab epic ls | head -1); sum=$(ab epic get E1 | rg '^tasks:'); kids=$(ab children E1 | wc -l)
+  echo "epic ls : $line"; echo "epic get: $sum"; echo "children: $kids lines"
+  case "$line" in *" 1/3 done "*) ok1=0 ;; *) ok1=1 ;; esac
+  case "$sum" in "tasks: 4 (1 blocking, 1 ready, 1 done, 1 dropped)") ok2=0 ;; *) ok2=1 ;; esac
+  [ "$kids" -eq 4 ]; ok3=$?
+  check "epic counts agree with children (dropped stays out of done and the denominator)" $((ok1 + ok2 + ok3))
+  stop_server
+  # epic ids come from their own counter under the same lock: 8 processes x 5 epic adds
+  new_server epics.ids; prime
+  pids=
+  for p in 1 2 3 4 5 6 7 8; do
+    ( for _ in 1 2 3 4 5; do ab epic add "e$p" 2>&1 | head -1; done >"$DIR/epic.$p" ) &
+    pids="$pids $!"
+  done
+  wait $pids
+  eids=$(cat "$DIR"/epic.? | sed -nE 's/^E([0-9]+) open$/\1/p' | sort -n)
+  etotal=$(printf '%s\n' "$eids" | sed '/^$/d' | wc -l)
+  edistinct=$(printf '%s\n' "$eids" | sed '/^$/d' | sort -u | wc -l)
+  emax=$(printf '%s\n' "$eids" | tail -1)
+  echo "epic adds=$etotal distinct=$edistinct max=E${emax:-?} (want 40 distinct, max E40)"
+  [ "$etotal" -eq 40 ] && [ "$edistinct" -eq 40 ] && [ "${emax:-0}" -eq 40 ]; check "epic id allocation" $?
+  stop_server
+fi
+
+# ---- (i) sessions: stub bridges, same steps, same text ---------------------------
+mkstubs() { # dir mode(alive|dead)
+  mkdir -p "$1"
+  if [ "$2" = alive ]; then
+    cat >"$1/tmux" <<'EOF'
+#!/bin/sh
+case "$1" in
+  has-session) [ "$3" = alive-one ] && exit 0; exit 1 ;;
+  list-sessions) exit 0 ;;
+esac
+exit 1
+EOF
+    cat >"$1/herdr" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "agent list" ] && { echo '{"result":{"agents":[{"name":"hz","agent":"claude"}]}}'; exit 0; }
+exit 1
+EOF
+  else
+    printf '#!/bin/sh\nexit 1\n' >"$1/tmux"
+    printf '#!/bin/sh\nexit 1\n' >"$1/herdr"
+  fi
+  chmod +x "$1/tmux" "$1/herdr"
+}
+sessions_transcript() { # binary
+  local B=$1
+  $B sessions
+  $B add "work" >/dev/null
+  $B register alive-one --agent claude --task T1; sleep 0.05
+  $B register gone-one --agent claude; sleep 0.05
+  $B register hz --agent claude --task T1; sleep 0.05
+  $B register hz --agent claude; sleep 0.05
+  $B register bad --task T9
+  $B sessions
+  $B sessions prune --dry-run; $B sessions; $B sessions prune; $B sessions
+  $B sessions prune
+  $B unregister alive-one; $B unregister alive-one; $B unregister nobody; $B sessions
+  PATH="$DEAD_STUBS:$PATH" $B sessions prune; PATH="$DEAD_STUBS:$PATH" $B sessions prune --dry-run
+  $B sessions
+}
+if want sessions; then
+  echo "== (i) sessions: stub tmux/herdr bridges, sqlite vs surreal transcripts"
+  ALIVE_STUBS=$T/stubs-alive; DEAD_STUBS=$T/stubs-dead
+  mkstubs "$ALIVE_STUBS" alive; mkstubs "$DEAD_STUBS" dead
+  (export AGENTBOARD_DB=$T/sessions.db PATH="$ALIVE_STUBS:$PATH"; sessions_transcript "$T/ab-sqlite" 2>&1 | norm >"$T/sessions.sqlite")
+  new_server sessions
+  (export PATH="$ALIVE_STUBS:$PATH"; sessions_transcript "$T/ab-surreal" 2>&1 | norm >"$T/sessions.surreal")
+  if diff "$T/sessions.sqlite" "$T/sessions.surreal" >"$T/sessions.diff"; then
+    echo "session transcripts identical ($(wc -l <"$T/sessions.sqlite") lines)"; check "sessions parity" 0
+  else
+    cat "$T/sessions.diff"; check "sessions parity" 1
+  fi
+  # Rows seen in the same millisecond must list in the same order on both backends: by
+  # name, byte order (uppercase before lowercase, non-ASCII last). Registered out of order,
+  # then `seen` forced equal, so no sleep can hide a missing tiebreak.
+  tie_register() { for n in émile mid alpha Zed; do "$1" register "$n" --agent claude >/dev/null; done; }
+  tie_order() { "$1" sessions | awk '{print $1}' | tr '\n' ' '; }
+  want_order="Zed alpha mid émile "
+  (export AGENTBOARD_DB=$T/ties.db PATH="$ALIVE_STUBS:$PATH"
+   tie_register "$T/ab-sqlite"
+   python3 - "$T/ties.db" <<'EOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1]); c.execute("UPDATE sessions SET seen = 1000"); c.commit()
+EOF
+   tie_order "$T/ab-sqlite" >"$T/ties.sqlite")
+  new_server sessions.ties
+  (export PATH="$ALIVE_STUBS:$PATH"
+   tie_register "$T/ab-surreal"
+   curl -s -u root:root -H 'surreal-ns: agentboard' -H 'surreal-db: board' -H 'Accept: application/json' \
+     -H 'Content-Type: text/plain' --data 'UPDATE sessions SET seen = 1000' "http://127.0.0.1:$PORT/sql" >/dev/null
+   tie_order "$T/ab-surreal" >"$T/ties.surreal")
+  echo "forced-tie order, sqlite : $(cat "$T/ties.sqlite")"
+  echo "forced-tie order, surreal: $(cat "$T/ties.surreal")"
+  [ "$(cat "$T/ties.sqlite")" = "$want_order" ] && [ "$(cat "$T/ties.surreal")" = "$want_order" ]; check "sessions tie order (Zed alpha mid émile) on both backends" $?
+  stop_server
+  for want_line in 'prune: neither tmux nor herdr answers' 'no registered session "alive-one"' 'no such task T9' 'would remove gone-one' 'removed gone-one' 'nothing to prune' 'hz claude up'; do
+    rg -q -- "$want_line" "$T/sessions.surreal" || { echo "session transcript lacks: $want_line"; check "sessions transcript coverage" 1; }
+  done
+  rg -m3 'prune|would|removed|pruned' "$T/sessions.surreal" | head -5
+  stop_server
 fi
 
 echo

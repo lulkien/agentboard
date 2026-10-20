@@ -12,9 +12,11 @@ struct SessionRow {
     seen: i64,
 }
 
+/// Newest first; rows seen in the same millisecond come out by name (SQLite BINARY
+/// collation: byte order), so the listing never depends on insertion order.
 fn rows(conn: &rusqlite::Connection) -> Result<Vec<SessionRow>, String> {
     let mut stmt = conn
-        .prepare("SELECT name,agent,task_id,seen FROM sessions ORDER BY seen DESC")
+        .prepare("SELECT name,agent,task_id,seen FROM sessions ORDER BY seen DESC, name")
         .map_err(|e| e.to_string())?;
     stmt.query_map([], |r| {
         Ok(SessionRow {
@@ -373,7 +375,29 @@ fn try_tmux_send(name: &str, text: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HerdrAgent, parse_herdr_agents};
+    use super::{HerdrAgent, parse_herdr_agents, rows};
+
+    #[test]
+    fn rows_with_the_same_seen_list_by_name_in_byte_order() {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        c.execute_batch(crate::store::sqlite::SCHEMA).unwrap();
+        // inserted out of order, all seen in the same millisecond, one newer row
+        for name in ["mid", "émile", "alpha", "Zed"] {
+            c.execute(
+                "INSERT INTO sessions(name,agent,seen) VALUES(?,?,?)",
+                rusqlite::params![name, "claude", 1000],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "INSERT INTO sessions(name,agent,seen) VALUES('newest','claude',2000)",
+            [],
+        )
+        .unwrap();
+        let got: Vec<String> = rows(&c).unwrap().into_iter().map(|r| r.name).collect();
+        // newest first, then ties by byte order: uppercase before lowercase, non-ASCII last
+        assert_eq!(got, ["newest", "Zed", "alpha", "mid", "émile"]);
+    }
 
     #[test]
     fn parses_herdr_agent_list_and_skips_unnamed() {

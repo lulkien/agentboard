@@ -26,7 +26,7 @@ const STATUS_LIST: &str = "ready|working|blocking|needs_fix|review|done|dropped"
 
 /// A task row. `tid` is the integer record key (`meta::id(id)`).
 #[derive(Deserialize, Clone, Debug)]
-struct Row {
+pub(super) struct Row {
     tid: i64,
     status: String,
     assignee: Option<String>,
@@ -49,7 +49,7 @@ struct Row {
 
 const SELECT_TASK: &str = "SELECT meta::id(id) AS tid, * FROM tasks";
 
-async fn fetch_opt(db: &Db, id: i64) -> Result<Option<Row>, String> {
+pub(super) async fn fetch_opt(db: &Db, id: i64) -> Result<Option<Row>, String> {
     let mut r = db
         .query(format!(
             "{SELECT_TASK} WHERE id = type::thing('tasks', $id)"
@@ -78,13 +78,13 @@ async fn select_rows(db: &Db, tail: &str, binds: Value) -> Result<Vec<Row>, Stri
 
 /// One write transaction: statements are appended with their values bound as
 /// parameters, then `run` commits and returns the value of a closing `RETURN`.
-struct Txn {
+pub(super) struct Txn {
     sql: String,
     binds: Map<String, Value>,
 }
 
 impl Txn {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             sql: "BEGIN TRANSACTION;\n".to_owned(),
             binds: Map::new(),
@@ -92,13 +92,13 @@ impl Txn {
     }
 
     /// Binds a value and returns its `$pN` name.
-    fn p(&mut self, v: impl Into<Value>) -> String {
+    pub(super) fn p(&mut self, v: impl Into<Value>) -> String {
         let name = format!("p{}", self.binds.len());
         self.binds.insert(name.clone(), v.into());
         format!("${name}")
     }
 
-    fn raw(&mut self, s: &str) {
+    pub(super) fn raw(&mut self, s: &str) {
         self.sql.push_str(s);
         self.sql.push('\n');
     }
@@ -106,14 +106,26 @@ impl Txn {
     /// Allocates the next event seq and records an event on a task (`task` is a
     /// SurrealQL expression for the task id). The seq is left in `$seq`.
     fn event(&mut self, task: &str, actor: &str, kind: &str, body: &str) {
+        self.event_on("task_id", task, actor, kind, body);
+    }
+
+    /// The same for an event on an epic (`col` is `epic_id`).
+    pub(super) fn event_on(
+        &mut self,
+        col: &str,
+        subject: &str,
+        actor: &str,
+        kind: &str,
+        body: &str,
+    ) {
         let (a, k, b, ts) = (self.p(actor), self.p(kind), self.p(body), self.p(now_ms()));
         self.raw("LET $seq = (UPSERT counters:event SET n = (n ?? 0) + 1 RETURN VALUE n)[0];");
         self.raw(&format!(
-            "CREATE type::thing('events', $seq) SET task_id = {task}, actor = {a}, kind = {k}, body = {b}, ts = {ts};"
+            "CREATE type::thing('events', $seq) SET {col} = {subject}, actor = {a}, kind = {k}, body = {b}, ts = {ts};"
         ));
     }
 
-    async fn run(mut self, db: &Db, ret: &str) -> Result<Value, String> {
+    pub(super) async fn run(mut self, db: &Db, ret: &str) -> Result<Value, String> {
         self.raw(&format!("RETURN {ret};\nCOMMIT TRANSACTION;"));
         let mut res = db
             .query(self.sql)
@@ -130,7 +142,7 @@ impl Txn {
 }
 
 /// `field = $pN` for a value, `field = NONE` for absent.
-fn assign(tx: &mut Txn, sets: &mut Vec<String>, name: &str, v: Option<Value>) {
+pub(super) fn assign(tx: &mut Txn, sets: &mut Vec<String>, name: &str, v: Option<Value>) {
     match v {
         Some(v) => {
             let p = tx.p(v);
@@ -140,7 +152,7 @@ fn assign(tx: &mut Txn, sets: &mut Vec<String>, name: &str, v: Option<Value>) {
     }
 }
 
-fn int_of(v: &Value, what: &str) -> Result<i64, String> {
+pub(super) fn int_of(v: &Value, what: &str) -> Result<i64, String> {
     v.as_i64()
         .ok_or_else(|| format!("board database: no {what} came back ({v})"))
 }
@@ -160,7 +172,7 @@ fn code(status: &str) -> &str {
     }
 }
 
-fn ago(ts_ms: i64) -> String {
+pub(super) fn ago(ts_ms: i64) -> String {
     let d = (now_ms() - ts_ms).max(0) / 1000;
     match d {
         0..=59 => format!("{d}s"),
@@ -176,11 +188,11 @@ fn stamp(ts_ms: i64) -> String {
     format!("{h:02}:{m:02}")
 }
 
-fn when(ts: i64) -> String {
+pub(super) fn when(ts: i64) -> String {
     format!("{} ({}Z)", ago(ts), stamp(ts))
 }
 
-fn text_change<'a>(
+pub(super) fn text_change<'a>(
     diffs: &mut Vec<String>,
     name: &str,
     old: &'a str,
@@ -197,7 +209,7 @@ fn text_change<'a>(
     value
 }
 
-fn value_change<'a>(
+pub(super) fn value_change<'a>(
     diffs: &mut Vec<String>,
     name: &str,
     old: &'a str,
@@ -214,7 +226,7 @@ fn value_change<'a>(
     value
 }
 
-fn field_names(diffs: &[String]) -> String {
+pub(super) fn field_names(diffs: &[String]) -> String {
     let names: Vec<&str> = diffs
         .iter()
         .filter_map(|d| d.split_whitespace().next())
@@ -240,8 +252,9 @@ fn held_text(r: &Row) -> String {
 
 // ---- writes -------------------------------------------------------------------------
 
-/// The epic a new task lands in. Epics are not ported yet, so a named epic never
-/// exists and is refused exactly as the sqlite build refuses a missing one.
+/// The epic a new task lands in: the explicit one, else the parent's. An
+/// explicit epic that disagrees with the parent's is an error: a subtask lives in
+/// its parent's epic.
 async fn resolve_epic(
     db: &Db,
     epic: Option<i64>,
@@ -257,9 +270,20 @@ async fn resolve_epic(
         None => None,
     };
     if let Some(e) = epic {
-        return Err(format!("add: no such epic {}", short_epic(e)));
+        super::epics::fetch_epic(db, e)
+            .await
+            .map_err(|_| format!("add: no such epic {}", short_epic(e)))?;
     }
-    Ok(parent_epic.and_then(|(_, pe)| pe))
+    match (epic, parent_epic) {
+        (Some(e), Some((p, pe))) if pe != Some(e) => Err(format!(
+            "add: parent {} belongs to {}, not {} (a subtask lives in its parent's epic)",
+            short(p),
+            pe.map_or("no epic".to_owned(), short_epic),
+            short_epic(e)
+        )),
+        (None, Some((_, pe))) => Ok(pe),
+        (e, _) => Ok(e),
+    }
 }
 
 pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
@@ -787,9 +811,18 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
             r.priority
         );
         out.push_str(&format!("title: {}\n", r.title));
-        if r.epic_id.is_some() {
-            // Unreachable until epics are ported: no task can name an epic yet.
-            return Err(crate::store::stub::STUB.to_owned());
+        if let Some(e) = r.epic_id {
+            let epic = super::epics::fetch_epic(&s.db, e).await?;
+            out.push_str(&format!(
+                "epic: {} {}{}\n",
+                short_epic(e),
+                clip(&epic.title, 60),
+                if epic.path.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", epic.path)
+                }
+            ));
         }
         if let Some(p) = r.parent_id {
             out.push_str(&format!("parent: {}\n", short(p)));
@@ -807,7 +840,7 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
                 out.push_str(&format!("lease: {}m left\n", left / 60_000));
             }
         }
-        if let Some(line) = status_summary(&s.db, r.tid).await? {
+        if let Some(line) = status_summary(&s.db, "parent_id", r.tid, "children").await? {
             out.push_str(&line);
             out.push('\n');
         }
@@ -840,6 +873,7 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
         out.push_str(
             &recent_events(
                 &s.db,
+                "task_id",
                 r.tid,
                 full,
                 &format!("`agentboard get {t} --full` or task_get id={t} full=true"),
@@ -852,7 +886,13 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
 
 /// The last 8 events of a task as an `events:` block, oldest first; bodies are
 /// clipped with a marker unless `full`.
-async fn recent_events(db: &Db, id: i64, full: bool, hint: &str) -> Result<String, String> {
+pub(super) async fn recent_events(
+    db: &Db,
+    col: &str,
+    id: i64,
+    full: bool,
+    hint: &str,
+) -> Result<String, String> {
     #[derive(Deserialize)]
     struct Ev {
         seq: i64,
@@ -862,7 +902,7 @@ async fn recent_events(db: &Db, id: i64, full: bool, hint: &str) -> Result<Strin
         ts: i64,
     }
     let mut r = db
-        .query("SELECT meta::id(id) AS seq, actor, kind, body, ts FROM events WHERE task_id = $id ORDER BY seq DESC LIMIT 8")
+        .query(format!("SELECT meta::id(id) AS seq, actor, kind, body, ts FROM events WHERE {col} = $id ORDER BY seq DESC LIMIT 8"))
         .bind(("id", id))
         .await
         .map_err(|e| db_err(&e))?;
@@ -900,14 +940,21 @@ const STATUS_ORDER: [&str; 7] = [
 ];
 
 /// `children: 4 (2 done, 1 working, 1 needs_fix)`, or None when there are none.
-async fn status_summary(db: &Db, id: i64) -> Result<Option<String>, String> {
+pub(super) async fn status_summary(
+    db: &Db,
+    col: &str,
+    id: i64,
+    label: &str,
+) -> Result<Option<String>, String> {
     #[derive(Deserialize)]
     struct Count {
         status: String,
         n: i64,
     }
     let mut r = db
-        .query("SELECT status, count() AS n FROM tasks WHERE parent_id = $id GROUP BY status")
+        .query(format!(
+            "SELECT status, count() AS n FROM tasks WHERE {col} = $id GROUP BY status"
+        ))
         .bind(("id", id))
         .await
         .map_err(|e| db_err(&e))?;
@@ -922,27 +969,32 @@ async fn status_summary(db: &Db, id: i64) -> Result<Option<String>, String> {
             parts.push(format!("{} {st}", c.n));
         }
     }
-    Ok(Some(format!("children: {total} ({})", parts.join(", "))))
+    Ok(Some(format!("{label}: {total} ({})", parts.join(", "))))
 }
 
-/// One compact line per subtask, ordered by id: id, status, assignee, age, title.
-/// An epic's tasks wait for the epic port.
+/// One compact line per task, ordered by id: id, status, assignee, age, title.
+/// For a task these are its subtasks (`parent_id`); for an epic, every task in it.
 pub fn children(of: Ref) -> Result<String, String> {
-    let id = match of {
-        Ref::Task(id) => id,
-        Ref::Epic(_) => return Err(crate::store::stub::STUB.to_owned()),
-    };
     let s = session(false)?;
     block_on(async {
-        fetch(&s.db, id).await?;
+        let (label, col, id) = match of {
+            Ref::Task(id) => {
+                fetch(&s.db, id).await?;
+                (short(id), "parent_id", id)
+            }
+            Ref::Epic(id) => {
+                super::epics::fetch_epic(&s.db, id).await?;
+                (short_epic(id), "epic_id", id)
+            }
+        };
         let rows = select_rows(
             &s.db,
-            "WHERE parent_id = $id ORDER BY tid",
+            &format!("WHERE {col} = $id ORDER BY tid"),
             json!({"id": id}),
         )
         .await?;
         if rows.is_empty() {
-            return Ok(format!("{} has no children", short(id)));
+            return Ok(format!("{label} has no children"));
         }
         let mut out = String::new();
         for r in rows {

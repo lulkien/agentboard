@@ -4,8 +4,10 @@
 //! the stub; `connect` is reached only from tests until the first port lands
 //! (docs/surrealdb-migration.md, Temporary debt).
 
+mod epics;
 mod lock;
 mod serve;
+mod sessions;
 mod tasks;
 
 use serde::Deserialize;
@@ -92,13 +94,13 @@ impl Board for SurrealBoard {
         goal: &str,
         path: Option<&str>,
     ) -> Result<String, String> {
-        StubBoard.epic_add(actor, title, description, goal, path)
+        epics::epic_add(actor, title, description, goal, path)
     }
     fn epic_list(&self, status: Option<&str>) -> Result<String, String> {
-        StubBoard.epic_list(status)
+        epics::epic_list(status)
     }
     fn epic_get(&self, id: i64, full: bool) -> Result<String, String> {
-        StubBoard.epic_get(id, full)
+        epics::epic_get(id, full)
     }
     fn epic_status(
         &self,
@@ -107,19 +109,19 @@ impl Board for SurrealBoard {
         status: &str,
         note: Option<&str>,
     ) -> Result<String, String> {
-        StubBoard.epic_status(actor, id, status, note)
+        epics::epic_status(actor, id, status, note)
     }
     fn epic_edit(&self, actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, String> {
-        StubBoard.epic_edit(actor, id, e)
+        epics::epic_edit(actor, id, e)
     }
     fn sessions(&self) -> Result<String, String> {
-        StubBoard.sessions()
+        sessions::sessions()
     }
     fn prune(&self, dry_run: bool) -> Result<String, String> {
-        StubBoard.prune(dry_run)
+        sessions::prune(dry_run)
     }
     fn unregister(&self, name: &str) -> Result<String, String> {
-        StubBoard.unregister(name)
+        sessions::unregister(name)
     }
     fn register_session(
         &self,
@@ -128,7 +130,7 @@ impl Board for SurrealBoard {
         cwd: &str,
         task: Option<i64>,
     ) -> Result<String, String> {
-        StubBoard.register_session(name, agent, cwd, task)
+        sessions::register_session(name, agent, cwd, task)
     }
     fn tail(&self, name: &str, lines: usize) -> Result<String, String> {
         StubBoard.tail(name, lines)
