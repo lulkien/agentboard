@@ -10,8 +10,10 @@
 #   (g) first use- 8 simultaneous first adds, then 8 first reads, on a fresh board: one schema
 #   (h) epics    - an epic workflow transcript, sqlite vs surreal, identical
 #   (i) sessions - register / sessions / prune / unregister against stub tmux and herdr, identical
-# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions) runs one phase
-# after the builds.
+#   (j) render   - brief / ls filters / get / get --full / clipped titles, sqlite vs surreal, identical
+#   (k) dispatch - --print, refusal, --force reset, send, fallback line, warnings, sqlite vs surreal
+# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch)
+# runs one phase after the builds.
 # Needs a `surreal` binary. A missing one is a failure, never a skip.
 set -u
 cd "$(dirname "$0")/.."
@@ -421,6 +423,123 @@ EOF
     rg -q -- "$want_line" "$T/sessions.surreal" || { echo "session transcript lacks: $want_line"; check "sessions transcript coverage" 1; }
   done
   rg -m3 'prune|would|removed|pruned' "$T/sessions.surreal" | head -5
+  stop_server
+fi
+
+# ---- (j) render: brief / ls / get, same steps, same text ------------------------
+render_transcript() { # binary
+  local B=$1
+  local LONG BIG
+  LONG=$(python3 -c "print('a long title with many words in it ' * 5)")
+  BIG=$(python3 -c "print('d' * 4500)")
+  $B brief; $B ls
+  $B epic add "Render epic" --path /nonexistent-agentboard-render
+  $B add "$LONG" --description "$BIG" --goal "goal line one
+goal line two"
+  $B add "in the epic" --epic E1 --priority 5
+  $B add "will block"; $B add "already working" --status working; $B add "to review" --status review
+  $B ask T3 "need input?"
+  $B claim; $B claim
+  $B brief; $B brief --since 1
+  $B ls; $B ls --status ready; $B ls --status working; $B ls --status blocking; $B ls --status review
+  $B ls --status done; $B ls --assignee a; $B ls --assignee nobody; $B ls --limit 2; $B ls --status bogus
+  $B get T1; $B get T1 --full; $B get T2; $B get T3 --full; $B get T4; $B get T9
+  $B report T5 "report $BIG"; $B done T4 "all finished"; $B note T1 "a note"
+  $B brief; $B get T5 --full; $B get T4; $B children E1; $B children T1; $B epic ls
+}
+if want render; then
+  echo "== (j) render: sqlite vs surreal transcripts"
+  (export AGENTBOARD_DB=$T/render.db; render_transcript "$T/ab-sqlite" 2>&1 | norm >"$T/render.sqlite")
+  new_server render
+  render_transcript "$T/ab-surreal" 2>&1 | norm >"$T/render.surreal"
+  if diff "$T/render.sqlite" "$T/render.surreal" >"$T/render.diff"; then
+    echo "render transcripts identical ($(wc -l <"$T/render.sqlite") lines)"; check "render parity" 0
+  else
+    head -40 "$T/render.diff"; check "render parity" 1
+  fi
+  for want_line in '^[0-9]+ [a-z]{3}, ' 'ON INPUT' '\[input\]' '^EPIC E1' '^done:' 'no such task T9' '^\(no tasks\)' 'bad status' '…' 'events:' 'epic: E1'; do
+    rg -q -- "$want_line" "$T/render.surreal" || { echo "render transcript lacks: $want_line"; check "render transcript coverage" 1; }
+  done
+  stop_server
+  # The `done:` list of brief: rows finished in the same millisecond list by id, and the
+  # LIMIT of 8 keeps the lowest ids. Ten tasks finished out of order, then updated_at forced
+  # equal on both backends, so neither scan order nor timing can supply the order.
+  tie_done() { local B=$1 i; for i in $(seq 1 10); do "$B" add "d$i" >/dev/null; done
+    for i in 7 3 9 1 5 10 2 8 4 6; do "$B" done "T$i" "r$i" >/dev/null; sleep 0.01; done; }
+  brief_done() { "$1" brief | sed -n '/^done:/,$p'; }
+  now_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+  want_done=$(printf 'done:\n'; for i in 1 2 3 4 5 6 7 8; do printf '  T%s r%s\n' "$i" "$i"; done)
+  (export AGENTBOARD_DB=$T/tiedone.db
+   tie_done "$T/ab-sqlite"
+   python3 - "$T/tiedone.db" "$now_ms" <<'EOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1]); c.execute("UPDATE tasks SET updated_at = ? WHERE status = 'done'", (int(sys.argv[2]),)); c.commit()
+EOF
+   brief_done "$T/ab-sqlite" >"$T/tiedone.sqlite")
+  new_server render.tie
+  tie_done "$T/ab-surreal"
+  curl -s -u root:root -H 'surreal-ns: agentboard' -H 'surreal-db: board' -H 'Accept: application/json' \
+    -H 'Content-Type: text/plain' --data "UPDATE tasks SET updated_at = $now_ms WHERE status = 'done'" \
+    "http://127.0.0.1:$PORT/sql" >/dev/null
+  brief_done "$T/ab-surreal" >"$T/tiedone.surreal"
+  echo "forced-tie brief done list, sqlite : $(tr '\n' ' ' <"$T/tiedone.sqlite")"
+  echo "forced-tie brief done list, surreal: $(tr '\n' ' ' <"$T/tiedone.surreal")"
+  [ "$(cat "$T/tiedone.sqlite")" = "$want_done" ] && [ "$(cat "$T/tiedone.surreal")" = "$want_done" ]; check "brief done-list tie order (T1..T8 of 10) on both backends" $?
+  stop_server
+fi
+
+# ---- (k) dispatch: stub herdr/tmux, same steps, same text ------------------------
+mkdispatchstubs() { # dir
+  mkdir -p "$1"
+  cat >"$1/tmux" <<'EOF'
+#!/bin/sh
+case "$1" in
+  has-session) [ "$3" = alive-one ] && exit 0; exit 1 ;;
+  list-sessions) exit 0 ;;
+  send-keys) [ "$3" = alive-one ] && exit 0; echo "no such session" >&2; exit 1 ;;
+esac
+exit 1
+EOF
+  cat >"$1/herdr" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+  "agent list") echo '{"result":{"agents":[{"name":"hz","agent":"claude","cwd":"/elsewhere/x","pane_id":"p1"}]}}'; exit 0 ;;
+  "agent prompt") [ "$3" = hz ] && exit 0; echo "no such agent" >&2; exit 1 ;;
+  "pane send-text"|"pane send-keys") exit 0 ;;
+esac
+exit 1
+EOF
+  chmod +x "$1/tmux" "$1/herdr"
+}
+dispatch_transcript() { # binary
+  local B=$1
+  $B epic add "Proj" --path /srv/proj
+  $B add "t1" --epic E1; $B add "t2"; $B add "t3"
+  $B register alive-one --agent claude; $B register gone-one --agent claude; $B register hz --agent claude
+  $B dispatch T1 --print; $B get T1
+  $B dispatch T1
+  $B dispatch T1 --to alive-one; $B get T1
+  $B dispatch T1 --to hz
+  $B dispatch T1 --to nobody; $B dispatch T1 --to gone-one
+  $B edit T2 --assignee gone-one; $B dispatch T2; $B dispatch T2 --to alive-one
+  $B edit T3 --assignee alive-one; $B dispatch T3; $B get T3
+  $B claim T1; $B dispatch T1; $B dispatch T1 --print; $B dispatch T1 --force --to alive-one; $B get T1
+  $B dispatch T9; $B dispatch T2 --force --print
+}
+if want dispatch; then
+  echo "== (k) dispatch: stub tmux/herdr, sqlite vs surreal transcripts"
+  D_STUBS=$T/stubs-dispatch; mkdispatchstubs "$D_STUBS"
+  (export AGENTBOARD_DB=$T/dispatch.db PATH="$D_STUBS:$PATH"; dispatch_transcript "$T/ab-sqlite" 2>&1 | norm >"$T/dispatch.sqlite")
+  new_server dispatch
+  (export PATH="$D_STUBS:$PATH"; dispatch_transcript "$T/ab-surreal" 2>&1 | norm >"$T/dispatch.surreal")
+  if diff "$T/dispatch.sqlite" "$T/dispatch.surreal" >"$T/dispatch.diff"; then
+    echo "dispatch transcripts identical ($(wc -l <"$T/dispatch.sqlite") lines)"; check "dispatch parity" 0
+  else
+    head -40 "$T/dispatch.diff"; check "dispatch parity" 1
+  fi
+  for want_line in 'dispatched to hz via herdr' 'dispatched to alive-one via tmux \(herdr: no such agent\)' '^warning: T1 belongs to epic E1' 'has no registered assignee' 'no registered session "nobody"' 'registered but not live' 'row is stale' '^--force: T1 working -> ready' 'is working, not ready' 'Use the agentboard MCP tools' 'dispatch N: alive-one via tmux' 'no such task T9'; do
+    rg -q -- "$want_line" "$T/dispatch.surreal" || { echo "dispatch transcript lacks: $want_line"; check "dispatch transcript coverage" 1; }
+  done
   stop_server
 fi
 

@@ -2,31 +2,42 @@
 //! as `tasks.rs`: a write holds the write lock for the whole read-modify-write and is
 //! one server-side transaction; a read takes no lock.
 //!
-//! `normalize_path` and `path_note` are copies of the sqlite ones (see the debt table
-//! in docs/surrealdb-migration.md).
+//! Rows are loaded here and normalised to the plain `text::EpicRow`; the paths and the
+//! text come from the shared `text` module, as in the sqlite build.
 
-use super::tasks::{
-    Txn, assign, field_names, int_of, recent_events, status_summary, text_change, value_change,
-    when,
-};
+use super::tasks::{Txn, assign, int_of, recent_events, status_summary};
 use super::{Db, block_on, db_err, session};
-use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, clip, clip_marked};
 use crate::store::board::EpicEdit;
+use crate::store::text::{self, field_names, normalize_path, path_note, text_change, value_change};
 use crate::store::{now_ms, short_epic};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::path::{Component, Path, PathBuf};
 
 #[derive(Deserialize)]
 pub(super) struct EpicRow {
-    tid: i64,
-    pub title: String,
-    description: String,
-    goal: String,
-    status: String,
-    pub path: String,
-    created_at: i64,
-    completed_at: Option<i64>,
+    pub(super) tid: i64,
+    pub(super) title: String,
+    pub(super) description: String,
+    pub(super) goal: String,
+    pub(super) status: String,
+    pub(super) path: String,
+    pub(super) created_at: i64,
+    pub(super) completed_at: Option<i64>,
+}
+
+impl From<EpicRow> for text::EpicRow {
+    fn from(e: EpicRow) -> Self {
+        Self {
+            id: e.tid,
+            title: e.title,
+            description: e.description,
+            goal: e.goal,
+            status: e.status,
+            path: e.path,
+            created_at: e.created_at,
+            completed_at: e.completed_at,
+        }
+    }
 }
 
 const SELECT_EPIC: &str = "SELECT meta::id(id) AS tid, * FROM epics";
@@ -53,46 +64,6 @@ fn norm_status(raw: &str) -> Option<&'static str> {
         "done" => Some("done"),
         "dropped" => Some("dropped"),
         _ => None,
-    }
-}
-
-/// Absolute, lexically clean project path: `~` and `~/x` expand against `home`,
-/// a relative path resolves against `cwd`, `.`/`..` collapse, no trailing slash.
-/// The path need not exist (an epic may be written before the repo).
-fn normalize_path(raw: &str, cwd: &Path, home: Option<&str>) -> String {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return String::new();
-    }
-    let expanded: PathBuf = match (raw, home) {
-        ("~", Some(h)) => PathBuf::from(h),
-        (r, Some(h)) if r.starts_with("~/") => Path::new(h).join(&r[2..]),
-        (r, _) => PathBuf::from(r),
-    };
-    let abs = if expanded.is_absolute() {
-        expanded
-    } else {
-        cwd.join(expanded)
-    };
-    let mut out = PathBuf::new();
-    for c in abs.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out.to_string_lossy().into_owned()
-}
-
-/// The marker `epic get` shows for a path that is not on disk.
-fn path_note(path: &str) -> &'static str {
-    if !path.is_empty() && !Path::new(path).exists() {
-        " (does not exist)"
-    } else {
-        ""
     }
 }
 
@@ -135,7 +106,7 @@ pub fn epic_add(
 }
 
 /// (done, not-dropped) task counts of an epic: dropped work leaves the denominator.
-async fn counts(db: &Db, epic: i64) -> Result<(i64, i64), String> {
+pub(super) async fn counts(db: &Db, epic: i64) -> Result<(i64, i64), String> {
     #[derive(Deserialize)]
     struct S {
         status: String,
@@ -175,13 +146,7 @@ pub fn epic_list(status: Option<&str>) -> Result<String, String> {
         let mut out = String::new();
         for e in rows {
             let (done, total) = counts(&s.db, e.tid).await?;
-            out.push_str(&format!(
-                "{} {want} {done}/{total} done {}{} {}\n",
-                short_epic(e.tid),
-                if e.path.is_empty() { "-" } else { &e.path },
-                path_note(&e.path),
-                clip(&e.title, 60)
-            ));
+            out.push_str(&text::epic_list_line(&e.into(), want, done, total));
         }
         Ok(out.trim_end().to_owned())
     })
@@ -191,39 +156,10 @@ pub fn epic_list(status: Option<&str>) -> Result<String, String> {
 pub fn epic_get(id: i64, full: bool) -> Result<String, String> {
     let s = session(false)?;
     block_on(async {
-        let e = fetch_epic(&s.db, id).await?;
-        let tag = short_epic(e.tid);
-        let mut out = format!("{tag} {}\ntitle: {}\n", e.status, e.title);
-        if e.path.is_empty() {
-            out.push_str("path: -\n");
-        } else {
-            out.push_str(&format!("path: {}{}\n", e.path, path_note(&e.path)));
-        }
-        out.push_str(&format!("created: {}\n", when(e.created_at)));
-        if let Some(c) = e.completed_at {
-            out.push_str(&format!("completed: {}\n", when(c)));
-        }
-        if let Some(line) = status_summary(&s.db, "epic_id", e.tid, "tasks").await? {
-            out.push_str(&line);
-            out.push('\n');
-        }
-        let hint = format!("`agentboard epic get {tag} --full` or epic_get id={tag} full=true");
-        for (label, value, cap) in [
-            ("description", &e.description, CAP_DESCRIPTION),
-            ("goal", &e.goal, CAP_GOAL),
-        ] {
-            if value.is_empty() {
-                continue;
-            }
-            let shown = if full {
-                value.clone()
-            } else {
-                clip_marked(value, cap, &hint)
-            };
-            out.push_str(&format!("{label}:\n{shown}\n"));
-        }
-        out.push_str(&recent_events(&s.db, "epic_id", e.tid, full, &hint).await?);
-        Ok(out.trim_end().to_owned())
+        let e: text::EpicRow = fetch_epic(&s.db, id).await?.into();
+        let summary = status_summary(&s.db, "epic_id", e.id, "tasks").await?;
+        let events = recent_events(&s.db, "epic_id", e.id, full, &text::epic_hint(e.id)).await?;
+        Ok(text::epic_text(&e, summary.as_deref(), &events, full))
     })
 }
 
@@ -309,27 +245,4 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
         }
         Ok(out)
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_path;
-    use std::path::Path;
-
-    const CWD: &str = "/work/here";
-
-    fn n(raw: &str) -> String {
-        normalize_path(raw, Path::new(CWD), Some("/home/u"))
-    }
-
-    #[test]
-    fn paths_are_absolute_clean_and_need_not_exist() {
-        assert_eq!(n(""), "");
-        assert_eq!(n("   "), "");
-        assert_eq!(n("/a/b/../c/./d/"), "/a/c/d");
-        assert_eq!(n("repo"), "/work/here/repo");
-        assert_eq!(n("../repo"), "/work/repo");
-        assert_eq!(n("~"), "/home/u");
-        assert_eq!(n("~/x/../y"), "/home/u/y");
-    }
 }

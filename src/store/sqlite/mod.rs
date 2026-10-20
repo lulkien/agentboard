@@ -3,6 +3,7 @@
 //! own connection: cheap, and safe under concurrency.
 
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
+use super::bridge;
 use super::{
     DEFAULT_TTL_S, Ref, db_path, norm, now_ms, parse_epic_id, parse_id, short, short_epic,
 };
@@ -106,74 +107,7 @@ fn log_event(
     Ok(conn.last_insert_rowid())
 }
 
-/// The value to store for a text field an edit may set, noting `name old->new`
-/// (character lengths) in `diffs` when it moves.
-fn text_change<'a>(
-    diffs: &mut Vec<String>,
-    name: &str,
-    old: &'a str,
-    new: Option<&'a str>,
-) -> &'a str {
-    let value = new.unwrap_or(old);
-    if value != old {
-        diffs.push(format!(
-            "{name} {}->{}",
-            old.chars().count(),
-            value.chars().count()
-        ));
-    }
-    value
-}
-
-/// Like `text_change` for the short fields (title, assignee, path): the event
-/// records `name "old"->"new"`, each clipped to 80 chars, so a same-length
-/// change is visible and the old text is recoverable.
-fn value_change<'a>(
-    diffs: &mut Vec<String>,
-    name: &str,
-    old: &'a str,
-    new: Option<&'a str>,
-) -> &'a str {
-    let value = new.unwrap_or(old);
-    if value != old {
-        diffs.push(format!(
-            "{name} \"{}\"->\"{}\"",
-            crate::clip::clip(old, 80),
-            crate::clip::clip(value, 80)
-        ));
-    }
-    value
-}
-
-/// `title, goal` out of `["title 12->15", "goal 3->9"]`.
-fn field_names(diffs: &[String]) -> String {
-    let names: Vec<&str> = diffs
-        .iter()
-        .filter_map(|d| d.split_whitespace().next())
-        .collect();
-    names.join(", ")
-}
-
-struct Row {
-    id: i64,
-    status: String,
-    assignee: Option<String>,
-    needs: Option<String>,
-    title: String,
-    description: String,
-    goal: String,
-    lease_until: Option<i64>,
-    updated_at: i64,
-    created_at: i64,
-    started_at: Option<i64>,
-    completed_at: Option<i64>,
-    report: Option<String>,
-    note: Option<String>,
-    commit_ref: Option<String>,
-    priority: i64,
-    epic_id: Option<i64>,
-    parent_id: Option<i64>,
-}
+pub(super) use super::text::{TaskRow as Row, field_names, text_change, value_change};
 
 const COLS: &str = "id,status,assignee,needs,title,description,goal,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id";
 
@@ -330,10 +264,10 @@ impl Board for SqliteBoard {
         sessions::register_session(name, agent, cwd, task)
     }
     fn tail(&self, name: &str, lines: usize) -> Result<String, String> {
-        sessions::tail(name, lines)
+        bridge::tail(name, lines)
     }
     fn send(&self, name: &str, text: &str) -> Result<String, String> {
-        sessions::send(name, text)
+        bridge::send(name, text)
     }
 
     fn dispatch(

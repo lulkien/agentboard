@@ -3,15 +3,14 @@
 //! `tail` and `send` are unchanged and still stubbed here. Liveness asks tmux and
 //! herdr through the shared bounded runner in `proc.rs`.
 //!
-//! `Liveness` and its tmux/herdr helpers are copies of the sqlite ones; the hoist
-//! into a shared module happens with the dispatch port (it needs them too).
+//! Liveness comes from the shared `bridge` module, as in the sqlite build.
 
-use super::tasks::{Txn, ago, fetch_opt};
+use super::tasks::{Txn, fetch_opt};
 use super::{block_on, db_err, session};
-use crate::store::proc;
+use crate::store::bridge::{Liveness, tmux_up};
+use crate::store::text::ago;
 use crate::store::{now_ms, short};
 use serde::Deserialize;
-use std::process::Command;
 
 /// One registry row as `sessions` lists it. `cwd` is stored but not shown.
 #[derive(Deserialize)]
@@ -28,34 +27,6 @@ async fn rows(db: &super::Db) -> Result<Vec<SessionRow>, String> {
         .await
         .map_err(|e| db_err(&e))?;
     r.take(0).map_err(|e| db_err(&e))
-}
-
-/// Which panes answer right now. A row is only a claim that a pane exists; this
-/// is the check. tmux is asked per name, herdr once, and only if tmux cannot
-/// vouch for a name.
-struct Liveness {
-    herdr: std::cell::OnceCell<Option<Vec<HerdrAgent>>>,
-}
-
-impl Liveness {
-    fn new() -> Self {
-        Self {
-            herdr: std::cell::OnceCell::new(),
-        }
-    }
-
-    /// `None` when herdr cannot answer (missing, hung, bad exit), `Some(empty)`
-    /// when it answers with no agents: the difference decides whether a prune is safe.
-    fn herdr(&self) -> Option<&[HerdrAgent]> {
-        self.herdr.get_or_init(herdr_agents).as_deref()
-    }
-
-    fn alive(&self, name: &str, agent: &str) -> bool {
-        tmux_alive(name)
-            || self
-                .herdr()
-                .is_some_and(|a| a.iter().any(|h| h.name == name && h.kind == agent))
-    }
 }
 
 pub fn sessions() -> Result<String, String> {
@@ -179,68 +150,4 @@ pub fn register_session(
         tx.run(&s.db, "true").await?;
         Ok(format!("ok session {name} up"))
     })
-}
-
-fn tmux_alive(name: &str) -> bool {
-    proc::run(Command::new("tmux").args(["has-session", "-t", name]))
-        .is_ok_and(|o| o.status.success())
-}
-
-/// One entry of `herdr agent list`.
-struct HerdrAgent {
-    name: String,
-    kind: String,
-}
-
-/// A tmux server is up and answering (a `has-session` miss alone cannot tell
-/// "no such session" from "no tmux at all").
-fn tmux_up() -> bool {
-    proc::run(Command::new("tmux").arg("list-sessions")).is_ok_and(|o| o.status.success())
-}
-
-/// Live herdr agents. `None`: herdr did not answer (missing binary, hang, bad
-/// exit). Bad JSON is an answer with no agents. Bounded by the shared runner.
-fn herdr_agents() -> Option<Vec<HerdrAgent>> {
-    match proc::run(Command::new("herdr").args(["agent", "list"])) {
-        Ok(o) if o.status.success() => Some(parse_herdr_agents(&o.stdout)),
-        _ => None,
-    }
-}
-
-/// Parses the `herdr agent list` envelope (`.result.agents[]`). Agents without a
-/// `name` (unnamed panes) are skipped.
-fn parse_herdr_agents(json: &[u8]) -> Vec<HerdrAgent> {
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(json) else {
-        return Vec::new();
-    };
-    v["result"]["agents"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| {
-                    Some(HerdrAgent {
-                        name: x["name"].as_str()?.to_owned(),
-                        kind: x["agent"].as_str().unwrap_or_default().to_owned(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_herdr_agents;
-
-    #[test]
-    fn herdr_agents_parse_and_unnamed_panes_are_skipped() {
-        let json = br#"{"result":{"agents":[{"name":"w1","agent":"claude"},{"agent":"claude"},{"name":"w2"}]}}"#;
-        let got = parse_herdr_agents(json);
-        let names: Vec<_> = got
-            .iter()
-            .map(|h| (h.name.as_str(), h.kind.as_str()))
-            .collect();
-        assert_eq!(names, [("w1", "claude"), ("w2", "")]);
-        assert!(parse_herdr_agents(b"not json").is_empty());
-    }
 }

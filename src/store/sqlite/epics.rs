@@ -2,23 +2,11 @@
 //! An epic is never claimed, leased or dispatched; it names the project (`path`)
 //! the work belongs to.
 
-use super::render::{recent_events, status_summary, when};
+use super::render::{recent_events, status_summary};
 use super::{Subject, field_names, log_event, now_ms, open, short_epic, text_change, value_change};
-use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, clip, clip_marked};
 use crate::store::board::EpicEdit;
+use crate::store::text::{self, EpicRow, normalize_path, path_note};
 use rusqlite::{Connection, OptionalExtension, params};
-use std::path::{Component, Path, PathBuf};
-
-pub(super) struct EpicRow {
-    pub id: i64,
-    pub title: String,
-    pub description: String,
-    pub goal: String,
-    pub status: String,
-    pub path: String,
-    pub created_at: i64,
-    pub completed_at: Option<i64>,
-}
 
 pub(super) fn fetch_epic(conn: &Connection, id: i64) -> Result<EpicRow, String> {
     conn.query_row(
@@ -50,46 +38,6 @@ fn norm_status(raw: &str) -> Option<&'static str> {
         "done" => Some("done"),
         "dropped" => Some("dropped"),
         _ => None,
-    }
-}
-
-/// Absolute, lexically clean project path: `~` and `~/x` expand against `home`,
-/// a relative path resolves against `cwd`, `.`/`..` collapse, no trailing slash.
-/// The path need not exist (an epic may be written before the repo).
-pub(super) fn normalize_path(raw: &str, cwd: &Path, home: Option<&str>) -> String {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return String::new();
-    }
-    let expanded: PathBuf = match (raw, home) {
-        ("~", Some(h)) => PathBuf::from(h),
-        (r, Some(h)) if r.starts_with("~/") => Path::new(h).join(&r[2..]),
-        (r, _) => PathBuf::from(r),
-    };
-    let abs = if expanded.is_absolute() {
-        expanded
-    } else {
-        cwd.join(expanded)
-    };
-    let mut out = PathBuf::new();
-    for c in abs.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out.to_string_lossy().into_owned()
-}
-
-/// The marker `epic get` and `brief` show for a path that is not on disk.
-pub(super) fn path_note(path: &str) -> &'static str {
-    if !path.is_empty() && !Path::new(path).exists() {
-        " (does not exist)"
-    } else {
-        ""
     }
 }
 
@@ -148,13 +96,17 @@ pub fn epic_list(status: Option<&str>) -> Result<String, String> {
     let mut out = String::new();
     for (id, title, path) in rows {
         let (done, total) = counts(&conn, id)?;
-        out.push_str(&format!(
-            "{} {want} {done}/{total} done {}{} {}\n",
-            short_epic(id),
-            if path.is_empty() { "-" } else { &path },
-            path_note(&path),
-            clip(&title, 60)
-        ));
+        let e = EpicRow {
+            id,
+            title,
+            description: String::new(),
+            goal: String::new(),
+            status: want.to_owned(),
+            path,
+            created_at: 0,
+            completed_at: None,
+        };
+        out.push_str(&text::epic_list_line(&e, want, done, total));
     }
     Ok(out.trim_end().to_owned())
 }
@@ -173,38 +125,9 @@ pub(super) fn counts(conn: &Connection, epic: i64) -> Result<(i64, i64), String>
 pub fn epic_get(id: i64, full: bool) -> Result<String, String> {
     let conn = open()?;
     let e = fetch_epic(&conn, id)?;
-    let tag = short_epic(e.id);
-    let mut out = format!("{tag} {}\ntitle: {}\n", e.status, e.title);
-    if e.path.is_empty() {
-        out.push_str("path: -\n");
-    } else {
-        out.push_str(&format!("path: {}{}\n", e.path, path_note(&e.path)));
-    }
-    out.push_str(&format!("created: {}\n", when(e.created_at)));
-    if let Some(c) = e.completed_at {
-        out.push_str(&format!("completed: {}\n", when(c)));
-    }
-    if let Some(line) = status_summary(&conn, "epic_id", e.id, "tasks")? {
-        out.push_str(&line);
-        out.push('\n');
-    }
-    let hint = format!("`agentboard epic get {tag} --full` or epic_get id={tag} full=true");
-    for (label, value, cap) in [
-        ("description", &e.description, CAP_DESCRIPTION),
-        ("goal", &e.goal, CAP_GOAL),
-    ] {
-        if value.is_empty() {
-            continue;
-        }
-        let shown = if full {
-            value.clone()
-        } else {
-            clip_marked(value, cap, &hint)
-        };
-        out.push_str(&format!("{label}:\n{shown}\n"));
-    }
-    out.push_str(&recent_events(&conn, "epic_id", e.id, full, &hint)?);
-    Ok(out.trim_end().to_owned())
+    let summary = status_summary(&conn, "epic_id", e.id, "tasks")?;
+    let events = recent_events(&conn, "epic_id", e.id, full, &text::epic_hint(e.id))?;
+    Ok(text::epic_text(&e, summary.as_deref(), &events, full))
 }
 
 /// Opens, closes or drops an epic. Closing is the manager's call, never automatic.
@@ -274,38 +197,4 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
         ));
     }
     Ok(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_path;
-    use std::path::Path;
-
-    const CWD: &str = "/work/here";
-
-    fn n(raw: &str) -> String {
-        normalize_path(raw, Path::new(CWD), Some("/home/u"))
-    }
-
-    #[test]
-    fn paths_are_absolute_clean_and_slashless() {
-        assert_eq!(n("/srv/app/"), "/srv/app");
-        assert_eq!(n("/srv//app/./x/../y"), "/srv/app/y");
-        assert_eq!(n("~"), "/home/u");
-        assert_eq!(n("~/code/app/"), "/home/u/code/app");
-        assert_eq!(n("proj"), "/work/here/proj");
-        assert_eq!(n("../other/"), "/work/other");
-        assert_eq!(n("."), "/work/here");
-        assert_eq!(n("/"), "/");
-        assert_eq!(n("  "), "");
-        assert_eq!(n("/../.."), "/", "cannot climb above the root");
-    }
-
-    #[test]
-    fn tilde_without_home_is_just_a_relative_name() {
-        assert_eq!(
-            normalize_path("~/x", Path::new(CWD), None),
-            "/work/here/~/x"
-        );
-    }
 }

@@ -9,15 +9,15 @@
 //! event or an id spent without its row. Reads take no lock: they see a write whole
 //! or not at all.
 //!
-//! The rendering helpers below (`code`, `ago`, `stamp`, `when`, the change-diff
-//! helpers) are copies of the pure ones in `sqlite/`; hoisting them into a shared
-//! module is listed in the migration doc's debt table.
+//! Rows are loaded here and normalised to the plain `text::TaskRow` before they are
+//! rendered, so the text comes from the same functions as the sqlite build.
 
 use super::{Db, block_on, db_err, session};
-use crate::clip::{
-    CAP_DESCRIPTION, CAP_EVENT, CAP_GOAL, CAP_NOTE, CAP_REPORT, clip, clip_marked, field,
-};
+use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
+use crate::store::text::{
+    self, EpicRow, EventRow, TaskRow, field_names, held_text, text_change, value_change,
+};
 use crate::store::{DEFAULT_TTL_S, Ref, norm, now_ms, short, short_epic};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -27,24 +27,24 @@ const STATUS_LIST: &str = "ready|working|blocking|needs_fix|review|done|dropped"
 /// A task row. `tid` is the integer record key (`meta::id(id)`).
 #[derive(Deserialize, Clone, Debug)]
 pub(super) struct Row {
-    tid: i64,
-    status: String,
-    assignee: Option<String>,
-    needs: Option<String>,
-    title: String,
-    description: String,
-    goal: String,
-    lease_until: Option<i64>,
-    updated_at: i64,
-    created_at: i64,
-    started_at: Option<i64>,
-    completed_at: Option<i64>,
-    report: Option<String>,
-    note: Option<String>,
-    commit_ref: Option<String>,
-    priority: i64,
-    epic_id: Option<i64>,
-    parent_id: Option<i64>,
+    pub(super) tid: i64,
+    pub(super) status: String,
+    pub(super) assignee: Option<String>,
+    pub(super) needs: Option<String>,
+    pub(super) title: String,
+    pub(super) description: String,
+    pub(super) goal: String,
+    pub(super) lease_until: Option<i64>,
+    pub(super) updated_at: i64,
+    pub(super) created_at: i64,
+    pub(super) started_at: Option<i64>,
+    pub(super) completed_at: Option<i64>,
+    pub(super) report: Option<String>,
+    pub(super) note: Option<String>,
+    pub(super) commit_ref: Option<String>,
+    pub(super) priority: i64,
+    pub(super) epic_id: Option<i64>,
+    pub(super) parent_id: Option<i64>,
 }
 
 const SELECT_TASK: &str = "SELECT meta::id(id) AS tid, * FROM tasks";
@@ -61,13 +61,13 @@ pub(super) async fn fetch_opt(db: &Db, id: i64) -> Result<Option<Row>, String> {
     Ok(rows.into_iter().next())
 }
 
-async fn fetch(db: &Db, id: i64) -> Result<Row, String> {
+pub(super) async fn fetch(db: &Db, id: i64) -> Result<Row, String> {
     fetch_opt(db, id)
         .await?
         .ok_or_else(|| format!("no such task {}", short(id)))
 }
 
-async fn select_rows(db: &Db, tail: &str, binds: Value) -> Result<Vec<Row>, String> {
+pub(super) async fn select_rows(db: &Db, tail: &str, binds: Value) -> Result<Vec<Row>, String> {
     let mut r = db
         .query(format!("{SELECT_TASK} {tail}"))
         .bind(binds)
@@ -105,7 +105,7 @@ impl Txn {
 
     /// Allocates the next event seq and records an event on a task (`task` is a
     /// SurrealQL expression for the task id). The seq is left in `$seq`.
-    fn event(&mut self, task: &str, actor: &str, kind: &str, body: &str) {
+    pub(super) fn event(&mut self, task: &str, actor: &str, kind: &str, body: &str) {
         self.event_on("task_id", task, actor, kind, body);
     }
 
@@ -157,97 +157,30 @@ pub(super) fn int_of(v: &Value, what: &str) -> Result<i64, String> {
         .ok_or_else(|| format!("board database: no {what} came back ({v})"))
 }
 
-// ---- pure helpers (copies of the sqlite ones) --------------------------------------
-
-fn code(status: &str) -> &str {
-    match status {
-        "ready" | "triage" => "rdy",
-        "working" | "running" => "wrk",
-        "blocking" | "blocked" => "blk",
-        "needs_fix" => "fix",
-        "review" => "rev",
-        "done" => "don",
-        "dropped" => "drp",
-        other => other,
+impl From<Row> for TaskRow {
+    /// Normalised at the store boundary: the renderer sees plain values.
+    fn from(r: Row) -> Self {
+        Self {
+            id: r.tid,
+            status: r.status,
+            assignee: r.assignee,
+            needs: r.needs,
+            title: r.title,
+            description: r.description,
+            goal: r.goal,
+            lease_until: r.lease_until,
+            updated_at: r.updated_at,
+            created_at: r.created_at,
+            started_at: r.started_at,
+            completed_at: r.completed_at,
+            report: r.report,
+            note: r.note,
+            commit_ref: r.commit_ref,
+            priority: r.priority,
+            epic_id: r.epic_id,
+            parent_id: r.parent_id,
+        }
     }
-}
-
-pub(super) fn ago(ts_ms: i64) -> String {
-    let d = (now_ms() - ts_ms).max(0) / 1000;
-    match d {
-        0..=59 => format!("{d}s"),
-        60..=3599 => format!("{}m", d / 60),
-        3600..=86_399 => format!("{}h", d / 3600),
-        _ => format!("{}d", d / 86_400),
-    }
-}
-
-fn stamp(ts_ms: i64) -> String {
-    let secs = ts_ms / 1000;
-    let (h, m) = ((secs / 3600) % 24, (secs / 60) % 60);
-    format!("{h:02}:{m:02}")
-}
-
-pub(super) fn when(ts: i64) -> String {
-    format!("{} ({}Z)", ago(ts), stamp(ts))
-}
-
-pub(super) fn text_change<'a>(
-    diffs: &mut Vec<String>,
-    name: &str,
-    old: &'a str,
-    new: Option<&'a str>,
-) -> &'a str {
-    let value = new.unwrap_or(old);
-    if value != old {
-        diffs.push(format!(
-            "{name} {}->{}",
-            old.chars().count(),
-            value.chars().count()
-        ));
-    }
-    value
-}
-
-pub(super) fn value_change<'a>(
-    diffs: &mut Vec<String>,
-    name: &str,
-    old: &'a str,
-    new: Option<&'a str>,
-) -> &'a str {
-    let value = new.unwrap_or(old);
-    if value != old {
-        diffs.push(format!(
-            "{name} \"{}\"->\"{}\"",
-            clip(old, 80),
-            clip(value, 80)
-        ));
-    }
-    value
-}
-
-pub(super) fn field_names(diffs: &[String]) -> String {
-    let names: Vec<&str> = diffs
-        .iter()
-        .filter_map(|d| d.split_whitespace().next())
-        .collect();
-    names.join(", ")
-}
-
-/// The refusal for a task somebody holds: who, the lease, and the manager's way out.
-fn held_text(r: &Row) -> String {
-    format!(
-        "{} {} by {}{} — manager: agentboard status {} ready",
-        short(r.tid),
-        r.status,
-        r.assignee.as_deref().unwrap_or("nobody"),
-        r.lease_until.map_or(String::new(), |l| format!(
-            " (lease {}m left, until {}Z)",
-            ((l - now_ms()).max(0) + 59_999) / 60_000,
-            stamp(l)
-        )),
-        short(r.tid)
-    )
 }
 
 // ---- writes -------------------------------------------------------------------------
@@ -359,7 +292,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
     block_on(async {
         let cur = fetch(&s.db, id).await?;
         if cur.status == "working" && cur.lease_until.is_some_and(|l| l >= now_ms()) {
-            return Err(ClaimError::Held(held_text(&cur)));
+            return Err(ClaimError::Held(held_text(&TaskRow::from(cur.clone()))));
         }
         let mut diffs = Vec::new();
         let title = value_change(&mut diffs, "title", &cur.title, e.title);
@@ -481,7 +414,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
                         } else {
                             // A refusal is an error: `agentboard claim T7 && ...` must not
                             // read "somebody else has it" as "claimed".
-                            return Err(ClaimError::Held(held_text(&r)));
+                            return Err(ClaimError::Held(held_text(&TaskRow::from(r.clone()))));
                         }
                     }
                 },
@@ -763,38 +696,10 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
             binds.insert("assignee".into(), a.into());
         }
         let mut rows = select_rows(&s.db, &format!("WHERE {cond}"), Value::Object(binds)).await?;
-        let rank = |st: &str| match st {
-            "blocking" => 0,
-            "needs_fix" => 1,
-            "working" => 2,
-            "review" => 3,
-            "ready" => 4,
-            _ => 5,
-        };
-        rows.sort_by_key(|r| (rank(&r.status), r.priority, r.tid));
+        rows.sort_by_key(|r| (text::list_rank(&r.status), r.priority, r.tid));
         rows.truncate(limit);
-        if rows.is_empty() {
-            return Ok("(no tasks)".to_owned());
-        }
-        let mut out = String::new();
-        for r in &rows {
-            let who = r.assignee.as_deref().unwrap_or("-");
-            let flag = if r.needs.as_deref() == Some("input") {
-                " [input]"
-            } else {
-                ""
-            };
-            out.push_str(&format!(
-                "{} {} {:<9} {:>4} {}{}\n",
-                short(r.tid),
-                code(&r.status),
-                who,
-                ago(r.updated_at),
-                clip(&r.title, 64),
-                flag
-            ));
-        }
-        Ok(out.trim_end().to_owned())
+        let rows: Vec<TaskRow> = rows.into_iter().map(TaskRow::from).collect();
+        Ok(text::list_text(&rows))
     })
 }
 
@@ -803,89 +708,24 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
     let s = session(false)?;
     block_on(async {
         let r = fetch(&s.db, id).await?;
-        let mut out = format!(
-            "{} {} {} priority {}\n",
-            short(r.tid),
-            r.status,
-            r.assignee.as_deref().unwrap_or("-"),
-            r.priority
-        );
-        out.push_str(&format!("title: {}\n", r.title));
-        if let Some(e) = r.epic_id {
-            let epic = super::epics::fetch_epic(&s.db, e).await?;
-            out.push_str(&format!(
-                "epic: {} {}{}\n",
-                short_epic(e),
-                clip(&epic.title, 60),
-                if epic.path.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", epic.path)
-                }
-            ));
-        }
-        if let Some(p) = r.parent_id {
-            out.push_str(&format!("parent: {}\n", short(p)));
-        }
-        out.push_str(&format!("created: {}\n", when(r.created_at)));
-        if let Some(st) = r.started_at {
-            out.push_str(&format!("started: {}\n", when(st)));
-        }
-        if let Some(c) = r.completed_at {
-            out.push_str(&format!("completed: {}\n", when(c)));
-        }
-        if let Some(u) = r.lease_until {
-            let left = u - now_ms();
-            if left > 0 {
-                out.push_str(&format!("lease: {}m left\n", left / 60_000));
-            }
-        }
-        if let Some(line) = status_summary(&s.db, "parent_id", r.tid, "children").await? {
-            out.push_str(&line);
-            out.push('\n');
-        }
-        let t = short(r.tid);
-        out.push_str(&field(
-            "description",
-            &r.description,
-            CAP_DESCRIPTION,
+        let epic = match r.epic_id {
+            Some(e) => Some(super::epics::fetch_epic(&s.db, e).await?),
+            None => None,
+        };
+        let summary = status_summary(&s.db, "parent_id", r.tid, "children").await?;
+        let events = recent_events(&s.db, "task_id", r.tid, full, &text::task_hint(r.tid)).await?;
+        Ok(text::get_text(
+            &TaskRow::from(r),
+            epic.map(EpicRow::from).as_ref(),
+            summary.as_deref(),
+            &events,
             full,
-            &t,
-        ));
-        out.push_str(&field("goal", &r.goal, CAP_GOAL, full, &t));
-        out.push_str(&field(
-            "report",
-            r.report.as_deref().unwrap_or(""),
-            CAP_REPORT,
-            full,
-            &t,
-        ));
-        out.push_str(&field(
-            "note",
-            r.note.as_deref().unwrap_or(""),
-            CAP_NOTE,
-            full,
-            &t,
-        ));
-        if let Some(c) = &r.commit_ref {
-            out.push_str(&format!("commit: {c}\n"));
-        }
-        out.push_str(
-            &recent_events(
-                &s.db,
-                "task_id",
-                r.tid,
-                full,
-                &format!("`agentboard get {t} --full` or task_get id={t} full=true"),
-            )
-            .await?,
-        );
-        Ok(out.trim_end().to_owned())
+        ))
     })
 }
 
-/// The last 8 events of a task as an `events:` block, oldest first; bodies are
-/// clipped with a marker unless `full`.
+/// The last 8 events of a task or an epic (`col` is `task_id` or `epic_id`) as an
+/// `events:` block, oldest first; bodies are clipped with a marker unless `full`.
 pub(super) async fn recent_events(
     db: &Db,
     col: &str,
@@ -907,37 +747,18 @@ pub(super) async fn recent_events(
         .await
         .map_err(|e| db_err(&e))?;
     let evs: Vec<Ev> = r.take(0).map_err(|e| db_err(&e))?;
-    if evs.is_empty() {
-        return Ok(String::new());
-    }
-    let mut out = String::from("events:\n");
-    for e in evs.iter().rev() {
-        let text = if full {
-            e.body.clone()
-        } else {
-            clip_marked(&e.body, CAP_EVENT, hint)
-        };
-        out.push_str(&format!(
-            "  #{} {} {} {}: {text}\n",
-            e.seq,
-            e.actor,
-            e.kind,
-            ago(e.ts)
-        ));
-    }
-    Ok(out)
+    let evs: Vec<EventRow> = evs
+        .into_iter()
+        .map(|e| EventRow {
+            seq: e.seq,
+            actor: e.actor,
+            kind: e.kind,
+            body: e.body,
+            ts: e.ts,
+        })
+        .collect();
+    Ok(text::events_text(&evs, full, hint))
 }
-
-/// Canonical status order for summaries: most urgent first.
-const STATUS_ORDER: [&str; 7] = [
-    "blocking",
-    "needs_fix",
-    "working",
-    "review",
-    "ready",
-    "done",
-    "dropped",
-];
 
 /// `children: 4 (2 done, 1 working, 1 needs_fix)`, or None when there are none.
 pub(super) async fn status_summary(
@@ -959,17 +780,8 @@ pub(super) async fn status_summary(
         .await
         .map_err(|e| db_err(&e))?;
     let counts: Vec<Count> = r.take(0).map_err(|e| db_err(&e))?;
-    let total: i64 = counts.iter().map(|c| c.n).sum();
-    if total == 0 {
-        return Ok(None);
-    }
-    let mut parts = Vec::new();
-    for st in STATUS_ORDER {
-        if let Some(c) = counts.iter().find(|c| c.status == st) {
-            parts.push(format!("{} {st}", c.n));
-        }
-    }
-    Ok(Some(format!("{label}: {total} ({})", parts.join(", "))))
+    let counts: Vec<(String, i64)> = counts.into_iter().map(|c| (c.status, c.n)).collect();
+    Ok(text::summary_text(label, &counts))
 }
 
 /// One compact line per task, ordered by id: id, status, assignee, age, title.
@@ -993,20 +805,7 @@ pub fn children(of: Ref) -> Result<String, String> {
             json!({"id": id}),
         )
         .await?;
-        if rows.is_empty() {
-            return Ok(format!("{label} has no children"));
-        }
-        let mut out = String::new();
-        for r in rows {
-            out.push_str(&format!(
-                "{} {} {:<9} {:>4} {}\n",
-                short(r.tid),
-                code(&r.status),
-                r.assignee.as_deref().unwrap_or("-"),
-                ago(r.updated_at),
-                clip(&r.title, 64)
-            ));
-        }
-        Ok(out.trim_end().to_owned())
+        let rows: Vec<TaskRow> = rows.into_iter().map(TaskRow::from).collect();
+        Ok(text::children_text(&label, &rows))
     })
 }

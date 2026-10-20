@@ -17,8 +17,8 @@ Run these from the repo root. A change is not done until each prints what is bes
 | Command | Expected |
 |---|---|
 | `cargo build --release` | `Finished` |
-| `cargo test` | `test result: ok. 13 passed` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test --no-default-features --features surreal` | `test result: ok. 18 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
+| `cargo test` | `test result: ok. 15 passed` |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test --no-default-features --features surreal` | `test result: ok. 22 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
 | `bash tests/surreal.sh` | `surreal.sh: all checks passed` (needs a `surreal` binary; builds both feature sets itself and a debug surreal build under `target/surreal-debug`, then restores the default release build; about a minute once that cache is warm) |
 | `python3 tests/mcp_client.py` | `121/121 checks passed` |
 | `bash tests/cli.sh` | `111/111 passed` |

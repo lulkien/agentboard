@@ -4,8 +4,10 @@
 //! the stub; `connect` is reached only from tests until the first port lands
 //! (docs/surrealdb-migration.md, Temporary debt).
 
+mod dispatch;
 mod epics;
 mod lock;
+mod render;
 mod serve;
 mod sessions;
 mod tasks;
@@ -20,6 +22,7 @@ use surrealdb::opt::auth::Root;
 use tokio::runtime::Runtime;
 
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
+use super::bridge;
 use super::stub::StubBoard;
 
 /// Task operations are ported; everything else is still the stub.
@@ -84,7 +87,7 @@ impl Board for SurrealBoard {
         tasks::children(of)
     }
     fn brief(&self, since_min: i64) -> Result<String, String> {
-        StubBoard.brief(since_min)
+        render::brief(since_min)
     }
     fn epic_add(
         &self,
@@ -133,10 +136,10 @@ impl Board for SurrealBoard {
         sessions::register_session(name, agent, cwd, task)
     }
     fn tail(&self, name: &str, lines: usize) -> Result<String, String> {
-        StubBoard.tail(name, lines)
+        bridge::tail(name, lines)
     }
     fn send(&self, name: &str, text: &str) -> Result<String, String> {
-        StubBoard.send(name, text)
+        bridge::send(name, text)
     }
     fn dispatch(
         &self,
@@ -146,7 +149,7 @@ impl Board for SurrealBoard {
         force: bool,
         print_only: bool,
     ) -> Result<String, String> {
-        StubBoard.dispatch(actor, id, to, force, print_only)
+        dispatch::dispatch(actor, id, to, force, print_only)
     }
     async fn wait(&self, w: Wait<'_>) -> Result<Outcome, String> {
         StubBoard.wait(w).await

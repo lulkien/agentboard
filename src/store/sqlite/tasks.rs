@@ -1,10 +1,10 @@
-use super::render::stamp;
 use super::{
-    DEFAULT_TTL_S, Row, STATUS_LIST, Subject, fetch, field_names, log_event, norm, now_ms, open,
-    short, short_epic, text_change, value_change,
+    DEFAULT_TTL_S, STATUS_LIST, Subject, fetch, field_names, log_event, norm, now_ms, open, short,
+    short_epic, text_change, value_change,
 };
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
+use crate::store::text::held_text;
 use rusqlite::{OptionalExtension, params};
 
 /// The epic a new task lands in: the explicit one, else the parent's. An
@@ -189,22 +189,6 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
     Ok(parent.map_or(format!("{} no parent", short(id)), |p| {
         format!("{} parent {}", short(id), short(p))
     }))
-}
-
-/// The refusal for a task somebody holds: who, the lease, and the manager's way out.
-fn held_text(r: &Row) -> String {
-    format!(
-        "{} {} by {}{} — manager: agentboard status {} ready",
-        short(r.id),
-        r.status,
-        r.assignee.as_deref().unwrap_or("nobody"),
-        r.lease_until.map_or(String::new(), |l| format!(
-            " (lease {}m left, until {}Z)",
-            ((l - now_ms()).max(0) + 59_999) / 60_000,
-            stamp(l)
-        )),
-        short(r.id)
-    )
 }
 
 /// Claims a specific task, or the next ready one. Atomic: BEGIN IMMEDIATE + guarded UPDATE.

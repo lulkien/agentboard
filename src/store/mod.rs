@@ -121,7 +121,9 @@ pub fn parse_ref(raw: &str) -> Result<Ref, String> {
 }
 
 pub mod board;
+pub mod bridge;
 mod proc;
+pub mod text;
 
 pub use board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 
