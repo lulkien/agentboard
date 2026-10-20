@@ -106,6 +106,8 @@ id=8`) taught workers to run binary in bash step instead of calling tool. If pan
 
    Run as background job with notify. `--open --kind ask` other useful shape: wakes when *anyone* on board needs human. Blocked delegate shows as `ask`, CLI accepts as alias of real `block` event.
 
+   **A short timeout is a stall check, and the manager is the loop — not a script.** `--timeout 300` is a fine choice for a task that should move within minutes: exit 3 means the row has not moved, so read the pane once (`herdr agent wait <pane> --until idle --timeout 1`) and push with `herdr agent prompt` only if it is idle; then arm the same wait again. What must not happen is wrapping that in a poller: a python watchdog and a shell supervisor were both written for this and both were worse than the command — one keyed pane state by agent kind and pushed a *busy* agent four times, the other needed a shared-board filter so it did not drive this repo's coder at another project's rows. `agentboard wait` already re-queries, already prints the offending status, and already has the exit codes; anything layered on top is a second, weaker implementation of it.
+
    Dispatch not finished until watcher armed; any question about delegate progress — from user or own doubt — answered by reading board, never asking pane or guessing from elapsed time. Ending turn on "it's probably still working" is how finished task gets reported as running.
 
    Facts that matter reading its output:
@@ -295,7 +297,7 @@ herdr pane close <id> ; herdr tab close <id>     # teardown, on an explicit stop
 ## What "done" means
 
 1. Task `done` on board, report names files and pastes real output.
-2. Manager re-ran named gates in that tree, passed — output in reply to user.
+2. The report carries the named gates' real output from that tree — tool name, counts, exit codes — and the manager reads it for completeness rather than re-running it. Owner's rule: **the manager manages.** No builds, no ctest, no parity runs, no code edits from the manager's own shell; a green claim that looks thin, stale or self-contradictory goes back as a review row or a question to the worker, not as a gate the manager runs itself.
 3. Review task agrees, or required fixes landed and second round says so.
 4. Reviewed files committed locally (step 8), one objective per commit, sha in reply. Push and history rewrites stay human's call, always.
 
