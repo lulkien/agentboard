@@ -7,10 +7,10 @@ use crate::clip::clip;
 use rusqlite::{OptionalExtension, params};
 use std::process::Command;
 
-/// The line a worker pane receives. Fixed wording: the pane runs claim itself.
+/// The line a worker pane receives. Fixed wording: the pane uses MCP tools.
 fn line(id: i64) -> String {
     format!(
-        "Claim {}, then task_get id={id} full=true, and execute it.",
+        "Use the agentboard MCP tools: claim task {} with the claim tool, read it with the get tool (full=true), then execute it. Do not shell out to the agentboard binary for board writes.",
         short(id)
     )
 }

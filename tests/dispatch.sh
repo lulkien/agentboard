@@ -74,7 +74,7 @@ check "refusal wrote no dispatch event and ran no stub" $([ "$(events T2 dispatc
 
 # --print touches nothing, even with --force
 run $B dispatch T2 --force --print
-check "--print --force: exit 0, prints the line" $([ $rc -eq 0 ] && has "$out" "Claim T2, then task_get id=2" && echo 0 || echo 1)
+check "--print --force: exit 0, prints the line" $([ $rc -eq 0 ] && has "$out" "agentboard MCP tools: claim task T2 with the claim tool" && echo 0 || echo 1)
 check "--print: no stub run, no event, status unchanged" $([ ! -s "$LOG" ] && [ "$(events T2 dispatch)" = 0 ] && [ "$(events T2 edit)" = 0 ] && $B get T2 | grep -q "^T2 working" && echo 0 || echo 1)
 
 # --force on a working task: reset through ready, then send, one dispatch event
