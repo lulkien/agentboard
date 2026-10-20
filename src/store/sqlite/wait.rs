@@ -1,8 +1,10 @@
 //! `wait`: server-side long-poll over a set of tasks. One connection and one
 //! query per poll, whatever the size of the set.
 
-use super::{STATUS_LIST, fetch, get, norm, open, parse_epic_id, parse_id, short};
+use super::render::get;
+use super::{STATUS_LIST, fetch, norm, open, parse_epic_id, parse_id, short};
 use crate::clip::{CAP_LAST, clip_marked};
+use crate::store::board::{Outcome, Wait};
 use rusqlite::{Connection, params};
 use std::time::{Duration, Instant};
 
@@ -24,24 +26,6 @@ const KINDS: [&str; 11] = [
     "edit",
     "dispatch",
 ];
-
-/// What `wait` returned. `text` starts with `matched:` or `timeout:`.
-pub struct Outcome {
-    pub text: String,
-    pub timed_out: bool,
-}
-
-pub struct Wait<'a> {
-    pub ids: &'a [String],
-    pub epic: Option<&'a str>,
-    pub open: bool,
-    /// CSV of statuses; the task's CURRENT status must be in it.
-    pub status: Option<&'a str>,
-    /// CSV of event kinds.
-    pub kind: Option<&'a str>,
-    pub after: Option<i64>,
-    pub timeout_ms: u64,
-}
 
 fn norm_kind(raw: &str) -> Option<&'static str> {
     let k = raw.trim().to_ascii_lowercase();

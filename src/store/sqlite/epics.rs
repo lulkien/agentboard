@@ -5,6 +5,7 @@
 use super::render::{recent_events, status_summary, when};
 use super::{Subject, field_names, log_event, now_ms, open, short_epic, text_change, value_change};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, clip, clip_marked};
+use crate::store::board::EpicEdit;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Component, Path, PathBuf};
 
@@ -231,15 +232,6 @@ pub fn epic_status(
     let seq = log_event(&tx, Subject::Epic(id), actor, kind, note.unwrap_or(""))?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} {want} #{seq}", short_epic(id)))
-}
-
-/// New spec text for an epic; `None` leaves a field alone. An empty `path`
-/// clears it.
-pub struct EpicEdit<'a> {
-    pub title: Option<&'a str>,
-    pub description: Option<&'a str>,
-    pub goal: Option<&'a str>,
-    pub path: Option<&'a str>,
 }
 
 /// Amends an epic's spec. Epics are never leased, so there is no lease guard.

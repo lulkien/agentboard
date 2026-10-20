@@ -14,10 +14,10 @@ The document runs in this order: decisions, evidence, rejected alternatives, ris
 [features]
 default = ["sqlite"]
 sqlite  = ["dep:rusqlite"]
-surreal = ["dep:surrealdb", "dep:tokio"]
+surreal = ["dep:surrealdb"]
 ```
 
-`rusqlite` and `surrealdb` become optional dependencies. A build with neither or both features fails to compile, in `src/main.rs`:
+`rusqlite` and `surrealdb` become optional dependencies. `tokio` stays a normal dependency (`rmcp` needs it in both builds), so the `surreal` feature does not list `dep:tokio`; cargo rejects `dep:` on a non-optional dependency. A build with neither or both features fails to compile, in `src/main.rs`:
 
 ```rust
 #[cfg(all(feature = "sqlite", feature = "surreal"))]
@@ -46,6 +46,7 @@ A trait for board operations lives in `src/store/board.rs` (new). The existing r
 | `src/store/board.rs` (new) | The trait and the shared row/return types. No backend code, no cfg. |
 | `src/store/sqlite/` (moved) | `#[cfg(feature = "sqlite")]`. Every module that calls rusqlite today moves here as SQLite code: `tasks.rs`, `epics.rs`, `sessions.rs`, `wait.rs`, `render.rs`, `dispatch.rs`, plus the `open`, `check_schema` and `INIT` logic now in `src/store/mod.rs`. |
 | `src/store/surreal/` (new) | `#[cfg(feature = "surreal")]`. `mod.rs` (connect, schema bootstrap), `serve.rs` (auto-serve), `lock.rs` (write lock, Decision 6), and one port of each of `tasks.rs`, `epics.rs`, `sessions.rs`, `wait.rs`, `render.rs`, `dispatch.rs`. |
+| `src/store/stub.rs` | `StubBoard`, a `Board` whose every operation returns one "not implemented" error. It backs the surreal build until its operations are ported, and stands in for `BACKEND` when both or neither feature is on, so the `compile_error!` is the only error rustc prints. |
 | `src/store/mod.rs` | Keeps id parsing, event logging and `db_path`; its `open()`, `Connection` and `check_schema` are rusqlite and move behind the trait. |
 | `src/store/proc.rs` | Unchanged: no rusqlite, no `Connection`, no `open(`. |
 | `src/main.rs`, `src/cli.rs`, `src/server.rs`, `src/clip.rs` | No rusqlite references; they call `store::` only. |
@@ -260,6 +261,17 @@ Each step ends with the default-build suites green (AGENTS.md table); from step 
 8. **CLI adapter (`src/main.rs`, `src/cli.rs`).** `--db` help text and `path` output per feature.
 9. **rmcp adapter (`src/server.rs`) last.** It has no rusqlite reference and already calls the sync surface through `spawn_blocking`, so it should need no logic change; run `tests/mcp_client.py` on both builds. Then make `cli.sh` and `dispatch.sh` runnable against the surreal build if wanted, and add the `tests/surreal.sh` row to AGENTS.md.
 10. **Install.** `cargo install --path . --locked --no-default-features --features surreal` on this host; agents run `~/.cargo/bin/agentboard` (AGENTS.md).
+
+### Temporary debt from the feature-split step
+
+Things that exist only because the surreal backend is still a stub. Each goes away at the step named; none is permanent.
+
+| Item | Where | Removed when |
+|---|---|---|
+| `use surrealdb as _;` (keeps the optional dependency from tripping cargo's unused-dependency warning) | `src/store/surreal/mod.rs` | Step 3: the connect module calls the client crate. |
+| `#![cfg_attr(feature = "surreal", allow(dead_code))]` (the stub calls no shared helper: `clip.rs` caps, `now_ms`, `short`, `proc.rs`, and the unused fields of the shared types in `board.rs`) | `src/main.rs` | Step 7: the last port. It cannot go at step 4, because `proc.rs` is used only by the sessions and dispatch ports (steps 5 and 6) and `CAP_LAST` only by `wait.rs` (step 7). Remove it, then fix whatever warns. |
+| The stub error text ("surreal backend is not implemented yet ...") and `src/store/stub.rs` | `src/store/stub.rs`, aliased as `SurrealBoard` in `src/store/surreal/mod.rs` | Per operation as each port lands (steps 4 to 7); `stub.rs` itself goes when no operation uses it, and `BACKEND` needs another stand-in for the two unsupported feature sets (or the guard noise returns). |
+| `cargo test --no-default-features --features surreal` runs 0 tests (the sqlite tests are gated out) | `src/store/sqlite/` | The surreal unit tests arrive with the ports. |
 
 ---
 

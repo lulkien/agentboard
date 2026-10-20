@@ -4,19 +4,8 @@ use super::{
     short, short_epic, text_change, value_change,
 };
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
+use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use rusqlite::{OptionalExtension, params};
-
-/// A task as the caller describes it; `add` supplies id, timestamps and lease.
-pub struct NewTask<'a> {
-    pub title: &'a str,
-    pub description: &'a str,
-    pub goal: &'a str,
-    pub status: &'a str,
-    pub assignee: Option<&'a str>,
-    pub priority: i64,
-    pub epic: Option<i64>,
-    pub parent: Option<i64>,
-}
 
 /// The epic a new task lands in: the explicit one, else the parent's. An
 /// explicit epic that disagrees with the parent's is an error: a subtask lives in
@@ -83,16 +72,6 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     log_event(&tx, Subject::Task(id), actor, "add", title)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} {status}", short(id)))
-}
-
-/// New spec text for a task; `None` leaves a field alone. An empty `assignee`
-/// clears it.
-pub struct TaskEdit<'a> {
-    pub title: Option<&'a str>,
-    pub description: Option<&'a str>,
-    pub goal: Option<&'a str>,
-    pub priority: Option<i64>,
-    pub assignee: Option<&'a str>,
 }
 
 /// Amends a task's spec. A task a worker holds (`working` with a live lease) is
@@ -212,26 +191,6 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
     }))
 }
 
-/// Why a claim failed. `Held` is the legitimate refusal (somebody holds the
-/// task); the MCP layer reports it differently from a bad request or a DB error.
-pub enum ClaimError {
-    Held(String),
-    Other(String),
-}
-
-impl From<String> for ClaimError {
-    fn from(e: String) -> Self {
-        Self::Other(e)
-    }
-}
-
-impl std::fmt::Display for ClaimError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (Self::Held(m) | Self::Other(m)) = self;
-        f.write_str(m)
-    }
-}
-
 /// The refusal for a task somebody holds: who, the lease, and the manager's way out.
 fn held_text(r: &Row) -> String {
     format!(
@@ -320,17 +279,6 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
         return Ok(out);
     }
     Err("claim contention: retry".to_owned().into())
-}
-
-/// One transactional edit of a task. Status moves, report, note, commit and
-/// lease all land together or not at all.
-pub struct Patch<'a> {
-    pub status: Option<&'a str>,
-    pub report: Option<&'a str>,
-    pub note: Option<&'a str>,
-    pub commit: Option<&'a str>,
-    pub needs: Option<&'a str>,
-    pub ttl_s: i64,
 }
 
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {

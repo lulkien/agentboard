@@ -1,9 +1,10 @@
-use super::proc;
 use super::render::stamp;
 use super::sessions::Liveness;
-use super::tasks::{Patch, apply};
+use super::tasks::apply;
 use super::{Subject, fetch, log_event, now_ms, open, short, short_epic};
 use crate::clip::clip;
+use crate::store::board::Patch;
+use crate::store::proc;
 use rusqlite::{OptionalExtension, params};
 use std::process::Command;
 

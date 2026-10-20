@@ -1,6 +1,6 @@
-use super::proc;
 use super::render::ago;
 use super::{fetch, now_ms, open, short};
+use crate::store::proc;
 use rusqlite::params;
 use std::process::Command;
 
