@@ -144,15 +144,20 @@ Hermes (`~/.hermes/config.yaml`):
 
     mcp_servers:
       agentboard:
-        command: /home/kien1.luu/.cargo/bin/agentboard
+        command: agentboard
         env:
           AGENTBOARD_ACTOR: hermes
         enabled: true
 
 Claude Code, one session per herdr pane:
 
-    claude mcp add agentboard --env AGENTBOARD_ACTOR=claude1 \
-      -- /home/kien1.luu/.cargo/bin/agentboard
+    claude mcp add agentboard --env AGENTBOARD_ACTOR=claude1 -- agentboard
+
+The command is exec'd directly, not through a shell, so `$HOME` and `~` are passed
+literally and fail with `ENOENT` — verified: `["$HOME/.cargo/bin/agentboard","--help"]`
+raises `No such file or directory`, while bare `agentboard` resolves on `PATH`. Use the
+bare name (installed to `~/.cargo/bin`, which is on `PATH`), or a hardcoded absolute path
+when you need one specific build.
 
 Then register the pane once so the board can map task → session:
 
