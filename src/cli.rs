@@ -268,6 +268,8 @@ pub enum Cmd {
     },
     /// Where the database lives
     Path,
+    /// Which build this is: version, derived tool count, commit, backend
+    BoardBuild,
     /// Drive the herdr session: `manager [--herdr|--tmux] <verb>`
     Manager {
         /// herdr backend (the default)

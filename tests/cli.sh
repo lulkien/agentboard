@@ -424,5 +424,11 @@ for mode in "" "serve"; do
   check "no-arg/serve (\"$mode\") answers JSON-RPC initialize" $(has "$reply" '"result"' && has "$reply" 'protocolVersion' && ! has "$reply" Usage && echo 0 || echo 1)
 done
 
+# the build stamp: the same one line from the CLI verb and from initialize, with the
+# tool count derived from the source markers (never written down)
+run $B board-build;                                                    check "board-build: one line naming version, tools, commit, backend" $([ $rc -eq 0 ] && [ "$(wc -l <<<"$out")" = 1 ] && has "$out" "agentboard 0.1.0 tools=" && has "$out" "commit=" && has "$out" "backend=$BACKEND" && echo 0 || echo 1)
+markers=$(grep -c '^[[:space:]]*#\[tool(' src/server.rs)
+check "board-build: its tool count equals the #[tool( markers in src/server.rs" $(has "$out" "tools=$markers " && echo 0 || echo 1)
+
 echo "$pass/$total passed (backend: $BACKEND)"
 [ "$pass" -eq "$total" ]

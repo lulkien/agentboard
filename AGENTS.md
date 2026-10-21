@@ -23,15 +23,15 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | Command | Expected |
 |---|---|
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 46 passed` (unit) and `test result: ok. 26 passed` (`tests/manager.rs`, the stub-herdr suite); add `-- --nocapture` and `rg -c SKIP` prints nothing |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 36 passed` and `26 passed` (needs no `surreal` binary) |
-| `bash tests/cli.sh` | `189/189 passed (backend: surreal)` (against the sqlite binary: `194/194 passed (backend: sqlite)`) |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 48 passed` (unit) and `test result: ok. 26 passed` (`tests/manager.rs`, the stub-herdr suite); add `-- --nocapture` and `rg -c SKIP` prints nothing |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 38 passed` and `26 passed` (needs no `surreal` binary) |
+| `bash tests/cli.sh` | `191/191 passed (backend: surreal)` (against the sqlite binary: `196/196 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
 | `bash tests/manager.sh` | `50/50 passed (backend: surreal)`: `manager up/down/renew` and `wait --agent` against `tests/herdr_stub.py` and a throwaway board. `AGENTBOARD_HERDR_LIVE=1 bash tests/manager-live.sh` is the one round against the real herdr (scratch agents only); without the variable it prints `skipped` |
-| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `189/189`, `194/194`, `59/59`, `151/151` for them; about a minute once that cache is warm) |
+| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `191/191`, `196/196`, `59/59`, `151/151` for them; about a minute once that cache is warm) |
 | `bash tests/race.sh` | `claims=80 unique=80 elapsed_ms=... (backend: surreal)` (`AGENTBOARD_TEST_BIN` picks the binary; sqlite prints `(backend: sqlite)`) |
 | `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
-| `rg -c '#\[tool\(' src/server.rs` | `22`, equal to the count on line 1 of `src/server.rs` (`MCP surface: 22 tools`) |
+| `rg -c '#\[tool\(' src/server.rs` | `23`, equal to the count on line 1 of `src/server.rs` (`MCP surface: 23 tools`) and to what `agentboard board-build` prints |
 | `cargo fmt --check` | no output |
 | `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 

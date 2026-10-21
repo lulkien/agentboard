@@ -1,4 +1,4 @@
-//! MCP surface: 22 tools, text-only results, short acks.
+//! MCP surface: 23 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
@@ -10,10 +10,17 @@ use rmcp::schemars::JsonSchema;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
+use crate::ident;
 use crate::store;
 
-const NAME: &str = "agentboard";
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The tool count the client is actually served, read from the registry itself: no
+/// number is written down in this crate.
+/// `the_reported_tool_count_is_the_number_of_tool_markers` pins it to the tool
+/// attribute markers in this file, so adding or dropping a tool cannot leave the
+/// build stamp lying about the surface.
+pub fn tool_count() -> usize {
+    Board::new().tool_router.list_all().len()
+}
 
 fn actor() -> String {
     store::default_actor()
@@ -771,6 +778,15 @@ impl Board {
     ) -> Result<CallToolResult, ErrorData> {
         run!(blocking(move || store::send(&a.name, &a.text)).await)
     }
+
+    #[tool(
+        name = "board_build",
+        description = "Which build serves this board, in one line: version, derived tool count, commit, backend. A seat compares two servers with it instead of trusting either one's claim; the count changes when the tool surface does.",
+        annotations(title = "Build identity", read_only_hint = true)
+    )]
+    async fn board_build(&self) -> Result<CallToolResult, ErrorData> {
+        Ok(text(ident::line(self.tool_router.list_all().len())))
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -786,7 +802,45 @@ impl Default for Board {
 impl ServerHandler for Board {
     fn get_info(&self) -> ServerConfig {
         let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
-        info.server_info = Implementation::new(NAME, VERSION);
+        // The crate version stays where a client expects it; the build line rides in
+        // `title`, so one initialize shows the tool count and the commit. Two servers
+        // that answer `0.1.0` are then still distinguishable at a glance.
+        let mut me = Implementation::new(ident::NAME, ident::VERSION);
+        me.title = Some(ident::line(self.tool_router.list_all().len()));
+        info.server_info = me;
         info
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_reported_tool_count_is_the_number_of_tool_markers() {
+        // Both sides derived: the registry the client is served, and the markers the
+        // surface is written with. Counted at line start, so prose that names the
+        // marker (this file's comments do) is not a marker, and the literal is
+        // assembled here so this test does not count itself.
+        let marker = concat!("#[to", "ol(");
+        let markers = include_str!("server.rs")
+            .lines()
+            .filter(|l| l.trim_start().starts_with(marker))
+            .count();
+        assert_eq!(tool_count(), markers);
+    }
+
+    #[test]
+    fn the_build_line_separates_the_surfaces_of_one_version() {
+        // Same version, different surface: the count in the line is the whole point.
+        let a = ident::line(22);
+        let b = ident::line(23);
+        assert_ne!(a, b);
+        assert!(a.starts_with("agentboard "), "{a}");
+        assert!(a.contains("tools=22"), "{a}");
+        assert!(a.contains(ident::COMMIT), "{a}");
+        assert!(a.contains(ident::BACKEND), "{a}");
+        // One line, no newline: it is pasted into reports and log lines.
+        assert!(!a.contains('\n'), "{a}");
     }
 }

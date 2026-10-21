@@ -17,6 +17,7 @@ compile_error!(
 
 mod cli;
 mod clip;
+mod ident;
 mod manager;
 mod server;
 mod store;
@@ -83,6 +84,7 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
     match cmd {
         Cmd::Serve | Cmd::Wait { .. } | Cmd::Manager { .. } => unreachable!("handled in main"),
         Cmd::Path => store::board_path().map(|p| p.display().to_string()),
+        Cmd::BoardBuild => Ok(ident::line(server::tool_count())),
         Cmd::Add {
             title,
             description,
