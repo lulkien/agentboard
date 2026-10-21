@@ -6,8 +6,21 @@ envelope; there is no tmux here. The binary is the authority for flags —
 
 ## A second team on its own tab
 
-The sequence that works from the manager's own shell (no `HERDR_PANE_ID` needed,
-because nothing here is `--current`):
+**Starting a seat needs a pane whose shell is ready, and that is a startup window,
+not a rule about position.** `tab create` -> `pane split` -> `agent start --pane <id>`
+answers `agent_pane_busy: agent target pane <id> is not an available shell` for the
+first moments after the pane exists, then accepts the same target — a split tab root
+accepted the start seconds later in a live round at 0.9.0. So retry on that exact
+error inside one small named budget (the refusal comes back immediately, so never
+retry with the caller's start timeout) and read the state with `herdr pane get --pane
+<id>` / `session.snapshot` when the order matters. A stub answering scripted NDJSON
+cannot model this rule, so it will happily pass a wrong order forever; only a live
+round shows it. `manager up` closes the panes it created when a start never settles,
+so a refused `up` leaves no half-team behind — keep that rollback.
+
+The mechanics that ARE verified, from the manager's own shell (no `HERDR_PANE_ID` needed,
+because nothing here is `--current`; the `agent start` lines assume a target whose shell
+is up):
 
 ```bash
 j() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
@@ -49,8 +62,26 @@ agentboard register reviewer2 --agent claude
   actor that wrote a verdict when you quote it. Two opencode panes on one board need two
   config files with different actors, or the ledger cannot tell them apart.
 - A pane that starts a fresh agent picks up the current `~/.cargo/bin/agentboard` as its
-  MCP server, so a pane created after an install has the new verbs; one created before it
-  keeps the old build until it is recreated.
+  MCP server, so a pane created after an install has the new verbs. A pane that already
+  holds an agent keeps the OLD build, and `/clear` does not help: it clears the
+  conversation, not the MCP server process, so the seat answers `tools/list` from the
+  build it started with. Restart the agent in the pane (`/exit`, then `herdr agent start
+  <name> --kind ... --pane <id>`) after any install that changes the board surface, and
+  prove it per pane: `readlink /proc/<pid>/exe` must name the current file with no
+  ` (deleted)` suffix. A stale seat is silent - its board calls succeed against the old
+  surface, so a gate the new binary enforces (a diff required before `review`, the
+  auto-filed review row) never fires and the round reads clean while proving nothing.
+- **A seat started in a brand-new repo can sit on its own first-run surface.** A claude
+  seat launched with `--strict-mcp-config` in a directory it has never trusted reports
+  `agent_status: blocked` with `launch_pending: true` and never reaches a prompt, so
+  `renew` (clear, then wait for a prompt) times out with a message that reads like a
+  wedged agent. It is waiting on a trust/onboarding dialog. Make the start END at a
+  prompt: pass the seat argv that trusts or auto-accepts the directory, in the same place
+  the MCP config already lives, or detect `blocked` + `launch_pending`, read the pane, and
+  refuse with the dialog text and the remedy. Never answer this by waiting longer - a
+  longer timeout passes nowhere and hides the cause. `manager down` correctly refuses such
+  a seat (`refusing to stop <name>: status=blocked`, exit 3), so prove the `--force` path
+  on the same live round before claiming teardown works.
 - Verify, do not assume: `agent start` can exit non-zero (or report `blocked`) while the
   agent is up at its prompt. `herdr agent list` + `herdr pane read` settles it.
 

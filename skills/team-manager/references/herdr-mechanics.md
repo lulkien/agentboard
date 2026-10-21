@@ -8,7 +8,8 @@ Herdr = terminal workspace manager for coding agents. Socket API over workspaces
 
 ```bash
 test "${HERDR_ENV:-}" = 1 || echo NOT_INSIDE_HERDR
-herdr-status                 # tabs + panes + agents + board, read-only (scripts/herdr-status.sh)
+agentboard manager status    # board sessions joined with live agents, read-only
+agentboard manager pane list # tabs/panes now
 herdr status                 # server running, protocol compatible
 herdr pane layout --pane "$HERDR_PANE_ID"
 herdr agent list             # name, agent kind, agent_status, pane_id
@@ -28,16 +29,16 @@ herdr agent list             # name, agent kind, agent_status, pane_id
 
 Manager in own tab. Coding agents share NEW tab with exactly two panes (coder left, reviewer right). Never split manager's tab, never put workers in manager's tab.
 
-`~/.local/bin/herdr-team-open <repo>` does whole move in one shot: closes any live `coder`/`reviewer` agent + pane, creates fresh tab rooted in repo, splits into two panes, starts coder on Claude and reviewer on opencode by default, answers folder-trust dialog, fixes names herdr assigned from agent kind. Flags: `REVIEWER_KIND=claude` puts reviewer on Claude (with `reviewer-mcp.json`), `CODER_MODEL`/`REVIEWER_MODEL` pick model per role, `DRY=1` prints plan, touches nothing. Same script at `scripts/herdr-team-open.sh` — copy to `~/.local/bin` and `chmod +x` if host lacks it. Without `DRY` refuses to run outside herdr.
+`agentboard manager up --repo <repo> [--coder K] [--reviewer K]` does whole move in one verb: refuses while a `coder`/`reviewer` is live, creates fresh tab rooted in repo, splits into two panes, starts coder (default claude) and reviewer (default opencode), answers folder-trust dialog, forces the names, registers both by name. `manager down` is the reverse. This file covers only what those verbs do not.
 
 Create worker panes from own pane only when user asks for something other than team tab. Don't invent workspaces.
 
 ```bash
-herdr pane split --current --direction right --cwd "$PWD" --no-focus   # coder
-herdr pane split --pane <new-pane> --direction down --cwd "$PWD" --no-focus  # reviewer
+agentboard manager pane split <pane> --right --cwd <repo>    # new pane next to <pane>
+agentboard manager pane split <pane> --down --cwd <repo>
 ```
 
-New pane id: `.result.pane.pane_id`. `--no-focus` keeps user's focus. `agent start` needs pane at interactive shell prompt — never creates layout.
+`manager pane split --help` names the arguments. `agent start` needs pane at interactive shell prompt — never creates layout.
 
 ## Start the agents
 
@@ -73,13 +74,7 @@ Re-check `agent list` for `idle` before sending work. Startup dialog delayed rea
 
 ## Renew a pane's conversation between work cycles
 
-Cycle: task -> review -> fix -> done, then renew: next task starts in cleared context so pane doesn't carry last row's state. Send `/clear` as text, not key names (`send-keys` rejects text), then `enter`:
-
-```bash
-herdr pane send-text <pane_id> "/clear"
-herdr pane send-keys <pane_id> enter
-herdr pane read <pane_id> --lines 8      # expect an empty prompt line and no recap
-```
+Cycle: task -> review -> fix -> done, then renew: next task starts in cleared context so pane doesn't carry last row's state. `agentboard manager renew [--names A,B]` sends `/clear`, waits for `idle`, and prints the prompt marker it found; it refuses a working or blocked seat and a screen with no marker. By hand only when `renew` refused and you must see why: `agentboard manager agent read <name>` shows the screen, `manager agent keys <name> esc` closes an overlay, then run `renew` again.
 
 Rules to avoid damage:
 
@@ -122,12 +117,13 @@ Claude Code's `/btw` answers as side question without cancelling turn — right 
 
 Work switches repo → close running agent, open fresh session rooted in that repo. Reusing pane with other project's cwd makes every read a cross-directory permission dialog ("Read outside the working directories") and leaves agent with wrong project context.
 
-Sequence (wrapped by `~/.local/bin/herdr-agent-open <name> <kind> <repo> [model]`; copy from `scripts/herdr-agent-open.sh` and `chmod +x`):
+Whole team on a new repo: `agentboard manager down`, then `agentboard manager up --repo <repo>`. One agent only (manual — no verb replaces a single-seat reopen):
 
-1. Find agent's pane + foreground process group (`herdr pane process-info --pane <id>`), `kill -TERM -<pgid>`, wait for shell prompt, then close pane (`herdr pane close <id>`). Leftover pane = dead screen space + one more place agent gets started by mistake.
-2. `herdr pane split --current --direction down --cwd <repo> --no-focus` for new pane.
-3. `herdr agent start <name> --kind <kind> --pane <new>` with role's MCP config.
-4. Re-check name — herdr may name it after kind when startup dialog delayed readiness.
+1. Find agent's pane + foreground process group (`herdr pane process-info --pane <id>`), `kill -TERM -<pgid>`, wait for shell prompt, then `agentboard manager pane close <id>`. Leftover pane = dead screen space + one more place agent gets started by mistake.
+2. `agentboard manager pane split <existing-pane> --down --cwd <repo>` for new pane. Name the pane to split explicitly; never rely on the manager's own current pane.
+3. `agentboard manager agent start <name> --kind <kind> --pane <new> -- <role's MCP config args>`.
+4. Re-check name with `manager agent list` — herdr may name it after kind when startup dialog delayed readiness; `manager agent rename` fixes it.
+5. `agentboard register <name> --agent <kind>` with that name.
 
 ## Restart an agent with a different config, model or env
 
@@ -157,18 +153,9 @@ Verdict belongs to reviewer that produced it: review role changed vendor mid-rou
 
 ## Close the team down
 
-Work finished → user wants panes gone, not idle. Sequence:
+Work finished → user wants panes gone, not idle. `agentboard manager down` (add `--force` only on the user's say-so) closes both panes and unregisters the sessions. Then verify, don't assume: `agentboard manager pane list` and `manager tab list` must show only manager tab, `manager agent list` no named agents, `manager status` no registered rows. Closing tab's last pane can leave empty tab (or herdr opens fresh one, rooted at parent dir) — close that pane too, else workspace unclean.
 
-```bash
-for p in wB:pP wB:pQ; do
-  pgid=$(herdr pane process-info --pane "$p" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["process_info"]["foreground_process_group_id"])')
-  kill -TERM "-$pgid"
-done
-sleep 2
-herdr pane close wB:pP; herdr pane close wB:pQ
-```
-
-Then verify, don't assume: `herdr pane list` and `herdr tab list` must show only manager tab, `herdr agent list` no named agents. Closing tab's last pane can leave empty tab (or herdr opens fresh one, rooted at parent dir) — close that pane too, else workspace unclean and future `pane split --current` lands somewhere unexpected.
+Only a single hand-built seat needs the manual kill: `herdr pane process-info --pane <p>` → `result.process_info.foreground_process_group_id`, `kill -TERM -<pgid>` (negative pid = whole group), then `agentboard manager pane close <p>`. Pane's own `foreground_processes[]` can be empty for an idle agent, so empty array proves nothing; surviving login shell after the group kill is normal.
 
 ## Pitfalls
 
@@ -179,6 +166,6 @@ Then verify, don't assume: `herdr pane list` and `herdr tab list` must show only
 - Herdr pane ≠ tmux session. Anything checking liveness with `tmux has-session` reports agents gone; match name **and** agent kind against `herdr agent list` instead, with bounded subprocess.
 - Probe/run agents with throwaway state DB or directory, answer every dialog you cause — blocked pane silently stops pipeline.
 - Parse herdr JSON with `python3 -c`, never `python3 - <<'PY'`: heredoc replaces stdin, so `herdr ... | python3 - <<'PY'` pipeline feeds script itself, command output never arrives — parse prints nothing while command looks fine.
-- `scripts/herdr-status.sh` dumps server, tabs, panes, agents, board sessions read-only in one call. Run before changing topology instead of chaining five commands and misreading stale pane id.
+- `agentboard manager status` joins board sessions with live agents read-only in one call. Run before changing topology instead of chaining five commands and misreading stale pane id.
 - **Re-read topology in the same turn you act on it.** Pane list from earlier turn goes stale once user or dialog changes it, so `herdr pane close <pane>` can answer `pane_not_found` and "cleaned up" report describes changed state. Close, re-list, state what's actually there; never retry close blind, never claim teardown without fresh `herdr tab list` / `herdr agent list` output.
-- **Helper scripts live in two places** — `~/.local/bin/<helper>` and skill's `scripts/`. Editing one leaves other running old logic → "fix did nothing". `diff -q` pair after any change, copy new one over both, then `bash -n` it.
+- **The installed `agentboard` is what agents run.** A verb missing from `~/.cargo/bin/agentboard` is a stale install, not a missing feature: rebuild-and-install the binary, then retry.

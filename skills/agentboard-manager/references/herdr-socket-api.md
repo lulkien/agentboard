@@ -13,6 +13,10 @@ upgrade.
   Discovery order worth implementing: `$AGENTBOARD_HERDR_SOCK` → `$HERDR_SOCKET`
   → `$XDG_CONFIG_HOME/herdr/herdr.sock` → `~/.config/herdr/herdr.sock`; absent
   socket = one line naming the paths tried, never a silent fallback to the CLI.
+  The order selects among candidates that exist — it does not overrule a caller:
+  an env var that is set but names a missing path is a refusal naming that
+  variable and path, never a fall-through to the next candidate, or a manager
+  pointed at a staging socket silently drives the live one.
 - Leave `herdr-client.sock` alone: that is the TUI client's own socket, not the
   control surface.
 - Framing: **NDJSON** both directions. Request `{"id":"…","method":"…","params":{…}}`,
@@ -20,8 +24,41 @@ upgrade.
   `{"id":"…","error":{"code":"…","message":"…"}}`, also one line each.
   Read exactly one response line per request, then close; do not assume the
   server keeps a chatty session open for you.
+- **The server closes the connection after one reply.** Measured at 0.9.0: a
+  second write on the same connection returns `EPIPE`, and a second request
+  pipelined before the first reply is read returns `ECONNRESET`. So "send the
+  handshake request and then the real method on one connection" is not a shape
+  this server permits — pin on a fresh connection that ends immediately, then
+  open the connection that carries the request. That also means the pin has to
+  live per request, not once per process: with one request per connection, a
+  process that pings only on its first connection sends every later request to
+  a server it never verified (see the pin pitfall below).
 - Every call needs a deadline (connect + read). A wedged server must not hang
   the caller that is supposed to be supervising agents.
+
+## Subscriptions push on a connection you hold open
+
+`events.subscribe` is the exception to "one request, one reply, then the server
+closes": after the ack the connection **stays open** and the server pushes
+`{"type":"subscription_event","event":…,"data":…}` lines unprompted. Measured at
+0.9.0 / protocol 22: subscribe, ack, then 25 s with no bytes in either direction and
+no client write, and the transition still arrived as a line when it happened.
+
+So a blocking wait can be a real subscription instead of a poll: one subscribe, read
+lines off that connection, never write again. Three traps:
+
+- a reader that closes after the first line (the rule for ordinary methods) never
+  sees an event — the ack is not the answer;
+- the only client-side timer may be a read slice with a timeout (200 ms is plenty)
+  so a cancel flag or a deadline is observed; a slice that *sends* anything turns the
+  subscription back into a poll;
+- pin the protocol on the subscribe connection too, before subscribing.
+
+Judge an implementation by which side owns the interval: a fresh connection on a
+timer asking "anything new" is a poll however small the timer, while one held-open
+connection makes the latency herdr's. Write the claim down as what it is (`wakes on a
+herdr-pushed transition; no client poll interval`) — a doc promising push while the
+code polls is the defect, and it survives review because nobody measures silence.
 
 ## Handshake and version pinning
 
@@ -81,9 +118,27 @@ the schema, not from memory.
 | block on one event | `events.wait` | `match_event` [`timeout_ms`] |
 | notifications | `notification.show` | `title` [`body`, `position`, `sound`] |
 
-`agent.start` never creates layout: it needs an existing shell pane, so a team
-launcher is `tab.create` → `pane.split` → `agent.start` ×N, in that order.
-Agent targets accept a live **name** or its pane id, never a terminal id.
+`agent.start` never creates layout: it needs a pane whose shell is ready, and
+the refusal is a **window, not a rule about the pane's position**. A pane — the
+id `tab.create` returned or one `pane.split` just made — answers
+`agent_pane_busy: agent target pane <id> is not an available shell` until its
+shell is up, and then accepts the start. Live rounds on 0.9.0 confirmed both
+halves: the first start right after `pane.split` was refused, the same split
+tab root accepted the start seconds later. So retry on `agent_pane_busy` inside
+one small named budget (never the caller's start timeout — that error comes back
+immediately), and do not conclude that roots are unusable or that splitting
+first is mandatory. Read `pane.get` / `session.snapshot` when the order matters,
+and keep the launcher's rollback (close the panes it created) for the case where
+the window never opens. Agent targets accept a live **name** or its pane id,
+never a terminal id.
+
+A seat can also start cleanly and still never reach a prompt: a `claude`
+launched in a directory it has not been trusted for comes up
+`agent_status: blocked` with `launch_pending: true` and stays there. Anything
+that waits for "back at a prompt" must read those fields (plus
+`interactive_ready`) and name the state and what the pane shows instead of
+reporting a bare timeout — and a launcher should either make the seat
+non-interactive for a fresh cwd or refuse and quote the dialog.
 
 ## Shape of the answers (for typing your own structs)
 
@@ -174,3 +229,18 @@ The owner picked the interface; a row that invents another layer is out of scope
 - **A stale registry and a live pane can disagree silently.** Read state from
   `agent.list`, not from whatever the tool recorded last: the daemon's view is
 the only one that knows an agent died.
+- **The deadline has to cover `connect`, and only a full accept queue proves it.**
+  Binding `read`/`write` alone leaves the wedge: a socket file that still exists
+  while the server stops accepting (backlog full) blocks `connect` forever, so
+  nothing the caller times out on ever runs. Put the connect inside the same
+  budget (thread + `recv_timeout`, or non-blocking connect polled to the
+  deadline). The test that catches this needs `UnixListener` with a small backlog
+  and one queued connection that is never accepted — a stub that calls `accept()`
+  first and then sleeps only ever exercises the read path, which is why the
+  obvious hang test passes on unbounded code.
+- **Pin per connection, not per process.** With one request per connection, a
+  process that pings only on its first connection sends every later request to a
+  server it never verified, so a herdr restart or upgrade between two calls goes
+  unnoticed. Open every connection with `ping`, refuse a non-matching protocol
+  before any other method goes out, and write the test as *n* connections → *n*
+  pings; counting one ping per process hides the gap.

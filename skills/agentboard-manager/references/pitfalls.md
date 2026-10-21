@@ -23,9 +23,24 @@ on a new machine.
   newlines and clip at a cap with a marker; `claim` is the one path that is verbatim
   and uncapped. Reading a clipped spec and judging the work from it is how a manager
   reviews something other than what was asked.
+- **A long note goes over MCP; keep CLI notes to a sentence.** A multi-kilobyte double-quoted
+  argument to `agentboard note` is fragile for the same reason dispatch wording is: the quoting
+  survives but the call can be killed mid-write, so the row keeps nothing of a ruling you
+  believed you had recorded — and a ruling that never landed is worse than none, because the
+  worker is already acting on the version it was dispatched with. Put anything longer than a
+  line through `task_update(note=…)` with a JSON string, and confirm it with `get --full`
+  instead of trusting the ack line.
 - **Never poll `board.db` from a script.** A python loop over `updated_at` is a second
   implementation of board semantics that silently drifts from the schema. `wait` is
   the supported long-poll: selectors, `--status`, `--kind`, exit 0 match / 3 timeout.
+- **A wait that joins two sources needs a stated precedence, and the arm that already matched
+  wins.** `wait --agent` races the board arm against a herdr subscription; propagating the
+  agent-side error before the board's result is consulted throws away a match the operator
+  already had, so a row that did move reports as a bare timeout (`agent.list timed out`, exit 1,
+  empty stdout). Settle it in the code and in a test that fails on the old ordering: once the
+  board arm has fired it decides the exit; when nothing matched, the agent error decides and
+  says which side failed. Either way the degraded side is printed — on stderr, naming the agent
+  — because a watch that silently lost half its inputs reads as a healthy one.
 - **`updated_at` moves without an event** (heartbeat). A watcher keyed on `updated_at`
   wakes on a heartbeat and tells you nothing; key the watcher on the thing you care
   about (`--status`, `--kind`).
@@ -40,6 +55,17 @@ on a new machine.
   (`agentboard status T<n> ready`) when the holder is simply dead.
 - **Never inline the spec in the dispatch line.** The reviewer reads the row; a prompt
   that carries the text gives the coder and the reviewer different specs.
+- **`not_done` is never a worker's message.** It means the reopen cap was hit and only
+  the store sets it, so a row parked there to say "I need a human" is indistinguishable
+  from a capped one and your triage (drop it, or file a replacement) reads the wrong story.
+  A `not_done` with no needs_fix trail behind it is a defect in the report: say so, move
+  the row back, and put the rule in the next brief — a worker asking for a decision uses
+  `blocking` plus `ask`. **Then check whether the tool let it.** A status the protocol
+  reserves for the store is settable whenever the status name is parsed like any other, so
+  a worker succeeding at it is evidence of an enforcement gap, not only of a wrong row:
+  file the refusal (one line naming the status to use instead, the store's own path left
+  untouched) as its own row, because every script and reviewer downstream reads a
+  caller-set value as the store's verdict.
 - **A report is a claim, not evidence.** Re-run the named gates in that tree and put
   the output in your reply. A worker that never claimed can still report success.
 - **A behaviour change invalidates the verdict.** After a fix round, commission a new
@@ -67,6 +93,17 @@ on a new machine.
   re-arms nothing, because the count stays and the next `needs_fix` move is refused again:
   drop the rows or file a replacement implement row. A reviewer who tries to work round the
   cap is outside its brief.
+- **A submission is recorded from a file, never retyped.** A change too large to paste
+  (thousands of lines) cannot be re-typed verbatim, so use `diff add T<n> --body-file
+  <path>`: the file form of the CLI verb is the sanctioned path for a big body, even for a
+  worker told to write the board over MCP — say in the row that you authorised it. Three
+  traps make the identity proof lie: `git add -N` already puts new files into `git diff
+  HEAD`, so appending `diff --no-index /dev/null <file>` records each new file twice (all
+  bytes present, `git apply` fails on the duplicate); `diff get --full` renders a trailing
+  newline the stored body does not have, so a one-byte digest difference is the render, not
+  corruption — compare with the last byte dropped; and a deep `tree` path is not a
+  substitute for content. Prove it by regenerating the submission from the tree and diffing
+  that against the recorded body, never against the worker's own scratch file.
 - **Epic closure is policy, not a guard.** `epic_update done` accepts an epic with `not_done`
   rows in it. Close an epic only when every row is `done` or `dropped`, drop or refile
   `not_done` rows first, and call it policy whenever you quote the rule; a document that
@@ -109,12 +146,21 @@ on a new machine.
 
 ## herdr
 
-- **`herdr-agent-open` from the manager shell destroys the old agent and starts
-  nothing.** It splits the *current* pane, which needs `HERDR_PANE_ID`; the kill
-  happens first, the split dies after. Create the tab and panes by id instead.
-- **Register sessions by herdr agent name, never pane id.** The liveness check
-  compares names, so a pane-id row registers fine and then reads `gone` forever, and
-  `dispatch` cannot address it.
+- **Open and close teams with `manager up` / `manager down`, not by hand.** They
+  name every pane explicitly and register by name; no step splits "the current
+  pane", which a manager shell cannot rely on.
+- **Retiring a helper in the repo does not retire it on the machine.** An older setup
+  copied the wrappers onto `PATH` (`~/.local/bin/herdr-*.sh` plus the extension-less
+  symlinks), so a skill sentence saying "no shell helper exists" is false on that host
+  until those copies are gone — and the dangerous one keeps being runnable, which is
+  exactly the state the rewrite was meant to end. Move them, do not delete them: `mkdir -p
+  ~/.hermes/cache/scratch/retired-helpers-$(date +%Y%m%dT%H%M%S) && mv ~/.local/bin/herdr-*
+  <that dir>/`, then prove the claim with `ls ~/.local/bin/herdr-*` returning nothing.
+  Backing up rather than deleting keeps the user's own tooling recoverable while the doc
+  and the host stop disagreeing.
+- **Sessions are keyed by herdr agent name.** The liveness check compares names, so
+  a row registered under anything else reads `gone` forever and `dispatch` cannot
+  address it. `manager up` registers the right name; `manager status` shows `gone`.
 - **The task assignee is an MCP actor** (`claude1`, `opencode`), not a session name.
   Assignee-to-session resolution usually misses; `--to <session>` is what names the
   pane.
@@ -134,11 +180,57 @@ on a new machine.
   name, so a second project under new names satisfies it without stopping the first.
 - **A pane is closed only on an explicit stop**, never as cleanup, never while
   `working` or `blocked`.
+- **`/clear` does not respawn the pane's MCP server.** The child process survives a
+  clear, so after an install a cleared pane keeps the old build and the evidence reads as
+  a board defect: `diff add` missing, a move to review refused with no gate in sight, no
+  auto-filed review row, an unknown-verb error for something you just installed. Prove
+  which build each process runs with `readlink /proc/<pid>/exe` across `pgrep -f
+  agentboard`; a `(deleted)` suffix means it still holds the replaced file. Give the pane
+  a new agent rather than a reload: `/exit`, Enter on the confirmation, wait for the shell
+  prompt, then `herdr agent start <name> --kind <kind> --pane <id> --timeout 120000 --
+  <its usual argv>`. Do it at a cycle boundary, never while the pane is working.
+- **A seat can start and still never reach a prompt.** A `claude` launched into a
+  directory it has not been trusted for comes up `agent_status: blocked` with
+  `launch_pending: true` and stays there, so a launcher or a renew that waits for "back at
+  a prompt" reports a bare timeout that names nothing. Read `blocked` +
+  `launch_pending` + `interactive_ready` from `agent list` and surface the pane's own text;
+  then either make the seat non-interactive for a fresh cwd or refuse and quote it.
+- **Answering another program's interactive prompt is a decision taken for the operator, so
+  it is never silent — and it is only made for the object it names.** A launcher that
+  auto-accepts a folder-trust (or any consent) dialog must print that it did, naming the
+  target and the keys sent; a dialog answered invisibly is indistinguishable from a seat
+  that started clean, and the operator never learns a trust decision was recorded for that
+  path. Gate the answer on the dialog identifying exactly your target, matched as a whole
+  token on BOTH sides — a path check that looks only forward accepts `/home/u/tmp/repo` for
+  `repo=/tmp/repo`, which is the wrong-directory acceptance the check exists to stop — and
+  when it cannot be identified or does not match, send no keys: refuse and quote the
+  screen. Tests must cover the negative (a dialog naming another path, asserting the stub
+  saw no send-keys) or they pin the code's own guess about the layout rather than the rule.
+- **Create-then-register leaks a half ledger when the second create fails.** A setup verb
+  that registers each unit inside its create loop (session row for seat 1, then seat 2)
+  leaves seat 1's row behind when seat 2 fails, with its pane already closed: the board now
+  claims a live session that answers nowhere, and the next dispatch resolves to it. Register
+  only after every create succeeded, unregister in the failure path as well as closing
+  panes, and prove it by failing the SECOND unit — a test that fails the first one never
+  reaches the leak.
 - **Check `cwd` in `agent list` before dispatching** — a pane rooted in the wrong repo
   is silent until the diff comes back in the wrong project.
 
 ## Gates
 
+- **A sandbox refusal is not a workaround licence.** A worker's permission classifier
+  refusing a genuinely live command (a live round against the real daemon, a flash,
+  anything touching someone else's workspace) is correct behaviour: it pastes the refusal
+  and stops, and the manager runs that one command instead, handing the verbatim output
+  back for the report. Keep it to one command per iteration and read the refusal before
+  ruling — a denied command and a failed command look identical in a report. Run that
+  command to a file (`… > $TMPDIR/live.txt 2>&1`) and grep it for the line each step must
+  print (`up tab`, `answered`, `renewed`, `stopped`, `ok:`): piping through `tail`
+  truncates the head, which is exactly where the setup line that proves what the verb did
+  lands, and re-running to see it costs a whole live round. The round's own script must
+  clean up BEFORE it asserts nothing was left behind, with the cleanup on the failure path
+  as well, or a deliberately refused teardown fails its leftover-pane assertion while the
+  tab is still open — a self-inflicted failure that reads like a product defect.
 - **A guard must fail when the thing it guards is broken.** Two shapes pass on broken
   code: an assertion that accepts the success path (a helper returning `"ACCEPTED: " +
   result` when the call succeeded, then checked for a substring that both paths produce),
@@ -146,6 +238,14 @@ on a new machine.
   stub's pid is gone). Prove every guard twice — revert the fix, and force the failure
   path to succeed. A guard that survives either one is decoration, and only a reviewer
   who mutates the code will notice.
+- **A test that asserts a string the code itself mints proves nothing.** When both the
+  implementation and its test carry the same literal (`"… at a prompt"`, a status word the
+  verb prints, an error sentence built a few lines away), the test passes for any state that
+  reaches that print — including the one it was written to exclude. Require the negative
+  case: the observed condition absent (screen without the prompt marker, dialog naming
+  another path, status `blocked`) must produce a refusal with its own message, and that
+  refusal is what the test asserts. Same trap as a declared total nobody re-derived: the
+  number and the text agree because one author wrote both.
 - **Never assert on wall-clock text in a rendered row.** `get`/`get --full` prints relative
   ages and a live lease (`created: 0s`, `lease: 59m left`), so two renders compared for
   equality — the natural way to prove "the refused edit changed nothing" — differ whenever
@@ -153,6 +253,15 @@ on a new machine.
   TTL change is 59 or 60 depending on the same luck. Strip those lines before comparing,
   assert on the event timeline or stored values, or assert a range. A suite that is green
   on the run you happened to watch proves nothing; repeat it three to five times.
+- **One observed failure is reproduced or retired — never averaged.** When a suite fails once
+  in a handful of runs, the adjudication costs a loop of that test (or the whole binary) ten to
+  thirty times, not one re-run: a pass on the retry is exactly what a flake looks like, so it
+  proves nothing either way. If it will not reproduce, name the mechanism you suspect and record
+  the ruling where a recurrence will be found again — the epic's numbered decisions — instead of
+  filing a row on a rumour or leaving it as a footnote in a report. Suspect the harness first
+  when parallel tests allocate resources: binding `:0` and closing the socket before the child
+  uses it lets two tests adopt the same server, and the loser then sees a state word
+  (`Already`) where it asserts another (`Created`).
 - **Every suite drives a built binary.** `tests/mcp_client.py`, `tests/cli.sh` and
   `tests/dispatch.sh` all execute `target/release/agentboard`, so a stale build makes a
   green run test code you did not change. Rebuild first, or the green is meaningless.
@@ -190,6 +299,15 @@ on a new machine.
   same flake returns every time the schema grows if write sessions re-apply the whole DDL:
   each added table widens the window in which a killed server surfaces as a reset, so the
   widening is a finding about the write path, not about the test.
+
+- **A playbook may only teach verbs the binary has.** The mirror of retiring a stale
+  workaround: a skill written from an epic's verb list describes a surface that the
+  implementation may never have reached, so every verb and flag the skill teaches is
+  checked against the build that exists (`<verb> --help`, one line each) before the skill
+  is called done — otherwise the next session runs a `Usage: … <COMMAND>` line and reads
+  it as a broken tool. When a promised verb is genuinely missing, file it as its own row
+  and leave the skill honest about the gap; quietly deleting it from the prose makes an
+  unfinished epic look finished, which is the more expensive error.
 
 ## Probes and live boards
 
