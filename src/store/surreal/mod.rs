@@ -355,6 +355,54 @@ DEFINE FIELD IF NOT EXISTS seen ON sessions TYPE int;
 DEFINE FIELD IF NOT EXISTS status ON sessions TYPE string DEFAULT 'up';
 ";
 
+/// A `DEFAULT` applies when a row is created, never to a row already stored, and
+/// SCHEMAFULL refuses any write to a row that lacks a non-optional field. So the
+/// `DEFINE FIELD f ON t TYPE <not option> DEFAULT d` lines of `SCHEMA` also yield,
+/// per table, one `UPDATE t SET f = f ?? d, ... WHERE f IS NONE OR ...` run right
+/// after the definitions: a field added to `SCHEMA` reaches the rows that predate it
+/// with no further code. One statement per table, because a row is validated whole
+/// after each update and would still lack the table's other new fields.
+fn backfill() -> String {
+    let mut tables: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
+    for l in SCHEMA.lines() {
+        let Some(rest) = l.strip_prefix("DEFINE FIELD IF NOT EXISTS ") else {
+            continue;
+        };
+        let Some((field, rest)) = rest.split_once(" ON ") else {
+            continue;
+        };
+        let Some((table, rest)) = rest.split_once(" TYPE ") else {
+            continue;
+        };
+        let Some((ty, default)) = rest.split_once(" DEFAULT ") else {
+            continue;
+        };
+        if ty.starts_with("option<") {
+            continue;
+        }
+        let default = default.trim_end_matches(';');
+        match tables.iter_mut().find(|(t, _)| *t == table) {
+            Some((_, fields)) => fields.push((field, default)),
+            None => tables.push((table, vec![(field, default)])),
+        }
+    }
+    tables
+        .iter()
+        .map(|(table, fields)| {
+            let set: Vec<_> = fields
+                .iter()
+                .map(|(f, d)| format!("{f} = {f} ?? {d}"))
+                .collect();
+            let missing: Vec<_> = fields.iter().map(|(f, _)| format!("{f} IS NONE")).collect();
+            format!(
+                "UPDATE {table} SET {} WHERE {};\n",
+                set.join(", "),
+                missing.join(" OR ")
+            )
+        })
+        .collect()
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Bootstrap {
     /// An empty database: tables defined and the marker written.
@@ -410,6 +458,10 @@ async fn bootstrap(db: &Db, s: &Settings) -> Result<Bootstrap, String> {
         }
     }
     db.query(SCHEMA)
+        .await
+        .and_then(surrealdb::Response::check)
+        .map_err(|e| db_err(&e))?;
+    db.query(backfill())
         .await
         .and_then(surrealdb::Response::check)
         .map_err(|e| db_err(&e))?;
@@ -868,8 +920,11 @@ mod tests {
         assert!(fields(&c).contains("\"branch\""), "fresh board has branch");
         // Make it a board from before the field existed: marker intact, field gone.
         runtime().block_on(async {
-            c.db.query("REMOVE FIELD branch ON tasks")
-                .await
+            c.db.query(
+                "REMOVE FIELD branch ON tasks; REMOVE FIELD path ON tasks; REMOVE FIELD board ON tasks; \
+                 CREATE tasks:98 SET title = 'old', created_at = 1, updated_at = 1",
+            )
+            .await
                 .unwrap()
                 .check()
                 .unwrap();
@@ -906,6 +961,24 @@ mod tests {
             r.take(0).unwrap()
         });
         assert_eq!(kept.as_deref(), Some("feat/x"));
+        // The row written while the fields were absent takes an ordinary write and
+        // reads back each field's default.
+        let old: Vec<serde_json::Value> = runtime().block_on(async {
+            w.db.query("UPDATE tasks:98 SET status = 'working'")
+                .await
+                .unwrap()
+                .check()
+                .expect("a row older than the fields accepts a write");
+            let mut r =
+                w.db.query("SELECT status, board, path, branch FROM tasks:98")
+                    .await
+                    .unwrap();
+            r.take(0).unwrap()
+        });
+        assert_eq!(
+            old[0],
+            serde_json::json!({"status": "working", "board": "main", "path": "", "branch": "HEAD"})
+        );
     }
 
     #[test]
