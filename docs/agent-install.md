@@ -118,16 +118,18 @@ used. Set it identically for every agent that should share a board.
 
 ```sh
 ./skills/install.sh [target-dir]       # default ~/.hermes/skills
-./skills/install.sh --force            # refresh an existing install
+./skills/install.sh --force            # replace an existing install
 ```
 
-Expected: `installed: agentboard-manager -> <target>/agentboard-manager`. An existing
-copy is refused (`exists: <path> (use --force)`, exit 1) and nothing is touched.
+Expected: `linked: <target>/agentboard-manager -> <repo>/skills/agentboard-manager`, plus
+one `linked:` line each for `~/.claude/commands/manager.md` and
+`~/.config/opencode/commands/manager.md`. An existing path is refused
+(`exists: <path> (use --force)`, exit 1) and nothing is touched.
 
-- The repo copy is canonical. An installed copy is a snapshot: re-run with `--force`
-  after pulling.
-- `agentboard-manager` names two companion skills, `herdr-kit` and
-  `subagent-team-setup`. They live outside this repo.
+- The install is a symlink into the repo: there is one file, no snapshot, and nothing
+  to refresh after pulling.
+- `agentboard-manager` lists `claude-code` and `opencode` as related skills. They live
+  outside this repo.
 - `skills/agentboard-manager` is the playbook for running a team with this tool.
   [`AGENTS.md`](../AGENTS.md) holds the rules for changing the code.
 

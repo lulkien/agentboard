@@ -1,492 +1,82 @@
 ---
 name: agentboard-manager
-description: "Use when managing coding agents: file, dispatch, watch, gate."
-version: 1.10.0
+description: "Use when working a task on the agentboard, or managing a coder and reviewer team on it."
+version: 2.0.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [agentboard, herdr, manager, delegation, review, dispatch, wait]
-    related_skills: [team-manager, claude-code, opencode]
+    tags: [agentboard, herdr, manager, coder, reviewer, delegation]
+    related_skills: [claude-code, opencode]
 ---
-# Being the manager
+# agentboard manual
 
-Two ledgers, never swap jobs:
+The board holds work (rows, status, reports, events). herdr holds processes (tabs, panes, agents).
+Full wire reference: `PROTOCOL.md`. Tool reference: `README.md`. Both live in the agentboard repo.
+Three pages here, nothing else binding:
 
-- **agentboard** holds *work*: status, prompt (the row), report, event log.
-- **herdr** holds *process*: tabs, panes, live agents, sessions.
+- this manual: the verbs and exit codes
+- `workflow.md`: how a row moves, who moves which status
+- `roles.md`: manager, coder, reviewer: what each may run and never does
 
-Manager owns both ledgers, writes **no code**. No patch, no plugin, no shell-driven edit. Hands: board writes, dispatch, watching, reading panes, re-running gates, git-state resets, talking with user. Worker makes every edit. "Review the code" = commission reviewer, not fix it.
+Read this page and `workflow.md`. Read `roles.md` for your seat.
 
-An install that never reaches a running agent, who runs the live round when the worker's sandbox refuses, which way a skill-install drift runs and what adopting it does to a frozen diff, how a submission body is recorded and checked, and watching for a diff instead of a status: `references/live-verification.md`.
+## Rules for every agent
 
-One override: user says do independent row yourself, now, and it touches files no worker/reviewer holds → do it. Pick docs-only row, files disjoint from in-flight task, never interrupt working pane for it. Record exception in row: `status T<n> working "<manager> writing it directly"`, then `report` with evidence, then `status T<n> done "committed as <sha>"`. Put "no reviewer round ran" in report so ledger not imply gate that never ran. Row editing files coder is inside = not independent, queue it.
+- The board is the only status channel. No `NOTES.md`, `STATUS.md`, summary files.
+- The row is the prompt: `claim` returns `description` and `goal` verbatim. Do not stage prompt text in files.
+- Write to the board through the MCP tools. Do not shell out to the `agentboard` binary for board writes. One exception: a diff body too big for an inline MCP string goes in with `diff add --body-file` (`references/diff-submission.md`).
+- Never guess a missing requirement: `task_ask` one narrow question, then `task_wait`.
+- `done` means verified. Paste the real output of the check the goal names into `report`.
+- Touch only your row. Do not run suites or installs the goal does not name.
+- A probe that touches a board uses a throwaway one: set `AGENTBOARD_DB` (and `AGENTBOARD_SURREAL_URL`) in the same command. A bare `agentboard` call hits the live board.
 
-Only time to interrupt working pane: **doc or design row whose spec you rewrite**: work so far is prose going wrong way, no code/reviewer holds it, finishing costs second full round. `herdr agent send-keys <name> esc`, then `agentboard status T<n> ready "<why>"` to drop lease, land both fields, dispatch again. Never on code row mid-edit: tree keeps whatever half it wrote.
+## Board verbs (MCP tool, CLI verb)
 
-Repo housekeeping = code work too, even one line: `.gitignore` entry, manifest bump, CI yaml, README correction code contradicts. Test not "is it trivial" but "is it the repo's": file row, worker edits, so every write in tree has author on board. One exception: file coder is mid-edit in, don't touch at all.
+| Job | MCP tool | CLI |
+|---|---|---|
+| take a row, get description and goal | `task_claim`, then `task_get full=true` | `claim [T]`, `get T --full` |
+| progress note | `task_update note=` | `note T "..."` |
+| keep a long lease | `task_update heartbeat=true` | `heartbeat T` |
+| record the change | `diff_add id body=` | `diff add T (--body TEXT\|--body-file PATH\|-)` |
+| outcome and status | `task_update report= status=` | `report T "..."`, `status T <s> [note]` |
+| block on a human | `task_ask` | `ask T "..."` |
+| wait for the board | `task_wait` | `wait [T..] [--epic E] [--open] [--status csv] [--kind csv] [--timeout S]` |
+| read | `task_get`, `task_list`, `task_children`, `diff_list`, `diff_get`, `board_brief` | `get`, `ls`, `children`, `diff ls`, `diff get`, `brief` |
 
-This skill = operating loop. Pane mechanics + step-by-step procedure: `team-manager` skill, whose `references/herdr-mechanics.md` has pane depth (`herdr --skill` stays authority shipped with binary). Machine setup, MCP configs, wrapper bins: `references/machine-provisioning.md`. Costly mistakes: `references/pitfalls.md`. Reproducing worker's "the engine cannot do this" claim: `references/worker-claim-probes.md`. Live round + big-diff recording: `references/live-rounds.md`, `references/large-diffs.md`.
+Lease is 30 min by default. A long diff has no MCP shape (inline string only): use `diff add --body-file`; see `references/diff-submission.md`.
 
-Same job as short procedure (topology, epic/task recipes, dispatch, review loop, renew cycle, recovery table) = `team-manager` skill. Use it for commands in order; this file = reasoning + traps.
+## Exit codes
 
-## When to Use
+- Any refusal exits 1 with an `agentboard: ` prefix on stderr (unknown task, bad value, refused move, cap hit, `chain too deep`, refused `claim` of an explicit id). MCP returns the same text as a tool error.
+- `wait` exits 0 and prints `matched:`; exits 3 and prints `timeout:`. `manager events wait` uses the same two codes.
+- The id-less `claim` with nothing ready prints `no ready tasks` and exits 0.
+- `dispatch` refuses a row that is not `ready` (exit 1; `--force` resets it first).
 
-- You manage coder + reviewer team, work lives on board.
-- Work needs filing, dispatching, watching, or report verifying.
-- Review round to commission, or findings to turn into fix task.
-- Worker blocked, silent, or task behind live lease.
-- About to poll board by hand: stop, use `wait`.
-- NEW machine must run team (claude/agentboard/MCP configs, wrapper bins, verification): `references/machine-provisioning.md`.
-- Board must start fresh: plain reset or schema switch ("Keeping the tool current").
+## Manager verbs (manager only)
 
-## The one rule that shapes everything
+`agentboard manager ...` drives herdr. There is no shell helper.
 
-**Task row is the prompt.** `description` = context (repo, files, situation, what to build); `goal` = how to do it + how judged finished. `claim` returns both **verbatim and uncapped**, so worker gets prompt in one call. Never stage prompt text in file: no `prompt.txt`, no `desc.txt`, no `"$(cat
-scratch.md)"` handed to `add`. Row is only copy; user treats second copy as defect even if deleted after. Long, backticked, multi-paragraph text → MCP `task_add` / `task_edit` with JSON argument, avoids shell quoting; CLI form for short one-liners.
-
-Name work, not agent in seat. Workflow, doc, row stay agent-agnostic (`docs/review-loop.md`, "Review: review-loop.md"), since coder/reviewer pair changes when quota runs out; name current agent only in one clearly labelled setup example in body.
-
-So dispatch = one line, board owns text:
-
-```bash
-agentboard dispatch T15 --to coder2
-# dispatched to coder2 via herdr: Use the agentboard MCP tools: claim task T15 with the
-# claim tool, read it with the get tool (full=true), then execute it. Do not shell out
-# to the agentboard binary for board writes.
-```
-
-Line names MCP tools on purpose: CLI-shaped line (`Claim T8, then task_get
-id=8`) taught workers to run binary in bash instead of calling tool. Pane still gets old wording → installed binary predates change; check `strings ~/.cargo/bin/agentboard | rg 'claim tool'` before blaming row.
-
-## The loop
-
-0. **Orient before acting.** `agentboard brief`, `agentboard ls`,
-   `agentboard sessions`, `herdr agent list`. Never dispatch into board or pane you haven't looked at; stale `working` or pane in wrong repo stays invisible until work comes back wrong.
-1. **Epic first, then work under it.** `agentboard epic add "<outcome>" [--path <repo>]
-   [--description D] [--goal G]` creates container, then tasks go in with
-   `--epic E<n>`. Epics and tasks: two tables, two id spaces: epics print `E1`, tasks `T1`, prefix picks table, so `--epic E3` and `--parent T7` never mean same thing. Task may sit under epic **and** be subtask of another task (fix task under review task that found it); subtask inherits parent's epic; disagreement, cycle, self-parent, cross-epic parent refused. Re-point: `agentboard parent T<n> <T<m>|none`.
-   Epic never claimable, leaseable, dispatchable; every task verb refuses E id and names epic verb you wanted.
-
-   Give epic its **project path** (`--path`, `~` and relative paths resolved, existence not required). Only property no task has; lets dispatch answer "is pane in right repo": live target's cwd outside epic path → `dispatch` prints warning naming both, proceeds. Warn, not refuse: manager decides, but only if told.
-
-   **When the user names the next objective while the current epic is still open, file it immediately and say what one row stands between them and it.** File the new epic and its rows in that turn, then one line: the order, the single blocking row, and why the block is a hazard rather than polish (an unsafe gate the new row's own acceptance would run, a file both rows edit, a live-board writer). Offer the reorder explicitly — "say the word and I strip that gate and start X now" — because the user decides priority, not the queue. A queue the user cannot see reads as drift: they will ask "why are we not on X" twice, and the second question costs the turn you were saving. Never let an optional nicety silently outrank the objective they just named.
-
-   **Decisions live in the epic, numbered, and rows are told not to re-open them.** When the user settles a design question (how a schema migrates, where a gate belongs, who owns a status), write it into the epic body as `D1 … Dn`, each with its reasoning one clause long, and close with one line: *owner-approved; do not re-open inside a row, raise it to the manager*. Rows then cite the decision instead of relitigating it, the reviewer has an authority to measure against, and a session that reads only the board can see why the shape is what it is. A decision that changes is an `epic_edit` plus a note on every in-flight row — never a quiet divergence in one row's goal, because the next row will implement the other half. **A ruling that arrives mid-epic is a numbered note on the epic, not a body rewrite:** `agentboard epic status E<n> open "D6 …"` logs it as an event, the number stays citable, and the row you re-dispatch cites it in its `status T<n> ready` note ("ruling D6: …") instead of restating it. Rewrite the epic body only when the shape of the epic itself changes; a body rewritten per ruling stops being read.
-2. **Write row so worker can self-verify.** Goal must be executable: "`cargo test` prints 4 passed", "`rg 'unwrap()' src/` returns nothing", "these three commands and their output pasted into the report". "Implement X" not a goal. File long or backtick-heavy text over MCP (`task_add` with JSON string) so shell quoting never eats span. Spec long enough (five numbered findings + checks) can break single call: file row first with one-line description, then land body with `task_edit` on `description` and again on `goal`. Two edits = two `edit` events.
-
-   **Entries in one `calls[]` are independent.** Entry missing `name` rejected (`calls[0] requires a 'name'`) while siblings write, so error names one call, hides ones that landed. Build each entry as `{name, arguments}` with the name leading — a call whose `name` trails its arguments is the shape that comes back rejected while its siblings may already have written. Re-list (`epic_list`, `task_list`) after any batched error before retry, else batch filed twice.
-
-   **Resolve stated constraint's physical shape before filing.** User line like "still use the db file" = two possible specs: path contract (`AGENTBOARD_DB`, `--db`, `path`) or one physical file on disk. Embedded store may only offer directory, so encode reading you can implement, say in row which one, put impossible reading in reply as question. Never file spec asking for shape engine can't produce. Same for tech: user names crate or database → scope row to that one; no bake-off; cheaper-option idea goes to user, not worker's row.
-
-   **Two documents disagreeing = doc bug in authority, not a section.** Playbook contradicts wire doc agents read first (PROTOCOL.md) → fix wire doc, delete "divergence" note from playbook; page documenting split keeps split alive, each worker picks half it read. Ask for one concrete numbered workflow, one step per action, plus who-moves-what status ownership, and one doc owning diagrams, pointed at from both sides.
-
-   Diagrams = section of markdown file: `mermaid` fences inside `.md`, never standalone `.mmd` in tree; exactly one page owns them, others link. Page already holds copy → delete copy in same change adding owner page; two diagram sources drift like two prose sources. Markdown rendering is part of doc correctness, review as output: escaped backtick inside code span splits it into code, stray backslashes and code. Use double-backtick delimiter when content has backticks; no renderer installed → verify by counting delimiter runs on line, not eyeballing.
-
-   Change touching every call site (argv rewrite, rename, signature change) → row also carries **parity contract**: which behaviours must not move, traps that break them, test counts before and after. "Refactor X to Y" invites silent behaviour change; enumerated contract doesn't. CLI rewrites: `references/cli-rewrite-parity.md`.
-
-   **File list in spec is grep-verified, not remembered.** "`dispatch.rs` and
-   `render.rs` are untouched, they only go through the trait" is a claim; two files still calling old driver = surreal/stub build can't compile. Reviewer found exactly that after order approved. Before row names files unaffected or fixes their order, run `rg -n '<old driver>|Command::output' src/` per file, let hit count write list. Same treatment for the module and library a row names as its oracle: a spec saying matplotlib in `views/well.py` when the plotting lives in `plots.py` and uses pyqtgraph hands the worker a vocabulary the app does not use, and every proof it then writes is judged against the wrong shape — `rg -n 'import <lib>|<symbol>' <file>` before the library name reaches a row, and correct an already-dispatched row by `note`.
-
-   **A plan or spec written on another machine is a claim about this tree, not a description of it.** A copied plan carries the tree state of the box it was written on: its repo path, its "the tree already holds an uncommitted partial diff" premise, and the technique it picked for a schema change. Check each premise with one command before approving or dispatching — `git -C <repo> status --short` for the claimed dirty tree, `rg -n '<symbol>' src/` for the claimed work in progress, `rg -n 'fn check_schema|ALTER TABLE' src/store/` for whether this repo migrates or refuses, `ls` for the files it calls missing — and correct the plan in writing instead of handing a worker a spec for a tree that does not exist. A path from the other box is the tell that nothing else in it was checked either. Put the verified current state at the top of the epic or row (file:line plus the command output that showed it), so the worker reads the tree rather than the story.
-
-   Counts in goal (`cli.sh 39/39`, `202 passed`) go stale once anyone adds test; worker then "fails" target already exceeded or trims tests to hit number. Quote command + "current totals", or run suite at filing time. Never remembered count.
-
-   **Name the gate subset, or the worker runs the repo's whole check table.** A goal that says "run the gates", or names two suites while the repo's table lists five, gets the worker executing the ones you never scoped — and an unscoped suite is exactly where the fixture that writes the live board, the suite whose external dependency is missing, and the ten-minute parity run all hide. A worker running an out-of-row suite to be thorough is obeying the table, not disobeying you; the row is what was ambiguous. List the exact commands with their expected last lines, then one line: "do not run suites outside this list; if one looks relevant, say so and stop."
-
-   **`description` and `goal` both the prompt: correct in one pass.** Reviewer or user can overrule half a spec; easy to land new decision in `description` while old ruling sits in `goal`. Worker then blocks (correctly) asking which is authority, round spent on question you made. Before each dispatch, re-read `agentboard get T<n> --full`, check goal's proofs match description's decision; decision changes → edit both fields same sitting, say in goal which section binds.
-
-   **Row starting from manager's own uncommitted edits must list them, file by file, line by line.** Worker inheriting dirty tree can't tell your half-edit from own code: duplicate validation, dead guard, comment on wrong branch all read as coder's work, reviewer then files your leftover as finding against row ("redundant guard, remove line N"). Say what you touched and that fmt already reformatted some, so round starts from known state. Expect fix row for duplication you seeded.
-
-   Spec is **row you can amend**: `agentboard edit T<n> [--title T] [--description|--spec D]
-   [--goal G] [--priority N] [--assignee A]` (same for `E<n>`, with `--path`), one `edit` event per field, `unchanged` and no write when text same. Fix row instead of refiling; refiling costs id and history. Guard = lease: row held by working agent refuses edit (exit 1, same `lease Nm left — manager: agentboard status T<n> ready` remedy as `claim`), since worker already reading text. So: amend freely while `ready`; while `working`, wait for delivery (worker can `task_get full=true` again) or reset with `status T<n> ready` and re-dispatch. Short fields record old→new in event; description and goal record lengths only. Big spec edit not restorable, so refile when change structural, not correction.
-
-   **Take the id from the `add` that made it.** `add` prints it (`T45 ready`); never derive the id by scraping `ls | tail -1` or as "last id + 1" — `ls` orders by urgency, not creation, and a stray row (a worker's probe landing on the live board) occupies ids you did not file, so the guess lands your description on somebody else's row. If it does: the overwritten text is gone from the ledger (events keep lengths only), so recover it by searching the session transcript for the filing call (`session_search`), restore both fields verbatim, and prove the restore with the lengths the edit events recorded — `2322->2332` must read back as `2332->2322`. Record the recovery in a `note` on the damaged row and say it in the reply.
-
-   **While a row is leased, `note` still lands.** Editing description/goal refuses, but a manager `note` reaches the worker on its next `task_get`; that is how you correct a spec it is already reading (wrong module, wrong library) without re-prompting the pane or dropping the lease.
-
-   **Steering a pane that drifts mid-round: `note`, not a push, and give it two exits.** A worker that stumbles on a pre-existing defect inside its diff will fold a silent behaviour change into the round (an error-classification tweak, a widened retry, a guard for a flake it hit). The note offers exactly two exits — *back it out, name the failing check, and I file it as its own row* or *keep it, prove it with a test that fails without the change, and say in the report that this round also touched X* — plus "do not ship it silently" and "do not let it eat the round". That keeps the decision yours, costs no turn, and hands the reviewer a declared side change instead of a surprise one buried in a diffs diff.
-3. **Dispatch with verb**, not hand-typed sentence:
-   `agentboard dispatch T<n> --to <session>`. Refuses task not `ready` (exit 1, no event, no write), `--force` resets through normal status->ready path first, `--print` mutates nothing, delivery is `herdr agent prompt` under deadline with tmux fallback, `dispatch` event written only after successful send. Deadline matters: undeadlined `Command::output()` against wedged pane hangs manager, not worker. Read event body after: names delivery path and fallback reason (`w1 via tmux (herdr: timed out after 200ms)`), which "exit 0" doesn't.
-
-   **One row per pane at a time.** `herdr agent prompt` submits into live agent's conversation, so dispatch to pane still `working` = extra user turn mid-task: drops second instruction or answers it with first task's context. Queue next row as `ready`, dispatch when pane reports. Parallel work = second pane, never second dispatch.
-
-   Dispatch fails naming agent you didn't pass (`agent_not_found: reviewer` while you said `--to reviewer2`) → task's **assignee** registration row shadowed target. Resolution now prefers *live* target (assignee-if-live, then `--to`-if-live), else refuses with one error naming every candidate, saying assignee row stale. `agentboard sessions` marks such rows `gone`. Clean with verbs, not DB: `agentboard unregister <name>` for one, `agentboard sessions prune [--dry-run]` for rest. Prune refuses when neither tmux nor herdr answers (box that can't see sessions must not delete registry), so run where herdr up. Only if verb truly missing, edit `board.db` with python stdlib (`sqlite3`, no CLI binary on this box) and say so in reply; manager routinely reaching for DB has stopped respecting board.
-4. **Arm watcher before ending turn.** Step that gets skipped, not optional: no python polling loops, no reading `board.db` by hand.
-
-   ```bash
-   agentboard wait T<n> --timeout 300 --status review,blocking,needs_fix
-   # exit 0 = matched (prints `matched:` + the task's status + the new event lines)
-   # exit 3 = timeout (prints `timeout:` + one status line per watched task + a tail)
-   ```
-
-   **Anything you hand to the reviewer pane comes back at `review`** — it marks its own row `review` when finished, exactly like a coder, so watch `done,review,needs_fix,blocking` for it. That includes a coder's own row you re-dispatched with `--force` for its verdict: leaving `review` out of the watch set guarantees the only thing that fires is your timeout, while the verdict sits on the row as its report. Else wait runs full timeout while verdict sits on board (40-minute timeout spent on review landed in 10). A wait that times out with the row reading `review` means your watch set was wrong, not that the reviewer stalled: its terminal action is `task_update status=review`, so a `done,needs_fix` set can never match it, and the verdict is already on the row as its report. Re-arm with `review` in the set, then read the report and close the row yourself (`status T<n> done|needs_fix "<verdict + sha>"`).
-
-   Run as background job with notify. `--open --kind ask` also useful: wakes when *anyone* on board needs human. Blocked delegate shows as `ask`, CLI accepts as alias of real `block` event.
-
-   **Short timeout = stall check, and manager is the loop, not a script.** `--timeout 300` is the ceiling the user set and it is constant: never arm 900 s or 1800 s as a convenience, and on a timeout re-arm the same 300 — never a larger number, never an extension. Exit 3 = row hasn't moved, so read pane once (`herdr agent wait <pane> --until idle --timeout 1`), push with `herdr agent prompt` only if idle, then arm same wait again. **A lease that lapses mid-round is not a reclaim signal.** A phase row spanning schema, both backends, verbs and suites legitimately runs past the 25-30 min TTL; `working` plus an active pane (footer holding a live shell or a token count that keeps climbing) keeps the round, and `status <T> ready` there strands a worker mid-edit and loses the context the fix depends on. The lease expiring only makes the row claimable — leave it alone and keep watching. Never wrap in poller: python watchdog and shell supervisor both written for this, both worse than command. One keyed pane state by agent kind and pushed *busy* agent four times; other needed shared-board filter so it didn't drive this repo's coder at another project's rows. `agentboard wait` already re-queries, prints offending status, has exit codes; anything on top = second, weaker copy.
-
-   **`agent_status: done` with the pane's own shells still running is not a stall — and not finished either.** A coder that ends its turn to wait on its own long suite shows `done`/`idle`, prints something like `I'll continue when the monitor reports`, and keeps `N shells still running` in the footer; the row is still `working` and it resumes by itself when the shell exits. So on a timeout, read the pane footer before pushing: a running shell means re-arm the same 300 s and touch nothing, a bare prompt with an unfinished row means push once by name (`herdr agent prompt <name> "Read your running command's output, then finish T<n>: paste each gate result in the report and task_update status=review."`). Pushing into a pane whose suite is mid-flight injects a second turn into work already in progress. **A third shape is a worker that finished its turn holding a question**, usually because two of your own rules collide (write board through MCP vs record a body no MCP tool can carry, a gate that asks for a file the sandbox will not let it read): read the pane tail before pushing, answer with a ruling in a `note` on the row that names which path is sanctioned and what proof to paste, follow it with one `herdr agent prompt` carrying the same ruling, and file whatever gap the question exposed as its own row in that sitting — a worker that stops to ask is obeying the rules, and the price of the stop is paid once; a worker that guesses silently pays for it every round after.
-
-   Dispatch not finished until watcher armed. Any question on delegate progress (from user or own doubt) answered by reading board, never asking pane or guessing from elapsed time. Ending turn on "it's probably still working" is how finished task gets reported as running.
-
-   Facts that matter reading its output:
-
-   - `--open` re-queries each poll, so task created mid-wait gets picked up (verified:
-     matched 204 ms after the row appeared). Explicit ids and `--epic` stay frozen —
-     they name work, not a predicate.
-   - `--status`-only match on task already in that status returns at once, and
-     prints its most recent event prefixed `last:` — that event is context, not the
-     cause of the match. So never add a status the row already holds to the watch set:
-     re-watching a `review` row matches on the first poll and the watcher exits having
-     seen nothing new. Watch the row you just dispatched, with only the statuses it is
-     heading toward.
-   - Same per id. Multi-id watch whose set includes row already sitting
-     in a watched status (`wait T10 T14 T15 --status done`) matches on the first poll and
-     returns `matched: 1 of 3`, so the wake you actually wanted never arrives. Put only
-     rows that are still moving into the set, and after a false wake re-arm with the
-     remainder rather than concluding the work was already done.
-   - Match is snapshot, notification arrives later than event: row can
-     already be `done` when the message says `needs_fix`. Re-read `agentboard ls` and
-     `agentboard get T<n>` on every wake-up before acting, and never re-dispatch or reopen
-     on the strength of the notification alone. Expect wakes for rows you already closed:
-     several arms can be live on one id (a timeout re-armed while an older arm still runs
-     under a different status set), and each fires on its own schedule. Read the board
-     first, treat a wake naming a committed-and-closed row as a dead arm, and answer it
-     with the row's current state — not with a new round of work.
-   - On timeout returns every watched task's status plus clipped tail of the
-     freshest one, so a silent timeout is still evidence.
-   - `--status`/`--kind` names validated: typo exits 1 instead of quietly
-     matching nothing. `reclaim` is not a kind (it is logged as `claim`).
-   - For `--status`-only match, `--after` is no-op by definition: match is
-     current state, not an event.
-5. **On wake, read row; delegate runs gates, not you.** User's standing rule: manager reads report against goal, checks each pasted line and count, hands any re-run to idle worker or reviewer (`herdr agent prompt`). No suites, builds, installs from manager's shell unless user asks. Completion = board `report` naming each gate with real last line. Never pane's word "done", never unbacked claim. `agent_status: idle` = "ready for input", not "finished". Evidence missing or hollow → move row back to `ready` with note naming gate, re-dispatch.
-
-   **Coder tests own behaviour; reviewer reviews logic.** Worker that made change runs every gate goal names (build, unit and CLI suites, plus throwaway-board behaviour proof when change behavioural, `AGENTBOARD_DB=/tmp/…` style, never live board) and pastes real output into `report` before setting `review`. Row reaching `review` with gate unrun gets reopened. **Every executable step belongs to coder**, not just tests: `cargo install`, build for target, `devtool_build` / `devtool_deploy_target`, flashing board, running binary there and driving proving flow. Reviewer = team lead: **reads and judges, never writes.** Its entire job is four inputs and one output — read the newest diff (`diff ls`, `diff get`), read the row's `description` and `goal`, check the logic and edge cases against that spec, and file feedback classified blocker / follow-up / nit. It never writes: no file edit, no commit, no install, no build or test run of the project under review, no `git checkout`/`stash`/`reset`, and no board row except its own findings. It MAY measure — a throwaway stub or probe under `$TMPDIR` that leaves the tree and the board exactly as it found them is how a claim about blocking behaviour gets disproved, and `git status --short` clean after the verdict is what separates measuring from editing — but the DEFAULT is no probe at all: if the claim can be checked by reading the diff, the description and the goal, read it and rule. A probe is a last resort for a claim about blocking behaviour, never a substitute for evidence the coder owed. What it cannot do is produce the round's evidence for it: when the proof is the coder's to paste, that is a finding — "prove X with a command that shows Y" — and the manager decides who runs it. Neither reviewer nor manager re-runs coder's suite routinely: duplicated cost, and pushes author to trust someone else's run.
-
-   **A sandbox denial is a permission question, not a failed gate.** When the worker's own harness refuses a command the goal requires — a live round against the real service, a deploy, a flash, anything touching a shared resource — the round is not weak evidence and the worker was right to stop. The decision is yours and it has exactly two shapes: authorize it in a `note` (`run it; if the classifier refuses again, paste the refusal and stop — do not work around it, do not mock the proof, do not narrow the goal`), or run that one command yourself and hand the output back to be recorded. Take the first when authorship and the pasted evidence belong in the worker's report; take the second when the pane cannot obtain the permission at all. Before you take the second, check that the binary the live round will drive is the tree you think it is: those scripts default to `target/release/agentboard`, so compare its mtime against the newest source file, or ask it for one of the phase's new verbs (`./target/release/agentboard manager up --help`) — a stale release makes a green live round prove the previous phase. And treat a live-round failure as the round's real finding, not an environment quirk: a server that refuses your sequence is teaching you its state machine, which is exactly the class of rule a scripted stub cannot model, so hand the exact command, the exact error and the line that chose the offending argument back to the worker and let it derive the rule from the surface rather than patch an order that happens to pass. A denial that turns into a workaround or a narrowed goal is the failure to watch for, and a worker that stopped to ask is not the defect. When the call needs the owner and no answer arrives inside the window, take the recommended option, say on the row that the window passed and you decided, and keep the queue moving — an epic parked on an unanswered question is a decision you already made by not making it.
-
-   **Claimed platform blocker = finding until reproduced.** "CREATE does not persist", "the deserializer breaks on single-letter fields", "the crate will not compile": worker hitting wall in spike usually hit bug in own probe (wrong namespace, unawaited query, connection reused wrong). Design calling its core mechanism unverified is not a design. Run smallest independent probe that would fail if claim false, in `$TMPDIR`, before accepting report or sending to review. Recipe + traps making probe lie: `references/worker-claim-probes.md`. Then rule on claim in writing: verified, disproved with output, or unverified-with-version; file fix against doc that stated it. **The same trap catches your own probes of an external tool.** A negative claim about a tool's OUTPUT — "the JSON is not parseable", "the flag is ignored", "it prints nothing", "exit code is always 1" — is usually your capture path, not the tool: the shell wrapper, the pager, control characters the terminal layer strips, a pipe that closes early, stderr mixed in, or a tool that formats for a TTY. Before that sentence reaches a reference file or a row, re-run the probe with the output written to a file and parsed from the file, and quote the exact command whose stdout you read. A false negative about a tool is worse than no note at all: it reads as measured, so nobody re-measures it.
-
-   **A negative claim about side effects is a claim too: check the ledger.** "the live board was only read", "no writes", "nothing created", "not built" pass a review because nothing on the page contradicts them. Falsify against the artifact — board `events` for a row that should not exist, `git status` for untracked scratch, the file timestamp — and treat "untouched" without that check as unverified, not true. Probes are the usual source: a bare `agentboard …` in a probe addresses the default data dir, which on a working host is the owner's live board, unless `AGENTBOARD_DB` (and `AGENTBOARD_SURREAL_URL`) are set in that same command or an exported prefix. Require the probe to paste the line proving which store it hit, and file the hygiene defect when it did not. **The repo's own suites are not exempt.** A fixture that sets the data path but not the server URL aims at the live board and still prints PASS, so for any suite you did not just write, take the board's row count (`ls --limit 400 | wc -l`) and newest event sequence before and after, and treat unchanged as the only evidence; flipping a default backend turns every untouched suite into exactly that hazard. Two-setting rule, counting trap and cleanup steps: `references/pitfalls.md`, "Probes and live boards".
-
-   **A worker's own `open risks` list is a queue of findings, not a disclaimer.** A report ending "Open risks: X is not checked, Y happens even when it should not" has already told you where the defects are; accepting the round because the gates are green means the reviewer inherits them as scope and the epic ships them. Rule on each one in writing before accepting: if it is a real defect, it is this round's work — append the ruling to the row's `goal` as a numbered item with its own proof (what must be refused, what must stay untouched, the test that shows both), `status T<n> ready` with a note saying the ruling and that round 1's work stands, and dispatch the same row again; if it is genuinely out of scope, say which later row owns it in the note so it is not silently dropped — and file that row in the same sitting, because a risk named in a report and left unfiled is a finding you chose to lose. Separate the two out-of-scope shapes. Work belonging to a later phase is ordinary backlog: file it, cite the phase. A RULE the epic states that this row's own goal never asked for is a filing gap on your side, not a defect in the round: a worker reporting "rule N was not in this row's scope, not written" has obeyed its row, so rule on it as manager — either append a numbered item to the goal and send the same row back, or defer it into the row that owns it — and never record it as the worker's miss. While you are in the epic body, re-derive every number it states (method counts, suite totals, group counts): an epic is prose like any other, and a row that copies its count propagates the error into code. Two shapes recur and are always defects: a guard keyed on a link alone that can resurrect or un-close a terminal row, and a depth/limit check that measures the immediate parent instead of the whole subtree being moved. A third is a second write path — a cascade, a bulk fix-up — that sets a status without clearing what the normal path clears (`needs`, the lease, `completed_at`), so the row lands in the new state still wearing the old state's badge: `nd` with `[input]` beside it, or a finished row holding a live lease. Grep every path that writes `status` and diff its SET list against the canonical one before believing a new transition. A fourth is a **lookup or reuse key computed from display text**: a "does this row already have its review child?" query matching on `title = 'Review ' || implement_title`, or any find-by-name over a field the workflow lets someone edit, silently stops matching after a rename and the code files a duplicate instead of reusing — and because the derived text looked authoritative in the spec, nobody tests the rename. Keys are ids and links (`parent_id`, a stored foreign key), never a string assembled at write time; a lookup that needs prose to recognise its own row is an identity bug, not a naming preference. Prove the fix with the edit-shaped case: rename the parent between rounds, assert the count stays one and the update lands on the original row. **When a review hands you exactly two ways out of that — a fragile marker or a schema change — neither is usually the answer.** Derive the key from an invariant the workflow already guarantees (a parentless implement row's children are its review rows, because fix rows hang off the review row), which needs no new column and no text to recognise its own row; then rule in the row's own terms, record the ruling as the next `D<n>` on the epic, and re-dispatch with the regression test for the case that broke it. A review that ends by asking you to choose has done half its job: rule, then close — do not hand the choice to the next worker as if it were a finding.
-
-**Gate that cleans is not a gate.** Re-running worker's build must leave artifacts you came to inspect intact: `clean` flag on build tool can delete build dir, compile log, every test binary, still exit 0 with success-looking summary (`Attempted 1 tasks … all succeeded` because only task was the clean). Prefer plain build; want wipe → run as own step, re-check binary timestamps before quoting test result. Read-only gates first, destructive ones only when their output is what you need.
-
-   **Report's own caveat is claim too: timestamp artifact.** "the unit-test targets were not compiled", "I could not configure a separate build", "only the library was built" arrive as honest self-doubt, get copied into review row as scope; check artifact instead of believing either side. Build log names output dir (cmake `--build <dir>`, cargo `--target-dir`, `-o` in compile line), and second build tree under same workdir often months old, making green build look missing: `find <dir> -name '<target>' -newermt '<diff time>'`. Fresh binary → caveat false, say so in review row so reviewer doesn't spend round on it. Old binary, no compile line → caveat real, goal not met.
-
-   **Green report dies at worker's last edit.** Workers routinely land one-line clippy/fmt fix *after* last full suite run, then report earlier numbers; pasted count no longer describes tree you commit. Check which tree state report measured; worker admits post-run edit → fix task or reviewer runs FULL suite again, not just changed phase, since compile-level tweak can move later phase's output.
-
-   **Suites report does NOT list = where red one hides.** Report enumerating
-   "controller 36, adaptor 24, client 128, dbus 38 — all PASSED" silently chose its gate;
-   list test targets build produced (`find <build dir> -name '*_tests'`), diff against names in report. Unlisted target not covered by claim, and is where collateral damage shows: suite worker never ran is one that fails. Have reviewer run missing ones before accepting round; one red → decide attribution with baseline binary before filing (failure predating diff belongs in row that removes behaviour, not fix task against this change).
-
-   **Green once not green.** Suite asserting anything time-shaped (relative age in rendered row (`created: 0s`, `lease: 59m left`), boundary between two calls, TTL countdown) passes/fails by where second hand was. Have reviewer run it three to five times before believing; reviewer reports "N/N but flaky" → flake = defect, same severity as failing test: next session inherits untrustable gate.
-
-   **Gate that skips not a gate.** Test needing external binary (database daemon, CLI tool) prints `SKIP <name>: not found`, exits 0, so run that matters (host that DOES have dependency) can be green asserting nothing. Give suite strict switch (`AGENTBOARD_REQUIRE_SURREAL=1`-style) turning skip into failure, run strict wherever dependency installed, add both rows to repo check table: default run and strict run. Verify strict switch honestly: hide binary (`PATH=/nonexistent
-   HOME=/nonexistent`), confirm tests FAIL not skip.
-
-   **Test-only escape hatch must not exist in release binary.** Env var disabling write lock so mutation check proves lock load-bearing = good tool and live-board hazard: if `AGENTBOARD_UNSAFE_NO_WRITE_LOCK=1` works in release, one shell export corrupts board. Require switch `cfg(test)`/debug-only, or refuse in release; check built artifact (`strings`/behaviour), not only source.
-6. **One review row per implement row, filed by the board, read in a pane separate from coder.** Board files it when implement row moves to `review` (`children T<impl>` names it; ack prints `(review row T<n>)`); never file one by hand, never dispatch reviewer at implement row. Chain, cap, diff channel: "The review chain" below. **Standing seats (user, 2026-10-21): coder = claude (`coding-mcp.json`), reviewer = opencode (`--standalone` in a pane; its board actor reads `opencode`, so a verdict's author is `opencode` not `reviewer`). The claude-reviewer wrapper is retired as the seat; quota fallback stays Claude reviewer with `reviewer-mcp.json` while Claude has room, else a second opencode pane with its own actor. When the user names the seats for a round, that call wins: wire that pane (its own MCP config, its own `AGENTBOARD_ACTOR`), say once what follows (a verdict now comes from a different reviewer of record, so a later handover needs a fresh pass on that reviewer's word, not the old one's), then stop re-arguing the choice. Dispatched same way. Verdict goes on board as its report. Scope = diff: logic, edge cases, whether coder's pasted evidence proves claim. Not re-run of coder's gates (step 5), not board-wide test pass. Findings become next coder task: fix task = **subtask of review that produced it**: file with `--parent T<review>` (epic inherited from parent), so `children T<review>` answers "what did this review cost" instead of link only in prose. Same for anything else task spawns: child records cause, not just epic. Filed flat by mistake? `agentboard parent T<n> T<m>` repairs link after, accepted on any status, `done` included, logs `edit: parent -> T<m>`, `children` then answers from both ends. Wrong link never needs refile.
-
-   **Every first-pass dispatch to the reviewer carries a brief, numbered by what would block.** Write it as a `note` on the row before dispatching — three to five questions in blocking order, each naming the artifact to read and the thing to break, never a summary of the diff the reviewer is about to read anyway. The questions that earn their keep: the guard whose code path must be *shown to exist* rather than described; the number the reviewer must re-derive rather than quote back; the assertion or fixture the round moved and whether it is still load-bearing; the side change the round kept, and whether it fixes the cause or only the symptom that flaked; and **which doc sentence this change made false** — prose written in round 1 goes stale the moment a fix round changes behaviour, and a doc still describing the old rule is a finding against that round, not work for the next docs row. Close a closing pass with "do not re-open anything you already cleared". The brief also makes a hollow verdict visible: a verdict that answers none of the numbered questions is not an acceptance, whatever its first line says.
-
-   **A round that edits an existing test is asking you to accept a smaller gate.** When new behaviour makes an old assertion fail, workers routinely move the fixture (relocate the probe to its own task, relax the loop, split the check) and report it in one line of notes. Read that line as a finding and put the question in the review brief: legitimate fixture change, or a check quietly weakened to fit the new behaviour? The acceptable answer names what the old check proved, what proves it now, and why the new shape still fails on the old bug — a probe that merely stopped tripping the new limit proves nothing about the limit. Do not let the reviewer discover it alone: it will read the diff as intended behaviour unless you say a test moved. **Prove the fix round added and removed nothing: `git diff --numstat tests/<suite>` over the round, where a zero deletion count plus insertions equal to the new checks is the artifact** — a worker that says "no earlier PASS disturbed" is making a claim, and repurposed assertions hide inside a net-positive line count. Ask the reviewer to reproduce the fixer's own mutation as well (delete the guard line, watch exactly that named check fail, restore), because a mutation quoted from the coder's report is a quotation, not a proof. **Then accept that a reviewer barred from writing often cannot reproduce it, and require the label instead.** A verdict that says "load-bearing by inspection, the coder-reported mutation stays coder-reported" is honest and usable; one that restates the mutation as though it re-ran it is not. Ask for every claim tagged read / reproduced / coder-reported, so an unverified mutation is visible in the verdict rather than implied — and let a non-writing discrimination test stand in its place: run the binary against two states that differ only in the guarded condition and show the two error texts differ.
-
-   **A closing pass over named findings is a narrow brief, and saying so is what keeps it cheap.** When the only open work is fix-round items you already filed, the brief names those items, requires the artifact for each, and ends with an explicit "do not re-open anything you already cleared — that acceptance stands". Without that line the reviewer re-audits the whole diff, re-raises cleared findings as new ones, and a two-item verification turns into another full round. Keep the earlier verdict citable: a behaviour change after it voids it, an unrelated re-read does not.
-
-**Reviewer that edits tree is not reviewing.** `git status` after "clean" verdict is part of gate. Reviewer edit = unowned change (no row, no author in ledger, absent from report) and verdict then grades own diff. Adopt via fix row assigned to coder (say in row manager adopted reviewer's edit, so ledger has author) or revert; never close round on it. Test-shaped version: fix making failing test pass by changing mock proves nothing about production class, since test never touched class. Demand contract asserted against real implementation same round.
-
-   **Instruction files reach pane only at agent start.** `AGENTS.md`, `CLAUDE.md`, MCP config: editing one does nothing for running pane, and `/clear` keeps old rules loaded. Restart agent at cycle boundary when new rule must bite, say rule live from next round, not this one. `needs_fix` verdict → fix row as a child of the review row (step 6).
-
-   **Scope bleed: amend next row before dispatching it.** Worker given row A often implements API row B was filed for, same methods, landed early. Don't dispatch B as written or second round rewrites first; re-read B's description against diff, restate as what's still missing (tests over new surface, refusal edges, callers), naming row that landed it. Leftover often just removing old entry point: `rg -n '<old symbol>' server/ ldclient/ tests/` after round tells whether B still has work; symbol whose only callers are old tests = real row ("delete it and its press-era tests"), not duplicate. Same correction when review round asks for work another queued row owns.
-
-   **Closing fix belongs to reviewer, not author.** Coder fills fix task, stops at `review` (no `fixed` status) with report and note. Only reviewer moves fix task on: `needs_fix` with remaining findings as note, or `done` with evidence; only done fix task lets it close review task. State in both rows: coder closing own fix self-certifies, reviewer reopens loop already shut.
-
-   **A fix row sitting in `review` reaches nobody without `--force`.** `dispatch` refuses any row that is not `ready` (`T9 is review, not ready ... --force resets it to ready first`), so handing the finished fix back for its verdict is `agentboard dispatch T<n> --to reviewer --force` — it prints `--force: T<n> review -> ready` and then the normal dispatch line. `status T<n> ready` alone moves the row but delivers nothing, so the fix stalls while the coder looks idle. Same for a review row being re-dispatched for a final pass after its findings closed. One fix row per turn: dispatch the highest-priority child, queue the siblings as `ready`, and dispatch the next when the pane reports — the reviewer can close them one at a time while the coder starts the next.
-
-   **Adjudicate findings before fix dispatched.** Reviewer reads code, not standing rule, so can file finding contradicting it ("the fix task never reaches done"); coder faithfully implements wrong thing. While fix row still `ready`, amend: `REJECTED` block naming each rejected finding with rule it breaks, then valid ones as actual work, explicit "do not apply R<n>" line. `task_edit` refuses only while lease live, so `needs_fix` review and `ready` fix both amendable; once coder claims, round spent. Read child fix row for findings too: reviewer may set review row `needs_fix` with empty report, all findings in fix task.
-
-   **`needs_fix` verdict with no child row = yours to file.** Reviewers sometimes report finding in note and stop. Read note, file fix as child of that review with note's findings quoted and proofs to paste, dispatch; re-prompting reviewer for paperwork costs round, finding already known. Say in child's description manager filed on reviewer's behalf.
-
-   **Empty report + `needs_fix` = read pane, then re-check `children` once.** Verdict often exists only in pane transcript: row shows `needs_fix` with nothing after colon while reviewer still writing child row. `herdr pane read <pane> --lines 200 | rg -v '^\s*$' | tail -40` gives numbered findings, and `children T<review>` a minute later usually shows fix task it filed. File child yourself only when still absent after second look. Reviewer line like "tracked separately" or "belongs in test infrastructure, tracked separately" with no id is NOT filed row: fold that finding into fix row you dispatch, named as manager addition, or it never lands.
-
-   **Children filed, review row never moved = transcribe the verdict, don't buy it twice.** The reviewer's turn can die after `children T<review>` already holds the findings — an upstream API error drops it with `agent_status: done`, an idle pane, and its own row still `working` with no report. The substance is on the board already: read the child rows (they carry each finding and its proof) plus the pane tail, then `agentboard status T<review> needs_fix "<verdict>"` naming the reviewer as author of the verdict, whose words you are transcribing, and why (its turn ended before the report). Do not re-prompt the pane for text that exists: it costs a turn, risks a second set of findings, and the child rows are the citable artifact either way. Note that a reviewer that ends without moving its own row is a report-shape defect worth one line in the next review row, not a re-dispatch. **Same rule one step later:** a fix row closed `done` while its review row still sits `needs_fix` is a half-finished close — read the fix row's report (it carries each finding and its evidence), then set the review row `done` yourself, naming the reviewer as author of the verdict you are transcribing. A status move is bookkeeping, and buying it with another pane turn is how a two-line close becomes a round.
-
-   **Reviewer reproduces measurement, not reads it.** Round turns on numbers (contention rates, lost updates, latency) → reviewer re-runs experiment with own probe and transport, pastes own output. Different rates expected (reviewer's HTTP probe duplicated in 1 of 10 runs where coder's ws probe saw 2 of 10); direction and conclusion must match. Verdict quoting author's table back ≠ evidence.
-
-   **Parity transcript sleeping between writes hides ordering hole.** Two backends sorting `seen DESC` and `seen DESC, name` print same transcript only because test registers rows 50 ms apart; real board sorts same-millisecond rows differently. Require same-timestamp case and one stable tiebreak in BOTH backends; "identical transcript" unproven until that case exists.
-
-   **Two workers same vendor still need two actors.** Two opencode panes (quota fallback) → each pane own `AGENTBOARD_ACTOR` (`herdr tab create
-   --env`, `herdr pane split --env`, each pane started `--standalone`), else every ledger event reads `opencode`, review can't name writer. Mechanics: `opencode` skill, "Two panes, two board actors".
-
-   Ask for **revert proof** on behaviour fixes: author reverts own fix, shows named test fails, restores. Test passing on broken code = decoration; review round only place this caught.
-
-   Revert-proof necessary not sufficient. Harness itself can break two ways, both look green:
-
-   - **Assertion accepts success.** Helper written as `try: return "ACCEPTED: " +
-     call(...) except: return str(e)` then handed to a substring check passes whether the
-     call succeeded or was refused. Assert the *shape* (an error was raised, exit code is
-     non-zero), never a string that both paths can produce.
-   - **Assertion measures wrong thing.** Hang test that only times caller
-     still passes when the kill is deleted — the stub survives, the caller returns fast.
-     Assert the observable: the pid is gone, the event count, the exit code, the row state.
-     The same trap catches a reviewer's own tooling: a "no stray process left" check run as
-     `pgrep -x surreal` printed zero every time because the daemon is `surreal-db`, which is
-     an all-clear the matcher could only ever produce. Verify such a check by creating the
-     state it looks for, or match on something unambiguous like the data directory in `ps`.
-
-   So demand two mutations per guard: revert fix (fails?) and force failure path to succeed (still fails?). Survives either = untested, not passing.
-
-   **A swap proof over a silent fallback proves nothing.** Any seam selected at run time (env var, build flag, factory table) that falls back to its default entry for a name it does not carry turns "the same page runs unchanged under both libraries" into the same implementation twice: the requested name is not what ran, and the spec lines, PNGs and parity verdicts match by construction. Demand three things of such a proof: the run PRINTS which implementation it actually used; the proof tool FAILS when the requested name and the reported name differ; and the requested-but-absent branch is an error the user sees rather than a silent draw (a warning at minimum naming requested / available / used, with the test asserting that warning instead of pinning the fallback). **The same lie lives in path and config DISCOVERY.** A path list ($AGENTBOARD_HERDR_SOCK, then $HERDR_SOCKET, then the defaults; the same shape for a config file, a database, a binary) must treat an explicitly set variable that does not exist as a REFUSAL naming that variable and path — never a fall-through to the next candidate. The order chooses among candidates that exist; it does not overrule a path the caller named, and quietly driving a different server is exactly as false as a flag accepted then ignored. Prove it with a two-path test: the named-but-missing path set, a valid stub at the next position, and an assertion that the stub was never contacted. Read the built artifact, not the source: one build tree of the same commit can carry the optional library and another not, so `strings <binary> | rg '<name>'` and `ldd | rg <lib>` say which proof is which. For a test-runtime seam the cheapest proof of that shape lives in the summary line: each suite prints the backend or library it actually detected (`… (backend: sqlite)`), the runner anchors its regex on the expected name, and a run handed the wrong binary FAILS instead of printing PASS — prove the anchor by feeding one suite's summary to the other's pattern and taking the non-zero exit. And when the implementation can only be built against headers outside the checkout, say so where the project keeps its honest state — a proof reproducible only inside a session scratch directory is a claim, not a gate.
-
-   **Survived mutation = finding about test, not guard.** Named test doesn't
-   reach guard (earlier gate in same function already returns, or fixture leaves guarded state empty), so round's proof void until test exercises path that gets there. Remedy = NEW test for that distinct path (late timeout after re-grant, handover completing while revoke open), not same test with louder assertion. Require author to say in report which guard was redundant for originally named test and which new test now fails without it; mutation round reporting "all five guards verified" with no survived list hasn't looked.
-
-   Verdict belongs to reviewer that produced it. Review role changes hands (different vendor/model takes seat) → accumulated commits get one fresh pass from reviewer of record before called merge-ready; earlier approve = another reviewer's opinion, not citable gate. Say on board which reviewer ran, so later session can tell apart.
-
-   **Required** fix from reviewer of record jumps queue. User's next feature doesn't outrank merge gate: land fix, re-verify, commit, resume queue. Everything built after would sit on unapproved base; finding cheapest to fix while reviewer evidence fresh. Optional findings queue like other work.
-
-   **Sort nits by mechanism, not by wording.** "Optional" is the reviewer's severity, not a licence: a nit that can hang a gate or write the owner's board is a class defect and is fixed in the round that found it (the shapes to watch for are a loop that treats any output as success, and a fixture that sets a path but not the server URL). A cosmetic nit does not earn its own row — chasing each one keeps the epic open for prose and buys nothing; record it in the closing `status T<n> done` note on the row where it was found, and when that note is the last thing in an epic, name in the epic's closure note which nits remain unfiled so a later session knows they were seen and not forgotten. A real cost that is genuinely outside the round's scope gets its own row the same sitting, carrying the measurement that exposed it (baseline versus this tree, with the rates) and the acceptance that no gate gets weaker to fix it — a cost named in a verdict and left unfiled is a finding you chose to lose.
-7. **Freeze tree while reviewer reads it.** No next coder round until verdict lands: diff moving under reviewer yields findings against code gone, whole verdict wasted. Behaviour change after review makes old verdict stale; commission second round, don't cite it. Two rows editing same file (docs task and feature task both touching `README.md`) serialized for same reason: spec says which row owns shared file, dispatch other after. Partition before you serialise: when the objectives split cleanly by file (code plus its suites in one row, `AGENTS.md`/`README.md` in another), write the owner of each file into both rows so they queue back to back without blocking each other.
-
-   **Your own uncommitted edit is inside the freeze — commit it before the reviewer round.** A docs or skill change you made in the same tree turns up in the worker's `git status` as "modified, not mine, left alone" and in the reviewer's diff as text with no author, which is precisely the shape a verdict has to reject. Commit it with an explicit path and its own message before dispatching the review (or revert it): the reviewer grades one author's change at a time, and the coder stops spending report lines disowning your edits.
-8. **Commit landed round without being asked; never push.** Standing default: implement or design task reaching `done` → reviewed files committed locally, one objective per commit, sha in reply. User asking "commit it" each round = doing manager's bookkeeping. Manager commits; workers told not to. Push stays human's call, always; same for history rewrite. `git add` explicit paths, never `-A` (sweeps workers' scratch files into commit). **A spec handed in from outside — a plan ported from another machine, a pasted design — is input, not deliverable: it stays untracked unless the user asks for it, and what ships is the epic decisions and rows it produced.**
-
-   **Split by objective, leave worker's in-flight edits unstaged.** Two finished rounds in one tree = two commits, explicit paths each; count table (`AGENTS.md`) moves in commit that changed tests it describes. Third change worker holds (manifest bump for dependency later epic adds) stays out of both: stage only reviewed paths, say in reply what left behind and why.
-
-   Other half: before commit, read `git status` for files same step touches and is about to leave behind. Seam function new CLI path calls (`board_path()` in `store/mod.rs`) is part of step "CLI adapter" though step title names two other files; staging by title leaves commit that doesn't build alone. Stage every reviewed file step needed; noticed immediately → amend rather than "oops" commit.
-
-   **No install while manifest carries unreviewed changes.** `cargo install --path
-   . --locked` builds whole dependency graph, so mid-migration install compiles crate under test, pins binary from unreviewed tree. Panes keep old binary until install; behaviour/wording change not installed → state plainly, don't report as live.
-
-   **Install = manager's step after clean verdict, never line in worker's goal.** Worker sandbox may refuse it as shared-resource change (correctly), and reviewer handed install-plus-live-board steps exercises them against LIVE board, leaving probe rows, pinning binary from unreviewed tree. Keep every gate touching `~/.cargo/bin` or live board out of worker goals; slipped in → strike from dispatched goal with `task_edit`, say on row goal supersedes that paragraph. Unreviewed install landed and board misbehaves → roll back without disturbing diff: `git worktree add --detach /tmp/ab-head <good-sha>` then `cargo install --path /tmp/ab-head --locked <backend flags>`, prove with `add --help | rg <new flag>` (absent = old surface back), `git worktree remove --force`.
-
-   **Re-read git state at report time.** User has shell in same repo, can push/commit while you work, so earlier `git status` not evidence now: before saying "N commits ahead, unpushed" or "HEAD is X", run `git status -sb` and `git ls-remote origin master` and compare, or say nothing about push state. Stale ahead-count = false claim about tree.
-
-## The review chain, the cap and the diff channel
-
-Authority = `PROTOCOL.md` (rules) and `docs/workflow.md` (only page with diagrams). How to record and prove a submission (large bodies, the one-occurrence trap, the byte check): `references/diff-submission.md`. What manager must hold:
-
-- **Three levels, no fourth: implement -> review -> fix.** Review row = child of implement row, fix row = child of review row, one fix row per review reused every round. Board refuses child of level-3 row and any re-parent reaching level 4 (`chain too deep`, exit 1).
-- **Diff = the feedback channel.** Coder records `diff add` (full change, verbatim, append-only) before every move to `review`; board refuses the move unless a diff landed after the newest claim event (message names `agentboard diff add T<n>`). Round that changed nothing records body saying so and why. Board never checks body: reviewer rejects one that is neither diff nor stated no-change reason. Reviewer reads only newest diff (`diff ls`, `diff get`). Round = reopen count + 1.
-- **A prose summary of the change is not the change, and it is the shape that actually gets submitted.** Asked for "the diff verbatim", a worker writes five lines naming three files and pasting its proofs; the tree holds sixteen. That submission is inadmissible on the artifact alone, whatever the code is worth, because the diff row is the one thing the verdict can cite — so put "is this submission admissible" FIRST in the review brief and have the reviewer refuse the round on it before reading code, then carry the code findings into the next round. The manager's own check before dispatching: count `git status --short` paths and compare with the file names in the body; a mismatch is the same finding, caught one round cheaper.
-- **A body too big to inline: `diff add --body-file PATH`, then prove the bytes.** The CLI takes `--body TEXT|--body-file PATH|-`; MCP `diff_add` takes an inline string only, so a 90 KB submission has no MCP shape and retyping it cannot be verbatim. Use the file form — that is the structured path, not a rule break — and require the proof rather than the assertion. Do not ask for a digest comparison of `diff get --full` against the worker's temp file: the render adds a header line AND a trailing newline the stored body does not have, so the digests differ by one byte and a correct record looks wrong. Prove the property instead — regenerate the submission from the tree (`git diff HEAD`, plus the new files' content) into your own file and `diff -u` it against the recorded body with the header line stripped: empty diff means the record is the change, and it holds whether or not any scratch file survived. Watch the one trap in that regeneration: `git add -N` already puts new files into `git diff HEAD` (`git ls-files --stage` shows them as the empty blob), so appending `git diff --no-index /dev/null <file>` records every new file TWICE — every byte present, `git apply` broken. Do one or the other, never both. Do NOT accept a trimmed "just this round's files" body as a substitute: the submission is the whole change, and a partial record recreates the hole. File the MCP gap as its own row in the same sitting instead of working around it silently.
-- **Board files the review row**, once: parentless row moving to `review` gets child `Review <title>` (`ready`, no assignee, epic/path/branch/priority inherited, report verbatim + newest diff id in description). Implement row submitted again = same review row, note naming new diff, no second row. Your dispatch of reviewer targets that row. Reviewer files the fix row (`--parent` = review row) once.
-- **Who moves what:** coder `ready/needs_fix -> working -> review`; reviewer `review -> done|needs_fix` on fix row and review row, closes both; only manager closes implement row, drops, re-arms `ready`, closes epic; board alone sets `not_done`.
-  **So a row that arrives at `not_done` from a worker is never a capped row — read `reopens:` first; `0` means nobody capped it.** A worker that wants a human decision has picked the wrong signal: keep its work, set the row `ready` with a note saying so, and tell it that `blocking` plus `task_ask` is the shape for "waiting on a human". Left alone, `not_done` reads to every later script and to triage as an exhausted reopen chain, and the row gets dropped or refiled when the work was fine.
-- **Cap = 3 moves into `needs_fix` per row, never reset.** Fourth refused: CLI exit 1 / MCP tool error naming cap and `not_done`; row lands `not_done`, caller body kept in event. Open parent (ready, working, blocking, needs_fix, review) lands `not_done` same transaction, one level only; done/dropped/not_done parent left alone, note on capped row names it. Capped fix row => review row `not_done`, implement row stays `review` for you. `get` shows `reopens: N/3`, `reopens: 4/3 (cap hit, stopped)` when capped.
-- **You unstick it:** drop the rows (`status T<n> dropped`) or file replacement implement row (fresh chain, fresh count). `status T<n> ready` re-arms nothing useful: count stays, next `needs_fix` move refused again. Reviewer never re-opens or works round a capped row; re-scoping is yours.
-- **Reviewer rules, put in every review brief:** (1) cap is final, re-scoping = manager; (2) review new diff only; (3) classify every finding blocker / follow-up / nit, uncategorised observation is not a finding; (4) never re-report closed finding without new evidence quoted from current diff; (5) never edit — you read the diff, the description, the goal, name the logic defect and stop; a fix is a finding for the coder's next round, and `git status` clean after your verdict is part of the gate.
-- **Epic closure = policy, not guard.** Close epic when every row `done` or `dropped`; `not_done` row blocks closure until you drop or refile it. `epic_update` checks nothing, so never cite "board enforces it". Say "policy" when quoting this.
-- Watch with `wait --kind diff` to see submissions land; `children T<impl>` and `diff ls T<n>` answer "what is under review and which diff". When a phase's only proof is a stub, or the tool answers a consent surface on the operator's behalf, `references/live-proofs-and-consent.md` has the rules: the live round is the manager's one command, and a silent trust decision is a defect.
-
-## Board surface the manager uses
-
-| Command | What it is for |
+| Move | Verb |
 |---|---|
-| `brief` | counts, open tasks by urgency, recent completions: standup; groups open epics with path and `[N blocking, N needs_fix]` |
-| `ls [--status S] [--assignee A]` | compact open list |
-| `epic add "<title>" [--path P] [--description D] [--goal G]` | container: own table and id space, never leaseable |
-| `epic ls [--status open\|done\|dropped]` / `epic get E<n> [--full]` / `epic status E<n> <s> [note]` | read and close epics |
-| `children E<n>` / `children T<n>` | epic's tasks, or one task's subtasks: two different questions |
-| `parent T<n> <T<m>\|none` | re-point subtask's parent (epic inheritance re-checked) |
-| `add "<title>" --description D --goal G [--assignee A] [--epic E] [--parent T] [--priority N]` | file row; `--spec` alias of `--description` |
-| `get T<n> [--full]` | the row; `--full` for verbatim description/goal/report/note/events. Plain mode folds to one line, clips **with explicit marker** |
-| `edit T<n>\|E<n> [--title T] [--description\|--spec D] [--goal G] [--priority N] [--assignee A] [--path P] [--branch B]` | amend a row; refused while a lease is live. `--assignee ""` clears a stale one — `status` clears the lease and leaves the assignee behind, which shadows later dispatch resolution |
-| `status T<n> <s> [note]` | manager moves status without claiming. `ready` clears lease, re-arms crashed task |
-| `note` / `report` | progress / outcome, no status move |
-| `diff add T<n> (--body TEXT\|--body-file PATH\|-)` / `diff ls T<n>\|E<n>` / `diff get D<n> [--full]` | feedback channel: what coder submitted, verbatim, append-only; ls newest first; exit 0 ok, 1 any refusal |
-| `ask` / `answer` | block on human, resume with fresh lease |
-| `dispatch T<n> [--to S] [--force] [--print]` | hand row to pane (see step 3) |
-| `wait [T…] [--epic E<n>] [--open] [--status csv] [--kind csv] [--after SEQ] [--timeout SEC]` | block until board moves (see step 4); `--epic` takes E id, selects every task under it, subtasks included |
-| `sessions` / `register <agent-name> --agent claude\|opencode [--task T]` | map task -> pane; key is the herdr agent name (`manager up` already registers) |
-| `sessions prune [--dry-run]` / `unregister <name>` | delete rows no live pane answers to; rows never expire alone |
+| open a team: tab, two panes, coder and reviewer started, sessions registered | `manager up --repo P [--coder claude] [--reviewer opencode] [--role-name-prefix X] [--env K=V]` |
+| board sessions joined with live agents (registered / gone / unregistered) | `manager status [--json]` |
+| herdr's session snapshot | `manager snapshot [--json]` |
+| map a pane's agent name to the board | `register <name> --agent claude\|opencode [--task T]` (`manager up` already registers) |
+| close a team; refuses a working or blocked agent | `manager down [--force] [--names A,B]` |
+| clear context at an epic boundary; refuses a working seat | `manager renew [--names A,B]` |
+| one agent: list, get, read, start, prompt, keys, rename, focus, wait | `manager agent <verb>` |
+| panes and tabs | `manager pane <verb>`, `manager tab <verb>` |
+| wake on an agent status | `manager events wait --until S [--agent N] [--timeout 300]`, or `wait T7 --agent N --status ...` |
+| hand a row to a pane | `dispatch T<n> --to <name> [--force] [--print]` |
+| file and amend | `epic add`, `add --epic E --parent T`, `edit`, `parent`, `epic status` |
 
-Statuses: `ready working blocking not_done needs_fix review done dropped` (`not_done` = set by board only, see "The review chain"); epic statuses:
-`open done dropped`.
+Manual moves that still need plain `herdr` (attach, `/btw`, killing a TUI by process group, seat swap): `references/herdr-mechanics.md`.
 
-Two refusals to recognise on sight:
+## References (read only when the case arises)
 
-```text
-T7 working by claude (lease 24m left, until 13:23Z) — manager: agentboard status T7 ready
-T9 is review, not ready (assignee opencode, lease none); --force resets it to ready first
-```
-
-First = `claim` saying lease live; remedy in text works (clears lease), so crashed holder costs one command, not 30-minute TTL.
-
-Both **errors, not replies**: explicit-id `claim` refusal and `dispatch` refusal exit 1; over MCP same text arrives as tool error. So error from `claim` means *someone holds this row* (read text, apply remedy), not *board is broken*; no blind retry, don't report tool down. Id-less probe = opposite, stays success: `claim` with no id on empty board exits 0, prints `no ready tasks`. Answer, not failure.
-
-**Manager does not `claim`.** Manager claim takes lease, coder's claim then refused. Use `status T<n> working "<note>"` to show intent, let worker claim.
-
-## MCP equivalents
-
-Driving board over MCP instead of shell: `board_brief`, `task_list`,
-`task_add`, `task_get` (`full: true`), `task_claim`, `task_update` (status / report /
-note / commit), `task_edit`, `task_ask` + `task_wait`, `task_children`, `diff_add`, `diff_get`,
-`diff_list`, `epic_add`, `epic_list`, `epic_get`, `epic_update`, `epic_edit`, `session_list`.
-`task_wait` has same selectors as CLI `wait`; no exit codes, so puts `matched:` or `timeout:` on first line; branch on that. No MCP `parent` verb: re-pointing subtask over MCP = CLI call.
-
-Workers must have `task_claim` and `task_get` in allowed toolset; without them they work and report success on task never claimed.
-
-## herdr: the minimum a manager needs
-
-Full pane mechanics and start flags: `team-manager` (references/herdr-mechanics.md).
-Verified start and teardown shapes for a second tab, including the opencode reviewer's
-`--standalone` line and where its board actor comes from: `references/herdr-pane-ops.md`.
-The server's own socket API — transport, NDJSON framing, protocol pin, the 102-method
-inventory with the dozen a manager needs, the client bounds a stub test has to actually
-exercise (connect inside the deadline, ping on every connection), and the read-only probe
-that touches nothing: `references/herdr-socket-api.md`. Read that file before designing or implementing
-anything that talks to herdr directly instead of shelling its CLI.
-What loop needs:
-
-```bash
-agentboard manager up --repo <repo>              # team: tab, two panes, agents, sessions
-agentboard manager status                        # sessions joined with live agents
-agentboard manager pane list | agent list | tab list
-agentboard manager tab new --cwd <repo> --label <name>
-agentboard manager pane split <pane-id> --right --cwd <repo>
-agentboard manager agent start <name> --kind claude --pane <id> -- \
-  --strict-mcp-config --mcp-config=$HOME/.claude/coding-mcp.json \
-  --append-system-prompt-file=$HOME/.claude/caveman-full.md --model sonnet
-agentboard manager agent prompt <name> "<one line>"   # atomic submit, one turn
-agentboard manager agent read <name> --lines 30       # what is it actually doing
-agentboard manager down                               # teardown, on an explicit stop only
-```
-
-- **`herdr agent prompt <name> ... --wait` belongs in background job.** Foreground hits tool deadline, gets yielded, looks like failed delivery while prompt already submitted. Run `background=true, notify=true`; returns timeout but pane shows agent working → don't resend (injects second turn into running task). Confirm on board (`agentboard ls`, `agentboard get T<n>`).
-- **`agentboard answer` writes board only, doesn't type into pane.** Resuming blocked row leaves worker at prompt not knowing answer landed; row shows `working`, nothing moves. After `answer`, push pane immediately: `herdr agent prompt <name> "Manager answered on T<n> (#<seq>): <the ruling>. Finish the row: task_update with report + status review."`, only into idle pane. Same for `note`: note = ledger, not delivery.
-- **Names are the address.** Distinct names let two teams run at once (`coder2`,
-  `reviewer2`); `agent_name_taken` can't clear without closing that pane.
-- **Workers write to board through MCP tools, not by shelling binary.** `agentboard dispatch` used to send "Claim T8, then task_get id=8 full=true", coder answered with bash step running CLI claim: same effect, extra subprocess, unstructured output, wrong shape for agent. Name tool in row or prompt (`task_claim`, `task_get`, `task_update`), keep CLI for verbs MCP lacks and verification commands goal lists, check live pane for what worker actually did, don't trust report.
-- **Reviewer approval ≠ verification: re-read artifact yourself.** Coder can leave doc/diagram describing opposite of rule it states, reviewer can pass it: two rounds approved `docs/review-loop.md` while flowchart put reviewer-owned `done` node in Coder lane. Read artifact, check against rule, not only command outputs in report. Manager findings go on new fix task (`parent=<the review task>`, assignee coder) so reviewer still closes it; never edit tree yourself.
-- **Row is the prompt: write no prompt files.** Long text into `task_add`/`task_edit` as JSON over MCP, never scratch `.txt` a wrapper `cat`s. Scratch copy = second prompt that drifts; user reads it as breaking board-is-only-channel rule.
-- **herdr is pane host; tmux legacy.** Build and test herdr paths first. Verb speaking only tmux = bug for this team; `parse_herdr_agents` dropping `pane_id` is what made it one (`tail`/`send` were tmux-only while `sessions`, `dispatch` and `prune` already used herdr). Leave tmux fallback untouched rather than improve; spend time on tmux only when nothing else to do.
-- **Renew pane's conversation between cycles, never inside one.** Cycle = task -> review -> fix -> done; next task starts with cleared context: `agentboard manager renew [--names A,B]` (sends `/clear`, refuses a working seat, prints the prompt marker it found; pane must sit at prompt; open stats/usage overlay eats text, so send `esc` first, read pane to confirm; a freshly cleared Claude pane can come back showing a session-feedback survey (`1: Bad 2: Fine 3: Good 0: Dismiss`) that would swallow the next dispatch, so answer `0` and read the pane again before sending anything). Do after task closed, before next dispatch, coder and reviewer separately. **Epic boundary is a renewal point too (standing rule):** when the last row of an epic closes — review verdict in and its commit landed — clear both panes before filing the next epic's first row, so the new epic starts on context that holds none of the old one's rows, files or findings. Once per epic, not per row, and never while a pane is `working`. Rule written into agent's instruction file not in pane until agent restarts; `/clear` alone keeps old rules. Fix task spawned by review = SAME cycle, not renewal point: clearing before fix drops context with findings, fix row only thread back. Renew when review and every fix under it `done`. Never clear pane `working` or mid-review: row = only prompt, cleared pane loses thread.
-- **Never close pane to free name or as cleanup.** Not while `working` or `blocked`; only when user asks.
-- **`blocked` usually dialog or TUI at prompt**, not hung agent: read pane before touching. Opencode reviewer may sit on "allow web search?"; local diff review doesn't need it.
-- **Open and close teams with `agentboard manager up` / `down`.** Never script a split of the manager's own current pane: a half-run sequence leaves the project with no agent. Other panes by explicit id (`manager pane split <pane>`).
-- **"In the next epic I want the tool to …" is a design request, not a dispatch.** Answer with a proposal and stop: the facts about the surface it must talk to (probe the real API read-only and quote what it answers — version, transport, framing, method count — because a design built from docs gets rebuilt the moment the real surface is probed); the shape in the tree (which module owns what, and which layer must NOT learn about it); the rules you want in code rather than prose (discovery order, version pin, deadline, refusal-on-working); phases as rows; the risks; then the numbered decisions only the owner can settle — transport choice, pin behaviour, schema cost, MCP exposure, retirement timing. "Proposal design first, implement after I confirm" is the standing order for tool design: file no epic, dispatch no row, write no code until the decisions come back answered. Filing rows anyway reads as ignoring the instruction and costs a round to unwind. **When the answer comes back as "do as your recommendation, and …", the recommendations stop being options:** file the epic with each one written in as a numbered `D<n>` carrying its one-clause reason, put the naming and grammar into the epic body verbatim (the flag, its default, and the alternative that is refused rather than ignored, since a flag accepted-then-ignored is a lie a later session builds on), file the first phases as rows with their proofs, and leave them unsent while the current epic still has a row in flight — one line saying which row stands in front and why it is a hazard rather than polish.
-- Verify `cwd` in `agent list` before dispatching. Pane in wrong directory = silent work in wrong repo.
-
-## Keeping the tool current
-
-**The binary on `PATH` lags the checkout while a phase row is in flight.** The verbs a row
-just added exist only in `./target/release/agentboard` until you install, so a bare
-`agentboard manager <verb>` that answers `Usage: agentboard manager [OPTIONS] <COMMAND>` is
-the old build refusing a verb that exists — read it as *wrong binary*, not *missing
-feature*, and never conclude a verb is absent from a PATH call alone. Run the repo build
-for anything a row added, install once the verdict lands, and name which build produced
-any output you quote to the user.
-
-**Never watch an implement row and its review row in one `wait` set.** The implement row
-sits in `review` for the whole verdict, so a set containing it — or containing `review`
-while watching that row — matches on the first poll with `matched: 1 of 2` and the wake you
-wanted never arrives. Watch the row the verdict lands on (the review row) with only the
-statuses it is heading toward, and treat an instant match whose `last:` line is older than
-your dispatch as a dead arm.
-
-- `agentboard` runs from two binaries: `~/.cargo/bin/agentboard` (installed, what shell and agent MCP configs execute) and `./target/release/agentboard` (checkout). After changing tool, `cargo install --path . --locked`, else verbs just built missing from binary you dispatch with.
-- **Install with backend feature host actually runs.** Once store feature-gated, bare install builds default backend, so surreal host installing without `--no-default-features --features surreal` silently gets sqlite binary: new file, empty board, agents reporting `no ready tasks` while real store untouched. Install from reviewed tree with host's feature set, prove which installed by BEHAVIOUR, not mtime/size: hand it path other build would refuse (sqlite file to directory-backed build, directory to sqlite build), require refusal. `strings` match or fresh timestamp only says something built; refusal says which backend runs. Say in reply which build live.
-- **Read the backend off the host, not off the last install line you remember.** Bare `cargo install --path . --locked` is the default mistake on a surreal host: it builds the default (sqlite) backend and replaces the PATH binary every pane's MCP config runs. Confirm the backend first — a live `surreal-db` process (`pgrep -af surreal`), the data dir under the state path, `AGENTBOARD_DB` absent from the MCP configs — then install ONCE with `--no-default-features --features surreal`. Two installs in a row (wrong build, then right one) leaves a live window in which any pane that starts an agent or reloads MCP grabs the wrong backend: that pane's board calls come back empty (`no ready tasks`) or error while the real store is untouched, and only a pane restart fixes it. If a wrong install did land, say so and name panes to restart rather than assuming nothing happened.
-- **"The default backend is X now" is two facts that drift: the cargo default and the binary on PATH.** Read them apart before agreeing. Build default: `rg -n '^default = ' Cargo.toml` plus `git log --oneline -S'default = ["surreal"]' -- Cargo.toml`, where an empty log proves the default was never flipped rather than flipped back. Runtime default: the installed binary's own `--db` help line — each build compiles its own DB_HELP string, so `~/.cargo/bin/agentboard --help` naming the `surreal` state dir proves the installed build is surreal no matter what Cargo.toml says, and a bare `cargo install` was what put a different backend there. Flipping the default is its own row, never a rider on a feature: it turns the fast hermetic suite into the opt-in one (a default that needs a live `surreal` binary makes plain `cargo test` print SKIP and go green), makes every suite that drives `target/release/agentboard` with no flags need a server, and their fixtures are backend-shaped — a `.db` file path handed to a build that now wants a data directory — so the same row must give those suites the env knobs the MCP suite already has (`AGENTBOARD_TEST_BIN` plus a data dir and server URL) and prove them passing under BOTH builds: a suite that silently covers only the old backend is a fail, not a pass. And it renumbers every gate row in AGENTS.md and README — so the new default gate row runs with the strict skip-turns-failure switch.
-- **After install, prove the binary is this tree, reads the live board, AND can write to it.** `cargo install --path .` compiles into the checkout's `target/release`, so `cmp ~/.cargo/bin/agentboard <repo>/target/release/agentboard` printing nothing (IDENTICAL) means the installed binary is exactly the current tree — no rebuild-and-compare needed. Against the real board, not a throwaway DB, `agentboard brief` quoting the live counts and `agentboard get T<n>` showing the newest fields (`path:`, `branch:`) prove the surreal build reached the live store. **A read is not the surface proof.** Read paths carry fallbacks, so a field the store does not actually hold still prints (`HEAD`, `-`) and every count looks right; SCHEMAFULL validation only runs on the write path. Finish the install with ONE write against a row that predates it — `agentboard --actor <manager> status T<n> ready "<why>"` on an old row — and read a `Found NONE for field …` error as this install being unusable on this board, not as a board quirk. Size is a quick tell only.
-- **An additive field plus `IF NOT EXISTS` DDL never backfills stored rows.** A write session re-applying `DEFINE FIELD IF NOT EXISTS x ON tasks TYPE string DEFAULT '…'` adds the definition, but SurrealDB applies a DEFAULT at insert only: every record written before the field existed still holds NONE, so the next UPDATE of that record fails validation with `Found NONE for field`. A commit that adds a NOT NULL field to a populated board therefore breaks *every* write to old rows — claim, status move, note, `edit`, `dispatch --force` — while reads and `brief` keep looking perfect. Fix belongs in the tool (a backfill inside the write session, or `option<string>` with the read path defaulting), never a hand-run UPDATE on the live board: the next additive field repeats it. The test that proves it must write to a row created while the field was absent; a test that re-defines the field and then CREATEs a fresh row with the value set passes while the defect stands.
-- `tests/mcp_client.py` drives `target/release/agentboard`. Rebuild before running, else green suite tests week-old code.
-- **A new precondition on a transition invalidates every fixture that crosses it.** Adding a rule (a move into `review` now needs a recorded diff, a claim now needs a lease) is not a local change: enumerate the fixtures before the gate lands — `rg -n -- '--status review|status .* review|"review"' tests/` — because each one that walks a row into that status now fails for a reason unrelated to its name, and a worker's cheapest way out is to weaken the fixture until it passes. Require per fixture: what it proved before, what proves it now, and why it still fails on the bug it was written for; a fixture that only gained a setup line (a diff recorded first, a claim first) is fine, one whose assertion was relaxed to fit is a finding. Say in the review brief which fixtures moved and why, so the reviewer reads them as intended and not as drift.
-- **Storage engine swap gated on multi-process safety, not schema.** Board opened by CLI, one MCP server process per agent, suites spawning N workers; embedded engine with per-process cache can't carry that, in-process mutex or flock doesn't fix stale view. Prove cross-process atomicity and read coherence before any port written; design whose core mechanism still unverified = rejection. Probe recipe + interpretation table: `references/worker-claim-probes.md`, "Multi-process safety probe". Engine facts, measured numbers, surviving local-server-plus-lock design: `storage-engine-swap` skill, its surrealdb-2x reference.
-- **Schema change needs switch, not migration.** Board has no migrate path: old file refused before any DDL with one line naming `mv <db> <db>.old`, file left byte-identical. History expendable, so switch = wipe, but order matters, agents' MCP servers are *old* binary processes:
-
-  1. stop every agent, close panes (nothing may hold board), including own MCP board server, also old-binary process: after switch, drive board by CLI until session restarts, else every MCP board call fails on unknown schema; 2. `cargo install`
-  new binary, 3. move `board.db` (plus `-wal`/`-shm`) into archive dir, 4. run one read (`agentboard brief`) so *new* binary creates schema, 5. re-register teams by name, 6. refile still-open rows; every id died in wipe, rebuild queue from specs you hold.
-
-  Skip step 1 = failure: old-binary server answering request recreates old schema in new file, new binary then refuses own board.
-- **Reset without schema change = same wipe, minus binary swap.** Resolve path first with `agentboard path`: `$AGENTBOARD_DB` (often set in MCP config env block) overrides state dir, so deleting default path can miss live board. Confirm board idle before wiping (every task `done`/`dropped`, no live lease), then `cp -p board.db board.db.bak-<ts>`, `mv board.db board.db.old-<ts>`
-  (plus `-wal`/`-shm`), run one read (`agentboard brief`) so fresh schema lands, verify empty counts via python `sqlite3` (no `sqlite3` CLI on this box), only then delete `.old` duplicate: `.bak` = restore path, outlives session. Say in reply where backup sits and when to drop it.
-- **Reset empties `sessions` too.** Panes keep old MCP server process (store reopens path per call, no stale handle), but registry rows gone: re-register names before dispatching, else `dispatch` answers `agent_not_found` on healthy team.
-- **Installing the binary does not reach a running agent, and `/clear` is not a restart.** A pane's MCP server is a child process started with the session: `/clear` wipes the conversation and keeps that process, so the pane keeps the build it was born with. Prove it with `readlink /proc/<pid>/exe` across every `agentboard` process — an old one reads `…/agentboard (deleted)` once `cargo install` replaced the file. The board-level tell is a pane whose tools are missing verbs the binary has: a coder that cannot see `diff_add` records no diff and the board files no review row, which reads like a workflow bug and is a stale server. Restart the agent in place, idle panes only: send `/exit` (claude answers with `Enter to confirm · Esc to cancel`, so the pane needs a second Enter; opencode drops straight to the shell), confirm the pane is back at its shell prompt, then `herdr agent start <name> --kind <kind> --pane <id> --timeout 120000 -- <flags>`. Verify before dispatching: the new pid's `/proc/<pid>/exe` is the live file with no `(deleted)`, and a `task_get` shows a field the new build added. A genuinely new flag is merely invisible until the restart — plan the restart, don't discover it at dispatch. A new *field* is worse than invisible: old panes read fine off their own build while the new binary's write path refuses the rows, so both the board and the panes need the write proof before the team trusts either.
-- Parsing has own suite, `tests/cli.sh` (exit codes, `--flag=value`, unknown-flag errors, hyphen values); delivery has `tests/dispatch.sh` (refusal, `--print`, `--force`, assigned-vs-`--to`, fallback reason, deadline kill). Run `mcp_client.py`, `cli.sh` and `dispatch.sh` before believing CLI or dispatch change.
-- **Test delivery with stub binaries on PATH, never live pane.** Two-line `herdr`/`tmux` script that exits, fails, or sleeps proves fallback and deadline in milliseconds; real dispatch types into someone's working agent, can't replay.
-- **"Every call now goes through X" is a grep you owe.** Unifying mechanism doesn't retire hand-rolled copies: after shared runner landed, `sessions` still had own spawn-and-join with fixed deadline, so README line "the env var bounds every bridge call" and commit message both false; path took 8 s under stub that should die at 300 ms. Before claiming coverage, search old pattern (`search_files` / `rg`: `Command::output`, old constant, second `std::process::Command` in same module), make claim a test's acceptance criterion, not sentence in commit.
-- **Count in prose = claim to re-derive, not copy.** Header comment "18 tools", README test total, worker report line `cli.sh 102/102` all drift within one round; quoting one back to user = wrong fact. Derive from source at verification (`rg -c '#\[tool\(' src/server.rs`,
-  `cargo test 2>&1 | rg '^test result'`), fix prose where it disagrees with command output, and treat an epic body's "measured surface" paragraph as prose of the same kind: a group or method count copied into an epic is re-derived or dropped, and when it is already wrong you correct it with a numbered note on the epic instead of letting rows cite it.
-  **Skill references the manager writes are prose of the same kind.** An inventory
-  count, a "required params" column, a version pin or a "this output is not
-  parseable" verdict in `references/` is reviewed against its source exactly like a
-  README line, and reads as authoritative to every later worker. Derive it from the
-  file that owns it (a schema bundle, `--help`, `rg -c`) and re-derive it in the
-  review round; when a reviewer files errors against a reference instead of code,
-  treat them as code findings and correct the sentence in place.
-  **Behavioural claim in user-facing prose verified same way: run the verb.** "`tail`
-  is tmux-only", "the bridge covers every call", "this env var bounds it" survive rounds
-  because nobody executes them. Before rewriting such line in README or PROTOCOL, run
-  command against live pane/process, quote output. Stale doc claims not docs problem; same defect as stale test count, one level up.
-- **Verb that lands retires skill saying it's missing.** Feature not finished while playbook still teaches workaround: after round, grep skill library for old claim (`rg -n 'no edit verb|there is no|not yet|workaround'` in skills dir), patch sentence in place, check reference files too. Stale `pitfalls.md` bullet sends next session down path tool closed.
-- **Playbook also shipped in repo → edit repo copy, install from it.** Repo copy canonical, installed one = snapshot; editing installed copy creates drift next `install.sh` silently reverts: edit in tree, `skills/install.sh --force`, then `diff -r` both ways. Comparison against something *outside* tree, so result time-shaped: worker reporting `diff -r` empty means empty when it looked, not at commit time. Re-run diff yourself at verification, hold commit until match; copy task whose source keeps moving lands stale, and stale half is what future session reads. Same for any
-  write reaching only `~/.hermes/skills/`: skill-management or curator pass that
-  can't touch repo leaves tree next `install.sh` reads behind, so mirror
-  edit into `skills/<name>/` and reinstall same sitting, then diff both ways.
-
-  **Mid-round, the installed copy is a moving target — re-read before every write.**
-  A worker whose row ends in `install.sh --force` (and the manager's own post-turn
-  skill pass) rewrites `~/.hermes/skills/<name>/` while you are reading it, so a
-  `skill_view` taken minutes earlier is not the bytes on disk and a patch built from
-  it fails to match. Re-read that exact file immediately before patching, and patch
-  targeted hunks rather than rewriting the whole file: a whole-file write built on a
-  stale read silently deletes whatever the last install added. This is a structural
-  defect of copy-based install, not bad luck — while host skills are copies, "repo ==
-  installed" cannot be true at commit time. File the structural fix (symlink the repo
-  skill into the install dir if the loader follows a symlinked directory; else a sync
-  step inside `install.sh` that cannot be skipped) as a row instead of paying the same
-  re-sync every round, and never call drift clean on a proof older than the last
-  install.
-
-  **When the only failure in a verdict is drift, do not buy a second review.**
-  Content already ruled correct does not become incorrect because a copy moved:
-  the mismatch is a sync defect, not a finding against the round. Commission a
-  sync-only round instead — snapshot the installed copy, adopt it into the repo,
-  verify repo == snapshot byte for byte, `install.sh --force`, `diff -r` both ways
-  — and write in its goal that it changes no wording, runs no suites and re-opens
-  nothing, or the worker widens scope and you pay for the review twice. Then verify
-  the copy yourself and commit citing the earlier verdict for the content and your
-  own `diff -r` for the sync, saying so in the row note. What a re-review is still
-  owed on: any change to the words, or a resync that dropped repo-only text without
-  a replacement — a resync that silently loses a rule looks exactly like a clean
-  one afterwards, so diff the file against its pre-adoption state before accepting it.
-
-  **Repo copy BEHIND → `install.sh --force` destroys knowledge.** `wc -l` both
-  copies first: repo file shorter → missing sections installed-only, reinstall deletes them. Then don't install: patch same block into repo
-  `skills/<name>/SKILL.md` and installed `SKILL.md`, prove by extracting
-  changed paragraph from each and comparing (`python3` slice, or
-  `diff <(sed -n '/<anchor>/,/^$/p' a) <(sed -n '/<anchor>/,/^$/p' b)`): whole-file
-  `diff -r` never comes back clean while unrelated drift exists, so paragraph is
-  unit to verify. Commit repo copy, file remaining drift as row instead of
-  silently loading one side.
-
-  **Compressing either copy: compressor's backup keyed by parent-dir name + stem**
-  (`backups/team-manager/SKILL.original.md`), so second tree of same skill hits
-  `Backup file already exists ... Aborting to prevent data loss`, run reports failure
-  after spending model call. Rename stale backup
-  (`mv … SKILL.original.pre-$(date +%Y%m%dT%H%M%S).md`), rerun. Expect 1-2% on skills
-  already dense: `Validation passed` ≠ saving, so quote `wc -c` before/after
-  and check `` rg -c '```' `` unchanged.
-
-## What "done" means
-
-1. Task `done` on board, report names files and pastes real output.
-2. Delegate (reviewer or idle worker) ran named gates in that tree, real output quoted in reply. Manager ran no suite, build or install unless user asked.
-3. Review task agrees, or required fixes landed and second round says so.
-4. Reviewed files committed locally (step 8), one objective per commit, sha in reply. Push and history rewrites stay human's call, always.
-5. Report actually supports status. `done` whose own report lists acceptance flows unproven = failed gate wearing green tag: read report against goal; disagree → move row back to `ready` with note naming what's unproven and what blocks it (missing hardware, service that can't start, no persistent client). Never leave it `done` because worker said so, never quietly widen goal to what was proven. Blocked verification row = honest scoping; green row contradicting its evidence poisons every later "E<n> is done" claim built on it.
-
-## Close the round: hygiene tasks
-
-Feature round not finished when review says approve. File hygiene work before calling done, else it piles up until noise hides real warning:
-
-- **clippy**: `cargo clean -p <crate>` then `cargo clippy --all-targets`; cached runs replay warnings from earlier builds, lie about count (8, 6 and 2 all "same" tree at different cache states).
-- **fmt**: `cargo fmt --check`; never-formatted repo reports thousands of diff lines.
-- Two separate tasks, clippy first, fmt second; **fmt never runs while reviewer reading tree**: mechanical 1000-line diff buries change under review. Commit separately, same reason: clippy fix reviewable, formatting sweep not.
-- Add gate to whatever repo calls its checks (`README`, `justfile`, CI) so next round inherits it instead of repeating task.
+- `references/diff-submission.md`: recording a large or verbatim diff, proving the bytes.
+- `references/worker-claim-probes.md`: reproducing a worker's "the engine cannot do this" claim.
+- `references/herdr-mechanics.md`: what the manager verbs do not cover.
+- `references/herdr-socket-api.md`: herdr socket protocol notes.

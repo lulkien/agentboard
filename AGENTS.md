@@ -117,8 +117,9 @@ have both adapters call it, so a rule exists once.
 ## Where the rest lives
 
 - `skills/agentboard-manager` — running a team with this tool. The repo copy is canonical:
-  edit it, run `skills/install.sh --force`, then `diff -r` the repo copy against the
-  installed one in both directions. Compare line counts first: an installed copy that is
-  ahead of the repo copy is destroyed by `--force`.
+  edit it there. `skills/install.sh --force` symlinks it (and the `/manager` command files)
+  into `~/.hermes/skills`, `~/.claude/commands` and `~/.config/opencode/commands`, so the
+  installed path is the repo file: no copy, no drift, nothing to `diff`. Never copy over
+  those links.
 - `PROTOCOL.md` — the wire surface: the chain, the cap, the diff verbs, who moves which status.
 - `docs/workflow.md` — the only page with diagrams; the other pages link to it.

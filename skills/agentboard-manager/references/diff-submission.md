@@ -40,3 +40,7 @@ that survived review rounds where the body, not the code, was the defect.
   render newline dropped. An empty `diff -u` is the proof; a claimed digest is not.
 - Reviewers may confirm a byte match but cannot reproduce a mutation that requires
   writing. Say "coder-reported, unverified" for those instead of accepting them.
+
+## Order in a fix round
+
+Fix the code first, then record the diff, so the artifact is the code that gets reviewed. Diffs are append-only: a mistaken body is superseded by a new one, and the report names which diff is current. Leave the manager's untracked scratch files out of the body.

@@ -1,20 +1,17 @@
 # skills
 
-Agent playbooks, not code: nothing here built or run by agentboard. Each `skills/<name>/` = one skill (`SKILL.md` + optional `references/`) for agent driving board.
+Agent playbook, not code: nothing here is built or run by agentboard. One skill, `agentboard-manager/`:
 
-- `agentboard-manager` — manager operating loop: file, dispatch, watch, gate, review.
-- `team-manager` — same job as operating procedure any agent can follow: topology and actors, epic/task/subtask recipes, dispatch and wait, review loop, renew-conversation cycle, recovery table.
+- `SKILL.md`: the manual (board verbs, exit codes, manager verbs)
+- `workflow.md`: how a row moves (chain, diff gate, reopen cap, status owners, epic boundary)
+- `roles.md`: manager, coder, reviewer
+- `references/`: read only when the case arises
+- `commands/claude/manager.md`, `commands/opencode/manager.md`: the `/manager` slash command, one file per CLI (both are markdown with `description:` frontmatter; Claude Code also reads `allowed-tools` and `argument-hint`, opencode ignores them). Each loads the three pages (Claude Code by instructing a Read, since it blocks `!cat` outside the session dirs; opencode by `!cat` injection), registers the session, prints the brief, and tells the manager to arm `agentboard wait --open ... --timeout 300`.
 
 ## Install
 
-    ./skills/install.sh [target-dir]
+    ./skills/install.sh --force [target-dir]
 
-Default target `~/.hermes/skills`. Existing skill never overwritten: script prints `exists: <path> (use --force)`, exits 1, touches nothing. Pass `--force` to refresh.
+Default target `~/.hermes/skills`. The script symlinks, never copies: `~/.hermes/skills/agentboard-manager`, `~/.claude/commands/manager.md` and `~/.config/opencode/commands/manager.md` are links into this repo, so there is one file and no drift. Hermes lists and loads a symlinked skill directory. Without `--force` an existing path is never touched (`exists: <path> (use --force)`, exit 1).
 
-## Canonical copy
-
-Repo copy canonical. Installed copy = snapshot, can go stale; re-run installer with `--force` after pull.
-
-## Companion skills
-
-`team-manager` carries own pane mechanics in `references/herdr-mechanics.md`, so `herdr` skill no longer dependency. Worker still needs one of `claude-code` / `opencode`, and `herdr` binary must be on PATH.
+The command files hardcode `~/.hermes/skills/agentboard-manager/`: they work only with the default skills target. A different target dir needs the paths in both command files edited.

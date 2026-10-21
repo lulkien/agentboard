@@ -1,6 +1,6 @@
 # Herdr mechanics
 
-Herdr = terminal workspace manager for coding agents. Socket API over workspaces, tabs, panes, recognized agents. This file = mechanics: context checks, layout, start/restart agents, dialogs, teardown, traps. Operating procedure using it: parent skill `team-manager`. Wire format agents follow: `PROTOCOL.md`. Long-form manager reasoning: `agentboard-manager`.
+Herdr = terminal workspace manager for coding agents. Socket API over workspaces, tabs, panes, recognized agents. This file = mechanics: context checks, layout, start/restart agents, dialogs, teardown, traps. Verbs: SKILL.md. Wire format: `PROTOCOL.md`.
 
 `herdr --skill` prints authoritative text shipped with installed binary. File and binary disagree on flag → binary wins.
 

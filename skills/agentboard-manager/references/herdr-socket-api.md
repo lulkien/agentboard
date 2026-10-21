@@ -177,7 +177,7 @@ are safe on a live desktop session. Treat anything that writes (`agent.start`,
 someone's workspace: test it against a scratch tab you opened, and never from
 the manager's own pane.
 
-## What agentboard builds on this (decided shape, mid-implementation)
+## What agentboard builds on this (implemented)
 
 The owner picked the interface; a row that invents another layer is out of scope.
 
@@ -199,7 +199,8 @@ The owner picked the interface; a row that invents another layer is out of scope
   `snapshot`, `agent list|get|read`, `tab list`, `pane list|get|read`. Mutating:
   `tab new`, `pane split`, `agent start <name> --kind K --pane P [-- ARGV…]`
   (argv passthrough is the point — opencode needs `--standalone`, claude needs
-  its `--mcp-config` line), `agent prompt|keys|rename|focus|wait`, `pane close`.
+  its `--mcp-config` line), `agent prompt|keys|rename|focus|wait`, `pane close`, `events wait --until S [--agent N]`
+  (block on an agent status; exit 0 matched, 3 timeout).
   Composites: `up --repo P [--coder claude] [--reviewer opencode]` (tab →
   split → start ×2 → register both by NAME), `down [--force]`,
   `renew [--names coder,reviewer]`.
