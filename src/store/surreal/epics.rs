@@ -79,7 +79,7 @@ pub fn epic_add(
         tx.event_on("epic_id", "$id", actor, "add", title);
         tx.run(&s.db, "$id")
             .await
-            .map_err(|e| format!("epic add: {e}"))
+            .map_err(|e| super::with_context("epic add", &e))
             .and_then(|v| int_of(&v, "epic id"))
     })?;
     let mut out = format!("{} open", short_epic(id));

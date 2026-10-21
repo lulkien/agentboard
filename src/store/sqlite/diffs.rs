@@ -44,7 +44,12 @@ pub fn diff_add(actor: &str, task: i64, body: &str) -> Result<String, String> {
 }
 
 /// Inserts the row and its event on `conn`, which is the caller's write transaction.
-fn record(conn: &Connection, actor: &str, task: i64, body: &str) -> Result<String, String> {
+pub(super) fn record(
+    conn: &Connection,
+    actor: &str,
+    task: i64,
+    body: &str,
+) -> Result<String, String> {
     let round = fetch(conn, task)?.reopen_count + 1;
     conn.execute(
         "INSERT INTO diffs(task_id,round,body,created_at) VALUES(?,?,?,?)",

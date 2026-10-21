@@ -17,8 +17,9 @@ use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
     self, EpicRow, EventRow, MAX_CHAIN, TaskRow, cap_cascade_note, cap_note, cap_refusal,
-    cap_skipped_note, cascades_to, chain_refusal, field_names, held_text, norm_branch,
-    normalize_path, reopen_after, text_change, value_change, workdir_text,
+    cap_skipped_note, cascades_to, chain_refusal, field_names, gate_refusal, held_text,
+    norm_branch, normalize_path, reopen_after, review_description, review_filed_note, review_goal,
+    review_resubmitted_note, review_title, text_change, value_change, workdir_text,
 };
 use crate::store::{DEFAULT_TTL_S, Ref, STATUS_LIST, norm, now_ms, short, short_epic};
 use serde::Deserialize;
@@ -300,7 +301,7 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         if let Some(p) = parent {
             check_depth(&s.db, p, 1)
                 .await
-                .map_err(|e| format!("add: {e}"))?;
+                .map_err(|e| super::with_context("add", &e))?;
         }
         // A task created already `working` belongs to its creator unless named.
         let assignee = assignee.or_else(|| (status == "working").then_some(actor));
@@ -334,7 +335,7 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         let id = tx
             .run(&s.db, "$id")
             .await
-            .map_err(|e| format!("add: {e}"))
+            .map_err(|e| super::with_context("add", &e))
             .and_then(|v| int_of(&v, "task id"))?;
         Ok(format!("{} {status}", short(id)))
     })
@@ -570,6 +571,95 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
     })
 }
 
+/// Adds to `tx` the review row for a parentless task that just moved to review, or a
+/// note on the one already filed. Returns the review row's id. The write lock is held,
+/// so the counter read here cannot move before the transaction runs.
+pub(super) async fn file_review(
+    db: &Db,
+    tx: &mut Txn,
+    actor: &str,
+    implement: &Row,
+    report: Option<&str>,
+) -> Result<i64, String> {
+    let diff = super::diffs::newest_diff(db, implement.tid)
+        .await?
+        .ok_or_else(|| gate_refusal(implement.tid))?;
+    // A parentless row's only children are its review rows (fix rows hang off those), so
+    // the link is the parent alone: renaming the row between rounds must not hide it.
+    let title = review_title(&implement.title);
+    let existing = select_rows(
+        db,
+        "WHERE parent_id = $id AND status != 'dropped' ORDER BY tid DESC LIMIT 1",
+        json!({"id": implement.tid}),
+    )
+    .await?
+    .into_iter()
+    .next();
+    if let Some(review) = existing {
+        let rp = tx.p(review.tid);
+        tx.event(
+            &rp,
+            actor,
+            "note",
+            &review_resubmitted_note(implement.tid, &diff),
+        );
+        return Ok(review.tid);
+    }
+    let mut r = db
+        .query("SELECT VALUE n FROM counters:task")
+        .await
+        .map_err(|e| db_err(&e))?;
+    let last: Vec<i64> = r.take(0).map_err(|e| db_err(&e))?;
+    let review = last.first().copied().unwrap_or(0) + 1;
+    let now = now_ms();
+    let as_row = TaskRow::from(implement.clone());
+    let report = report.or(implement.report.as_deref());
+    let mut content = json!({
+        "title": title,
+        "description": review_description(&as_row, report, &diff),
+        "goal": review_goal(implement.tid, diff.id),
+        "path": implement.path, "branch": implement.branch, "status": "ready",
+        "priority": implement.priority, "parent_id": implement.tid,
+        "created_at": now, "updated_at": now,
+    });
+    if let Some(e) = implement.epic_id {
+        content["epic_id"] = e.into();
+    }
+    let rp = tx.p(review);
+    tx.raw(&format!("UPSERT counters:task SET n = {rp};"));
+    let c = tx.p(content);
+    tx.raw(&format!("CREATE type::thing('tasks', {rp}) CONTENT {c};"));
+    tx.event(&rp, actor, "add", &title);
+    let ip = tx.p(implement.tid);
+    tx.event(&ip, actor, "note", &review_filed_note(review));
+    Ok(review)
+}
+
+/// The `seq` of the newest event of `kind` on a task, if any.
+async fn last_event_seq(db: &Db, id: i64, kind: &str) -> Result<Option<i64>, String> {
+    #[derive(Deserialize)]
+    struct Seq {
+        seq: i64,
+    }
+    let mut r = db
+        .query("SELECT meta::id(id) AS seq FROM events WHERE task_id = $id AND kind = $kind ORDER BY seq DESC LIMIT 1")
+        .bind(("id", id))
+        .bind(("kind", kind.to_owned()))
+        .await
+        .map_err(|e| db_err(&e))?;
+    let rows: Vec<Seq> = r.take(0).map_err(|e| db_err(&e))?;
+    Ok(rows.first().map(|s| s.seq))
+}
+
+/// Whether a diff was recorded for `id` after its newest claim event, both read from
+/// the events table in `seq` order (no claim at all means any diff counts).
+pub(super) async fn diff_since_claim(db: &Db, id: i64) -> Result<bool, String> {
+    let claim = last_event_seq(db, id, "claim").await?.unwrap_or(0);
+    Ok(last_event_seq(db, id, "diff")
+        .await?
+        .is_some_and(|diff| diff > claim))
+}
+
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let s = session(true)?;
     block_on(async {
@@ -580,6 +670,12 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             None => cur.status.as_str(),
         };
         let moved = status != cur.status;
+        // A move into review needs a diff recorded since the last claim: refused before
+        // anything is written, so a reviewer never gets an empty review.
+        let submit = moved && status == "review";
+        if submit && !diff_since_claim(&s.db, id).await? {
+            return Err(gate_refusal(id));
+        }
         // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
         let reopen = moved && status == "needs_fix";
         let capped = reopen && reopen_after(cur.reopen_count).1;
@@ -642,8 +738,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             (true, "needs_fix") => "needs_fix",
             (true, "working") => match cur.status.as_str() {
                 "blocking" => "answer",
-                "ready" => "claim",
-                _ => "edit",
+                _ => "claim",
             },
             (true, _) => "edit",
             (false, _) => {
@@ -685,8 +780,15 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             return Err(cap_refusal(id));
         }
         tx.event(&idp, actor, kind, body);
-        let seq = int_of(&tx.run(&s.db, "$seq").await?, "event seq")?;
-        Ok(format!("{} {status} #{seq}", short(id)))
+        tx.raw("LET $main = $seq;");
+        // Only a parentless row files a review row: a fix row or a review row never does.
+        let mut review = None;
+        if submit && cur.parent_id.is_none() {
+            review = Some(file_review(&s.db, &mut tx, actor, &cur, p.report).await?);
+        }
+        let seq = int_of(&tx.run(&s.db, "$main").await?, "event seq")?;
+        let filed = review.map_or(String::new(), |r| format!(" (review row {})", short(r)));
+        Ok(format!("{} {status} #{seq}{filed}", short(id)))
     })
 }
 

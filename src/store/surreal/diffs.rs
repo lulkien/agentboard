@@ -87,7 +87,7 @@ pub(super) async fn record(db: &Db, actor: &str, task: i64, body: &str) -> Resul
     tx.event(&taskp, actor, "diff", &text::diff_event(id, round, body));
     tx.run(db, "$seq")
         .await
-        .map_err(|e| format!("diff add: {e}"))?;
+        .map_err(|e| super::with_context("diff add", &e))?;
     Ok(format!(
         "{} ({} round {round})",
         short_diff(id),

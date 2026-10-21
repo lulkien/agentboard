@@ -94,7 +94,7 @@ transcript() { # binary
   $B add "kid" --parent T1; $B add "kid2" --parent T1 --status review
   $B parent T2 T1; $B parent T1 T1; $B parent T2 none
   $B ls; $B children T1; $B children T2; $B get T1
-  $B answer T1 "yes"; $B heartbeat T1; $B report T1 "findings"; $B status T1 review; $B done T1 "ok" --commit abc123
+  $B answer T1 "yes"; $B heartbeat T1; $B report T1 "findings"; $B diff add T1 --body "parity diff"; $B status T1 review; $B done T1 "ok" --commit abc123
   $B ls; $B ls --status done; $B ls --status bogus; $B get T1 --full
   $B claim T9; $B claim T3; $B status T1 bogus; $B get T7; $B heartbeat T2; $B edit T9 --title z
   $B edit T1; $B add "" 2>&1; $B claim; $B claim
@@ -562,7 +562,7 @@ wait_transcript() { # binary
   ( sleep 0.7; $B ask T1 "which one?" >/dev/null ) & $B wait T1 --kind ask --timeout 30; echo "exit=$?"; wait
   ( sleep 0.7; $B answer T1 "the first one" >/dev/null ) & $B wait T1 --kind answer --timeout 30; echo "exit=$?"; wait
   # --status and --kind together
-  ( sleep 0.7; $B status T1 review "done?" >/dev/null ) & $B wait T1 --status review --kind review --timeout 30; echo "exit=$?"; wait
+  ( sleep 0.7; $B diff add T1 --body "fixture diff" >/dev/null; $B status T1 review "done?" >/dev/null ) & $B wait T1 --status review --kind review --timeout 30; echo "exit=$?"; wait
   # --open picks up a task created during the wait
   ( sleep 0.7; $B add "created mid-wait" >/dev/null ) & $B wait --open --kind add --timeout 30; echo "exit=$?"; wait
   # --epic: the tasks of the epic, subtasks included

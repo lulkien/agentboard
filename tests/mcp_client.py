@@ -392,6 +392,7 @@ def main():
     wb = s.call("task_add", title="wait B").split()[0]
     s.call("task_claim", id=wa)
     s.call("task_claim", id=wb)
+    s.call("diff_add", id=wa, body="fixture diff: a move to review needs one")
     # matched-on-status: another session moves the task while the wait blocks.
     mover = subprocess.Popen(["sh", "-c", f"sleep 1; {BIN} status {wa} review 'ready'"], env=env, stdout=subprocess.DEVNULL)
     t0 = time.time()
@@ -486,10 +487,11 @@ def main():
     for t in (wc, wd):
         s.call("task_claim", id=t)
         s.call("task_update", id=t, note="progress")
+    s.call("diff_add", id=wd, body="fixture diff: a move to review needs one")
     s.call("task_update", id=wd, status="review")
     r = cli_wait(wc, wd, "--status", "review", "--kind", "note", "--after", "0", "--timeout", "5")
     heads = [l.split()[0] for l in r.stdout.splitlines() if l.startswith("T")]
-    ok = r.returncode == 0 and r.stdout.startswith("matched: 1 of 2 watched") and heads == [wd] and "note: progress" in r.stdout and "review" not in r.stdout.split("\n", 2)[2]
+    ok = r.returncode == 0 and r.stdout.startswith("matched: 1 of 2 watched") and heads == [wd] and "note: progress" in r.stdout and " review: " not in r.stdout.split("\n", 2)[2]
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"--status + --kind both hold :: {heads}")
     r = cli_wait(wc, wd, "--status", "review", "--kind", "done", "--after", "0", "--timeout", "1")
@@ -559,6 +561,29 @@ def main():
     ok = all("newest" in descs[n] for n in ("diff_add", "diff_get", "diff_list"))
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "the three diff tool descriptions say only the newest diff is reviewed")
+
+    # The review gate and the auto-filed review row.
+    gp = s.call("task_add", title="gate probe", priority=9).split()[0]
+    s.call("task_claim", id=gp)
+    refused = refusal_text(lambda: s.call("task_update", id=gp, status="review", report="the report"))
+    expect("a move to review with no diff is refused, naming diff_add and the task", refused, f"{gp} cannot move to review", f"diff add {gp}", f"diff_add id={gp}")
+    expect("the refused move changed nothing", s.call("task_get", id=gp), f"{gp} working")
+    dg = s.call("diff_add", id=gp, body="gate diff").split()[0]
+    moved = s.call("task_update", id=gp, status="review", report="the report")
+    expect("with a diff the same move succeeds and names the filed review row", moved, f"{gp} review #", "(review row T")
+    rv = moved.split("(review row ")[1].rstrip(")")
+    expect("task_children lists the one auto-filed review row", s.call("task_children", id=gp), rv, "Review gate probe")
+    expect("the review row carries the report verbatim, the newest diff, the parent and the priority", s.call("task_get", id=rv, full=True), f"{rv} ready - priority 9", f"parent: {gp}", "the report", f"Newest diff: {dg}")
+    s.call("task_update", id=gp, status="needs_fix")
+    s.call("task_update", id=gp, status="working")
+    expect("after a reopen and a new working move the old diff no longer satisfies the gate", refusal_text(lambda: s.call("task_update", id=gp, status="review")), f"diff add {gp}")
+    d2 = s.call("diff_add", id=gp, body="gate diff two").split()[0]
+    s.call("task_update", id=gp, status="review")
+    kids = [l for l in s.call("task_children", id=gp).splitlines() if l.strip()]
+    ok = len(kids) == 1
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + f"a resubmission files no second review row :: {len(kids)} child")
+    expect("the existing review row is told the new diff", s.call("task_get", id=rv), f"{gp} submitted again: newest diff {d2} (round 2)")
 
     expect("session list", s.call("session_list"), "session")
     s.close()

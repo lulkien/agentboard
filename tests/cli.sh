@@ -264,7 +264,7 @@ run $B --db "$X" edit E1 --title "Epic two";                           check "ep
 
 # review chain: three levels, the fourth reopen lands not_done and cascades one level
 use chain; C=$BOARD
-run $B --db "$C" add impl;                                             check "chain: level 1 (parentless)" $rc
+run $B --db "$C" add impl --status review;                                check "chain: level 1 (parentless, created at review so no review row is filed)" $rc
 run $B --db "$C" add review --parent T1;                               check "chain: level 2 accepted" $rc
 run $B --db "$C" add fix --parent T2;                                  check "chain: level 3 accepted" $rc
 run $B --db "$C" add deeper --parent T3
@@ -274,8 +274,8 @@ check "chain: parent under a level-3 row refused, exit 1, chain line" $([ $rc -e
 run $B --db "$C" parent T4 T1;                                         check "chain: parent under level 1 still fine" $rc
 for i in 1 2 3; do run $B --db "$C" status T3 needs_fix "findings $i"; run $B --db "$C" status T3 working; done
 run $B --db "$C" get T3;                                               check "reopens: 3/3 after three moves" $(has "$out" "reopens: 3/3" && ! has "$out" "cap hit" && echo 0 || echo 1)
+run $B --db "$C" diff add T2 --body "the review row's own submission"
 run $B --db "$C" status T2 review "parent at review"
-run $B --db "$C" status T1 review "impl at review"
 run $B --db "$C" status T3 needs_fix "findings 4: the body"
 check "cap: fourth move into needs_fix exits 1 naming the cap and not_done" $([ $rc -eq 1 ] && has "$err" "T3 reopen cap 3 hit" && has "$err" "not_done" && echo 0 || echo 1)
 run $B --db "$C" get T3
@@ -344,6 +344,40 @@ run $B --db "$DF" diff ls E1;                                          check "di
 run $B --db "$DF" status T1 dropped "gone"; run $B --db "$DF" diff ls T1
 check "diffs survive the task being dropped" $([ $rc -eq 0 ] && has "$out" "D2 round 2" && has "$out" "D1 round 1" && echo 0 || echo 1)
 run $B --db "$DF" wait T1 --kind diff --after 0 --timeout 1;           check "wait --kind diff is a known kind" $([ $rc -eq 0 ] && echo 0 || echo 1)
+
+# the review gate and the auto-filed review row
+use gate; G=$BOARD
+run $B --db "$G" epic add "gate epic";                                 check "gate: an epic for the implement row" $rc
+run $B --db "$G" add impl --epic E1 --path /tmp/agentboard-gate --branch feat/g --priority 7; run $B --db "$G" claim T1
+run $B --db "$G" children T1;                                          check "gate: children before the move: none" $(has "$out" "has no children" && echo 0 || echo 1)
+run $B --db "$G" review T1 "no diff yet"
+check "gate: review with no diff since the claim is refused, exit 1, names diff add and the task" $([ $rc -eq 1 ] && has "$err" "T1 cannot move to review" && has "$err" "agentboard diff add T1" && echo 0 || echo 1)
+run $B --db "$G" get T1;                                               check "gate: the refusal wrote nothing (still working, no child, no report)" $(has "$out" "T1 working" && ! has "$out" "no diff yet" && ! has "$out" "children:" && echo 0 || echo 1)
+run $B --db "$G" diff add T1 --body "first diff"
+run $B --db "$G" review T1 $'the report\nsecond line';                  check "gate: the same move succeeds once a diff exists, exit 0, names the review row" $([ $rc -eq 0 ] && has "$out" "T1 review #" && has "$out" "(review row T2)" && echo 0 || echo 1)
+run $B --db "$G" children T1;                                          check "autofile: exactly one child, ready, titled Review impl" $([ $rc -eq 0 ] && [ "$(grep -c . <<<"$out")" = 1 ] && has "$out" "T2 rdy" && has "$out" "Review impl" && echo 0 || echo 1)
+run $B --db "$G" get T2 --full
+check "autofile: the child inherits epic/path/branch/priority, no assignee" $(has "$out" "T2 ready - priority 7" && has "$out" "epic: E1 gate epic" && has "$out" "path: /tmp/agentboard-gate" && has "$out" "branch: feat/g" && has "$out" "parent: T1" && echo 0 || echo 1)
+check "autofile: the report is copied verbatim and the newest diff id is named" $(has "$out" $'the report\nsecond line' && has "$out" "Newest diff: D1" && has "$out" "never close T1" && echo 0 || echo 1)
+run $B --db "$G" get T1;                                               check "autofile: the implement row logs a note naming the review row" $(has "$out" "review row T2 filed" && echo 0 || echo 1)
+run $B --db "$G" status T1 needs_fix "findings"; run $B --db "$G" status T1 working
+run $B --db "$G" review T1 "second submission"
+check "gate: after needs_fix and a new working move the OLD diff no longer satisfies it" $([ $rc -eq 1 ] && has "$err" "agentboard diff add T1" && echo 0 || echo 1)
+run $B --db "$G" diff add T1 --body "second diff"; run $B --db "$G" review T1 "second submission"
+check "gate: a diff recorded after the new claim satisfies it" $([ $rc -eq 0 ] && has "$out" "(review row T2)" && echo 0 || echo 1)
+run $B --db "$G" children T1;                                          check "autofile: a resubmission files no second review row" $([ "$(grep -c . <<<"$out")" = 1 ] && echo 0 || echo 1)
+run $B --db "$G" get T2;                                               check "autofile: the existing review row gets a note naming the new diff, description untouched" $(has "$out" "T1 submitted again: newest diff D2 (round 2)" && has "$out" "Newest diff: D1" && echo 0 || echo 1)
+run $B --db "$G" status T1 needs_fix "round three"; run $B --db "$G" edit T1 --title "impl renamed"; run $B --db "$G" status T1 working
+run $B --db "$G" diff add T1 --body "third diff"; run $B --db "$G" review T1 "third submission"
+check "autofile: renaming the implement row between rounds still files no second review row" $([ $rc -eq 0 ] && has "$out" "(review row T2)" && echo 0 || echo 1)
+run $B --db "$G" children T1;                                          check "autofile: children stays one row after the rename" $([ "$(grep -c . <<<"$out")" = 1 ] && has "$out" "T2 " && echo 0 || echo 1)
+run $B --db "$G" get T2;                                               check "autofile: the rename's resubmission note lands on the original review row" $(has "$out" "T1 submitted again: newest diff D3 (round 3)" && echo 0 || echo 1)
+run $B --db "$G" add fix --parent T2; run $B --db "$G" claim T3
+run $B --db "$G" children T3;                                          check "autofile: a fix row has no children before" $(has "$out" "has no children" && echo 0 || echo 1)
+run $B --db "$G" diff add T3 --body "fix diff"; run $B --db "$G" review T3 "fixed"
+check "autofile: a parented row moved to review files nothing" $([ $rc -eq 0 ] && ! has "$out" "review row" && echo 0 || echo 1)
+run $B --db "$G" children T3;                                          check "autofile: and still has no children after" $(has "$out" "has no children" && echo 0 || echo 1)
+run $B --db "$G" ls --limit 50;                                        check "autofile: nothing beyond T1..T3 exists" $(! has "$out" "T4" && echo 0 || echo 1)
 
 # a board file from before epics is refused, untouched, with the way out (sqlite only;
 # the surreal build's wrong-kind and schema refusals are phase (n)/(o) of surreal.sh)

@@ -6,7 +6,9 @@ use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
     MAX_CHAIN, cap_cascade_note, cap_note, cap_refusal, cap_skipped_note, cascades_to,
-    chain_refusal, held_text, norm_branch, normalize_path, reopen_after, workdir_text,
+    chain_refusal, gate_refusal, held_text, norm_branch, normalize_path, reopen_after,
+    review_description, review_filed_note, review_goal, review_resubmitted_note, review_title,
+    workdir_text,
 };
 use rusqlite::{OptionalExtension, params};
 
@@ -353,6 +355,74 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
     Err("claim contention: retry".to_owned().into())
 }
 
+/// Whether a diff was recorded for `id` after its newest claim event. Both are read from
+/// the events table in `seq` order, so a diff and a claim in the same millisecond still
+/// sort; no claim at all means any diff counts.
+fn diff_since_claim(conn: &rusqlite::Connection, id: i64) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM events WHERE task_id=?1 AND kind='diff' AND seq > COALESCE((SELECT MAX(seq) FROM events WHERE task_id=?1 AND kind='claim'),0))",
+        params![id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Files the review row for a parentless task that just moved to review, or notes the
+/// new diff on the one already filed. Returns the review row's id. Runs inside
+/// `apply`'s write transaction, after the gate has proved a diff exists.
+fn file_review(
+    conn: &rusqlite::Connection,
+    actor: &str,
+    implement: &super::Row,
+    report: Option<&str>,
+) -> Result<i64, String> {
+    let diff =
+        super::diffs::newest_diff(conn, implement.id)?.ok_or_else(|| gate_refusal(implement.id))?;
+    // A parentless row's only children are its review rows (fix rows hang off those), so
+    // the link is the parent alone: renaming the row between rounds must not hide it.
+    let title = review_title(&implement.title);
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM tasks WHERE parent_id=? AND status != 'dropped' ORDER BY id DESC LIMIT 1",
+            params![implement.id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(review) = existing {
+        let note = review_resubmitted_note(implement.id, &diff);
+        log_event(conn, Subject::Task(review), actor, "note", &note)?;
+        return Ok(review);
+    }
+    let now = now_ms();
+    conn.execute(
+        "INSERT INTO tasks(title,description,goal,path,branch,status,priority,epic_id,parent_id,created_at,updated_at) VALUES(?,?,?,?,?,'ready',?,?,?,?,?)",
+        params![
+            title,
+            review_description(implement, report, &diff),
+            review_goal(implement.id, diff.id),
+            implement.path,
+            implement.branch,
+            implement.priority,
+            implement.epic_id,
+            implement.id,
+            now,
+            now
+        ],
+    )
+    .map_err(|e| format!("review row: {e}"))?;
+    let review = conn.last_insert_rowid();
+    log_event(conn, Subject::Task(review), actor, "add", &title)?;
+    log_event(
+        conn,
+        Subject::Task(implement.id),
+        actor,
+        "note",
+        &review_filed_note(review),
+    )?;
+    Ok(review)
+}
+
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let mut conn = open()?;
     let tx = conn
@@ -365,6 +435,12 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         None => cur.status.as_str(),
     };
     let moved = status != cur.status;
+    // A move into review needs a diff recorded since the last claim: refused before
+    // anything is written, so a reviewer never gets an empty review.
+    let submit = moved && status == "review";
+    if submit && !diff_since_claim(&tx, id)? {
+        return Err(gate_refusal(id));
+    }
     // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
     let reopen = moved && status == "needs_fix";
     let capped = reopen && reopen_after(cur.reopen_count).1;
@@ -430,8 +506,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         (true, "needs_fix") => "needs_fix",
         (true, "working") => match cur.status.as_str() {
             "blocking" => "answer",
-            "ready" => "claim",
-            _ => "edit",
+            _ => "claim",
         },
         (true, _) => "edit",
         (false, _) => {
@@ -475,8 +550,16 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         return Err(cap_refusal(id));
     }
     let seq = log_event(&tx, Subject::Task(id), actor, kind, body)?;
+    // Only a parentless row files a review row: a fix row or a review row never does.
+    let review = if submit && cur.parent_id.is_none() {
+        let report = p.report.or(cur.report.as_deref());
+        Some(file_review(&tx, actor, &cur, report)?)
+    } else {
+        None
+    };
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(format!("{} {status} #{seq}", short(id)))
+    let filed = review.map_or(String::new(), |r| format!(" (review row {})", short(r)));
+    Ok(format!("{} {status} #{seq}{filed}", short(id)))
 }
 
 pub fn note(actor: &str, id: i64, body: &str) -> Result<String, String> {
@@ -593,4 +676,118 @@ pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
         return Err(format!("{} not working or not held by {actor}", short(id)));
     }
     Ok(format!("ok {} lease {}m", short(id), ttl_s / 60))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::SCHEMA;
+    use super::*;
+    use crate::store::sqlite::diffs::record;
+
+    fn board() -> rusqlite::Connection {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        c.execute(
+            "INSERT INTO epics(title,created_at,updated_at) VALUES('e',1,1)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO tasks(title,path,branch,priority,epic_id,created_at,updated_at) VALUES('impl','/p','feat/x',7,1,1,1)",
+            [],
+        )
+        .unwrap();
+        c
+    }
+
+    #[test]
+    fn the_gate_wants_a_diff_after_the_newest_claim_event() {
+        let c = board();
+        assert!(!diff_since_claim(&c, 1).unwrap(), "no diff at all");
+        record(&c, "a", 1, "first").unwrap();
+        assert!(
+            diff_since_claim(&c, 1).unwrap(),
+            "no claim yet: any diff counts"
+        );
+        log_event(&c, Subject::Task(1), "a", "claim", "").unwrap();
+        assert!(
+            !diff_since_claim(&c, 1).unwrap(),
+            "the old diff predates the new claim"
+        );
+        record(&c, "a", 1, "second").unwrap();
+        assert!(diff_since_claim(&c, 1).unwrap());
+        log_event(&c, Subject::Task(1), "a", "claim", "").unwrap();
+        assert!(
+            !diff_since_claim(&c, 1).unwrap(),
+            "every later claim resets it"
+        );
+    }
+
+    #[test]
+    fn a_review_row_is_filed_once_and_a_resubmission_only_notes_it() {
+        let c = board();
+        record(&c, "a", 1, "d1").unwrap();
+        let implement = fetch(&c, 1).unwrap();
+        let review = file_review(&c, "a", &implement, Some("the report")).unwrap();
+        assert_eq!(review, 2);
+        let r = fetch(&c, 2).unwrap();
+        assert_eq!(
+            (r.title.as_str(), r.status.as_str(), r.parent_id, r.epic_id),
+            ("Review impl", "ready", Some(1), Some(1))
+        );
+        assert_eq!(
+            (r.path.as_str(), r.branch.as_str(), r.priority),
+            ("/p", "feat/x", 7)
+        );
+        assert!(r.assignee.is_none());
+        assert!(r.description.contains("the report") && r.description.contains("D1"));
+        let before = r.description.clone();
+        record(&c, "a", 1, "d2").unwrap();
+        assert_eq!(file_review(&c, "a", &implement, Some("again")).unwrap(), 2);
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM tasks WHERE parent_id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(n, 1, "no second review row");
+        assert_eq!(
+            fetch(&c, 2).unwrap().description,
+            before,
+            "description untouched"
+        );
+        let note: String = c
+            .query_row(
+                "SELECT body FROM events WHERE task_id=2 AND kind='note'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(note.contains("D2"), "{note}");
+
+        // Renamed between rounds: still the same review row, and the note lands on it.
+        c.execute("UPDATE tasks SET title='impl renamed' WHERE id=1", [])
+            .unwrap();
+        record(&c, "a", 1, "d3").unwrap();
+        let renamed = fetch(&c, 1).unwrap();
+        assert_eq!(file_review(&c, "a", &renamed, None).unwrap(), 2);
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM tasks WHERE parent_id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(n, 1, "a rename must not file a second review row");
+        let notes: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE task_id=2 AND kind='note' AND body LIKE '%D3%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(notes, 1);
+
+        // A dropped review row is not reused: the next submission files a fresh one.
+        c.execute("UPDATE tasks SET status='dropped' WHERE id=2", [])
+            .unwrap();
+        assert_eq!(file_review(&c, "a", &renamed, None).unwrap(), 3);
+    }
 }

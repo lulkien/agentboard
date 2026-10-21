@@ -159,6 +159,58 @@ pub fn cap_refusal(id: i64) -> String {
     )
 }
 
+// ---- the review gate and the auto-filed review row ---------------------------------
+
+/// The refusal for a move into `review` with no diff recorded since the last claim.
+pub fn gate_refusal(id: i64) -> String {
+    let t = short(id);
+    format!(
+        "{t} cannot move to review: no diff recorded since it was last claimed; record one first: agentboard diff add {t} --body-file - (diff_add id={t}); a change-free task records a body saying so"
+    )
+}
+
+/// The title of the review row filed for an implement row.
+pub fn review_title(implement_title: &str) -> String {
+    format!("Review {}", clip(implement_title, 80))
+}
+
+/// The description of a new review row: the implement row, its newest diff and its report verbatim.
+pub fn review_description(implement: &TaskRow, report: Option<&str>, diff: &DiffRow) -> String {
+    let d = short_diff(diff.id);
+    format!(
+        "Review of {} \"{}\" (round {}).\nNewest diff: {d}; read only this one: `agentboard diff get {d} --full` or diff_get id={d} full=true.\n\nImplement report (verbatim):\n{}",
+        short(implement.id),
+        implement.title,
+        diff.round,
+        report.filter(|r| !r.trim().is_empty()).unwrap_or("(none)")
+    )
+}
+
+/// What the reviewer does with a review row.
+pub fn review_goal(implement: i64, diff: i64) -> String {
+    format!(
+        "Read only the newest diff of {} (now {}; a resubmission adds a newer one). Give the verdict in this row's report. Findings: file a fix row under this row (parent = this row). Clean: close this row done. Close the fix row and this review row yourself; never close {}, the manager does.",
+        short(implement),
+        short_diff(diff),
+        short(implement)
+    )
+}
+
+/// The note on an existing review row when its implement row is submitted again.
+pub fn review_resubmitted_note(implement: i64, diff: &DiffRow) -> String {
+    format!(
+        "{} submitted again: newest diff {} (round {})",
+        short(implement),
+        short_diff(diff.id),
+        diff.round
+    )
+}
+
+/// The note on the implement row naming the review row filed for it.
+pub fn review_filed_note(review: i64) -> String {
+    format!("review row {} filed", short(review))
+}
+
 // ---- time and status --------------------------------------------------------------
 
 pub fn code(status: &str) -> &str {

@@ -454,6 +454,16 @@ fn connection_lost(msg: &str) -> bool {
         .any(|p| m.contains(p))
 }
 
+/// `what: err`, except that an outage keeps its `board server at ...` line whole: the
+/// one-line outage shape is the contract, whatever verb met it.
+fn with_context(what: &str, err: &str) -> String {
+    if err.starts_with("board server at ") {
+        err.to_owned()
+    } else {
+        format!("{what}: {err}")
+    }
+}
+
 /// A database error as one line. A connection lost mid-request is an outage, so it
 /// takes the same `board server at URL: ...` shape as a server that cannot be reached.
 fn db_err(e: &surrealdb::Error) -> String {
@@ -683,6 +693,18 @@ mod tests {
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         move |k| m.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn an_outage_line_keeps_its_shape_under_a_verb_prefix() {
+        assert_eq!(
+            with_context("add", "board server at 127.0.0.1:1: connection lost: x"),
+            "board server at 127.0.0.1:1: connection lost: x"
+        );
+        assert_eq!(
+            with_context("add", "board database: x"),
+            "add: board database: x"
+        );
     }
 
     #[test]
@@ -985,6 +1007,89 @@ mod tests {
             let ev: Vec<serde_json::Value> = r.take(0).unwrap();
             let ev = ev[0]["body"].as_str().map(str::to_owned);
             assert_eq!(ev.as_deref(), Some("D1 round 3 2 lines"));
+        });
+    }
+
+    #[test]
+    fn the_review_gate_and_the_review_row_filed_once() {
+        use super::diffs::record;
+        use super::tasks::{Txn, diff_since_claim, fetch, file_review};
+        let Some(srv) = start_server("review_gate") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        let db = &c.db;
+        runtime().block_on(async {
+            db.query(
+                "CREATE epics:1 SET title = 'e', created_at = 1, updated_at = 1; \
+                 CREATE tasks:1 SET title = 'impl', path = '/p', branch = 'feat/x', priority = 7, epic_id = 1, created_at = 1, updated_at = 1; \
+                 UPSERT counters:task SET n = 1",
+            )
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+            let claim = |tag: &'static str| async move {
+                let mut tx = Txn::new();
+                let one = tx.p(1);
+                tx.event(&one, "a", tag, "");
+                tx.run(db, "$seq").await.unwrap();
+            };
+            assert!(!diff_since_claim(db, 1).await.unwrap(), "no diff at all");
+            record(db, "a", 1, "first").await.unwrap();
+            assert!(diff_since_claim(db, 1).await.unwrap(), "no claim yet: any diff counts");
+            claim("claim").await;
+            assert!(!diff_since_claim(db, 1).await.unwrap(), "the old diff predates the new claim");
+            record(db, "a", 1, "second").await.unwrap();
+            assert!(diff_since_claim(db, 1).await.unwrap());
+            claim("claim").await;
+            assert!(!diff_since_claim(db, 1).await.unwrap(), "every later claim resets it");
+
+            let implement = fetch(db, 1).await.unwrap();
+            let mut tx = Txn::new();
+            let review = file_review(db, &mut tx, "a", &implement, Some("the report")).await.unwrap();
+            tx.run(db, "true").await.unwrap();
+            assert_eq!(review, 2);
+            let r = fetch(db, 2).await.unwrap();
+            assert_eq!(
+                (r.title.as_str(), r.status.as_str(), r.parent_id, r.epic_id),
+                ("Review impl", "ready", Some(1), Some(1))
+            );
+            assert_eq!((r.path.as_str(), r.branch.as_str(), r.priority), ("/p", "feat/x", 7));
+            assert!(r.assignee.is_none());
+            assert!(r.description.contains("the report") && r.description.contains("D2"));
+            let before = r.description.clone();
+            record(db, "a", 1, "third").await.unwrap();
+            let mut tx = Txn::new();
+            assert_eq!(file_review(db, &mut tx, "a", &implement, Some("again")).await.unwrap(), 2);
+            tx.run(db, "true").await.unwrap();
+            let mut q = db.query("SELECT count() FROM tasks WHERE parent_id = 1 GROUP ALL").await.unwrap();
+            let n: Vec<serde_json::Value> = q.take(0).unwrap();
+            assert_eq!(n[0]["count"], 1, "no second review row");
+            assert_eq!(fetch(db, 2).await.unwrap().description, before, "description untouched");
+            let mut q = db
+                .query("SELECT body FROM events WHERE task_id = 2 AND kind = 'note'")
+                .await
+                .unwrap();
+            let notes: Vec<serde_json::Value> = q.take(0).unwrap();
+            assert!(notes[0]["body"].as_str().unwrap().contains("D3"), "{notes:?}");
+
+            // Renamed between rounds: still the same review row, and the note lands on it.
+            db.query("UPDATE tasks:1 SET title = 'impl renamed'").await.unwrap().check().unwrap();
+            record(db, "a", 1, "fourth").await.unwrap();
+            let renamed = fetch(db, 1).await.unwrap();
+            let mut tx = Txn::new();
+            assert_eq!(file_review(db, &mut tx, "a", &renamed, None).await.unwrap(), 2);
+            tx.run(db, "true").await.unwrap();
+            let mut q = db.query("SELECT count() FROM tasks WHERE parent_id = 1 GROUP ALL").await.unwrap();
+            let n: Vec<serde_json::Value> = q.take(0).unwrap();
+            assert_eq!(n[0]["count"], 1, "a rename must not file a second review row");
+            let mut q = db
+                .query("SELECT body FROM events WHERE task_id = 2 AND kind = 'note' AND string::contains(body, 'D4')")
+                .await
+                .unwrap();
+            let hit: Vec<serde_json::Value> = q.take(0).unwrap();
+            assert_eq!(hit.len(), 1, "the note lands on the original row");
         });
     }
 
