@@ -16,7 +16,7 @@ Selectors (union, at least one; ids need no flag):
   --open     every task not done/dropped, re-evaluated while waiting (new tasks count)
 
 --status CSV  current status in CSV (ready|working|blocking|not_done|needs_fix|review|done|dropped); already true => returns at once
---kind CSV    new event kind in CSV (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch; `ask` is an alias of `block`)
+--kind CSV    new event kind in CSV (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch|diff; `ask` is an alias of `block`)
 Both filters => both must hold; neither => any new event. --after: only events with seq > SEQ.
 
 Exit 0 and first line `matched:`; exit 3 and first line `timeout:`.";
@@ -71,6 +71,11 @@ pub enum Cmd {
         /// Git branch the worker starts on (default HEAD: leave the checkout alone)
         #[arg(long, allow_hyphen_values = true)]
         branch: Option<String>,
+    },
+    /// Diffs: what a coder submitted for review, append-only; only the newest is reviewed
+    Diff {
+        #[command(subcommand)]
+        action: DiffCmd,
     },
     /// Epics: project-scoped groups of tasks (E1, E2...)
     Epic {
@@ -266,6 +271,34 @@ pub enum SessionsCmd {
         /// List what would be removed; delete nothing
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DiffCmd {
+    /// Record a diff for a task (round = its reopen count + 1); stored verbatim, never edited
+    Add {
+        /// Task id, e.g. T7
+        id: String,
+        /// The diff text
+        #[arg(long, allow_hyphen_values = true, conflicts_with = "body_file")]
+        body: Option<String>,
+        /// Read the diff from a file, or from stdin with `-`
+        #[arg(long, allow_hyphen_values = true)]
+        body_file: Option<String>,
+    },
+    /// A task's diffs (or an epic's), newest first, one line each
+    Ls {
+        /// Task or epic id, e.g. T7 or E2
+        id: String,
+    },
+    /// Show one diff: task, round, age and body
+    Get {
+        /// Diff id, e.g. D12
+        id: String,
+        /// The body unclipped, verbatim
+        #[arg(long)]
+        full: bool,
     },
 }
 

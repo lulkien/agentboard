@@ -6,6 +6,7 @@ pub const CAP_DESCRIPTION: usize = 4000;
 pub const CAP_GOAL: usize = 4000;
 pub const CAP_REPORT: usize = 6000;
 pub const CAP_NOTE: usize = 800;
+pub const CAP_DIFF: usize = 4000;
 pub const CAP_EVENT: usize = 220;
 pub const CAP_LAST: usize = 400;
 

@@ -60,6 +60,16 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 | started_at | When work began |
 | completed_at | When status reached done/dropped |
 
+## Diffs
+
+A diff is what a coder submitted for review: one row per submission, stored verbatim and append-only (no edit, no delete; it survives the task being dropped). The board never verifies the body. Only the newest diff of a task is reviewed, so record the complete change each time.
+
+- `diff_add(id=T7, body=...)` — `agentboard diff add T7 --body-file PATH|- | --body TEXT`. Returns `D12 (T7 round 2)`; `round` is the task's reopen count + 1. A whitespace-only body, an unknown task and an epic id are refused. Logs one `diff` event on the task (`D12 round 2 184 lines`, never the diff itself).
+- `diff_get(id=D12, full=)` — `agentboard diff get D12 [--full]`: task, round, age and the body, cut with a `[truncated: N of M chars; ...]` marker unless `full`.
+- `diff_list(id=T7|E3)` — `agentboard diff ls T7|E3`: newest first, one line per diff, `D12 round 2 3m 184 lines` (an epic's listing names the task: `D12 T7 round 2 ...`), or `(no diffs)`.
+
+`task_get` shows the newest diff of the task as one `diff:` line. Nothing about a diff moves a status.
+
 ## Editing a spec
 
 `agentboard edit T7|E3 ...` / `task_edit` / `epic_edit` amend a spec and are refused while the task is `working` with a live lease (the worker is reading it); free it with `agentboard status T7 ready` first. Each edit logs one `edit` event: short fields record the values, `title "old"->"new"` (title, assignee, path, branch; each clipped to 80 chars, so a same-length change shows and the old text survives), `priority 100->7`, and long fields only the lengths, `description 812->830` (description, goal). A worker re-reading its task sees the spec moved in the timeline.

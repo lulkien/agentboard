@@ -112,6 +112,24 @@ pub fn short_epic(id: i64) -> String {
     format!("E{id}")
 }
 
+pub fn short_diff(id: i64) -> String {
+    format!("D{id}")
+}
+
+/// A diff id: `D3` or `d3`. A task or epic id is refused with a pointer to the right
+/// verb, so a mixed-up id never silently hits the wrong table.
+pub fn parse_diff_id(raw: &str) -> Result<i64, String> {
+    let t = raw.trim();
+    if t.starts_with(['T', 't', '#', 'E', 'e']) {
+        return Err(format!(
+            "{t} is not a diff id; this takes D3 (`agentboard diff ls {t}` lists a task's diffs)"
+        ));
+    }
+    t.strip_prefix(['D', 'd'])
+        .and_then(|n| n.parse::<i64>().ok())
+        .ok_or_else(|| format!("bad diff id {raw:?} (want D3)"))
+}
+
 /// A task id: `T3`, `t3`, `#3` or `3`. An epic id is refused with a pointer to the
 /// right verb, so a mixed-up id never silently hits the wrong table.
 pub fn parse_id(raw: &str) -> Result<i64, String> {
@@ -238,6 +256,15 @@ pub fn children(of: Ref) -> Result<String, String> {
 }
 pub fn brief(since_min: i64) -> Result<String, String> {
     BACKEND.brief(since_min)
+}
+pub fn diff_add(actor: &str, task: i64, body: &str) -> Result<String, String> {
+    BACKEND.diff_add(actor, task, body)
+}
+pub fn diff_get(id: i64, full: bool) -> Result<String, String> {
+    BACKEND.diff_get(id, full)
+}
+pub fn diff_list(of: Ref) -> Result<String, String> {
+    BACKEND.diff_list(of)
 }
 pub fn epic_add(
     actor: &str,

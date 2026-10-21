@@ -12,7 +12,7 @@ pub const MATCHED: &str = "matched:";
 pub const TIMEOUT: &str = "timeout:";
 
 /// Every `kind` the store writes. `ask` is not one: it logs a `block` event.
-pub const KINDS: [&str; 11] = [
+pub const KINDS: [&str; 12] = [
     "add",
     "claim",
     "report",
@@ -24,6 +24,7 @@ pub const KINDS: [&str; 11] = [
     "needs_fix",
     "edit",
     "dispatch",
+    "diff",
 ];
 
 pub fn norm_kind(raw: &str) -> Option<&'static str> {

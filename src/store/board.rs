@@ -122,6 +122,12 @@ pub trait Board {
     fn children(&self, of: super::Ref) -> Result<String, String>;
     fn brief(&self, since_min: i64) -> Result<String, String>;
 
+    /// Records a diff for a task: append-only, round = the task's `reopen_count + 1`.
+    fn diff_add(&self, actor: &str, task: i64, body: &str) -> Result<String, String>;
+    fn diff_get(&self, id: i64, full: bool) -> Result<String, String>;
+    /// A task's diffs, or every diff of an epic's tasks, newest first.
+    fn diff_list(&self, of: super::Ref) -> Result<String, String>;
+
     fn epic_add(
         &self,
         actor: &str,

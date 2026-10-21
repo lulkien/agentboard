@@ -1,4 +1,4 @@
-//! MCP surface: 19 tools, text-only results, short acks.
+//! MCP surface: 22 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
@@ -114,6 +114,29 @@ pub struct EpicListArgs {
     /// open|done|dropped. Default open.
     #[serde(default)]
     pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DiffAddArgs {
+    /// Task id the diff belongs to, T7 or 7.
+    pub id: String,
+    /// The diff text, stored verbatim. Whitespace only is refused.
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DiffListArgs {
+    /// Task id T7, or epic id E3 for every diff of the epic's tasks.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DiffGetArgs {
+    /// Diff id, D12.
+    pub id: String,
+    /// true returns the body unclipped and verbatim. Default false: a long body is cut with a `[truncated ...]` marker.
+    #[serde(default)]
+    pub full: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -257,7 +280,7 @@ pub struct WaitArgs {
     /// CSV of statuses (ready|working|blocking|not_done|needs_fix|review|done|dropped): match only while the task's CURRENT status is in it. Already true => returns at once.
     #[serde(default)]
     pub status: Option<String>,
-    /// CSV of event kinds (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch; ask = block): match only new events of these kinds.
+    /// CSV of event kinds (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch|diff; ask = block): match only new events of these kinds.
     #[serde(default)]
     pub kind: Option<String>,
     /// Server-side long-poll in seconds (default 60, max 300). No client polling.
@@ -429,6 +452,46 @@ impl Board {
         Parameters(a): Parameters<EpicListArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         run!(blocking(move || store::epic_list(a.status.as_deref())).await)
+    }
+
+    #[tool(
+        name = "diff_add",
+        description = "Record what you changed for a task, verbatim: a diff row, append-only, round = the task's reopen count + 1. A reviewer reads only the newest diff, so record the complete change each time. Whitespace-only is refused. Returns D<n> (T<n> round <r>).",
+        annotations(title = "Add diff", read_only_hint = false, destructive_hint = false)
+    )]
+    async fn diff_add(
+        &self,
+        Parameters(a): Parameters<DiffAddArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_id(&a.id).map_err(err)?;
+        let actor = actor();
+        run!(blocking(move || store::diff_add(&actor, id, &a.body)).await)
+    }
+
+    #[tool(
+        name = "diff_get",
+        description = "One diff: task, round, age and body. Only the newest diff of a task is reviewed (`diff_list` shows which). A long body ends in a `[truncated ...]` marker; full=true returns it whole and verbatim.",
+        annotations(title = "Get diff", read_only_hint = true)
+    )]
+    async fn diff_get(
+        &self,
+        Parameters(a): Parameters<DiffGetArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_diff_id(&a.id).map_err(err)?;
+        run!(blocking(move || store::diff_get(id, a.full)).await)
+    }
+
+    #[tool(
+        name = "diff_list",
+        description = "A task's diffs (T7), or every diff of an epic's tasks (E3), newest first, one line each: D12 round 2 3m 184 lines. Only the newest diff of a task is reviewed. `(no diffs)` when there are none.",
+        annotations(title = "List diffs", read_only_hint = true)
+    )]
+    async fn diff_list(
+        &self,
+        Parameters(a): Parameters<DiffListArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let of = store::parse_ref(&a.id).map_err(err)?;
+        run!(blocking(move || store::diff_list(of)).await)
     }
 
     #[tool(

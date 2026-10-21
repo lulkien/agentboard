@@ -157,6 +157,7 @@ fn fetch(conn: &Connection, id: i64) -> Result<Row, String> {
         .ok_or_else(|| format!("no such task {}", short(id)))
 }
 
+mod diffs;
 mod dispatch;
 mod epics;
 mod render;
@@ -231,6 +232,15 @@ impl Board for SqliteBoard {
         render::brief(since_min)
     }
 
+    fn diff_add(&self, actor: &str, task: i64, body: &str) -> Result<String, String> {
+        diffs::diff_add(actor, task, body)
+    }
+    fn diff_get(&self, id: i64, full: bool) -> Result<String, String> {
+        diffs::diff_get(id, full)
+    }
+    fn diff_list(&self, of: Ref) -> Result<String, String> {
+        diffs::diff_list(of)
+    }
     fn epic_add(
         &self,
         actor: &str,

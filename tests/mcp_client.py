@@ -529,7 +529,36 @@ def main():
     expect("epic edit shows in the epic and its timeline", s.call("epic_get", id=epic_id), "title: epic: shipped", "path: /tmp/agentboard-no-such-project/sub", "title \"epic: ship it\"->\"epic: shipped\", path \"/tmp/agentboard-no-such-project\"->\"/tmp/agentboard-no-such-project/sub\"")
     expect("epic_edit with no field is refused", refusal_text(lambda: s.call("epic_edit", id=epic_id)), "nothing to edit")
     expect("epic_edit refuses a task id", refusal_text(lambda: s.call("epic_edit", id=ed, title="x")), "is a task id")
-    expect("the tools are listed", " ".join(t["name"] for t in s.rpc("tools/list", {})["tools"]), "task_edit", "epic_edit")
+    expect("the tools are listed", " ".join(t["name"] for t in s.rpc("tools/list", {})["tools"]), "task_edit", "epic_edit", "diff_add", "diff_get", "diff_list")
+
+    # Diffs: append-only, round from the reopen count, only the newest is reviewed.
+    dt = s.call("task_add", title="diffed").split()[0]
+    expect("diff_list of a task with none", s.call("diff_list", id=dt), "(no diffs)")
+    first = s.call("diff_add", id=dt, body="--- a/x\n+++ b/x\n+one")
+    expect("diff_add returns D<n> (T<n> round 1)", first, f"({dt} round 1)")
+    d1 = first.split()[0]
+    expect("diff_get shows task, round and the body", s.call("diff_get", id=d1), f"{d1} {dt} round 1", "+++ b/x")
+    expect("diff_get full is the body verbatim", s.call("diff_get", id=d1, full=True), "--- a/x\n+++ b/x\n+one")
+    s.call("task_update", id=dt, status="needs_fix")
+    s.call("task_update", id=dt, status="working")
+    second = s.call("diff_add", id=dt, body="+two")
+    expect("a reopened task records round 2", second, f"({dt} round 2)")
+    d2 = second.split()[0]
+    listing = s.call("diff_list", id=dt).splitlines()
+    ok = len(listing) == 2 and listing[0].startswith(f"{d2} round 2 ") and listing[1].startswith(f"{d1} round 1 ")
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "diff_list is newest first :: " + " | ".join(listing))
+    expect("task_get shows the newest diff line", s.call("task_get", id=dt), f"diff: {d2} round 2 ")
+    expect("diff_add refuses a whitespace-only body", refusal_text(lambda: s.call("diff_add", id=dt, body=" \n ")), "the body is empty")
+    expect("diff_add refuses an unknown task", refusal_text(lambda: s.call("diff_add", id="T9999", body="x")), "no such task T9999")
+    expect("diff_add refuses an epic id", refusal_text(lambda: s.call("diff_add", id=epic_id, body="x")), "is an epic id")
+    expect("diff_get refuses a task id", refusal_text(lambda: s.call("diff_get", id=dt)), "not a diff id")
+    expect("diff_get refuses an unknown diff", refusal_text(lambda: s.call("diff_get", id="D9999")), "no such diff D9999")
+    expect("diff_list of an epic names each task", s.call("diff_list", id=epic_id), "(no diffs)")
+    descs = {t["name"]: t.get("description", "") for t in s.rpc("tools/list", {})["tools"]}
+    ok = all("newest" in descs[n] for n in ("diff_add", "diff_get", "diff_list"))
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "the three diff tool descriptions say only the newest diff is reviewed")
 
     expect("session list", s.call("session_list"), "session")
     s.close()

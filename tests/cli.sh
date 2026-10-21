@@ -313,6 +313,38 @@ run $B --db "$C" status T12 needs_fix "capped"
 run $B --db "$C" ls
 check "cascade: a blocking parent lands not_done with needs cleared (no [input])" $(line=$(grep -E "^T11 " <<<"$out"); has "$line" "nd" && ! has "$line" "input" && echo 0 || echo 1)
 
+# diffs: append-only rows a reviewer reads newest-first
+use diffs; DF=$BOARD
+run $B --db "$DF" add coded;                                           check "diffs: a task to record against" $rc
+run $B --db "$DF" diff ls T1;                                          check "diff ls of a task with none prints (no diffs)" $([ $rc -eq 0 ] && [ "$out" = "(no diffs)" ] && echo 0 || echo 1)
+out=$(printf 'line one\nline two\n' | $B --db "$DF" diff add T1 --body-file - 2>"$S/err"); rc=$?; err=$(<"$S/err")
+check "diff add --body-file - reads stdin: D1, T1, round 1" $([ $rc -eq 0 ] && [ "$out" = "D1 (T1 round 1)" ] && echo 0 || echo 1)
+run $B --db "$DF" diff get D1 --full
+check "diff get --full: header with task, round, age, and the two-line body intact" $([ $rc -eq 0 ] && [[ "$(head -1 <<<"$out")" =~ ^D1\ T1\ round\ 1\ [0-9]+s ]] && [ "$(tail -n +2 <<<"$out")" = $'line one\nline two' ] && echo 0 || echo 1)
+run $B --db "$DF" diff get D1;                                         check "diff get (clipped) folds newlines, still shows round" $([ $rc -eq 0 ] && has "$out" "round 1" && has "$out" "line one ⏎ line two" && echo 0 || echo 1)
+run $B --db "$DF" status T1 needs_fix "r"; run $B --db "$DF" status T1 working
+run $B --db "$DF" diff add T1 --body "- a bullet, hyphen first"
+check "diff add --body accepts a leading hyphen; round 2 after one reopen" $([ $rc -eq 0 ] && [ "$out" = "D2 (T1 round 2)" ] && echo 0 || echo 1)
+run $B --db "$DF" diff ls T1
+check "diff ls: newest first, round and line count" $([ $rc -eq 0 ] && [[ "$(head -1 <<<"$out")" =~ ^D2\ round\ 2\ [0-9]+s\ 1\ lines$ ]] && [[ "$(tail -1 <<<"$out")" =~ ^D1\ round\ 1\ [0-9]+s\ 2\ lines$ ]] && echo 0 || echo 1)
+run $B --db "$DF" get T1;                                              check "get shows the newest diff line" $(has "$out" "diff: D2 round 2 " && ! has "$out" "diff: D1" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1 --body "   
+  ";                                                                   check "diff add: whitespace-only body refused, exit 1, says so" $([ $rc -eq 1 ] && has "$err" "the body is empty (whitespace only)" && echo 0 || echo 1)
+run $B --db "$DF" diff add T99 --body x;                               check "diff add: unknown task exits 1" $([ $rc -eq 1 ] && has "$err" "no such task T99" && echo 0 || echo 1)
+run $B --db "$DF" diff add nonsense --body x;                          check "diff add: bad task id exits 1" $([ $rc -eq 1 ] && has "$err" "bad task id" && echo 0 || echo 1)
+run $B --db "$DF" diff add E1 --body x;                                check "diff add: an epic id exits 1 with the epic hint" $([ $rc -eq 1 ] && has "$err" "E1 is an epic id" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1;                                         check "diff add: no body source exits 1" $([ $rc -eq 1 ] && has "$err" "--body" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1 --body-file /nonexistent/x;              check "diff add: unreadable --body-file exits 1" $([ $rc -eq 1 ] && has "$err" "reading /nonexistent/x" && echo 0 || echo 1)
+run $B --db "$DF" diff get D99;                                        check "diff get: unknown diff exits 1" $([ $rc -eq 1 ] && has "$err" "no such diff D99" && echo 0 || echo 1)
+run $B --db "$DF" diff get T1;                                         check "diff get: a task id exits 1 with a hint" $([ $rc -eq 1 ] && has "$err" "not a diff id" && echo 0 || echo 1)
+run $B --db "$DF" diff get nonsense;                                   check "diff get: a bad id exits 1" $([ $rc -eq 1 ] && has "$err" "bad diff id" && echo 0 || echo 1)
+run $B --db "$DF" diff ls T99;                                         check "diff ls: unknown task exits 1" $([ $rc -eq 1 ] && has "$err" "no such task T99" && echo 0 || echo 1)
+run $B --db "$DF" epic add ship; run $B --db "$DF" add inepic --epic E1; run $B --db "$DF" diff add T2 --body "x"
+run $B --db "$DF" diff ls E1;                                          check "diff ls of an epic names the task of each diff" $([ $rc -eq 0 ] && [[ "$out" =~ ^D3\ T2\ round\ 1 ]] && echo 0 || echo 1)
+run $B --db "$DF" status T1 dropped "gone"; run $B --db "$DF" diff ls T1
+check "diffs survive the task being dropped" $([ $rc -eq 0 ] && has "$out" "D2 round 2" && has "$out" "D1 round 1" && echo 0 || echo 1)
+run $B --db "$DF" wait T1 --kind diff --after 0 --timeout 1;           check "wait --kind diff is a known kind" $([ $rc -eq 0 ] && echo 0 || echo 1)
+
 # a board file from before epics is refused, untouched, with the way out (sqlite only;
 # the surreal build's wrong-kind and schema refusals are phase (n)/(o) of surreal.sh)
 if [ "$BACKEND" = sqlite ]; then

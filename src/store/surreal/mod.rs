@@ -3,6 +3,7 @@
 //! module per concern (`tasks`, `epics`, `sessions`, `render`, `dispatch`, `wait`)
 //! implementing every `Board` operation.
 
+mod diffs;
 mod dispatch;
 mod epics;
 mod lock;
@@ -87,6 +88,15 @@ impl Board for SurrealBoard {
     }
     fn brief(&self, since_min: i64) -> Result<String, String> {
         render::brief(since_min)
+    }
+    fn diff_add(&self, actor: &str, task: i64, body: &str) -> Result<String, String> {
+        diffs::diff_add(actor, task, body)
+    }
+    fn diff_get(&self, id: i64, full: bool) -> Result<String, String> {
+        diffs::diff_get(id, full)
+    }
+    fn diff_list(&self, of: super::Ref) -> Result<String, String> {
+        diffs::diff_list(of)
     }
     fn epic_add(
         &self,
@@ -348,6 +358,13 @@ DEFINE FIELD IF NOT EXISTS ts ON events TYPE int;
 DEFINE INDEX IF NOT EXISTS ev_task ON events FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS ev_epic ON events FIELDS epic_id;
 
+DEFINE TABLE IF NOT EXISTS diffs SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS task_id ON diffs TYPE int;
+DEFINE FIELD IF NOT EXISTS round ON diffs TYPE int;
+DEFINE FIELD IF NOT EXISTS body ON diffs TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS created_at ON diffs TYPE int;
+DEFINE INDEX IF NOT EXISTS diffs_task ON diffs FIELDS task_id;
+
 DEFINE TABLE IF NOT EXISTS sessions SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS agent ON sessions TYPE string;
 DEFINE FIELD IF NOT EXISTS cwd ON sessions TYPE option<string>;
@@ -428,8 +445,25 @@ struct Marker {
     version: i64,
 }
 
+/// Whether a driver error says the connection to the server went away mid-request
+/// (the server was killed or stopped), as opposed to the database refusing a query.
+fn connection_lost(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    ["connection reset", "connection closed", "broken pipe"]
+        .iter()
+        .any(|p| m.contains(p))
+}
+
+/// A database error as one line. A connection lost mid-request is an outage, so it
+/// takes the same `board server at URL: ...` shape as a server that cannot be reached.
 fn db_err(e: &surrealdb::Error) -> String {
-    format!("board database: {e}")
+    let msg = e.to_string();
+    if connection_lost(&msg)
+        && let Ok(s) = Settings::from_env()
+    {
+        return format!("board server at {}: connection lost: {msg}", s.url);
+    }
+    format!("board database: {msg}")
 }
 
 /// Brings the database to the current schema, or refuses it. The caller holds
@@ -649,6 +683,16 @@ mod tests {
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         move |k| m.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn a_connection_lost_mid_request_is_an_outage_not_a_database_error() {
+        assert!(connection_lost("I/O error: connection reset"));
+        assert!(connection_lost("Connection closed by peer"));
+        assert!(connection_lost("Broken pipe (os error 32)"));
+        assert!(!connection_lost(
+            "The query was not executed due to a failed transaction"
+        ));
     }
 
     #[test]
@@ -891,7 +935,9 @@ mod tests {
         assert_eq!(marker[0].version, SCHEMA_VERSION);
         assert_eq!(
             tables,
-            ["counters", "epics", "events", "meta", "sessions", "tasks"]
+            [
+                "counters", "diffs", "epics", "events", "meta", "sessions", "tasks"
+            ]
         );
         println!(
             "bootstrap run 1: {:?}, run 2: {:?}; tables {tables:?}; marker version {}",
@@ -899,6 +945,47 @@ mod tests {
         );
         // The lock file sits inside the data dir and did not upset the server.
         assert!(lock::lock_path(&srv.settings.dir).is_file());
+    }
+
+    #[test]
+    fn diffs_round_trip_with_the_round_from_the_reopen_count() {
+        use super::diffs::{listing, newest_diff, record, show};
+        use crate::store::Ref;
+        let Some(srv) = start_server("diffs_round_trip") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        let db = &c.db;
+        runtime().block_on(async {
+            db.query("CREATE tasks:1 SET title = 't', created_at = 1, updated_at = 1, reopen_count = 2")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+            assert_eq!(listing(db, Ref::Task(1)).await.unwrap(), "(no diffs)");
+            assert_eq!(record(db, "a", 1, "one\ntwo\n").await.unwrap(), "D1 (T1 round 3)");
+            let long = "x".repeat(5000);
+            assert_eq!(record(db, "a", 1, &long).await.unwrap(), "D2 (T1 round 3)");
+            let l = listing(db, Ref::Task(1)).await.unwrap();
+            let lines: Vec<_> = l.lines().collect();
+            assert!(lines[0].starts_with("D2 round 3 ") && lines[0].ends_with(" 1 lines"), "{l}");
+            assert!(lines[1].starts_with("D1 round 3 ") && lines[1].ends_with(" 2 lines"), "{l}");
+            let clipped = show(db, 2, false).await.unwrap();
+            assert!(clipped.contains("[truncated: 4000 of 5000 chars;"), "{clipped}");
+            let full = show(db, 2, true).await.unwrap();
+            assert!(full.ends_with(&long) && !full.contains("truncated"));
+            assert!(show(db, 1, true).await.unwrap().ends_with("one\ntwo\n"));
+            assert_eq!(newest_diff(db, 1).await.unwrap().unwrap().id, 2);
+            assert!(show(db, 9, false).await.unwrap_err().contains("no such diff D9"));
+            assert!(record(db, "a", 9, "x").await.unwrap_err().contains("no such task T9"));
+            let mut r = db
+                .query("SELECT body, meta::id(id) AS seq FROM events WHERE task_id = 1 AND kind = 'diff' ORDER BY seq LIMIT 1")
+                .await
+                .unwrap();
+            let ev: Vec<serde_json::Value> = r.take(0).unwrap();
+            let ev = ev[0]["body"].as_str().map(str::to_owned);
+            assert_eq!(ev.as_deref(), Some("D1 round 3 2 lines"));
+        });
     }
 
     #[test]

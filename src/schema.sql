@@ -53,12 +53,24 @@ CREATE TABLE IF NOT EXISTS events(
   task_id INTEGER REFERENCES tasks(id),   -- exactly one of task_id / epic_id is set
   epic_id INTEGER REFERENCES epics(id),
   actor   TEXT NOT NULL,
-  kind    TEXT NOT NULL,          -- add|claim|note|report|answer|block|review|done|needs_fix|edit|dispatch
+  kind    TEXT NOT NULL,          -- add|claim|note|report|answer|block|review|done|needs_fix|edit|dispatch|diff
   body    TEXT NOT NULL DEFAULT '',
   ts      INTEGER NOT NULL,
   CHECK ((task_id IS NULL) != (epic_id IS NULL))
 );
 CREATE INDEX IF NOT EXISTS ev_task ON events(task_id, seq);
+
+-- What a coder submitted for review, verbatim and append-only: no edit, no delete, and
+-- a row outlives its task being dropped. `round` is the task's reopen_count + 1 at the
+-- time. Printed D1, D2...
+CREATE TABLE IF NOT EXISTS diffs(
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    INTEGER NOT NULL REFERENCES tasks(id),
+  round      INTEGER NOT NULL,
+  body       TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS diffs_task ON diffs(task_id, id);
 CREATE INDEX IF NOT EXISTS ev_epic ON events(epic_id, seq);
 
 CREATE TABLE IF NOT EXISTS sessions(

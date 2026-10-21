@@ -843,10 +843,12 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
         };
         let summary = status_summary(&s.db, "parent_id", r.tid, "children").await?;
         let events = recent_events(&s.db, "task_id", r.tid, full, &text::task_hint(r.tid)).await?;
+        let newest = super::diffs::newest_diff(&s.db, r.tid).await?;
         Ok(text::get_text(
             &TaskRow::from(r),
             epic.map(EpicRow::from).as_ref(),
             summary.as_deref(),
+            newest.as_ref(),
             &events,
             full,
         ))

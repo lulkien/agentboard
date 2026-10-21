@@ -39,10 +39,12 @@ pub fn get(id: i64, full: bool) -> Result<String, String> {
         .transpose()?;
     let summary = status_summary(&conn, "parent_id", r.id, "children")?;
     let events = recent_events(&conn, "task_id", r.id, full, &text::task_hint(r.id))?;
+    let newest = super::diffs::newest_diff(&conn, r.id)?;
     Ok(text::get_text(
         &r,
         epic.as_ref(),
         summary.as_deref(),
+        newest.as_ref(),
         &events,
         full,
     ))

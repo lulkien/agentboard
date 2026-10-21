@@ -1,14 +1,14 @@
 # agentboard
 
 A task board shared by a handful of CLI coding agents (Claude Code in a herdr
-pane, Hermes, subagents) plus you. 19 MCP tools over stdio and one board, stored
+pane, Hermes, subagents) plus you. 22 MCP tools over stdio and one board, stored
 either in SurrealDB (the default build) or in a single SQLite file (opt-in). The point is to replace
 "write status to NOTES.md and hope somebody reads it" with a board that answers in
 one line and costs few tokens.
 
 ## Model
 
-Four kinds of record — four tables in SQLite (`src/schema.sql`), four record types in
+Five kinds of record — five tables in SQLite (`src/schema.sql`), five record types in
 SurrealDB (`src/store/surreal/`):
 
     epics     id, title, description, goal, status, path, created_at, updated_at,
@@ -17,7 +17,16 @@ SurrealDB (`src/store/surreal/`):
               parent_id, needs, report, commit_ref, lease_until, created_at, updated_at,
               started_at, completed_at
     events    seq, task_id | epic_id, actor, kind, body, ts  -- append-only, one timeline
+    diffs     id, task_id, round, body, created_at       -- D1, D2...; append-only, verbatim,
+                                                         -- outlive a dropped task
     sessions  name, agent, cwd, task_id, seen, status    -- live panes: herdr or tmux
+
+A **diff** is what a coder submitted for review, stored verbatim and never checked by
+the board. It is append-only (no edit, no delete, no renumber) and outlives its task
+being dropped. `get` shows the newest one for the task (`diff: D12 round 2 3m 184
+lines`); the CLI verbs are `agentboard diff add T7 --body-file PATH|- | --body TEXT`,
+`diff ls T7|E3` and `diff get D12 [--full]`. A board file from before diffs gains the
+table; nothing is refused.
 
 An **epic** is not a task: it has its own ids (`E1`), is never claimed, leased or
 dispatched, and carries the project `path` its work belongs to. A task points at an
@@ -49,6 +58,9 @@ completion is one row; nothing is mutable history.
 | `epic_update` | 1 line ack | set an epic `open`/`done`/`dropped`; closing is never automatic |
 | `epic_edit` | 1 line ack | amend title, description, goal, path (only the fields passed); logs old/new lengths |
 | `task_edit` | 1 line ack | amend title, description, goal, priority, assignee, path, branch (`HEAD` leaves the pane's checkout alone); refused while `working` with a live lease, because the worker is reading that text |
+| `diff_add` | 1 line ack | record what you changed for a task, verbatim and append-only: `D12 (T7 round 2)`, round = the task's reopen count + 1; whitespace-only is refused. Only the newest diff is reviewed |
+| `diff_get` | header + body | one diff: task, round, age; the body is cut with a `[truncated ...]` marker, `full=true` returns it whole |
+| `diff_list` | 1 line/diff | a task's diffs (or an epic's, naming each task), newest first: `D12 round 2 3m 184 lines`, or `(no diffs)` |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |
@@ -59,7 +71,7 @@ completion is one row; nothing is mutable history.
 | `session_tail` | N lines | last N lines of the agent's pane, herdr first and tmux as fallback; bounded by `$AGENTBOARD_DELIVER_TIMEOUT_MS` |
 | `session_send` | ack | type a line into a pane (steer another agent) |
 
-Nineteen tools is deliberate: every tool schema is resent on every request, so a
+Twenty-two tools is deliberate: every tool schema is resent on every request, so a
 wide surface is a permanent token tax. `answer` is not a tool — it is
 `task_update(status="running", note=...)`.
 
@@ -252,7 +264,7 @@ correct, the ordering is the client's.
 ## Not in scope
 
 No web UI, sprints, story points, attachments, or multi-user auth. One board,
-one user, a few agents. If it needs more than 19 tools, it is not this tool.
+one user, a few agents. If it needs more than 22 tools, it is not this tool.
 
 ## Do agents need a skill for this?
 

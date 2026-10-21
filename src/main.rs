@@ -22,7 +22,7 @@ mod store;
 
 use clap::Parser;
 use clap::error::ErrorKind;
-use cli::{Cli, Cmd, EpicCmd, SessionsCmd};
+use cli::{Cli, Cmd, DiffCmd, EpicCmd, SessionsCmd};
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 
@@ -161,6 +161,30 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
             };
             store::set_parent(actor, tid(&id)?, parent)
         }
+        Cmd::Diff { action } => match action {
+            DiffCmd::Add {
+                id,
+                body,
+                body_file,
+            } => {
+                let task = tid(&id)?;
+                let body = match (body, body_file.as_deref()) {
+                    (Some(b), _) => b,
+                    (None, Some("-")) => std::io::read_to_string(std::io::stdin())
+                        .map_err(|e| format!("diff add: reading stdin: {e}"))?,
+                    (None, Some(path)) => std::fs::read_to_string(path)
+                        .map_err(|e| format!("diff add: reading {path}: {e}"))?,
+                    (None, None) => {
+                        return Err(String::from(
+                            "diff add: pass --body TEXT or --body-file PATH (`-` reads stdin)",
+                        ));
+                    }
+                };
+                store::diff_add(actor, task, &body)
+            }
+            DiffCmd::Ls { id } => store::diff_list(store::parse_ref(&id)?),
+            DiffCmd::Get { id, full } => store::diff_get(store::parse_diff_id(&id)?, full),
+        },
         Cmd::Epic { action } => match action {
             EpicCmd::Add {
                 title,

@@ -5,9 +5,9 @@
 //! whose type differs between backends is normalised where the row is loaded.
 
 use crate::clip::{
-    CAP_DESCRIPTION, CAP_EVENT, CAP_GOAL, CAP_NOTE, CAP_REPORT, clip, clip_marked, field,
+    CAP_DESCRIPTION, CAP_DIFF, CAP_EVENT, CAP_GOAL, CAP_NOTE, CAP_REPORT, clip, clip_marked, field,
 };
-use crate::store::{now_ms, short, short_epic};
+use crate::store::{now_ms, short, short_diff, short_epic};
 use std::path::{Component, Path, PathBuf};
 
 /// One task as stored.
@@ -37,6 +37,17 @@ pub struct TaskRow {
     pub parent_id: Option<i64>,
     /// Moves into `needs_fix` so far; above `MAX_REOPENS` the cap stopped the row.
     pub reopen_count: i64,
+}
+
+/// One diff as stored: what a coder submitted for review, verbatim.
+#[derive(Clone, Debug)]
+pub struct DiffRow {
+    pub id: i64,
+    pub task_id: i64,
+    /// `reopen_count + 1` of the task when it was recorded.
+    pub round: i64,
+    pub body: String,
+    pub created_at: i64,
 }
 
 /// One epic as stored.
@@ -444,12 +455,77 @@ pub fn events_text(newest_first: &[EventRow], full: bool, hint: &str) -> String 
     out
 }
 
+// ---- diffs -------------------------------------------------------------------------
+
+/// The refusal for a diff with nothing in it.
+pub const EMPTY_DIFF: &str = "diff add: the body is empty (whitespace only); pass the diff text with --body, --body-file PATH or --body-file -";
+
+/// The event body of a recorded diff: the row and its size, never the diff itself.
+pub fn diff_event(id: i64, round: i64, body: &str) -> String {
+    format!(
+        "{} round {round} {} lines",
+        short_diff(id),
+        body.lines().count()
+    )
+}
+
+/// `D12 round 2 3m 184 lines`; with `task`, `D12 T5 round 2 ...` (an epic's listing).
+pub fn diff_line(d: &DiffRow, task: bool) -> String {
+    let of = if task {
+        format!(" {}", short(d.task_id))
+    } else {
+        String::new()
+    };
+    format!(
+        "{}{of} round {} {} {} lines",
+        short_diff(d.id),
+        d.round,
+        ago(d.created_at),
+        d.body.lines().count()
+    )
+}
+
+/// The `diff ls` listing, newest first: one line per row, or `(no diffs)`.
+pub fn diff_list_text(rows: &[DiffRow], task: bool) -> String {
+    if rows.is_empty() {
+        return "(no diffs)".to_owned();
+    }
+    rows.iter()
+        .map(|d| diff_line(d, task))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `diff get`: a header line, then the body clipped with a marker unless `full`.
+pub fn diff_text(d: &DiffRow, full: bool) -> String {
+    let tag = short_diff(d.id);
+    let head = format!(
+        "{tag} {} round {} {}",
+        short(d.task_id),
+        d.round,
+        when(d.created_at)
+    );
+    let body = if full {
+        d.body.clone()
+    } else {
+        clip_marked(
+            &d.body,
+            CAP_DIFF,
+            &format!(
+                "full text: `agentboard diff get {tag} --full` or diff_get id={tag} full=true"
+            ),
+        )
+    };
+    format!("{head}\n{body}")
+}
+
 /// `get`: the task, its epic line, the subtask summary and the event block.
 /// `full` returns description, goal, report and note unclipped and verbatim.
 pub fn get_text(
     r: &TaskRow,
     epic: Option<&EpicRow>,
     summary: Option<&str>,
+    newest_diff: Option<&DiffRow>,
     events: &str,
     full: bool,
 ) -> String {
@@ -506,6 +582,9 @@ pub fn get_text(
     if let Some(line) = summary {
         out.push_str(line);
         out.push('\n');
+    }
+    if let Some(d) = newest_diff {
+        out.push_str(&format!("diff: {}\n", diff_line(d, false)));
     }
     let t = short(r.id);
     out.push_str(&field(
