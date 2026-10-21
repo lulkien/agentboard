@@ -763,7 +763,7 @@ fi
 
 # ---- (p) the shell suites on both builds ------------------------------------------------
 if want suites; then
-  echo "== (p) suites: cli.sh and dispatch.sh on both builds, mcp_client.py on the sqlite build"
+  echo "== (p) suites: cli.sh, dispatch.sh, race.sh and wait.sh on both builds, mcp_client.py on the sqlite build"
   # The summary line names the backend the suite detected on its binary; it must be the
   # one this phase meant to test, or a swapped binary would still print PASS.
   suite_line() { # label, expected backend (surreal|sqlite), command...

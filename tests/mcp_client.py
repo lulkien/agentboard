@@ -20,8 +20,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.environ.get("AGENTBOARD_TEST_BIN") or os.path.join(ROOT, "target/release/agentboard")
 EXTERNAL_BOARD = bool(os.environ.get("AGENTBOARD_TEST_DB"))
 DB = os.environ.get("AGENTBOARD_TEST_DB") or os.path.join(ROOT, ".probe/client.db")
-BACKEND = "surreal" if "Data directory of the local board server" in subprocess.run(
-    [BIN, "--help"], capture_output=True, text=True).stdout else "sqlite"
+try:
+    _help = subprocess.run([BIN, "--help"], capture_output=True, text=True).stdout
+except OSError as e:
+    sys.exit(f"tests/mcp_client.py: cannot run {BIN} ({e.strerror}); build it (cargo build --release) or set AGENTBOARD_TEST_BIN=<path>")
+BACKEND = "surreal" if "Data directory of the local board server" in _help else "sqlite"
 DEFAULT_PORT = "18720"
 if BACKEND == "surreal":
     URL = os.environ.get("AGENTBOARD_SURREAL_URL", "")

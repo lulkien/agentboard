@@ -5,7 +5,7 @@ start_server() {
   local dir=$1 surreal
   surreal=$(command -v surreal || true)
   [ -n "$surreal" ] || surreal=$HOME/.surrealdb/surreal
-  [ -x "$surreal" ] || { echo "FAIL: no surreal binary in PATH or ~/.surrealdb/surreal"; exit 1; }
+  [ -x "$surreal" ] || { echo "FAIL: no surreal binary in PATH or ~/.surrealdb/surreal; the surreal build's suites start throwaway servers from it (or test a sqlite binary: AGENTBOARD_TEST_BIN=<path>)"; exit 1; }
   SERVER_PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
   mkdir -p "$dir"
   setsid "$surreal" db start --no-banner --log warn --bind "127.0.0.1:$SERVER_PORT" \

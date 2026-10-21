@@ -8,6 +8,7 @@
 # box that runs one) is unreachable until `use` points the environment somewhere else.
 unset AGENTBOARD_DB AGENTBOARD_SURREAL_URL
 source "$(dirname "${BASH_SOURCE[0]}")/server.sh"
+[ -x "$B" ] || { echo "FAIL: no binary at $B; build it (cargo build --release) or set AGENTBOARD_TEST_BIN=<path>"; exit 1; }
 if "$B" --help 2>&1 | grep -q 'Data directory of the local board server'; then BACKEND=surreal; else BACKEND=sqlite; fi
 declare -A BOARD_URL=()
 BOARD_PIDS=()
