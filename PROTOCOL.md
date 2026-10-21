@@ -31,7 +31,7 @@ Inspect with `epic_get(E1)` (task counts, path, timeline) and `task_children(id)
 
 The two id spaces never mix: `E` ids go to epic verbs and `epic=`/`--epic`, `T` ids to task verbs and `parent=`; the wrong one is refused with a hint. A subtask must live in its parent's epic; a self-parent, a cycle and a cross-epic parent are errors (`agentboard parent T5 T3|none` re-parents). `dispatch` warns (never refuses) when a task's epic has a path and the target pane's cwd, as herdr reports it, is outside it.
 
-Create the task with `task_add(title, description, goal, priority, assignee, epic, parent)`. `description` holds everything the worker needs: repo path, files, situation, constraints. `goal` holds how to do it and the definition of done. Do not block — poll `task_get` or `board_brief` for status changes. When status is `review` or `done`, read `report` for the outcome.
+Create the task with `task_add(title, description, goal, priority, assignee, epic, parent, path, branch)`. `path` is the project root the work lives in (`~` expands, relative resolves against the server's cwd) and `branch` the git ref the worker starts on; the default `HEAD` (or an empty string) means leave the pane's checkout alone. Branch names are case-sensitive: only the literal `HEAD` means that, `head` is an ordinary branch name. `task_get` shows both as `path:` (`-` when unset) and `branch:`. `description` holds everything the worker needs: repo path, files, situation, constraints. `goal` holds how to do it and the definition of done. Do not block — poll `task_get` or `board_brief` for status changes. When status is `review` or `done`, read `report` for the outcome.
 
 ## Worker flow
 
@@ -62,7 +62,7 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 
 ## Editing a spec
 
-`agentboard edit T7|E3 ...` / `task_edit` / `epic_edit` amend a spec and are refused while the task is `working` with a live lease (the worker is reading it); free it with `agentboard status T7 ready` first. Each edit logs one `edit` event: short fields record the values, `title "old"->"new"` (title, assignee, path; each clipped to 80 chars, so a same-length change shows and the old text survives), `priority 100->7`, and long fields only the lengths, `description 812->830` (description, goal). A worker re-reading its task sees the spec moved in the timeline.
+`agentboard edit T7|E3 ...` / `task_edit` / `epic_edit` amend a spec and are refused while the task is `working` with a live lease (the worker is reading it); free it with `agentboard status T7 ready` first. Each edit logs one `edit` event: short fields record the values, `title "old"->"new"` (title, assignee, path, branch; each clipped to 80 chars, so a same-length change shows and the old text survives), `priority 100->7`, and long fields only the lengths, `description 812->830` (description, goal). A worker re-reading its task sees the spec moved in the timeline.
 
 ## Long text and truncation
 

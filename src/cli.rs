@@ -65,6 +65,12 @@ pub enum Cmd {
         /// Parent task (a subtask link), e.g. T1
         #[arg(long)]
         parent: Option<String>,
+        /// Project root the work lives in; ~ expands, a relative path resolves against the cwd
+        #[arg(long, allow_hyphen_values = true)]
+        path: Option<String>,
+        /// Git branch the worker starts on (default HEAD: leave the checkout alone)
+        #[arg(long, allow_hyphen_values = true)]
+        branch: Option<String>,
     },
     /// Epics: project-scoped groups of tasks (E1, E2...)
     Epic {
@@ -87,9 +93,12 @@ pub enum Cmd {
         /// Tasks only; empty clears it
         #[arg(long)]
         assignee: Option<String>,
-        /// Epics only: project root, normalised like `epic add`; empty clears it
+        /// Project root of a task or an epic, normalised like `add --path`; empty clears it
         #[arg(long, allow_hyphen_values = true)]
         path: Option<String>,
+        /// Tasks only: branch the worker starts on (default HEAD); empty means HEAD
+        #[arg(long, allow_hyphen_values = true)]
+        branch: Option<String>,
     },
     /// Set (or `none` to clear) a task's parent task
     Parent {

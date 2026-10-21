@@ -88,6 +88,8 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
             priority,
             epic,
             parent,
+            path,
+            branch,
         } => {
             let epic = epic.as_deref().map(store::parse_epic_id).transpose()?;
             let parent = parent.as_deref().map(tid).transpose()?;
@@ -104,6 +106,8 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
                 priority,
                 epic,
                 parent,
+                path: path.as_deref(),
+                branch: branch.as_deref(),
             };
             store::add(actor, &task)
         }
@@ -115,23 +119,23 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
             priority,
             assignee,
             path,
+            branch,
         } => match store::parse_ref(&id)? {
             store::Ref::Task(n) => {
-                if path.is_some() {
-                    return Err("--path is for epics; a task has no path".to_owned());
-                }
                 let edit = store::TaskEdit {
                     title: title.as_deref(),
                     description: description.as_deref(),
                     goal: goal.as_deref(),
                     priority,
                     assignee: assignee.as_deref(),
+                    path: path.as_deref(),
+                    branch: branch.as_deref(),
                 };
                 store::edit(actor, n, &edit).map_err(|e| e.to_string())
             }
             store::Ref::Epic(n) => {
-                if priority.is_some() || assignee.is_some() {
-                    return Err("--priority and --assignee are for tasks".to_owned());
+                if priority.is_some() || assignee.is_some() || branch.is_some() {
+                    return Err("--priority, --assignee and --branch are for tasks".to_owned());
                 }
                 let edit = store::EpicEdit {
                     title: title.as_deref(),

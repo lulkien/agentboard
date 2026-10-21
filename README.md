@@ -13,7 +13,7 @@ SurrealDB (`src/store/surreal/`):
 
     epics     id, title, description, goal, status, path, created_at, updated_at,
               completed_at                               -- E1, E2...; never leased
-    tasks     id, board, title, description, goal, status, assignee, priority, epic_id,
+    tasks     id, board, title, description, goal, path, branch, status, assignee, priority, epic_id,
               parent_id, needs, report, commit_ref, lease_until, created_at, updated_at,
               started_at, completed_at
     events    seq, task_id | epic_id, actor, kind, body, ts  -- append-only, one timeline
@@ -39,7 +39,7 @@ completion is one row; nothing is mutable history.
 
 | tool | cost | what it does |
 |---|---|---|
-| `task_add` | 1 line | create; returns `T7` (takes `title, description, goal, status, assignee, priority, epic, parent`) |
+| `task_add` | 1 line | create; returns `T7` (takes `title, description, goal, status, assignee, priority, epic, parent, path, branch`; `branch` defaults to `HEAD`, which leaves the pane's checkout alone; names are case-sensitive and only the literal `HEAD` means that, `head` is an ordinary branch) |
 | `task_list` | 1 line/task | open work, ordered by urgency |
 | `task_get` | ~10 lines | description, goal, timestamps, lease, report, note, last 8 events; long fields end in a `[truncated <field>: N of M chars ...]` marker, `full=true` returns them (and event bodies) whole |
 | `task_children` | 1 line/task | an epic id (`E3`) lists every task in it, a task id (`T7`) its subtasks: id, status, assignee, age, title |
@@ -48,7 +48,7 @@ completion is one row; nothing is mutable history.
 | `epic_get` | ~10 lines | status, path, task counts, description, goal, last 8 events; `full=true` unclipped |
 | `epic_update` | 1 line ack | set an epic `open`/`done`/`dropped`; closing is never automatic |
 | `epic_edit` | 1 line ack | amend title, description, goal, path (only the fields passed); logs old/new lengths |
-| `task_edit` | 1 line ack | amend title, description, goal, priority, assignee; refused while `working` with a live lease, because the worker is reading that text |
+| `task_edit` | 1 line ack | amend title, description, goal, priority, assignee, path, branch (`HEAD` leaves the pane's checkout alone); refused while `working` with a live lease, because the worker is reading that text |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |

@@ -155,7 +155,10 @@ impl Board for SurrealBoard {
     }
 }
 
-/// Bumped when the schema below changes; a board with another value is refused.
+/// Bumped when a change to the schema below is NOT readable by the previous
+/// version. Adding a field with a DEFAULT is compatible — old records read with
+/// the default and no board is refused — so `tasks.path` / `tasks.branch` did
+/// not move this marker.
 pub const SCHEMA_VERSION: i64 = 1;
 const NAMESPACE: &str = "agentboard";
 const DATABASE: &str = "board";
@@ -285,6 +288,8 @@ fn runtime() -> &'static Runtime {
 }
 
 /// Idempotent: `IF NOT EXISTS` on every definition, so a second run changes nothing.
+/// Re-applied by every write session, not only at first bootstrap: that is how a field
+/// added to this block reaches a board that already exists (see `session_with`).
 /// Ids are integers, as in the SQLite schema; `events` carries the SQLite CHECK
 /// that exactly one of `task_id` / `epic_id` is set.
 const SCHEMA: &str = "
@@ -309,6 +314,8 @@ DEFINE FIELD IF NOT EXISTS board ON tasks TYPE string DEFAULT 'main';
 DEFINE FIELD IF NOT EXISTS title ON tasks TYPE string;
 DEFINE FIELD IF NOT EXISTS description ON tasks TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS goal ON tasks TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS path ON tasks TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS branch ON tasks TYPE string DEFAULT 'HEAD';
 DEFINE FIELD IF NOT EXISTS status ON tasks TYPE string DEFAULT 'ready';
 DEFINE FIELD IF NOT EXISTS assignee ON tasks TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS priority ON tasks TYPE int DEFAULT 100;
@@ -504,6 +511,15 @@ fn session_with(
     let db = bounded(s, t, open_db(s))?;
     let found = bounded(s, t, marker_version(&db))?;
     let bootstrap = match found {
+        // The marker only says which schema generation the board is, not that every
+        // field of this build exists on it. Every write session (the lock is already
+        // held, so two processes never define at once) re-runs SCHEMA: `IF NOT EXISTS`
+        // makes it a no-op except for a field added since the board was created, so
+        // any call that writes is guaranteed to carry a new field. A read session
+        // skips the pass (it would pay a DDL round trip and, unlocked, race a
+        // writer); a record written before a field existed reads back through the
+        // serde defaults on its row type.
+        Some(v) if v == SCHEMA_VERSION && write => bounded(s, t, bootstrap(&db, s))?,
         Some(v) if v == SCHEMA_VERSION => Bootstrap::Already,
         Some(v) => return Err(schema_refusal(Some(v), s)),
         None => {
@@ -833,6 +849,66 @@ mod tests {
     }
 
     #[test]
+    fn a_write_session_adds_a_field_the_existing_board_lacks() {
+        let Some(srv) = start_server("additive_field") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        let fields = |c: &Conn| -> String {
+            runtime().block_on(async {
+                let info: Option<serde_json::Value> =
+                    c.db.query("INFO FOR TABLE tasks")
+                        .await
+                        .unwrap()
+                        .take(0)
+                        .unwrap();
+                info.unwrap()["fields"].to_string()
+            })
+        };
+        assert!(fields(&c).contains("\"branch\""), "fresh board has branch");
+        // Make it a board from before the field existed: marker intact, field gone.
+        runtime().block_on(async {
+            c.db.query("REMOVE FIELD branch ON tasks")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        assert!(!fields(&c).contains("\"branch\""), "field removed");
+        // A read session leaves the board alone ...
+        let r = connect(&srv.settings).unwrap();
+        assert_eq!(r.bootstrap, Bootstrap::Already);
+        assert!(!fields(&r).contains("\"branch\""), "a read must not define");
+        // ... a write session defines it, and a row then keeps the value.
+        let w = session_with(
+            &srv.settings,
+            &serve::Timing::default(),
+            None,
+            lock::DEFAULT_WAIT,
+            true,
+        )
+        .unwrap();
+        assert_eq!(w.bootstrap, Bootstrap::Already);
+        assert!(
+            fields(&c).contains("\"branch\""),
+            "write session re-defined branch"
+        );
+        let kept: Option<String> = runtime().block_on(async {
+            w.db.query("CREATE tasks:99 SET title = 't', created_at = 1, updated_at = 1, branch = 'feat/x'")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+            let mut r =
+                w.db.query("SELECT VALUE branch FROM tasks:99")
+                    .await
+                    .unwrap();
+            r.take(0).unwrap()
+        });
+        assert_eq!(kept.as_deref(), Some("feat/x"));
+    }
+
+    #[test]
     fn a_wrong_or_missing_marker_is_refused_with_the_exact_line() {
         let Some(srv) = start_server("marker") else {
             return;
@@ -851,7 +927,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "board schema mismatch: found schema version 99, want version 1. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {url}'), move the data dir aside (mv {dir} {dir}.old) and retry."
+                "board schema mismatch: found schema version 99, want version {SCHEMA_VERSION}. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {url}'), move the data dir aside (mv {dir} {dir}.old) and retry."
             )
         );
         println!("wrong-marker refusal: {err}");

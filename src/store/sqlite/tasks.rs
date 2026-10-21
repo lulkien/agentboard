@@ -4,7 +4,7 @@ use super::{
 };
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
-use crate::store::text::held_text;
+use crate::store::text::{held_text, norm_branch, normalize_path, workdir_text};
 use rusqlite::{OptionalExtension, params};
 
 /// The epic a new task lands in: the explicit one, else the parent's. An
@@ -49,7 +49,13 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         priority,
         epic,
         parent,
+        path,
+        branch,
     } = *task;
+    let cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
+    let home = std::env::var("HOME").ok();
+    let path = normalize_path(path.unwrap_or(""), &cwd, home.as_deref());
+    let branch = norm_branch(branch.unwrap_or("")).map_err(|e| format!("add: {e}"))?;
     let mut conn = open()?;
     // Read the parent/epic and insert in one write transaction: the invariant
     // must hold for the row that lands, not for the row we looked at.
@@ -64,8 +70,8 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let lease = (status == "working").then(|| now + DEFAULT_TTL_S * 1000);
     let started = (status == "working").then_some(now);
     tx.execute(
-        "INSERT INTO tasks(title,description,goal,status,assignee,priority,epic_id,parent_id,created_at,updated_at,lease_until,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-        params![title, description, goal, status, assignee, priority, epic, parent, now, now, lease, started],
+        "INSERT INTO tasks(title,description,goal,path,branch,status,assignee,priority,epic_id,parent_id,created_at,updated_at,lease_until,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        params![title, description, goal, path, branch, status, assignee, priority, epic, parent, now, now, lease, started],
     )
     .map_err(|e| format!("add: {e}"))?;
     let id = tx.last_insert_rowid();
@@ -83,9 +89,11 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         && e.goal.is_none()
         && e.priority.is_none()
         && e.assignee.is_none()
+        && e.path.is_none()
+        && e.branch.is_none()
     {
         return Err(String::from(
-            "nothing to edit: pass title, description, goal, priority or assignee",
+            "nothing to edit: pass title, description, goal, priority, assignee, path or branch",
         )
         .into());
     }
@@ -110,6 +118,24 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         cur.assignee.as_deref().unwrap_or(""),
         e.assignee,
     );
+    // A path is normalised the way an epic's is; an empty one clears it.
+    let path_value = e.path.map(|raw| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let home = std::env::var("HOME").ok();
+        normalize_path(raw, &cwd, home.as_deref())
+    });
+    let path = value_change(&mut diffs, "path", &cur.path, path_value.as_deref());
+    // Refused before any write: a branch git cannot check out must not land.
+    let branch_value = match e.branch {
+        Some(raw) => norm_branch(raw).map_err(|err| ClaimError::Other(format!("edit: {err}")))?,
+        None => cur.branch.clone(),
+    };
+    let branch = value_change(
+        &mut diffs,
+        "branch",
+        &cur.branch,
+        Some(branch_value.as_str()),
+    );
     let priority = e.priority.unwrap_or(cur.priority);
     if priority != cur.priority {
         diffs.push(format!("priority {}->{priority}", cur.priority));
@@ -118,11 +144,13 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         return Ok(format!("{} unchanged", short(id)));
     }
     tx.execute(
-        "UPDATE tasks SET title=?, description=?, goal=?, assignee=?, priority=?, updated_at=? WHERE id=?",
+        "UPDATE tasks SET title=?, description=?, goal=?, path=?, branch=?, assignee=?, priority=?, updated_at=? WHERE id=?",
         params![
             title,
             description,
             goal,
+            path,
+            branch,
             (!assignee.is_empty()).then_some(assignee),
             priority,
             now_ms(),
@@ -250,6 +278,9 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
             ttl_s / 60,
             r.title
         );
+        // Where the work lives, before the prompt: a worker that checks out the
+        // wrong tree wastes the whole lease.
+        out.push_str(&workdir_text(&r));
         // claim is the worker's entry point, not a display path: the prompt
         // arrives byte-for-byte (newlines, fences) and uncapped.
         out.push_str(&field(

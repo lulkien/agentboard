@@ -69,6 +69,16 @@ fn check_schema(conn: &Connection) -> Result<(), String> {
             p.display()
         ));
     }
+    // A board written before tasks carried a repo path and a branch is refused
+    // the same way: the columns cannot be added to an existing file, and a
+    // half-migrated board is worse than a fresh one.
+    if !(tasks.iter().any(|c| c == "path") && tasks.iter().any(|c| c == "branch")) {
+        let p = db_path();
+        return Err(format!(
+            "this board file predates task path/branch and cannot be used; move it aside and start fresh (there is no migration): mv {0} {0}.old",
+            p.display()
+        ));
+    }
     Ok(())
 }
 
@@ -104,7 +114,7 @@ fn log_event(
 
 pub(super) use super::text::{TaskRow as Row, field_names, text_change, value_change};
 
-const COLS: &str = "id,status,assignee,needs,title,description,goal,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id";
+const COLS: &str = "id,status,assignee,needs,title,description,goal,path,branch,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id";
 
 fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
     Ok(Row {
@@ -115,17 +125,19 @@ fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         title: r.get(4)?,
         description: r.get(5)?,
         goal: r.get(6)?,
-        lease_until: r.get(7)?,
-        updated_at: r.get(8)?,
-        created_at: r.get(9)?,
-        started_at: r.get(10)?,
-        completed_at: r.get(11)?,
-        report: r.get(12)?,
-        note: r.get(13)?,
-        commit_ref: r.get(14)?,
-        priority: r.get(15)?,
-        epic_id: r.get(16)?,
-        parent_id: r.get(17)?,
+        path: r.get(7)?,
+        branch: r.get(8)?,
+        lease_until: r.get(9)?,
+        updated_at: r.get(10)?,
+        created_at: r.get(11)?,
+        started_at: r.get(12)?,
+        completed_at: r.get(13)?,
+        report: r.get(14)?,
+        note: r.get(15)?,
+        commit_ref: r.get(16)?,
+        priority: r.get(17)?,
+        epic_id: r.get(18)?,
+        parent_id: r.get(19)?,
     })
 }
 
@@ -290,6 +302,31 @@ mod tests {
         check_schema(&c).unwrap();
         c.execute_batch(SCHEMA).unwrap();
         check_schema(&c).unwrap();
+    }
+
+    #[test]
+    fn a_board_without_task_path_and_branch_is_refused_untouched() {
+        // Epics-era shape, but before tasks carried a repo path and a branch.
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE tasks(id INTEGER PRIMARY KEY, epic_id INTEGER, parent_id INTEGER);
+             CREATE TABLE epics(id INTEGER PRIMARY KEY);
+             CREATE TABLE events(seq INTEGER PRIMARY KEY, task_id INTEGER, epic_id INTEGER);",
+        )
+        .unwrap();
+        let err = check_schema(&c).unwrap_err();
+        assert!(
+            err.contains("predates task path/branch") && err.contains("mv "),
+            "{err}"
+        );
+        let tables: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 3, "the check must not create anything");
     }
 
     #[test]

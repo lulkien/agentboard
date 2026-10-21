@@ -12,16 +12,22 @@ pub struct NewTask<'a> {
     pub priority: i64,
     pub epic: Option<i64>,
     pub parent: Option<i64>,
+    /// Project root; normalised like an epic's. Empty or absent = not repo-bound.
+    pub path: Option<&'a str>,
+    /// Git ref the worker starts on; empty or absent = `HEAD`.
+    pub branch: Option<&'a str>,
 }
 
 /// New spec text for a task; `None` leaves a field alone. An empty `assignee`
-/// clears it.
+/// or `path` clears it; an empty `branch` means `HEAD`.
 pub struct TaskEdit<'a> {
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
     pub goal: Option<&'a str>,
     pub priority: Option<i64>,
     pub assignee: Option<&'a str>,
+    pub path: Option<&'a str>,
+    pub branch: Option<&'a str>,
 }
 
 /// Why a claim failed. `Held` is the legitimate refusal (somebody holds the

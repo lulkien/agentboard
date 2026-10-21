@@ -494,6 +494,11 @@ def main():
     print(("PASS " if ok else "FAIL ") + "the refused edit left the row and timeline byte-identical")
     s.call("task_update", id=ed, status="ready")
     expect("edit lands once the manager frees the task", s.call("task_edit", id=ed, goal="moved"), f"{ed} edited goal")
+    wd = s.call("task_add", title="workdir", path="/tmp/agentboard-wd/", branch="feat/x").split()[0]
+    expect("task_add with path and branch: task_get shows both", s.call("task_get", id=wd), "path: /tmp/agentboard-wd", "branch: feat/x")
+    expect("task_edit of the branch reports it", s.call("task_edit", id=wd, branch="HEAD"), f"{wd} edited branch")
+    expect("the branch edit logs the old->new diff", s.call("task_get", id=wd), "branch: HEAD", "branch \"feat/x\"->\"HEAD\"")
+    expect("a bad branch is refused", refusal_text(lambda: s.call("task_edit", id=wd, branch="a b")), "bad branch")
     expect("task_edit refuses an epic id", refusal_text(lambda: s.call("task_edit", id=epic_id, title="x")), "is an epic id")
     expect("epic_edit returns the changed field list", s.call("epic_edit", id=epic_id, title="epic: shipped", path="/tmp/agentboard-no-such-project/sub/"), f"{epic_id} edited title, path #", "warning: path /tmp/agentboard-no-such-project/sub does not exist")
     expect("epic edit shows in the epic and its timeline", s.call("epic_get", id=epic_id), "title: epic: shipped", "path: /tmp/agentboard-no-such-project/sub", "title \"epic: ship it\"->\"epic: shipped\", path \"/tmp/agentboard-no-such-project\"->\"/tmp/agentboard-no-such-project/sub\"")

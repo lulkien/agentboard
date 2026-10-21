@@ -87,6 +87,12 @@ pub struct AddArgs {
     /// Parent task id, e.g. T3 (a subtask link, such as a fix task under the review that found it).
     #[serde(default)]
     pub parent: Option<String>,
+    /// Project root the work lives in. `~` expands, a relative path resolves against the server's cwd, it need not exist yet.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Git ref the worker starts on. Default HEAD leaves the pane's checkout alone; empty string means HEAD.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -144,6 +150,12 @@ pub struct EditArgs {
     /// Empty string clears it.
     #[serde(default)]
     pub assignee: Option<String>,
+    /// Project root the work lives in. Empty string clears it. `~` expands, a relative path resolves against the server's cwd, it need not exist yet.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Git ref the worker starts on. Default HEAD leaves the pane's checkout alone; empty string means HEAD.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -302,7 +314,7 @@ impl Board {
 
     #[tool(
         name = "task_add",
-        description = "Create a task. description holds everything the worker needs (repo path, files, situation); goal holds how to do it and the definition of done. epic (E3) says which epic it belongs to; parent (T7) makes it a subtask and inherits the parent's epic. Returns its short id (T7).",
+        description = "Create a task. description holds everything the worker needs (repo path, files, situation); goal holds how to do it and the definition of done. epic (E3) says which epic it belongs to; parent (T7) makes it a subtask and inherits the parent's epic. path is the project root and branch the git ref the worker starts on (default HEAD leaves the pane's checkout alone). Returns its short id (T7).",
         annotations(title = "Add task", read_only_hint = false, destructive_hint = false)
     )]
     async fn task_add(
@@ -332,6 +344,8 @@ impl Board {
                     priority: a.priority.unwrap_or(100),
                     epic,
                     parent,
+                    path: a.path.as_deref(),
+                    branch: a.branch.as_deref(),
                 };
                 store::add(&actor(), &task)
             })
@@ -449,7 +463,7 @@ impl Board {
 
     #[tool(
         name = "task_edit",
-        description = "Amend a task's spec: title, description, goal, priority, assignee (only the fields you pass). Logs an `edit` event with old/new lengths. Refused while the task is working with a live lease (the worker is reading it); the manager frees it with task_update status=ready. Returns the changed field names.",
+        description = "Amend a task's spec: title, description, goal, priority, assignee, path, branch (only the fields you pass). Logs an `edit` event with old/new lengths. Refused while the task is working with a live lease (the worker is reading it); the manager frees it with task_update status=ready. Returns the changed field names.",
         annotations(title = "Edit task", read_only_hint = false, destructive_hint = false)
     )]
     async fn task_edit(
@@ -464,6 +478,8 @@ impl Board {
                 goal: a.goal.as_deref(),
                 priority: a.priority,
                 assignee: a.assignee.as_deref(),
+                path: a.path.as_deref(),
+                branch: a.branch.as_deref(),
             };
             store::edit(&actor(), id, &edit)
         })

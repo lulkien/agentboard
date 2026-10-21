@@ -16,7 +16,8 @@ use super::{Db, block_on, db_err, session};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
-    self, EpicRow, EventRow, TaskRow, field_names, held_text, text_change, value_change,
+    self, EpicRow, EventRow, TaskRow, field_names, held_text, norm_branch, normalize_path,
+    text_change, value_change, workdir_text,
 };
 use crate::store::{DEFAULT_TTL_S, Ref, STATUS_LIST, norm, now_ms, short, short_epic};
 use serde::Deserialize;
@@ -32,6 +33,14 @@ pub(super) struct Row {
     pub(super) title: String,
     pub(super) description: String,
     pub(super) goal: String,
+    /// Absent on a record written before the column existed: reads as unbound.
+    /// (The field is added to an existing board by the idempotent DEFINE in the
+    /// schema; no record is rewritten and nothing is refused.)
+    #[serde(default)]
+    pub(super) path: String,
+    /// Absent on such a record: reads as `HEAD`.
+    #[serde(default = "head_branch")]
+    pub(super) branch: String,
     pub(super) lease_until: Option<i64>,
     pub(super) updated_at: i64,
     pub(super) created_at: i64,
@@ -46,6 +55,11 @@ pub(super) struct Row {
 }
 
 const SELECT_TASK: &str = "SELECT meta::id(id) AS tid, * FROM tasks";
+
+/// The `branch` a record written before the field existed reads as.
+fn head_branch() -> String {
+    "HEAD".to_owned()
+}
 
 pub(super) async fn fetch_opt(db: &Db, id: i64) -> Result<Option<Row>, String> {
     let mut r = db
@@ -166,6 +180,8 @@ impl From<Row> for TaskRow {
             title: r.title,
             description: r.description,
             goal: r.goal,
+            path: r.path,
+            branch: r.branch,
             lease_until: r.lease_until,
             updated_at: r.updated_at,
             created_at: r.created_at,
@@ -227,7 +243,13 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         priority,
         epic,
         parent,
+        path,
+        branch,
     } = *task;
+    let cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
+    let home = std::env::var("HOME").ok();
+    let path = normalize_path(path.unwrap_or(""), &cwd, home.as_deref());
+    let branch = norm_branch(branch.unwrap_or("")).map_err(|e| format!("add: {e}"))?;
     let s = session(true)?;
     block_on(async {
         let epic = resolve_epic(&s.db, epic, parent).await?;
@@ -238,7 +260,8 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         let lease = (status == "working").then(|| now + DEFAULT_TTL_S * 1000);
         let started = (status == "working").then_some(now);
         let mut content = json!({
-            "title": title, "description": description, "goal": goal, "status": status,
+            "title": title, "description": description, "goal": goal,
+            "path": path, "branch": branch, "status": status,
             "priority": priority, "created_at": now, "updated_at": now,
         });
         let o = content.as_object_mut().expect("object");
@@ -277,9 +300,11 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         && e.goal.is_none()
         && e.priority.is_none()
         && e.assignee.is_none()
+        && e.path.is_none()
+        && e.branch.is_none()
     {
         return Err(String::from(
-            "nothing to edit: pass title, description, goal, priority or assignee",
+            "nothing to edit: pass title, description, goal, priority, assignee, path or branch",
         )
         .into());
     }
@@ -302,6 +327,26 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
             cur.assignee.as_deref().unwrap_or(""),
             e.assignee,
         );
+        // A path is normalised the way an epic's is; an empty one clears it. A
+        // branch git could not check out is refused before any write.
+        let path_value = e.path.map(|raw| {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let home = std::env::var("HOME").ok();
+            normalize_path(raw, &cwd, home.as_deref())
+        });
+        let path = value_change(&mut diffs, "path", &cur.path, path_value.as_deref());
+        let branch_value = match e.branch {
+            Some(raw) => {
+                norm_branch(raw).map_err(|err| ClaimError::Other(format!("edit: {err}")))?
+            }
+            None => cur.branch.clone(),
+        };
+        let branch = value_change(
+            &mut diffs,
+            "branch",
+            &cur.branch,
+            Some(branch_value.as_str()),
+        );
         let priority = e.priority.unwrap_or(cur.priority);
         if priority != cur.priority {
             diffs.push(format!("priority {}->{priority}", cur.priority));
@@ -314,6 +359,8 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         assign(&mut tx, &mut sets, "title", Some(title.into()));
         assign(&mut tx, &mut sets, "description", Some(description.into()));
         assign(&mut tx, &mut sets, "goal", Some(goal.into()));
+        assign(&mut tx, &mut sets, "path", Some(path.into()));
+        assign(&mut tx, &mut sets, "branch", Some(branch.into()));
         assign(
             &mut tx,
             &mut sets,
@@ -454,6 +501,9 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
                 ttl_s / 60,
                 r.title
             );
+            // Where the work lives, before the prompt: a worker that checks out
+            // the wrong tree wastes the whole lease.
+            out.push_str(&workdir_text(&TaskRow::from(r.clone())));
             // claim is the worker's entry point, not a display path: the prompt
             // arrives byte-for-byte (newlines, fences) and uncapped.
             out.push_str(&field(

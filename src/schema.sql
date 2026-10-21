@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS tasks(
   title        TEXT NOT NULL,
   description  TEXT NOT NULL DEFAULT '',      -- context: repo, files, situation
   goal         TEXT NOT NULL DEFAULT '',      -- how to do it + definition of done
+  path         TEXT NOT NULL DEFAULT '',      -- absolute project root; '' = not repo-bound
+  branch       TEXT NOT NULL DEFAULT 'HEAD',  -- git ref the worker starts on; HEAD = leave the checkout alone
   status       TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|needs_fix|review|done|dropped
   assignee     TEXT,
   priority     INTEGER NOT NULL DEFAULT 100,

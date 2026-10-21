@@ -20,6 +20,10 @@ pub struct TaskRow {
     pub title: String,
     pub description: String,
     pub goal: String,
+    /// Absolute project root the work lives in; '' = not repo-bound.
+    pub path: String,
+    /// Git ref the worker starts on; HEAD = leave the pane's checkout alone.
+    pub branch: String,
     pub lease_until: Option<i64>,
     pub updated_at: i64,
     pub created_at: i64,
@@ -245,6 +249,31 @@ pub fn path_note(path: &str) -> &'static str {
     }
 }
 
+/// The branch a task starts on: trimmed, and `''` means `HEAD` (start on
+/// whatever the pane has checked out). A name git could not check out is refused
+/// here, so the CLI and the MCP server share one rule and one message.
+pub fn norm_branch(raw: &str) -> Result<String, String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Ok("HEAD".to_owned());
+    }
+    let bad = t.starts_with('-')
+        || t.chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "~^:?*[\\".contains(c));
+    if bad {
+        return Err(format!(
+            "bad branch {raw:?}: a git ref cannot start with '-' or hold whitespace, control characters or any of ~^:?*[\\"
+        ));
+    }
+    Ok(t.to_owned())
+}
+
+/// A stored branch for display: an empty value (a row written before branches
+/// existed) reads as `HEAD`.
+pub fn shown_branch(branch: &str) -> &str {
+    if branch.is_empty() { "HEAD" } else { branch }
+}
+
 // ---- tasks -------------------------------------------------------------------------
 
 /// The refusal for a task somebody holds: who, the lease, and the manager's way out.
@@ -364,6 +393,12 @@ pub fn get_text(
         r.priority
     );
     out.push_str(&format!("title: {}\n", r.title));
+    if r.path.is_empty() {
+        out.push_str("path: -\n");
+    } else {
+        out.push_str(&format!("path: {}{}\n", r.path, path_note(&r.path)));
+    }
+    out.push_str(&format!("branch: {}\n", shown_branch(&r.branch)));
     if let (Some(e), Some(epic)) = (r.epic_id, epic) {
         out.push_str(&format!(
             "epic: {} {}{}\n",
@@ -424,6 +459,16 @@ pub fn get_text(
     }
     out.push_str(events);
     out.trim_end().to_owned()
+}
+
+/// The one line a claim hands the worker about where the work lives, or "" when
+/// the task is not repo-bound: there is nothing for it to check out.
+pub fn workdir_text(r: &TaskRow) -> String {
+    if r.path.is_empty() {
+        String::new()
+    } else {
+        format!("path: {} [branch {}]\n", r.path, shown_branch(&r.branch))
+    }
 }
 
 /// The hint a clipped task event names.
@@ -582,6 +627,21 @@ mod tests {
             normalize_path("~/x", Path::new(CWD), None),
             "/work/here/~/x"
         );
+    }
+
+    #[test]
+    fn a_branch_defaults_to_head_and_refuses_what_git_cannot_check_out() {
+        assert_eq!(norm_branch("").unwrap(), "HEAD");
+        assert_eq!(norm_branch("   ").unwrap(), "HEAD");
+        assert_eq!(norm_branch(" feat/x ").unwrap(), "feat/x");
+        assert_eq!(norm_branch("HEAD").unwrap(), "HEAD");
+        for bad in [
+            "-x", "feat x", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "a\tb",
+        ] {
+            assert!(norm_branch(bad).is_err(), "{bad} must be refused");
+        }
+        assert_eq!(shown_branch(""), "HEAD");
+        assert_eq!(shown_branch("feat/x"), "feat/x");
     }
 
     #[test]

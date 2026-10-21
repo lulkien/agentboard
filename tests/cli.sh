@@ -228,7 +228,19 @@ run $B --db "$X" edit T1 --title "typo title" --priority 7
 check "edit with every value equal to the current one writes nothing" $([ $rc -eq 0 ] && [ "$out" = "T1 unchanged" ] && [ "$($B --db "$X" get T1 --full)" = "$before" ] && echo 0 || echo 1)
 run $B --db "$X" edit T1;                                              check "edit with no field is a usage error, exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
 run $B --db "$X" edit T1 --title "  ";                                check "edit to an empty title: exit 1" $([ $rc -eq 1 ] && has "$err" "title cannot be empty" && echo 0 || echo 1)
-run $B --db "$X" edit T1 --path /x;                                    check "--path on a task: exit 1" $([ $rc -eq 1 ] && has "$err" "--path is for epics" && echo 0 || echo 1)
+run $B --db "$X" edit T1 --path "$S/proj/";                            check "edit --path on a task lands, trailing slash stripped" $([ $rc -eq 0 ] && has "$out" "T1 edited path" && echo 0 || echo 1)
+WD=$($B --db "$X" add "workdir" --path "$S/proj/" --branch feat/x | cut -d' ' -f1)
+run $B --db "$X" get $WD
+check "add --path --branch: get shows the path without its trailing slash and the branch" $(has "$out" "path: $S/proj" && ! has "$out" "path: $S/proj/" && has "$out" "branch: feat/x" && echo 0 || echo 1)
+NW=$($B --db "$X" add "no workdir" | cut -d' ' -f1)
+run $B --db "$X" get $NW
+check "a task added without them shows path: - and branch: HEAD" $(has "$out" "path: -" && has "$out" "branch: HEAD" && echo 0 || echo 1)
+run $B --db "$X" add "bad" --branch 'a b';                             check "--branch with a space: exit 1, bad branch" $([ $rc -eq 1 ] && has "$err" "bad branch" && echo 0 || echo 1)
+run $B --db "$X" edit $WD --branch HEAD;                               check "edit --branch lands" $([ $rc -eq 0 ] && has "$out" "$WD edited branch" && echo 0 || echo 1)
+run $B --db "$X" get $WD --full;                                       check "the branch edit logs the old->new diff" $(has "$out" "branch \"feat/x\"->\"HEAD\"" && echo 0 || echo 1)
+run $B --db "$X" edit $WD --path "";                                   check "empty --path clears it" $([ $rc -eq 0 ] && has "$out" "$WD edited path" && echo 0 || echo 1)
+run $B --db "$X" get $WD;                                              check "a cleared path shows path: -" $(has "$out" "path: -" && echo 0 || echo 1)
+run $B --db "$X" edit $WD --branch 'x~1';                              check "edit --branch with a bad ref: exit 1" $([ $rc -eq 1 ] && has "$err" "bad branch" && echo 0 || echo 1)
 run $B --db "$X" edit T99 --title x;                                   check "edit of an unknown task: exit 1" $([ $rc -eq 1 ] && has "$err" "no such task T99" && echo 0 || echo 1)
 run $B --actor=worker --db "$X" claim T1
 before=$($B --db "$X" get T1 --full)
@@ -243,6 +255,7 @@ run $B --db "$X" edit E1 --title "Epic two" --path "$S/proj/"
 check "edit of an epic: title and normalised path" $([ $rc -eq 0 ] && has "$out" "E1 edited title, path #" && echo 0 || echo 1)
 run $B --db "$X" epic get E1
 check "epic shows the new title, path and the edit event" $(has "$out" "title: Epic two" && has "$out" "path: $S/proj" && ! has "$out" "path: $S/proj/" && has "$out" "title \"Epic\"->\"Epic two\", path \"\"->\"$S/proj\"" && echo 0 || echo 1)
+run $B --db "$X" edit E1 --branch feat/x;                              check "--branch on an epic: exit 1, names tasks" $([ $rc -eq 1 ] && has "$err" "--branch are for tasks" && echo 0 || echo 1)
 run $B --db "$X" edit E1 --priority 3;                                 check "--priority on an epic: exit 1" $([ $rc -eq 1 ] && has "$err" "are for tasks" && echo 0 || echo 1)
 run $B --db "$X" edit E1;                                              check "epic edit with no field: exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
 run $B --db "$X" edit E1 --title "Epic two";                           check "epic edit with equal values: unchanged" $([ "$out" = "E1 unchanged" ] && echo 0 || echo 1)
