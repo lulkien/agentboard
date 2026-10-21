@@ -17,7 +17,7 @@
 #   (n) cli      - `path` prints the data directory, a sqlite file / `--db <file>` is refused, a bad marker is one line
 #   (o) mcp      - serve refuses a wrong-kind board path; the MCP suite on the surreal build; a wait does
 #                  not block other tool calls
-#   (p) suites   - cli.sh and dispatch.sh against BOTH builds (each reads its backend off the binary
+#   (p) suites   - cli.sh, dispatch.sh, race.sh and wait.sh against BOTH builds (each reads its backend off the binary
 #                  and starts its own throwaway servers); mcp_client.py on the sqlite build
 # ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath|cli|mcp|suites)
 # runs one phase after the builds.
@@ -28,6 +28,7 @@ export AGENTBOARD_REQUIRE_SURREAL=1
 export AGENTBOARD_ACTOR=a
 unset AGENTBOARD_UNSAFE_NO_WRITE_LOCK AGENTBOARD_DB AGENTBOARD_SURREAL_URL AGENTBOARD_SURREAL_USER AGENTBOARD_SURREAL_PASS
 
+source tests/server.sh
 SURREAL=$(command -v surreal || true)
 [ -n "$SURREAL" ] || SURREAL=$HOME/.surrealdb/surreal
 if [ ! -x "$SURREAL" ]; then
@@ -73,14 +74,9 @@ want() { [ -z "${ONLY:-}" ] || [ "$ONLY" = "$1" ]; }
 new_server() {
   stop_server
   local n=$1
-  PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
   DIR=$T/$n
-  mkdir -p "$DIR"
-  setsid "$SURREAL" db start --no-banner --log warn --bind "127.0.0.1:$PORT" \
-    --username root --password root "surrealkv://$DIR/data" >"$DIR/server.log" 2>&1 &
-  SERVER_PID=$!
-  for _ in $(seq 1 100); do curl -sf "http://127.0.0.1:$PORT/health" >/dev/null && break; sleep 0.1; done
-  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null || { echo "FAIL: server $n never came up"; cat "$DIR/server.log"; exit 1; }
+  start_server "$DIR"   # tests/server.sh, shared with tests/board.sh
+  PORT=$SERVER_PORT
   export AGENTBOARD_SURREAL_URL=127.0.0.1:$PORT AGENTBOARD_DB=$DIR/data
 }
 ab() { "$AB_BIN" "$@"; }
@@ -686,7 +682,7 @@ if want mcp; then
   # the whole MCP suite against the surreal build: a fresh server and a fresh data directory
   new_server mcp
   out=$(AGENTBOARD_TEST_BIN="$T/ab-surreal" AGENTBOARD_TEST_DB="$DIR/data" python3 tests/mcp_client.py 2>&1)
-  line=$(printf '%s\n' "$out" | rg '^[0-9]+/[0-9]+ checks passed$' | tail -1)
+  line=$(printf '%s\n' "$out" | rg '^[0-9]+/[0-9]+ checks passed \(backend: surreal\)$' | tail -1)
   echo "MCP suite on the surreal build: ${line:-no summary line}"
   printf '%s\n' "$out" | rg '^FAIL' | head -5
   n=${line%%/*}; m=${line#*/}; m=${m%% *}
@@ -768,21 +764,27 @@ fi
 # ---- (p) the shell suites on both builds ------------------------------------------------
 if want suites; then
   echo "== (p) suites: cli.sh and dispatch.sh on both builds, mcp_client.py on the sqlite build"
-  suite_line() { # label, expected backend word in the first PASS-free check, command...
-    local label=$1; shift
+  # The summary line names the backend the suite detected on its binary; it must be the
+  # one this phase meant to test, or a swapped binary would still print PASS.
+  suite_line() { # label, expected backend (surreal|sqlite), command...
+    local label=$1 want_backend=$2; shift 2
     local out line n m
     out=$("$@" 2>&1)
-    line=$(printf '%s\n' "$out" | rg '^[0-9]+/[0-9]+ (passed|checks passed)$' | tail -1)
+    line=$(printf '%s\n' "$out" | rg "^[0-9]+/[0-9]+ (passed|checks passed) \\(backend: $want_backend\\)\$" | tail -1)
     echo "$label: ${line:-no summary line}"
     printf '%s\n' "$out" | rg '^FAIL' | head -5
     n=${line%%/*}; m=${line#*/}; m=${m%% *}
     [ -n "$line" ] && [ "$n" = "$m" ]
   }
   for kind in surreal sqlite; do
-    suite_line "cli.sh on the $kind build" env AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/cli.sh;       check "cli.sh passes on the $kind build" $?
-    suite_line "dispatch.sh on the $kind build" env AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/dispatch.sh; check "dispatch.sh passes on the $kind build" $?
+    suite_line "cli.sh on the $kind build" $kind env AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/cli.sh;       check "cli.sh passes on the $kind build" $?
+    suite_line "dispatch.sh on the $kind build" $kind env AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/dispatch.sh; check "dispatch.sh passes on the $kind build" $?
+    out=$(AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/race.sh 2>&1); echo "race.sh on the $kind build: $(printf '%s\n' "$out" | tail -1)"
+    printf '%s\n' "$out" | tail -1 | rg -q "^claims=80 unique=80 .*\(backend: $kind\)\$"; check "race.sh: 80 unique claims on the $kind build" $?
+    out=$(AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/wait.sh 2>&1); echo "wait.sh on the $kind build: $(printf '%s\n' "$out" | tail -2 | tr '\n' ' ')"
+    printf '%s\n' "$out" | rg -q "^matched:" && printf '%s\n' "$out" | tail -1 | rg -q "^elapsed_ms=[0-9]+ \(backend: $kind\)\$"; check "wait.sh returns on the event on the $kind build" $?
   done
-  suite_line "mcp_client.py on the sqlite build" env AGENTBOARD_TEST_BIN="$T/ab-sqlite" AGENTBOARD_TEST_DB= python3 tests/mcp_client.py
+  suite_line "mcp_client.py on the sqlite build" sqlite env AGENTBOARD_TEST_BIN="$T/ab-sqlite" python3 tests/mcp_client.py
   check "MCP suite passes on the sqlite build" $?
 fi
 

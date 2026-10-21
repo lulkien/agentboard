@@ -109,8 +109,8 @@ Where the board lives:
 
 | | path |
 |---|---|
+| surreal (default) | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/surreal` (a directory) |
 | sqlite (opt-in) | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/board.db` |
-| surreal | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/surreal` (a directory) |
 
 Surreal settings, all optional: `$AGENTBOARD_SURREAL_URL` (`127.0.0.1:18720`, loopback
 only), `$AGENTBOARD_SURREAL_USER` and `$AGENTBOARD_SURREAL_PASS` (both default `root`).
@@ -222,11 +222,12 @@ binary on `PATH` or at `~/.surrealdb/surreal`; the sqlite test run needs none.
 `tests/mcp_client.py` needs `AGENTBOARD_TEST_DB` and `AGENTBOARD_SURREAL_URL` on the
 surreal build; `tests/surreal.sh` supplies both and builds both feature sets, a debug
 `surreal` binary, then restores the default release build (about a minute once warm).
-`tests/race.sh` and `tests/wait.sh` have not been moved to a throwaway server yet; do not
-run them against the default build.
+`tests/race.sh` and `tests/wait.sh` (8 concurrent claimers: 80 claims, 80 unique; the long-poll
+returns on the event) also own a throwaway board through `tests/board.sh`. No suite targets
+the default board: `mcp_client.py` refuses to run without a throwaway one.
 
 Static gates, run before every commit (no CI): `cargo fmt --check` and
-`cargo clippy --all-targets -- -D warnings`; both must print nothing.
+`cargo clippy --all-targets -- -D warnings`; both must print nothing (clippy: `Finished` only).
 
 Cold start: ~5 MB RSS, `brief` in <10 ms. One claim, process included, is ~1.4 ms.
 

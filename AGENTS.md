@@ -25,20 +25,24 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | `cargo build --release` | `Finished` |
 | `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 32 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
 | `cargo test --no-default-features --features sqlite` | `test result: ok. 22 passed` (needs no `surreal` binary) |
-| `bash tests/cli.sh` | `116/116 passed` (the default build; against the sqlite binary: `120/120 passed`) |
-| `bash tests/dispatch.sh` | `59/59 passed` (either build) |
+| `bash tests/cli.sh` | `116/116 passed (backend: surreal)` (against the sqlite binary: `120/120 passed (backend: sqlite)`) |
+| `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
 | `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `116/116`, `120/120`, `59/59`, `125/125` for them; about a minute once that cache is warm) |
-| `bash tests/race.sh`, `bash tests/wait.sh` | do not run on the default build yet: they set no `AGENTBOARD_SURREAL_URL` and would write to the live board (task T217). Sqlite-era expectations: `claims=80 unique=80`; ends with `elapsed_ms=...`, no `FAIL` |
+| `bash tests/race.sh` | `claims=80 unique=80 elapsed_ms=... (backend: surreal)` (`AGENTBOARD_TEST_BIN` picks the binary; sqlite prints `(backend: sqlite)`) |
+| `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
 | `cargo fmt --check` | no output |
 | `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 
 The suites drive `target/release/agentboard`: build release before running them.
-`tests/cli.sh` and `tests/dispatch.sh` read the backend off the binary
-(`AGENTBOARD_TEST_BIN` picks it) and start their own throwaway servers, so a bare run is
-safe. `python3 tests/mcp_client.py` is not: on the default build it needs
-`AGENTBOARD_TEST_DB` (a fresh data directory) and `AGENTBOARD_SURREAL_URL` (a throwaway
-server), or it talks to the server on the default port, which is the live board. Prefer
-`bash tests/surreal.sh`, which supplies both and prints `125/125 checks passed`. With a
+`tests/cli.sh`, `dispatch.sh`, `race.sh` and `wait.sh` source `tests/board.sh` (which sources
+`tests/server.sh`): it reads the backend off the binary (`AGENTBOARD_TEST_BIN` picks it),
+clears `AGENTBOARD_DB` and `AGENTBOARD_SURREAL_URL`, and starts throwaway servers on random
+loopback ports, so a bare run never touches the default board. Each prints
+`(backend: surreal|sqlite)` in its summary line, and `tests/surreal.sh` matches it.
+`python3 tests/mcp_client.py` cannot start a server itself: on the default build it refuses
+(exit 1, one line) unless `AGENTBOARD_TEST_DB` (a fresh data directory) and
+`AGENTBOARD_SURREAL_URL` (a throwaway server, never port 18720) are both set. Prefer
+`bash tests/surreal.sh`, which supplies both and prints `125/125 checks passed (backend: surreal)`. With a
 sqlite binary and no `AGENTBOARD_TEST_DB`, it uses `.probe/client.db`.
 Add or change behaviour with a test in the suite that owns that kind of check
 (`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`

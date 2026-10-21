@@ -12,12 +12,23 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The same suite runs against either build. AGENTBOARD_TEST_BIN picks the binary and
 # AGENTBOARD_TEST_DB the board it uses (a surreal data directory for the surreal build,
-# whose server and fresh directory the caller provides; tests/surreal.sh does). Left
-# unset: the default (surreal) build, which needs AGENTBOARD_TEST_DB and a server
-# (AGENTBOARD_SURREAL_URL), or a sqlite binary and a throwaway .probe/client.db.
+# whose server and fresh directory the caller provides; tests/surreal.sh does). It never
+# falls back to the default board: on the surreal build it refuses unless both
+# AGENTBOARD_TEST_DB and AGENTBOARD_SURREAL_URL name a throwaway server, and never accepts
+# the default port (the live board on a box that runs one). A sqlite binary with no
+# AGENTBOARD_TEST_DB uses a throwaway .probe/client.db.
 BIN = os.environ.get("AGENTBOARD_TEST_BIN") or os.path.join(ROOT, "target/release/agentboard")
 EXTERNAL_BOARD = bool(os.environ.get("AGENTBOARD_TEST_DB"))
 DB = os.environ.get("AGENTBOARD_TEST_DB") or os.path.join(ROOT, ".probe/client.db")
+BACKEND = "surreal" if "Data directory of the local board server" in subprocess.run(
+    [BIN, "--help"], capture_output=True, text=True).stdout else "sqlite"
+DEFAULT_PORT = "18720"
+if BACKEND == "surreal":
+    URL = os.environ.get("AGENTBOARD_SURREAL_URL", "")
+    if not EXTERNAL_BOARD or not URL or URL.rsplit(":", 1)[-1] == DEFAULT_PORT:
+        sys.exit("tests/mcp_client.py: refusing to run against the default board: the surreal build needs "
+                 "AGENTBOARD_TEST_DB=<fresh data dir> and AGENTBOARD_SURREAL_URL=<throwaway server, not :18720> "
+                 "(bash tests/surreal.sh sets both), or AGENTBOARD_TEST_BIN=<sqlite binary>")
 
 
 class Session:
@@ -509,7 +520,7 @@ def main():
 
     expect("session list", s.call("session_list"), "session")
     s.close()
-    print(f"\n{sum(checks)}/{len(checks)} checks passed")
+    print(f"\n{sum(checks)}/{len(checks)} checks passed (backend: {BACKEND})")
     return 0 if all(checks) else 1
 
 

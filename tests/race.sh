@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Concurrency probe: N workers drain a queue of tasks. Proves no task is
-# claimed twice and none is lost.
+# claimed twice and none is lost. Runs on a throwaway board (tests/board.sh),
+# never the default one; AGENTBOARD_TEST_BIN picks the binary.
 set -u
-B=$PWD/target/release/agentboard
-export AGENTBOARD_DB=$PWD/.probe/race.db
-rm -f "$AGENTBOARD_DB" "$AGENTBOARD_DB"-*
+cd "$(dirname "$0")/.."
+B=${AGENTBOARD_TEST_BIN:-$PWD/target/release/agentboard}
+S=$(mktemp -d /tmp/agentboard-race.XXXXXX)
+source tests/board.sh
+trap 'board_stop; rm -rf "$S"' EXIT
+use race
+export AGENTBOARD_DB=$BOARD
+echo "backend: $BACKEND, board: $BOARD${AGENTBOARD_SURREAL_URL:+ at $AGENTBOARD_SURREAL_URL}"
 W=8
 for i in $(seq 1 80); do $B add "task $i" >/dev/null; done
 
@@ -25,12 +31,14 @@ worker() {
 }
 
 start=$(date +%s%N)
-for w in $(seq 1 $W); do worker "$w" ".probe/race.$w" & done
-wait
+pids=
+for w in $(seq 1 $W); do worker "$w" "$S/race.$w" & pids="$pids $!"; done
+wait $pids   # not a bare wait: the throwaway server is a background job of this shell too
 end=$(date +%s%N)
 
-total=$(cat .probe/race.[0-9]* | grep -c '^T')
-uniq=$(cat .probe/race.[0-9]* | awk '{print $1}' | sort -u | wc -l)
-echo "claims=$total unique=$uniq elapsed_ms=$(( (end-start)/1000000 ))"
+total=$(cat "$S"/race.[0-9]* | grep -c '^T')
+uniq=$(cat "$S"/race.[0-9]* | awk '{print $1}' | sort -u | wc -l)
 echo "--- statuses after race:"
 $B ls --limit 100 | awk '{print $2}' | sort | uniq -c
+echo "claims=$total unique=$uniq elapsed_ms=$(( (end-start)/1000000 )) (backend: $BACKEND)"
+[ "$total" -eq 80 ] && [ "$uniq" -eq 80 ]

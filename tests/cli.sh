@@ -288,5 +288,5 @@ for mode in "" "serve"; do
   check "no-arg/serve (\"$mode\") answers JSON-RPC initialize" $(has "$reply" '"result"' && has "$reply" 'protocolVersion' && ! has "$reply" Usage && echo 0 || echo 1)
 done
 
-echo "$pass/$total passed"
+echo "$pass/$total passed (backend: $BACKEND)"
 [ "$pass" -eq "$total" ]

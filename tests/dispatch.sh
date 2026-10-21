@@ -232,5 +232,5 @@ run $B dispatch E1
 check "dispatch refuses an epic id" $([ $rc -eq 1 ] && has "$err" "E1 is an epic id" && echo 0 || echo 1)
 unset TMUX_LIVE
 
-echo "$pass/$total passed"
+echo "$pass/$total passed (backend: $BACKEND)"
 [ "$pass" -eq "$total" ]
