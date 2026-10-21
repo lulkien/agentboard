@@ -16,6 +16,17 @@ use write::guard;
 
 pub use api::Agent;
 pub use client::Client;
+pub use write::layout_apply;
+
+pub fn layout_export(c: &Client, tab: Option<&str>, pretty: bool) -> Result<String, String> {
+    let root = c.layout_export(tab)?;
+    if pretty {
+        serde_json::to_string(&root)
+    } else {
+        serde_json::to_string_pretty(&root)
+    }
+    .map_err(|e| e.to_string())
+}
 
 use crate::store::text::{SessionRow, ago};
 use crate::store::{self, short};

@@ -168,5 +168,24 @@ run env AGENTBOARD_HERDR_TIMEOUT_MS=500 $B wait "$T" --agent coder --status done
 check "with no board match the herdr error decides, naming the agent side" $([ $rc -eq 1 ] && [ -z "$out" ] && has "$err" "wait: agent watch failed: herdr: agent.list timed out" && echo 0 || echo 1)
 unset STUB_HANG
 
+# Layout CLI contracts; every apply targets the stub explicitly.
+stub
+M layout export --json
+layout=$out
+echo "layout export: $layout"
+check "layout export passes through herdr's ratio" $([ $rc -eq 0 ] && has "$out" '"ratio":0.37251' && echo 0 || echo 1)
+run bash -c 'printf "%s" "$1" | "$2" manager layout apply --tab s:t1 --root -' _ "$layout" "$B"
+check "layout apply accepts the exported tree on stdin" $([ $rc -eq 0 ] && has "$out" "applied layout to s:t1" && echo 0 || echo 1)
+check "layout apply sends the exported root and explicit tab" $(python3 -c 'import json,sys; rows=[json.loads(l) for l in open(sys.argv[1])]; p=rows[-1]["params"]; assert p=={"tab_id":"s:t1","root":json.loads(sys.argv[2])}' "$S/log" "$layout" && echo 0 || echo 1)
+stub
+M layout apply --tab s:t1
+check "layout apply without root is one line, exit 1, nothing sent" $([ $rc -eq 1 ] && has "$err" "requires --root" && [ "$(wc -l < "$S/err")" = 1 ] && [ -z "$(methods)" ] && echo 0 || echo 1)
+M layout apply --root "$layout"
+check "layout apply without tab refuses instead of guessing" $([ $rc -eq 1 ] && has "$err" "requires --tab" && [ -z "$(methods)" ] && echo 0 || echo 1)
+M layout apply --tab s:t1 --root '{'
+check "layout apply invalid JSON is one line and sends nothing" $([ $rc -eq 1 ] && has "$err" "invalid JSON" && [ "$(wc -l < "$S/err")" = 1 ] && [ -z "$(methods)" ] && echo 0 || echo 1)
+M layout apply --tab s:t1 --root '{}'
+check "layout apply empty tree is one line and sends nothing" $([ $rc -eq 1 ] && has "$err" "malformed or empty tree" && [ "$(wc -l < "$S/err")" = 1 ] && [ -z "$(methods)" ] && echo 0 || echo 1)
+
 echo "$pass/$total passed (backend: $BACKEND)"
 [ "$pass" -eq "$total" ]

@@ -158,7 +158,11 @@ impl Client {
     /// One method, pinned first, the whole of it (both connects, ping, request)
     /// bounded by the deadline: a server that dribbles bytes cannot stretch it.
     /// `Ok` is the `result` value.
-    pub(super) fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+    pub(super) fn call(
+        &self,
+        method: &str,
+        params: impl serde::Serialize,
+    ) -> Result<Value, String> {
         let end = Instant::now() + self.deadline;
         self.pin(end)?;
         let mut s = self.dial(end)?;
@@ -171,7 +175,7 @@ impl Client {
     pub(super) fn call_for(
         &self,
         method: &str,
-        params: Value,
+        params: impl serde::Serialize,
         wait: Duration,
     ) -> Result<Value, String> {
         self.pin(Instant::now() + self.deadline)?;
@@ -191,7 +195,7 @@ impl Client {
         s: &mut UnixStream,
         end: Instant,
         method: &str,
-        params: Value,
+        params: impl serde::Serialize,
     ) -> Result<Value, String> {
         let id = self.send(s, end, method, params)?;
         match self.read_line(s, end, method, &mut Vec::new())? {
@@ -207,10 +211,21 @@ impl Client {
         s: &mut UnixStream,
         end: Instant,
         method: &str,
-        params: Value,
+        params: impl serde::Serialize,
     ) -> Result<String, String> {
         let id = next_id();
-        let mut line = json!({"id": id, "method": method, "params": params}).to_string();
+        #[derive(serde::Serialize)]
+        struct Request<'a, P> {
+            id: &'a str,
+            method: &'a str,
+            params: P,
+        }
+        let mut line = serde_json::to_string(&Request {
+            id: &id,
+            method,
+            params,
+        })
+        .map_err(|e| format!("herdr: {method}: {}", one_line(&e.to_string())))?;
         line.push('\n');
 
         let left = end
@@ -272,7 +287,7 @@ impl Client {
     /// that hangs up mid-wait is an error, never a hang.
     pub(super) fn subscribe<T>(
         &self,
-        params: Value,
+        params: impl serde::Serialize,
         wait: Duration,
         cancel: &AtomicBool,
         mut on: impl FnMut(&Value) -> Option<T>,

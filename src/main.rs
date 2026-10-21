@@ -24,8 +24,8 @@ mod store;
 use clap::Parser;
 use clap::error::ErrorKind;
 use cli::{
-    Cli, Cmd, DiffCmd, EpicCmd, ManagerAgentCmd, ManagerCmd, ManagerEventsCmd, ManagerPaneCmd,
-    ManagerTabCmd, SessionsCmd,
+    Cli, Cmd, DiffCmd, EpicCmd, ManagerAgentCmd, ManagerCmd, ManagerEventsCmd, ManagerLayoutCmd,
+    ManagerPaneCmd, ManagerTabCmd, SessionsCmd,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -271,8 +271,32 @@ fn manager(tmux: bool, verb: ManagerCmd) -> Result<String, manager::Failure> {
     if tmux {
         return Err("--tmux: no tmux backend yet; only --herdr is implemented".into());
     }
+    if let ManagerCmd::Layout {
+        action: ManagerLayoutCmd::Apply { tab, root, .. },
+    } = &verb
+    {
+        if tab.as_deref().is_none_or(|s| s.trim().is_empty()) {
+            return Err("layout apply requires --tab <id>".into());
+        }
+        if root.is_none() {
+            return Err("layout apply requires --root <json|file|->".into());
+        }
+    }
     let c = manager::Client::connect()?;
     Ok(match verb {
+        ManagerCmd::Layout { action } => match action {
+            ManagerLayoutCmd::Export { tab, json } => {
+                manager::layout_export(&c, tab.as_deref(), json)?
+            }
+            ManagerLayoutCmd::Apply { tab, root, force } => {
+                return manager::layout_apply(
+                    &c,
+                    tab.as_deref().unwrap_or_default(),
+                    root.as_deref().unwrap_or_default(),
+                    force,
+                );
+            }
+        },
         ManagerCmd::Status { json } => manager::status(&c, json)?,
         ManagerCmd::Snapshot { json } => manager::snapshot(&c, json)?,
         ManagerCmd::Up {

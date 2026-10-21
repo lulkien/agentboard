@@ -19,6 +19,7 @@ type Script =
     Box<dyn Fn(&str, &Value) -> Option<Result<Value, (&'static str, &'static str)>> + Send + Sync>;
 
 struct Stub {
+    raw: Arc<Mutex<Vec<String>>>,
     dir: PathBuf,
     sock: PathBuf,
     log: Arc<Mutex<Vec<String>>>,
@@ -48,6 +49,8 @@ fn stub_streaming(name: &str, script: Script, stream: Option<Stream>) -> Stub {
     std::fs::create_dir_all(&dir).unwrap();
     let sock = dir.join("herdr.sock");
     let listener = UnixListener::bind(&sock).unwrap();
+    let raw = Arc::new(Mutex::new(Vec::new()));
+    let raw_thread = raw.clone();
     let log = Arc::new(Mutex::new(Vec::new()));
     let conns: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
     let reqs: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
@@ -55,6 +58,7 @@ fn stub_streaming(name: &str, script: Script, stream: Option<Stream>) -> Stub {
     let script = Arc::new(script);
     thread::spawn(move || {
         for conn in listener.incoming().flatten() {
+            let raw = raw_thread.clone();
             let (seen, by_conn, by_req, script, stream) = (
                 seen.clone(),
                 by_conn.clone(),
@@ -78,6 +82,7 @@ fn stub_streaming(name: &str, script: Script, stream: Option<Stream>) -> Stub {
                     let Ok(req) = serde_json::from_str::<Value>(&line) else {
                         continue;
                     };
+                    raw.lock().unwrap().push(line.clone());
                     let method = req["method"].as_str().unwrap_or("").to_owned();
                     seen.lock().unwrap().push(method.clone());
                     by_conn.lock().unwrap()[n].push(method.clone());
@@ -107,6 +112,7 @@ fn stub_streaming(name: &str, script: Script, stream: Option<Stream>) -> Stub {
         }
     });
     Stub {
+        raw,
         dir,
         sock,
         log,
@@ -971,5 +977,213 @@ fn events_wait_refuses_a_typo_and_an_unknown_agent_before_blocking() {
             .unwrap()
             .iter()
             .any(|r| r["method"] == "events.subscribe")
+    );
+}
+
+fn layout_stub(name: &str, status: &'static str, reject: bool) -> Stub {
+    stub(
+        name,
+        Box::new(move |method, _| {
+            Some(match method {
+                "ping" => Ok(pong(22)),
+                "layout.export" => {
+                    Ok(json!({"type":"layout_export", "layout":{"root":layout_tree()}}))
+                }
+                "agent.list" => Ok(json!({"agents":[agent("coder", "w1:p2", status)]})),
+                "tab.list" => Ok(
+                    json!({"tabs":[{"tab_id":"w1:t1","workspace_id":"w1","number":1,"label":"test","focused":true,"pane_count":2,"agent_status":status}]}),
+                ),
+                "layout.apply" if reject => Err(("invalid_layout", "cannot restore\nthis layout")),
+                _ => Ok(json!({"type":"ok"})),
+            })
+        }),
+    )
+}
+fn layout_tree() -> Value {
+    json!({"type":"split","direction":"right","ratio":0.37251,
+        "first":{"type":"pane","pane_id":"w1:p2"},"second":{"type":"pane","pane_id":"w1:p3"}})
+}
+#[test]
+fn layout_export_round_trip_and_apply_exact_bytes() {
+    let s = layout_stub("layout-roundtrip", "idle", false);
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &["layout", "export", "--tab", "w1:t1", "--json"],
+        &[],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let exported = text(&o.stdout);
+    assert_eq!(
+        serde_json::from_str::<Value>(&exported).unwrap(),
+        layout_tree()
+    );
+    let file = s.dir.join("root.json");
+    std::fs::write(&file, &exported).unwrap();
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "layout",
+            "apply",
+            "--tab",
+            "w1:t1",
+            "--root",
+            file.to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agentboard"))
+        .args([
+            "manager", "layout", "apply", "--tab", "w1:t1", "--root", "-",
+        ])
+        .env("AGENTBOARD_HERDR_SOCK", &s.sock)
+        .env("AGENTBOARD_DB", s.dir.join("stdin-board"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(exported.as_bytes())
+        .unwrap();
+    let stdin_out = child.wait_with_output().unwrap();
+    assert!(stdin_out.status.success(), "{}", text(&stdin_out.stderr));
+    let raw = s.raw.lock().unwrap();
+    let sent = raw
+        .iter()
+        .rev()
+        .find(|l| l.contains("layout.apply"))
+        .unwrap();
+    assert!(
+        sent.contains(&format!("\"root\":{}", exported.trim_end())),
+        "{sent}"
+    );
+    println!("exported: {exported}apply root bytes equal exported root bytes: true");
+    let reqs = s.reqs.lock().unwrap();
+    assert_eq!(reqs[0]["params"], json!({"tab_id":"w1:t1"}));
+    assert_eq!(
+        reqs.last().unwrap()["params"],
+        json!({"tab_id":"w1:t1","root":layout_tree()})
+    );
+    // Every method uses its own connection preceded by ping.
+    let log = s.log.lock().unwrap();
+    for (i, m) in log.iter().enumerate() {
+        if m != "ping" {
+            assert_eq!(log[i - 1], "ping");
+        }
+    }
+}
+#[test]
+fn layout_apply_empty_malformed_missing_root_and_missing_tab_send_nothing() {
+    let s = layout_stub("layout-invalid", "idle", false);
+    for root in [
+        "",
+        "{",
+        "null",
+        "{}",
+        "[]",
+        "{\"type\":\"split\"}",
+        "{\"type\":\"pane\",\"env\":[]}",
+    ] {
+        let (o, _) = manager(
+            &s.sock,
+            &s.dir,
+            &["layout", "apply", "--tab", "w1:t1", "--root", root],
+            &[],
+        );
+        assert_eq!(o.status.code(), Some(1));
+        assert!(one_line(&text(&o.stderr)), "{}", text(&o.stderr));
+    }
+    for args in [
+        vec!["layout", "apply", "--tab", "w1:t1"],
+        vec!["layout", "apply", "--root", "{\"type\":\"pane\"}"],
+    ] {
+        let (o, _) = manager(&s.sock, &s.dir, &args, &[]);
+        assert_eq!(o.status.code(), Some(1));
+        assert!(one_line(&text(&o.stderr)));
+    }
+    assert!(s.reqs.lock().unwrap().is_empty());
+}
+#[test]
+fn layout_apply_busy_guard_unknown_tab_and_herdr_error() {
+    let root = layout_tree().to_string();
+    for (name, status, tab, reject, code, message) in [
+        (
+            "layout-busy",
+            "working",
+            "w1:t1",
+            false,
+            3,
+            "status=working",
+        ),
+        (
+            "layout-blocked",
+            "blocked",
+            "w1:t1",
+            false,
+            3,
+            "status=blocked",
+        ),
+        ("layout-unknown", "idle", "w1:t404", false, 1, "unknown tab"),
+        (
+            "layout-error",
+            "idle",
+            "w1:t1",
+            true,
+            1,
+            "herdr: layout.apply: invalid_layout: cannot restore this layout",
+        ),
+    ] {
+        let s = layout_stub(name, status, reject);
+        let (o, _) = manager(
+            &s.sock,
+            &s.dir,
+            &["layout", "apply", "--tab", tab, "--root", &root],
+            &[],
+        );
+        assert_eq!(o.status.code(), Some(code));
+        let err = text(&o.stderr);
+        assert!(one_line(&err) && err.contains(message), "{err}");
+        assert_eq!(
+            s.reqs
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r["method"] == "layout.apply"),
+            reject
+        );
+    }
+}
+
+#[test]
+fn layout_apply_force_reports_guard_override_and_preserves_bytes() {
+    let s = layout_stub("layout-force", "working", false);
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "layout",
+            "apply",
+            "--tab",
+            "w1:t1",
+            "--root",
+            r#"{ "type" : "pane", "pane_id" : "w1:p2" }"#,
+            "--force",
+        ],
+        &[],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(text(&o.stdout).contains("forced: coder was working"));
+    assert!(
+        s.raw
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains(r#""root":{ "type" : "pane", "pane_id" : "w1:p2" }"#))
     );
 }

@@ -283,6 +283,11 @@ pub enum Cmd {
 
 #[derive(Subcommand)]
 pub enum ManagerCmd {
+    /// Capture or restore a tab layout
+    Layout {
+        #[command(subcommand)]
+        action: ManagerLayoutCmd,
+    },
     /// Board sessions joined with live herdr agents (registered, gone, unregistered)
     Status {
         #[arg(long)]
@@ -544,5 +549,25 @@ pub enum EpicCmd {
         status: String,
         #[arg(allow_hyphen_values = true)]
         note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ManagerLayoutCmd {
+    /// Export the tree exactly as herdr reports it
+    Export {
+        #[arg(long, allow_hyphen_values = true)]
+        tab: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replace an explicitly named tab's layout (JSON, file, or - for stdin)
+    Apply {
+        #[arg(long, allow_hyphen_values = true)]
+        tab: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        root: Option<String>,
+        #[arg(long)]
+        force: bool,
     },
 }

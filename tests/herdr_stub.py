@@ -75,6 +75,16 @@ def handle(method, p):
         return {"type": "pong", "version": "0.9.0", "protocol": 22}
     if method == "agent.list":
         return {"type": "agent_list", "agents": agents}
+    if method == "tab.list":
+        return {"tabs": [{"tab_id": "s:t1", "workspace_id": "s", "number": 1,
+                          "label": "test", "focused": True, "pane_count": 2, "agent_status": "idle"}]}
+    if method == "layout.export":
+        return {"type": "layout_export", "layout": {"root": {
+            "type": "split", "direction": "right", "ratio": 0.37251,
+            "first": {"type": "pane", "pane_id": "s:p1"},
+            "second": {"type": "pane", "pane_id": "s:p2"}}}}
+    if method == "layout.apply":
+        return {"type": "layout_apply", "layout": {"root": p["root"]}}
     if method == "tab.create":
         cwd[0] = p.get("cwd", "/repo")
         return {"type": "tab_created", "tab": {"tab_id": "s:t1"}, "root_pane": {"pane_id": "s:p1"}}

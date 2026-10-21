@@ -186,6 +186,84 @@ impl Client {
     }
 }
 
+/// Replace only the named tab, through the same busy-agent guard as down/renew.
+pub fn layout_apply(c: &Client, tab: &str, source: &str, force: bool) -> Result<String, Failure> {
+    if tab.trim().is_empty() {
+        return Err("layout apply requires a nonempty --tab".into());
+    }
+    let text = if source == "-" {
+        std::io::read_to_string(std::io::stdin()).map_err(|e| e.to_string())?
+    } else if std::path::Path::new(source).is_file() {
+        std::fs::read_to_string(source).map_err(|e| e.to_string())?
+    } else {
+        source.to_owned()
+    };
+    let root: Box<serde_json::value::RawValue> =
+        serde_json::from_str(&text).map_err(|e| format!("layout apply: invalid JSON: {e}"))?;
+    let value: Value = serde_json::from_str(root.get()).map_err(|e| e.to_string())?;
+    if !valid_tree(&value) {
+        return Err("layout apply: malformed or empty tree".into());
+    }
+    // The transport is NDJSON: literal line breaks in pretty input must be
+    // compacted. Single-line JSON (including export --json) stays byte-for-byte.
+    let root = if root.get().contains(['\n', '\r']) {
+        serde_json::value::RawValue::from_string(value.to_string()).map_err(|e| e.to_string())?
+    } else {
+        root
+    };
+    let live = c.agents()?;
+    let targets: Vec<&str> = live
+        .iter()
+        .filter(|a| a.tab_id == tab)
+        .map(|a| a.pane_id.as_str())
+        .collect();
+    let forced = guard(&live, "replace layout of", &targets, force)?;
+    // Requiring an existing tab prevents herdr's apply fallback from creating one.
+    if !c.tabs()?.iter().any(|t| t.tab_id == tab) {
+        return Err(format!("layout apply: unknown tab {tab:?}").into());
+    }
+    #[derive(serde::Serialize)]
+    struct Params<'a> {
+        tab_id: &'a str,
+        root: &'a serde_json::value::RawValue,
+    }
+    c.call(
+        "layout.apply",
+        Params {
+            tab_id: tab,
+            root: &root,
+        },
+    )?;
+    Ok(super::forced_note(
+        format!("applied layout to {tab}"),
+        &forced,
+    ))
+}
+
+fn valid_tree(v: &Value) -> bool {
+    match v.get("type").and_then(Value::as_str) {
+        Some("pane") => {
+            ["pane_id", "cwd", "label"]
+                .iter()
+                .all(|k| v.get(k).is_none_or(|x| x.is_null() || x.is_string()))
+                && v.get("command").is_none_or(|x| {
+                    x.is_null() || x.as_array().is_some_and(|a| a.iter().all(Value::is_string))
+                })
+                && v.get("env").is_none_or(|x| {
+                    x.as_object()
+                        .is_some_and(|o| o.values().all(Value::is_string))
+                })
+        }
+        Some("split") => {
+            matches!(v["direction"].as_str(), Some("right" | "down"))
+                && v["ratio"].as_f64().is_some_and(|r| r > 0.0 && r < 1.0)
+                && valid_tree(&v["first"])
+                && valid_tree(&v["second"])
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

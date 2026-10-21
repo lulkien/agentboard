@@ -65,6 +65,19 @@ fn take<T: DeserializeOwned>(method: &str, mut result: Value, key: &str) -> Resu
 }
 
 impl Client {
+    pub fn layout_export(&self, tab: Option<&str>) -> Result<Value, String> {
+        let params = tab.map_or_else(|| json!({}), |t| json!({"tab_id": t}));
+        let layout: Value = take(
+            "layout.export",
+            self.call("layout.export", params)?,
+            "layout",
+        )?;
+        layout
+            .get("root")
+            .cloned()
+            .ok_or_else(|| "herdr: layout.export: unexpected reply shape: no root".to_owned())
+    }
+
     /// The whole session as herdr reports it, left raw on purpose.
     pub fn snapshot(&self) -> Result<Value, String> {
         take(
