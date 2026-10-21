@@ -3,11 +3,13 @@
 # the checks mcp_client.py cannot make (it reads tool text, not stderr/exit).
 set -u
 cd "$(dirname "$0")/.."
-B=$PWD/target/release/agentboard
+B=${AGENTBOARD_TEST_BIN:-$PWD/target/release/agentboard}
 S=$(mktemp -d /tmp/agentboard-cli.XXXXXX)
-trap 'rm -rf "$S"' EXIT
+source tests/board.sh
+trap 'board_stop; rm -rf "$S"' EXIT
 # Every command names its DB; this default only catches one that forgets.
-export AGENTBOARD_DB=$S/stray.db AGENTBOARD_ACTOR=cli
+use stray
+export AGENTBOARD_DB=$BOARD AGENTBOARD_ACTOR=cli
 unset NO_COLOR
 pass=0 total=0
 rc=0 out="" err=""
@@ -19,7 +21,7 @@ check() { # check <name> <condition-result: 0 = ok>
 }
 has() { [[ "$1" == *"$2"* ]]; }
 
-D=$S/a.db
+use a; D=$BOARD
 # --flag=value equivalence for --db, --actor, --description
 run $B --db="$D" add one --description="d=1" --assignee=zed;           check "--db=PATH accepted" $rc
 run $B --db "$D" add two --description "d=2";                          check "--db PATH accepted" $rc
@@ -34,7 +36,7 @@ run $B --db "$D" add four --spec "via spec";                           check "--
 run $B --db "$D" get T4;                                               check "--spec is --description" $(has "$out" "via spec" && echo 0 || echo 1)
 run $B --db "$D" claim T1; run $B --db "$D" claim T2
 run $B --db "$D" claim T1;                                             check "claim of a held task exits 1 with the refusal text" $([ $rc -eq 1 ] && has "$err" "agentboard: T1 working by" && has "$err" "manager: agentboard status T1 ready" && echo 0 || echo 1)
-run $B --db "$S/empty.db" claim;                                       check "id-less claim on an empty board: exit 0, no ready tasks" $([ $rc -eq 0 ] && has "$out" "no ready tasks" && echo 0 || echo 1)
+use empty; run $B --db "$BOARD" claim; use a;                                       check "id-less claim on an empty board: exit 0, no ready tasks" $([ $rc -eq 0 ] && has "$out" "no ready tasks" && echo 0 || echo 1)
 run $B wait T1 T2 --db "$D" --status working;                          check "wait T1 T2 --db X after positionals: match exit 0" $rc
 run $B --db "$D" wait T1 T2 --status done --timeout 1;                 check "wait timeout exits 3" $([ $rc -eq 3 ] && echo 0 || echo 1)
 check "timeout first line" $(has "$out" "timeout:" && echo 0 || echo 1)
@@ -168,7 +170,7 @@ export PATH=$(echo $PATH | sed "s|$H:||")
 unset LOG
 
 # --- epics: own table, own ids, project path -----------------------------------
-E=$S/e.db
+use e; E=$BOARD
 mkdir -p "$S/proj"
 run $B --db "$E" epic add "Ship it" --path "$S/proj/" --goal "g"
 check "epic add with a path: E1 open, trailing slash stripped, existing dir => no warning" $([ $rc -eq 0 ] && [ "$out" = "E1 open $S/proj" ] && echo 0 || echo 1)
@@ -215,7 +217,7 @@ run $B --db "$E" brief
 check "brief: one EPIC line per open epic with progress and path, then tasks that belong to no epic" $(has "$out" "EPIC E1 0/3 done $S/proj Ship it" && has "$out" "EPIC E2 0/0 done $S/not/there/yet (does not exist) Later" && ! has "$out" "EPIC E5" && has "$out" "T4 " && ! has "$out" "T1 rdy" && echo 0 || echo 1)
 
 # --- edit: amend a spec, guarded by the lease -----------------------------------
-X=$S/x.db
+use x; X=$BOARD
 run $B --db "$X" epic add "Epic" --goal "g1"
 run $B --db "$X" add "typo titel" --description "old text" --epic E1 --assignee zed
 run $B --db "$X" edit T1 --title "typo title" --spec "new description" --priority 7
@@ -260,7 +262,9 @@ run $B --db "$X" edit E1 --priority 3;                                 check "--
 run $B --db "$X" edit E1;                                              check "epic edit with no field: exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
 run $B --db "$X" edit E1 --title "Epic two";                           check "epic edit with equal values: unchanged" $([ "$out" = "E1 unchanged" ] && echo 0 || echo 1)
 
-# a board file from before epics is refused, untouched, with the way out
+# a board file from before epics is refused, untouched, with the way out (sqlite only;
+# the surreal build's wrong-kind and schema refusals are phase (n)/(o) of surreal.sh)
+if [ "$BACKEND" = sqlite ]; then
 O=$S/old.db
 python3 - "$O" <<'PY'
 import sqlite3, sys
@@ -274,11 +278,13 @@ check "old board: exit 1, says it predates epics and how to move it aside" $([ $
 run $B --db "$O" add nope;                                             check "old board: writes refused too" $([ $rc -eq 1 ] && has "$err" "predates epics" && echo 0 || echo 1)
 check "old board file is byte-identical afterwards (never half-migrated)" $([ "$(sha1sum "$O" | cut -d' ' -f1)" = "$before" ] && [ ! -e "$O-wal" ] && echo 0 || echo 1)
 run $B --db "$O" path;                                                 check "'path' still works on an old board (it names the file to move)" $([ $rc -eq 0 ] && [ "$out" = "$O" ] && echo 0 || echo 1)
+fi
 
 # no args = MCP server on stdio, not a help print
 init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cli.sh","version":"0"}}}'
+use mcp
 for mode in "" "serve"; do
-  reply=$(printf '%s\n' "$init" | timeout 5 $B $mode --db "$S/mcp.db" 2>/dev/null | head -1)
+  reply=$(printf '%s\n' "$init" | timeout 5 $B $mode --db "$BOARD" 2>/dev/null | head -1)
   check "no-arg/serve (\"$mode\") answers JSON-RPC initialize" $(has "$reply" '"result"' && has "$reply" 'protocolVersion' && ! has "$reply" Usage && echo 0 || echo 1)
 done
 

@@ -5,11 +5,13 @@
 # stderr and wall time, none of which the MCP text channel carries.
 set -u
 cd "$(dirname "$0")/.."
-B=$PWD/target/release/agentboard
+B=${AGENTBOARD_TEST_BIN:-$PWD/target/release/agentboard}
 S=$(mktemp -d /tmp/agentboard-dispatch.XXXXXX)
-trap 'rm -rf "$S"' EXIT
+source tests/board.sh
+trap 'board_stop; rm -rf "$S"' EXIT
 mkdir "$S/bin"
-export AGENTBOARD_DB=$S/d.db AGENTBOARD_ACTOR=boss LOG=$S/calls
+use d
+export AGENTBOARD_DB=$BOARD AGENTBOARD_ACTOR=boss LOG=$S/calls
 # herdr: HERDR_MODE ok|fail|hang (hang = a shell with a backgrounded sleep, so a
 # kill that spares descendants leaves a live process; HERDR_AGENTS lists live agents).
 # tmux: TMUX_MODE ok|fail|hang|down, TMUX_LIVE names the sessions that exist. Every call is logged.

@@ -17,7 +17,9 @@
 #   (n) cli      - `path` prints the data directory, a sqlite file / `--db <file>` is refused, a bad marker is one line
 #   (o) mcp      - serve refuses a wrong-kind board path; the MCP suite on the surreal build; a wait does
 #                  not block other tool calls
-# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath|cli|mcp)
+#   (p) suites   - cli.sh and dispatch.sh against BOTH builds (each reads its backend off the binary
+#                  and starts its own throwaway servers); mcp_client.py on the sqlite build
+# ONLY=<phase> (parity|claim|ids|mutation|outage|release|firstuse|epics|sessions|render|dispatch|wait|waitdeath|cli|mcp|suites)
 # runs one phase after the builds.
 # Needs a `surreal` binary. A missing one is a failure, never a skip.
 set -u
@@ -51,11 +53,11 @@ check() { # name, status
 }
 
 echo "== build both feature sets"
-cargo build --release >/dev/null 2>&1 || { echo "FAIL: default build"; exit 1; }
+cargo build --release --no-default-features --features sqlite >/dev/null 2>&1 || { echo "FAIL: sqlite build"; exit 1; }
 cp target/release/agentboard "$T/ab-sqlite"
-cargo build --release --no-default-features --features surreal >/dev/null 2>&1 || { echo "FAIL: surreal build"; exit 1; }
+cargo build --release >/dev/null 2>&1 || { echo "FAIL: default (surreal) build"; exit 1; }
 cp target/release/agentboard "$T/ab-surreal"
-cargo build --release >/dev/null 2>&1 # leave target/release as the default build
+# target/release is left as the default build: surreal
 # The mutation switch is compiled into debug builds only. Kept under target/ so the
 # dependency build is paid once, apart from target/release and target/debug.
 DEBUG_TARGET=${AGENTBOARD_SURREAL_DEBUG_TARGET:-$PWD/target/surreal-debug}
@@ -761,6 +763,27 @@ sys.exit(0 if ok else 1)
 EOF
   BIN="$T/ab-surreal" python3 "$T/mcp_starve.py"; check "lock-blocked writes do not starve a read (2 workers, surreal build)" $?
   stop_server
+fi
+
+# ---- (p) the shell suites on both builds ------------------------------------------------
+if want suites; then
+  echo "== (p) suites: cli.sh and dispatch.sh on both builds, mcp_client.py on the sqlite build"
+  suite_line() { # label, expected backend word in the first PASS-free check, command...
+    local label=$1; shift
+    local out line n m
+    out=$("$@" 2>&1)
+    line=$(printf '%s\n' "$out" | rg '^[0-9]+/[0-9]+ (passed|checks passed)$' | tail -1)
+    echo "$label: ${line:-no summary line}"
+    printf '%s\n' "$out" | rg '^FAIL' | head -5
+    n=${line%%/*}; m=${line#*/}; m=${m%% *}
+    [ -n "$line" ] && [ "$n" = "$m" ]
+  }
+  for kind in surreal sqlite; do
+    suite_line "cli.sh on the $kind build" env AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/cli.sh;       check "cli.sh passes on the $kind build" $?
+    suite_line "dispatch.sh on the $kind build" env AGENTBOARD_TEST_BIN="$T/ab-$kind" bash tests/dispatch.sh; check "dispatch.sh passes on the $kind build" $?
+  done
+  suite_line "mcp_client.py on the sqlite build" env AGENTBOARD_TEST_BIN="$T/ab-sqlite" AGENTBOARD_TEST_DB= python3 tests/mcp_client.py
+  check "MCP suite passes on the sqlite build" $?
 fi
 
 echo

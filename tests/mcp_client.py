@@ -13,7 +13,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The same suite runs against either build. AGENTBOARD_TEST_BIN picks the binary and
 # AGENTBOARD_TEST_DB the board it uses (a surreal data directory for the surreal build,
 # whose server and fresh directory the caller provides; tests/surreal.sh does). Left
-# unset: the default sqlite build and a throwaway .probe/client.db, as always.
+# unset: the default (surreal) build, which needs AGENTBOARD_TEST_DB and a server
+# (AGENTBOARD_SURREAL_URL), or a sqlite binary and a throwaway .probe/client.db.
 BIN = os.environ.get("AGENTBOARD_TEST_BIN") or os.path.join(ROOT, "target/release/agentboard")
 EXTERNAL_BOARD = bool(os.environ.get("AGENTBOARD_TEST_DB"))
 DB = os.environ.get("AGENTBOARD_TEST_DB") or os.path.join(ROOT, ".probe/client.db")

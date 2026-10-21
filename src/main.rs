@@ -8,11 +8,11 @@
 // One backend per build. Both or neither cannot work: fail here, naming the fix.
 #[cfg(all(feature = "sqlite", feature = "surreal"))]
 compile_error!(
-    "features `sqlite` and `surreal` are exclusive. Build with `cargo build --release` (sqlite) or `cargo build --release --no-default-features --features surreal`."
+    "features `sqlite` and `surreal` are exclusive. Build with `cargo build --release` (surreal) or `cargo build --release --no-default-features --features sqlite`."
 );
 #[cfg(not(any(feature = "sqlite", feature = "surreal")))]
 compile_error!(
-    "enable exactly one backend. Build with `cargo build --release` (sqlite) or `cargo build --release --no-default-features --features surreal`."
+    "enable exactly one backend. Build with `cargo build --release` (surreal) or `cargo build --release --no-default-features --features sqlite`."
 );
 
 mod cli;
