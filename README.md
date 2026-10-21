@@ -15,7 +15,7 @@ SurrealDB (`src/store/surreal/`):
               completed_at                               -- E1, E2...; never leased
     tasks     id, board, title, description, goal, path, branch, status, assignee, priority, epic_id,
               parent_id, needs, report, commit_ref, lease_until, created_at, updated_at,
-              started_at, completed_at
+              started_at, completed_at, reopen_count     -- moves into needs_fix; 4 = capped
     events    seq, task_id | epic_id, actor, kind, body, ts  -- append-only, one timeline
     diffs     id, task_id, round, body, created_at       -- D1, D2...; append-only, verbatim,
                                                          -- outlive a dropped task
@@ -36,10 +36,20 @@ file written before epics is refused with the command to move it aside: there is
 no migration.
 
 Statuses: `ready → working → (blocking → working)* → review → done`,
-plus `needs_fix` (review found work, waiting for a fix; shown as `fix`) and
-`dropped`. `needs='input'` marks "blocked on a human", which is the only
+plus `needs_fix` (review found work, waiting for a fix; shown as `fix`),
+`not_done` (set by the board when a row's fourth move into `needs_fix` is refused;
+shown as `nd`) and `dropped`. `needs='input'` marks "blocked on a human", which is the only
 thing that should ever interrupt you. Input aliases `running`→`working`,
 `blocked`→`blocking`, `triage`→`ready`, `need fix`/`needs-fix`/`fix`→`needs_fix` accepted on input.
+
+Reviewable work is a chain of three levels, implement → review → fix, and no fourth.
+Moving a task to `review` needs a diff recorded since its last claim (`diff_add`), and
+on a parentless task the board files the review row as its child, once. A row may move
+into `needs_fix` three times; the fourth is refused (CLI exit 1) and the row lands
+`not_done`, taking an open parent with it. The rules, who moves which status and the
+reviewer's four rules are in [PROTOCOL.md](PROTOCOL.md); the diagrams are in
+[docs/workflow.md](docs/workflow.md). Closing an epic only when every row is `done` or
+`dropped` is the manager's policy, not something the board enforces.
 
 `events` is the file you used to write. Every note, question, answer, claim and
 completion is one row; nothing is mutable history.
@@ -270,7 +280,7 @@ one user, a few agents. If it needs more than 22 tools, it is not this tool.
 
 No for the mechanics: the tool descriptions were enough in a field test — a bare
 "you have work waiting on this machine" prompt produced `task_list` →
-`task_claim` → edit → verify → `task_update(review)` with no guidance, and no
+`task_claim` → edit → verify → `task_update(review)` with no guidance (a move to `review` now also needs a `diff_add` first, and the refusal names it), and no
 status file was written. The surface is ~1.8k tokens.
 
 Yes for the conventions, which no schema can express: board is the only status

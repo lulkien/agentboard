@@ -15,25 +15,37 @@ Each pane runs its own `agentboard` MCP server. The actor name is recorded in ev
 
 ## The loop
 
-1. **Manager** creates an epic (`E<n>`) with `epic_add` and an implement task with `epic=E<n>`.
-2. **Worker** (coder) claims the implement task, works, writes progress with `note`, then finishes with `task_update(report=..., status=review)`.
-3. **Manager** reads the report (via `task_get` or `board_brief`, or `task_wait` for server-side blocking), creates a review task under the same epic, and dispatches the reviewer (`dispatch` to the reviewer pane).
-4. **Reviewer** claims the review task and either:
+The chain is three levels, **implement → review → fix**, and no fourth: the review row is a child of the implement row, the fix row is a child of the review row, and the board refuses a child of a level-3 row. One fix row serves a review across every round.
+
+1. **Manager** creates an epic (`E<n>`) with `epic_add` and an implement row with `epic=E<n>`, and dispatches the coder.
+2. **Coder** claims the implement row, works, writes progress with `note`, records the change with `diff_add`, then finishes with `task_update(report=..., status=review)`. The board refuses that move unless a diff was recorded after the newest claim, and the refusal names `agentboard diff add T<n>`. A round that changed nothing still records a body saying so and why.
+3. **The board** files the review row when a parentless row moves to `review`: one child, `ready`, unassigned, inheriting epic, path, branch and priority, with the report and the newest diff id in its description. A second submission of the same implement row reuses it and notes the new diff on it. A fix row or a review row never files another.
+4. **Manager** reads the report (via `task_get` or `board_brief`, or `task_wait` for server-side blocking) and dispatches the reviewer to the review row.
+5. **Reviewer** claims the review row, reads only the newest diff (`diff_list`, `diff_get`) and either:
    - Sets it `done` with a report (no changes needed), or
-   - Files a fix task with `parent=<review task id>` (inherits the epic) and sets the review task `status=needs_fix`.
-5. **Coder** claims the fix task, fixes the listed findings, writes `report` with the verdict per finding, and sets the fix task `status=review` (this is the "fixed" state; there is no `fixed` status).
-6. **Reviewer** re-checks the fix against its own findings:
-   - If all checks pass: sets the fix task `done` (report carries the evidence), then sets the review task `done`.
-   - If findings remain: writes a `note` listing remaining findings on the fix task and sets the fix task `status=needs_fix` (the review task stays `needs_fix`).
-7. Loop returns to step 5 until the reviewer closes the review task.
-8. **Manager** closes the epic once every task is terminal (`done` or `dropped`) with `epic_update(status=done)`.
+   - Files one fix row with `parent=<review row id>` (inherits the epic) and sets the review row `status=needs_fix`.
+6. **Coder** claims the fix row, fixes the listed findings, records `diff_add` on the fix row, writes `report` with the verdict per finding, and sets the fix row `status=review` (this is the "fixed" state; there is no `fixed` status).
+7. **Reviewer** re-checks the new diff against its own findings:
+   - If all checks pass: sets the fix row `done` (report carries the evidence), then sets the review row `done`.
+   - If findings remain: writes a `note` listing them on the fix row and sets the fix row `status=needs_fix` (the review row stays `needs_fix`). The same fix row is reused.
+8. The loop returns to step 6 until the reviewer closes the review row, or the reopen cap stops it (below).
+9. **Manager** re-runs the gates the goal names, closes the implement row `done` (only the manager does), and closes the epic with `epic_update(status=done)` once every row is `done` or `dropped`. That last part is policy: `epic_update` does not check the rows, and a `not_done` row blocks closure only because the manager does not close over it.
 
-Only the reviewer sets a fix task `done`. The coder never sets a fix task `done` and never closes a review task.
+Only the reviewer sets a fix row `done`. The coder never sets a fix row `done` and never closes a review row. Only the manager closes an implement row.
 
-## Fix-task lifecycle
+### Reviewer rules
+
+1. The cap is final; re-scoping belongs to the manager.
+2. Review the new diff only.
+3. Classify every finding blocker, follow-up or nit. An uncategorised observation is not a finding.
+4. Never re-report a closed finding without new evidence quoted from the current diff.
+
+The board does not verify a diff body, so the reviewer also rejects a body that is neither a diff nor a stated reason nothing changed.
+
+## Fix-row lifecycle
 
 ```
-ready → working (coder claims) → review (coder reports; "fixed" state) → needs_fix (reviewer reopens with note) → working (coder claims again) → done (reviewer sets)
+ready → working (coder claims) → review (coder records a diff and reports; "fixed" state) → needs_fix (reviewer reopens with note) → working (coder claims again) → done (reviewer sets)
 ```
 
 States are exactly those in `src/schema.sql`:
@@ -42,9 +54,9 @@ States are exactly those in `src/schema.sql`:
 ready | working | blocking | not_done | needs_fix | review | done | dropped
 ```
 
-`not_done` is set by the board, not by an agent: a row's fourth move into `needs_fix` (the reopen cap is 3) is refused with exit 1 and the row lands `not_done`, its caller body kept in the event. An open parent of that row (`ready`, `working`, `blocking`, `needs_fix` or `review`) lands `not_done` in the same transaction (one level up only); a `done`, `dropped` or `not_done` parent is left as it is and the capped row gets a note naming it, so a capped fix row stops its review row and leaves the implement row at `review` for the manager. A parent chain is at most three levels (implement → review → fix); a child of a level-3 row is refused.
+`not_done` is set by the board, not by an agent. The reopen cap is 3: a row's fourth move into `needs_fix` is refused with exit 1 (a tool error over MCP) and the row lands `not_done` instead, the caller's body kept in an event on the row. An open parent of that row (`ready`, `working`, `blocking`, `needs_fix` or `review`) lands `not_done` in the same transaction, one level up only; a `done`, `dropped` or `not_done` parent is left as it is and the capped row gets a note naming it. So a capped fix row stops its review row and leaves the implement row at `review` for the manager. `reopen_count` is never reset, so a `not_done` row is not re-armed: the manager drops the rows, or files a replacement implement row with a fresh count.
 
-The `review` state on a fix task means "fixed, awaiting re-check". The `needs_fix` state means "re-check found remaining work". The reviewer drives the transition from `review` to `done` (on the fix task) or `needs_fix` (on the fix task), and subsequently closes the review task `done`. The coder drives `ready` → `working` → `review`.
+The `review` state on a fix row means "fixed, awaiting re-check". The `needs_fix` state means "re-check found remaining work". The reviewer drives the transition from `review` to `done` (on the fix row) or `needs_fix` (on the fix row), and subsequently closes the review row `done`. The coder drives `ready` → `working` → `review`.
 
 ## Where text lives
 
@@ -59,7 +71,7 @@ No `NOTES.md` / `STATUS.md` files. The board is the only status channel.
 
 ## Diagrams
 
-The loop and the fix-task lifecycle are drawn in [workflow.md](workflow.md), together with the status-ownership table. They are kept in one place so the prose here and the pictures cannot drift.
+The loop, the fix-row lifecycle and the reopen cap are drawn in [workflow.md](workflow.md), together with the status-ownership table. That page owns every diagram; this one carries none, so the prose here and the pictures cannot drift.
 
 ## Wait mechanism
 
@@ -69,7 +81,7 @@ The loop and the fix-task lifecycle are drawn in [workflow.md](workflow.md), tog
 
 ## Status reference
 
-From `src/schema.sql` line 27:
+From the `tasks` table in `src/schema.sql`:
 
 ```sql
 status TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|not_done|needs_fix|review|done|dropped

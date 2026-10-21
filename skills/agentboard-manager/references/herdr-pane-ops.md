@@ -34,7 +34,23 @@ agentboard register reviewer2 --agent claude
   review write is attributed to the coder.
 - The voice prompt file must be passed only when it exists, or claude refuses to start.
 - opencode needs `--standalone` in a pane; without it the TUI prints a banner and
-  exits, and `agent start` reports a startup timeout.
+  exits, and `agent start` reports a startup timeout. The whole start is one line —
+  `herdr agent start reviewer --kind opencode --pane "$c2" --timeout 120000 -- --standalone`
+  — and it takes no `--mcp-config`: opencode reads its servers from
+  `~/.config/opencode/opencode.json`, so that file, not a herdr argument, decides which
+  tools the seat has. `--kind opencode` resolves the binary itself, so an `opencode` that
+  is not on the shell's `PATH` does not block the start; `herdr agent start --help`
+  lists the kind as available.
+- The opencode seat's board actor is fixed inside that config, under
+  `mcp.servers.agentboard.environment.AGENTBOARD_ACTOR` (commonly `opencode`), not by the
+  herdr name. Register the seat by its herdr name (`agentboard register reviewer --agent
+  opencode`) and expect its claim, report and status events to be authored `opencode`:
+  read the seat off the pane and the registration, never off the event actor, and name the
+  actor that wrote a verdict when you quote it. Two opencode panes on one board need two
+  config files with different actors, or the ledger cannot tell them apart.
+- A pane that starts a fresh agent picks up the current `~/.cargo/bin/agentboard` as its
+  MCP server, so a pane created after an install has the new verbs; one created before it
+  keeps the old build until it is recreated.
 - Verify, do not assume: `agent start` can exit non-zero (or report `blocked`) while the
   agent is up at its prompt. `herdr agent list` + `herdr pane read` settles it.
 

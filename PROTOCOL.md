@@ -10,22 +10,47 @@ Never guess a missing requirement. `task_ask` with ONE narrow question, then `ta
 
 Work that needs review runs as one loop. An epic is not a task: it has its own table and ids (`E1`, `E2`...), is never claimed, leased or dispatched, and names the project the work belongs to (`path`). Tasks point at an epic (`epic=E1`) and optionally at another task (`parent=T7`, a subtask). `board_brief` shows one `EPIC E1 2/4 done [1 blocking] /abs/path <title>` line per open epic, then the open tasks that belong to no epic. Dropped tasks are left out of the total. Nothing closes an epic automatically.
 
+The chain is exactly three levels, **implement → review → fix**, and the board enforces it: the review row is a child of the implement row, the fix row is a child of the review row, and a child of a level-3 row (or a re-parent that would put a row at level 4) is refused with exit 1 and a `chain too deep` line. There is one fix row per review, reused across rounds.
+
 1. Manager opens the epic: `epic_add(title, goal, path=<project root>)` (CLI: `agentboard epic add "..." --path /abs/dir`). A path that does not exist yet is accepted with a warning.
-2. Manager adds the implement task with `epic=<E id>` and dispatches it. Hand the worker only the task id; the row carries description and goal.
-3. Worker claims it with `task_claim`, does the work, records decisions with `task_update(note=...)`, and finishes with `task_update(report=..., status="review")`. The report names files and pastes the output of the check the goal asked for.
-4. Manager reads `report` (`task_get`, or `task_wait` to block server-side — never a poll loop), files a review task with `epic=<E id>`, and dispatches the reviewer.
-5. Reviewer claims the review task, reads the diff and the report. Clean: `task_update(id, report=<what was checked>, status="done")` on the review task. Findings: the reviewer files the fix task itself — `task_add(..., parent=<review task id>)`, which inherits the epic — and sets its own review task `needs_fix`.
-6. Coder claims the fix task, fixes only the listed findings, answers each finding in `report`, and sets the fix task `review`. The coder never sets a fix task `done`, never closes a review task, and there is no `fixed` status: on a fix task `review` means fixed and awaiting re-check.
-7. Reviewer re-checks its own findings — the same reviewer, no separate checker task. Every finding closed: set the **fix** task `done` with the evidence in `report`, then re-read the file and set the review task `done`. Anything still open: write a `note` naming it on the fix task and set that fix task `needs_fix`; the review task stays `needs_fix`. Loop back to step 6.
-8. Manager re-runs the gates the goal names, in that tree, before believing any report — a report is a claim, not proof — then closes the epic once every task is `done` or `dropped`: `epic_update(id, status="done")`.
+2. Manager adds the implement row with `epic=<E id>` and dispatches it. Hand the worker only the task id; the row carries description and goal.
+3. Coder claims it with `task_claim`, does the work, records decisions with `task_update(note=...)`, records the change with `diff_add(id, body=<the diff>)`, and finishes with `task_update(report=..., status="review")`. The report names files and pastes the output of the check the goal asked for. A move into `review` is refused unless a diff row was recorded on that task after its newest claim (the gate reads the events table, not `started_at`); the refusal names `agentboard diff add T<n>`. A round that changed nothing still records a diff whose body says so and why.
+4. The board files the review row. When a **parentless** row moves into `review`, the same transaction creates one child, `Review <implement title>`: status `ready`, no assignee, epic, path, branch and priority inherited, description carrying the implement row's report verbatim and the newest diff id. The ack names it (`T7 review #31 (review row T8)`) and the implement row gets a note `review row T8 filed`. If the implement row is submitted again after a reopen, the existing review row is reused and gets a note naming the new diff; a second review row is never filed. A fix row or a review row (both have a parent) never files one.
+5. Manager reads `report` (`task_get`, or `task_wait` to block server-side — never a poll loop) and dispatches the reviewer to the review row.
+6. Reviewer claims the review row and reads only the newest diff (`diff_list` shows which, `diff_get` reads it). Clean: `task_update(id, report=<what was checked>, status="done")` on the review row. Findings: the reviewer files the fix row itself — `task_add(..., parent=<review row id>)`, which inherits the epic — and sets its own review row `needs_fix`.
+7. Coder claims the fix row, fixes only the listed findings, records `diff_add` on the fix row, answers each finding in `report`, and sets the fix row `review`. The coder never sets a fix row `done`, never closes a review row, and there is no `fixed` status: on a fix row `review` means fixed and awaiting re-check.
+8. Reviewer re-checks its own findings against the new diff on the fix row — the same reviewer, no separate checker row. Every finding closed: set the **fix** row `done` with the evidence in `report`, then re-read the file and set the review row `done`. Anything still open: write a `note` naming it on the fix row and set that fix row `needs_fix`; the review row stays `needs_fix`. Loop back to step 7 with the same fix row.
+9. Manager re-runs the gates the goal names, in that tree, before believing any report — a report is a claim, not proof. Only the manager closes the implement row (`done`), and closes the epic once every row is `done` or `dropped`: `epic_update(id, status="done")`.
 
 Status ownership in this loop is fixed:
 
 - Coder: `ready`/`needs_fix` → `working` → `review`. Nothing else.
-- Reviewer: `review` → `done` or `needs_fix`, on a fix task and on a review task alike.
-- Manager: `ready` (re-arm a crashed task), `dropped`, `done` on an implement task it owns, and epic status.
+- Reviewer: `review` → `done` or `needs_fix`, on a fix row and on a review row alike. Never on the implement row.
+- Manager: `ready` (re-arm a crashed row), `dropped`, `done` on the implement row it owns, epic status, and clearing a `not_done` row (below).
+- Board: `not_done`, and only through the reopen cap. An agent does not set it.
 
-A fix task reaching `done` is the reviewer's signature and its `report` must carry the evidence. The same loop as diagrams: [docs/workflow.md](docs/workflow.md).
+A fix row reaching `done` is the reviewer's signature and its `report` must carry the evidence. The same loop as diagrams: [docs/workflow.md](docs/workflow.md), which owns every diagram.
+
+### Reviewer rules
+
+1. The cap is final. When a row lands `not_done` the reviewer does not re-open it or work around it; re-scoping belongs to the manager.
+2. Review the new diff only: the newest diff of the row under review. An older diff, or code the new diff did not touch, is not in scope.
+3. Classify every finding as **blocker**, **follow-up** or **nit**. An observation that is not classified is not a finding and does not go in the fix row.
+4. Never re-report a closed finding without new evidence quoted from the current diff.
+
+The board does not check a diff body, so rule 2 has a companion: the reviewer rejects a body that is neither a diff nor a stated reason why nothing changed (`diff_get` shows what the reviewer is judging).
+
+### The reopen cap
+
+Each move of a row into `needs_fix` counts (`reopen_count`; `get` shows `reopens: N/3`, and `reopens: 4/3 (cap hit, stopped)` once capped). The count is never reset. The **fourth** attempt is refused: the CLI exits 1 and MCP returns a tool error, both with one line naming the cap and `not_done` (`T9 reopen cap 3 hit: the row is now not_done, not needs_fix`). The refused row is not left where it was; it lands `not_done`, and the body the caller passed is preserved in an event on the row, so the reviewer's findings survive.
+
+If the capped row has a parent that is open (`ready`, `working`, `blocking`, `needs_fix` or `review`), that parent lands `not_done` in the same transaction with its own event naming the child and the cap. One level only, and the grandparent is not touched. A parent that is `done`, `dropped` or already `not_done` is left as it is, and the capped row gets a note naming the parent and its status. So a capped **fix** row also stops its review row, and the implement row stays at `review` for the manager.
+
+A `not_done` row is not claimable and nothing re-arms it: re-opening it with `status` would not reset the count, so its next move into `needs_fix` is refused again. The manager unsticks it by dropping the rows (`status T<n> dropped`) or by filing a replacement implement row, which starts a new chain with a fresh count.
+
+### Closing an epic is policy
+
+An epic is closed by the manager once every row in it is `done` or `dropped`; a `not_done` row blocks closure until the manager drops it or refiles. This is **policy, not a guard**: `epic_update` does not check the rows, and nothing on the board stops an epic being closed with `not_done` rows in it. Do not read it as a property of the code.
 
 Inspect with `epic_get(E1)` (task counts, path, timeline) and `task_children(id)`: an epic id lists every task in it, a task id lists its subtasks (CLI: `agentboard children E1` / `T27`). `task_get` shows `epic:` and `parent:` lines and, for a task with subtasks, `children: N (2 done, ...)`.
 
@@ -35,7 +60,7 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 
 ## Worker flow
 
-`task_claim(id)` → read `description` and `goal` → do the work → `task_update(note=...)` for progress → `task_update(report=..., status=review|done)` with the outcome. Any agent may create a child task (`parent=<id>`); a reviewer uses this to file the fix task.
+`task_claim(id)` → read `description` and `goal` → do the work → `task_update(note=...)` for progress → `diff_add(id, body=...)` → `task_update(report=..., status=review|done)` with the outcome. A move to `review` needs the diff (see the workflow above); `done` does not. Any agent may create a child task (`parent=<id>`); a reviewer uses this to file the fix task.
 
 ## Fields
 
@@ -51,6 +76,7 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 | epic | Epic id (e.g., E3) the work belongs to; inherited from `parent` when omitted |
 | parent | Parent task id (e.g., T3): a subtask link, such as a fix task under the review that found it |
 | needs | Input type the task waits for (e.g., input) |
+| reopen_count | Moves into `needs_fix` so far (0 on a new row, never reset); a refused fourth is recorded as 4, shown by `get` as `reopens: 4/3 (cap hit, stopped)` |
 | report | Worker's findings/outcome |
 | note | Free-form progress note |
 | commit_ref | Commit or PR reference |
@@ -68,7 +94,9 @@ A diff is what a coder submitted for review: one row per submission, stored verb
 - `diff_get(id=D12, full=)` — `agentboard diff get D12 [--full]`: task, round, age and the body, cut with a `[truncated: N of M chars; ...]` marker unless `full`.
 - `diff_list(id=T7|E3)` — `agentboard diff ls T7|E3`: newest first, one line per diff, `D12 round 2 3m 184 lines` (an epic's listing names the task: `D12 T7 round 2 ...`), or `(no diffs)`.
 
-`task_get` shows the newest diff of the task as one `diff:` line. Nothing about a diff moves a status.
+Exit codes: every diff verb exits 0 on success and 1 on any refusal — a bad id, an unknown task or diff, a whitespace-only body, an unreadable `--body-file`, no body source, a task id where a diff id belongs. Over MCP the same text arrives as a tool error. A round that changed nothing still records a body saying so and why; the gate is on a row existing, not on its content.
+
+`task_get` shows the newest diff of the task as one `diff:` line. Recording a diff moves no status; the only status rule that reads diffs is the gate on a move into `review` (workflow step 3). `task_wait`/`agentboard wait` accept `diff` as an event kind.
 
 ## Editing a spec
 
@@ -95,8 +123,8 @@ Other clips, all marked or absent:
 - `working` — actively being done (alias: `running`)
 - `blocking` — waiting on external input (alias: `blocked`)
 - `needs_fix` — review found work, waiting for a fix (aliases: `need fix`, `needs-fix`, `fix`)
-- `not_done` — the board stopped the row: its fourth move into `needs_fix` (the reopen cap is 3) is refused with exit 1, the row lands here with the caller's body kept in the event, and its parent row, if open (`ready`, `working`, `blocking`, `needs_fix`, `review`), lands here too (one level only; a `done`, `dropped` or `not_done` parent is left alone and the capped row gets a note naming it); aliases `not-done`, `nd`. `get` shows `reopens: N/3`, and `(cap hit, stopped)` above 3. A parent chain is at most three levels (implement → review → fix); a child of a level-3 row is refused.
-- `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation
+- `not_done` — set by the board, not by an agent: the row's fourth move into `needs_fix` was refused (see [The reopen cap](#the-reopen-cap)) and the row landed here instead, with the caller's body kept in an event; an open parent lands here too, one level only. Not claimable; the manager drops it or refiles (aliases `not-done`, `nd`). `get` shows `reopens: N/3`, and `(cap hit, stopped)` above 3.
+- `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation. A move into it needs a diff recorded since the last claim. On a parentless row the board files its review row.
 - `done` — verified complete
 - `dropped` — abandoned
 

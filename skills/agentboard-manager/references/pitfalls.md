@@ -45,6 +45,45 @@ on a new machine.
 - **A behaviour change invalidates the verdict.** After a fix round, commission a new
   review rather than citing the old approve.
 
+## The review chain
+
+- **A move to `review` with no diff since the last claim is refused, and the refusal is the
+  remedy.** `T<n> cannot move to review: no diff recorded since it was last claimed` names
+  `agentboard diff add T<n>`. The gate reads the events table (a `diff` event newer than the
+  newest `claim` event), so a diff from an earlier round does not satisfy a later one, and a
+  reopened row needs a fresh diff. A round that changed nothing records a body saying so and
+  why; the board checks only that a row exists, so the reviewer, not the board, rejects a
+  body that is neither a diff nor a stated reason.
+- **Never file the review row by hand.** The board files it when a parentless row moves to
+  `review` and reuses the newest non-dropped child of that row on every resubmission, so a
+  hand-filed child is adopted as the review row and a second one is never added beside it.
+  `children T<impl>` names the real one; the ack of the move prints `(review row T<n>)`.
+  Dispatch the reviewer at that row, never at the implement row.
+- **The cap is final and never resets.** Three moves into `needs_fix` per row; the fourth is
+  refused (exit 1, or a tool error over MCP) and the row lands `not_done` with the caller's
+  body kept in an event. An open parent lands `not_done` with it, one level only; a
+  closed parent is left alone and the capped row gets a note naming it. So a capped fix
+  row leaves its review row `not_done` and the implement row at `review`. `status T<n> ready`
+  re-arms nothing, because the count stays and the next `needs_fix` move is refused again:
+  drop the rows or file a replacement implement row. A reviewer who tries to work round the
+  cap is outside its brief.
+- **Epic closure is policy, not a guard.** `epic_update done` accepts an epic with `not_done`
+  rows in it. Close an epic only when every row is `done` or `dropped`, drop or refile
+  `not_done` rows first, and call it policy whenever you quote the rule; a document that
+  says "the board blocks it" describes code that does not exist.
+- **Clear both panes at each epic boundary.** The last row of an epic closed, the verdict in
+  and the commit landed: renew coder and reviewer before the next epic's first row, not only
+  between tasks. Never while a pane is `working`.
+- **A diagram node is a claim about every path that reaches it.** Arrows are drawn generic
+  ("a row moves into `needs_fix`") while the node text is written for the case the author had
+  in mind, so a node reading "the implement row stays at review" is false the moment the
+  capped row is the *review* row — whose parent is the implement row. Whatever the prose
+  scopes per case, the node must scope too: put the case in the node ("a capped fix row
+  leaves the implement row at review") and, when a fix round changes which cases exist,
+  re-read every node whose arrow can now carry a different row. Skipping this costs exactly
+  one doc defect per round, and only in the diagram — which is why the prose passes review
+  while the picture lies.
+
 ## Delivery: calling an external command on the dispatcher's behalf
 
 - **Every external call needs a deadline.** `Command::output()` waits forever, so one
@@ -141,3 +180,51 @@ on a new machine.
   copy, an installed skill dir, or a generated file is true only at the instant it ran —
   the external side keeps moving while the worker works. Re-run it when you verify, and
   never accept "diff empty" as a property of the commit.
+- **An assertion on an error's shape breaks the first time a verb wraps it.** A check that
+  every failure prints exactly one line passes until a new verb prefixes the message
+  (`add: board server at …`), and from then on a random subset of the suite fails depending
+  on which path happened to hit the kill — which reads as flake, gets retried, and hides
+  that the error contract moved. Classify by cause once (unreachable, connection lost
+  mid-request, query error) and assert the class rather than one driver's wording, then
+  prove the shape through the verbs that wrap errors, not only the one the test calls. The
+  same flake returns every time the schema grows if write sessions re-apply the whole DDL:
+  each added table widens the window in which a killed server surfaces as a reset, so the
+  widening is a finding about the write path, not about the test.
+
+## Probes and live boards
+
+- **A throwaway board takes two settings, not one.** On a server-backed build the path
+  env (`AGENTBOARD_DB`) names the data directory while the server comes from the URL env
+  (`AGENTBOARD_SURREAL_URL`); a suite or probe that sets only the path talks to the
+  *default* server, i.e. the owner's live board, and still prints PASS. Every fixture aims
+  both at a throwaway (temp dir plus a random loopback port). The proof it did is never the
+  green line: take `ls --limit 400 | wc -l` and the newest event sequence before and after
+  and require them unchanged, and add one run with the URL pointed at a dead port that
+  must FAIL rather than quietly fall back to the default server.
+- **After a default-backend flip, the suites the row does not name are the hazard.**
+  Suites written against the old path kind (a `.db` file) carry an env prefix that sets the
+  path only, so the flip turns every untouched suite into a writer on the live board. Before
+  calling the flip done, enumerate the test directory and the repo's gate table and give
+  every suite the throwaway treatment — a gate table row whose suite cannot run on the new
+  default (`rm: cannot remove …: Is a directory`) is part of the flip, not a follow-up.
+- **`ls` hides the scale of the damage.** Its default limit is 20 rows, so a runaway probe
+  that wrote 160 looks like 20. Count per status with `--limit 400`, and scan for real rows
+  wearing a fake assignee (`T48 wrk w1`): a suite that claims "the next ready task" steals
+  live work, not just ids.
+- **Cleanup is three steps and `status` is not one of them for assignees.** Drop the junk
+  in a loop — `for i in $(seq A B); do agentboard --actor <mgr> status "T$i" dropped "junk
+  from <suite>; not real work"; done` clears 160 rows in seconds — then `status <T> ready`
+  the real rows that got claimed, then `edit <T> --assignee ""`, because `status` clears
+  the lease and leaves the assignee in place (a stale one shadows later dispatch
+  resolution). Verify with the same `--limit 400` count and the open list, record the
+  incident on the row that caused it, and file the fixture fix as its own row whose
+  acceptance is the before/after-count proof.
+- **A count delta is only evidence once you know who wrote the rows.** The before/after
+  counts that prove a suite left the board alone are read across a window in which *you*
+  also file rows, so a delta of exactly the rows the manager filed (the row under review,
+  a follow-up, a nit row) is your own paperwork and not a suite write. Compare the newest
+  event sequence as well, and when a delta does appear name the ids it added instead of
+  asking the worker to explain it — the current `ls --limit 400` against the list from
+  before the round gives the new ids in one command, and a worker that volunteers "the +1
+  is the row you filed" has done that subtraction for you and should be believed only after
+  you repeat it.
