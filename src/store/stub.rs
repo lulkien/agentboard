@@ -5,6 +5,7 @@
 
 use super::Ref;
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
+use super::text::SessionRow;
 
 const STUB: &str =
     "no storage backend is compiled in: enable exactly one of the `sqlite` and `surreal` features";
@@ -108,6 +109,9 @@ impl Board for StubBoard {
     }
 
     fn sessions(&self) -> Result<String, String> {
+        stub()
+    }
+    fn session_rows(&self) -> Result<Vec<SessionRow>, String> {
         stub()
     }
     fn prune(&self, _dry_run: bool) -> Result<String, String> {

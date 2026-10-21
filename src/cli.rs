@@ -262,6 +262,86 @@ pub enum Cmd {
     },
     /// Where the database lives
     Path,
+    /// Read the herdr session: `manager [--herdr|--tmux] <verb>`; nothing here writes
+    Manager {
+        /// herdr backend (the default)
+        #[arg(long, global = true, conflicts_with = "tmux")]
+        herdr: bool,
+        /// Refused: there is no tmux backend yet
+        #[arg(long, global = true)]
+        tmux: bool,
+        #[command(subcommand)]
+        verb: ManagerCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ManagerCmd {
+    /// Board sessions joined with live herdr agents (registered, gone, unregistered)
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// herdr's session.snapshot summary, or the raw snapshot with --json
+    Snapshot {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Live herdr agents
+    Agent {
+        #[command(subcommand)]
+        action: ManagerAgentCmd,
+    },
+    /// herdr tabs
+    Tab {
+        #[command(subcommand)]
+        action: ManagerTabCmd,
+    },
+    /// herdr panes
+    Pane {
+        #[command(subcommand)]
+        action: ManagerPaneCmd,
+    },
+}
+
+const READ_SOURCES: [&str; 4] = ["visible", "recent", "recent_unwrapped", "detection"];
+
+#[derive(Subcommand)]
+pub enum ManagerAgentCmd {
+    /// One line per live agent
+    List,
+    /// One agent, by name or pane id
+    Get { target: String },
+    /// Screen text of an agent's pane
+    Read {
+        target: String,
+        #[arg(long, default_value = "recent", value_parser = READ_SOURCES)]
+        source: String,
+        #[arg(long)]
+        lines: Option<u32>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ManagerTabCmd {
+    /// One line per tab
+    List,
+}
+
+#[derive(Subcommand)]
+pub enum ManagerPaneCmd {
+    /// One line per pane
+    List,
+    /// One pane
+    Get { pane_id: String },
+    /// Screen text of a pane
+    Read {
+        pane_id: String,
+        #[arg(long, default_value = "recent", value_parser = READ_SOURCES)]
+        source: String,
+        #[arg(long)]
+        lines: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]

@@ -4,6 +4,7 @@
 
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 use super::bridge;
+use super::text::SessionRow;
 use super::{DEFAULT_TTL_S, Ref, STATUS_LIST, db_path, norm, now_ms, short, short_epic};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::time::Duration;
@@ -272,6 +273,9 @@ impl Board for SqliteBoard {
 
     fn sessions(&self) -> Result<String, String> {
         sessions::sessions()
+    }
+    fn session_rows(&self) -> Result<Vec<SessionRow>, String> {
+        sessions::session_rows()
     }
     fn prune(&self, dry_run: bool) -> Result<String, String> {
         sessions::prune(dry_run)

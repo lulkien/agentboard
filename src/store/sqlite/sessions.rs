@@ -1,34 +1,32 @@
 use super::{fetch, now_ms, open};
 use crate::store::bridge::{Liveness, tmux_up};
 use crate::store::short;
-use crate::store::text::ago;
+use crate::store::text::{SessionRow, ago};
 use rusqlite::params;
-
-/// One registry row as `sessions` lists it. `cwd` is stored but not shown.
-struct SessionRow {
-    name: String,
-    agent: String,
-    task: Option<i64>,
-    seen: i64,
-}
 
 /// Newest first; rows seen in the same millisecond come out by name (SQLite BINARY
 /// collation: byte order), so the listing never depends on insertion order.
 fn rows(conn: &rusqlite::Connection) -> Result<Vec<SessionRow>, String> {
     let mut stmt = conn
-        .prepare("SELECT name,agent,task_id,seen FROM sessions ORDER BY seen DESC, name")
+        .prepare("SELECT name,agent,cwd,task_id,seen,status FROM sessions ORDER BY seen DESC, name")
         .map_err(|e| e.to_string())?;
     stmt.query_map([], |r| {
         Ok(SessionRow {
             name: r.get(0)?,
             agent: r.get(1)?,
-            task: r.get(2)?,
-            seen: r.get(3)?,
+            cwd: r.get(2)?,
+            task_id: r.get(3)?,
+            seen: r.get(4)?,
+            status: r.get(5)?,
         })
     })
     .map_err(|e| e.to_string())?
     .collect::<rusqlite::Result<Vec<_>>>()
     .map_err(|e| e.to_string())
+}
+
+pub fn session_rows() -> Result<Vec<SessionRow>, String> {
+    rows(&open()?)
 }
 
 pub fn sessions() -> Result<String, String> {
@@ -42,15 +40,16 @@ pub fn sessions() -> Result<String, String> {
     for SessionRow {
         name,
         agent,
-        task,
+        task_id,
         seen,
+        ..
     } in names
     {
         let alive = live.alive(&name, &agent);
         out.push_str(&format!(
             "{name} {agent} {} {} {}\n",
             if alive { "up" } else { "gone" },
-            task.map_or("-".to_owned(), short),
+            task_id.map_or("-".to_owned(), short),
             ago(seen)
         ));
     }

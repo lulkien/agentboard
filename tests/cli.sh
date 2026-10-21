@@ -406,6 +406,16 @@ check "board without reopen_count: exit 1, one-line move-it-aside refusal" $([ $
 run $B --db "$O" path;                                                 check "'path' still works on an old board (it names the file to move)" $([ $rc -eq 0 ] && [ "$out" = "$O" ] && echo 0 || echo 1)
 fi
 
+# manager: --tmux is refused by name; a bad socket is one line, exit 1. HOME and the
+# socket variables point into $S, so neither check can reach the live herdr session.
+mgr() { run env -u AGENTBOARD_HERDR_SOCK -u HERDR_SOCKET XDG_CONFIG_HOME="$S/xdg" HOME="$S/home" "$@"; }
+mgr "$B" manager --tmux status;                                                     check "manager --tmux: refused by name, exit 1" $([ $rc -eq 1 ] && [ "$err" = "agentboard: --tmux: no tmux backend yet; only --herdr is implemented" ] && echo 0 || echo 1)
+mgr "$B" manager --herdr --tmux status;                                             check "manager --herdr --tmux: clap conflict, exit 1" $([ $rc -eq 1 ] && has "$err" "agentboard: " && echo 0 || echo 1)
+mgr "$B" manager agent list;                                           check "manager with no socket: exit 1, one line naming all four paths" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "\$AGENTBOARD_HERDR_SOCK" && has "$err" "\$HERDR_SOCKET" && has "$err" "$S/xdg/herdr/herdr.sock" && has "$err" "$S/home/.config/herdr/herdr.sock" && echo 0 || echo 1)
+mgr env AGENTBOARD_HERDR_SOCK="$S/none.sock" "$B" manager agent list;  check "manager with a named socket that is missing: exit 1, names the variable and path" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "\$AGENTBOARD_HERDR_SOCK is set but $S/none.sock does not exist" && echo 0 || echo 1)
+mgr "$B" manager status --bogus;                                                    check "manager status rejects unknown flags, exit 1" $([ $rc -eq 1 ] && has "$err" "'--bogus'" && echo 0 || echo 1)
+mgr "$B" manager agent read coder --source bogus;                                   check "manager agent read --source is a closed set, exit 1" $([ $rc -eq 1 ] && has "$err" "possible values" && echo 0 || echo 1)
+
 # no args = MCP server on stdio, not a help print
 init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cli.sh","version":"0"}}}'
 use mcp

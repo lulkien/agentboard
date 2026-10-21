@@ -2,6 +2,8 @@
 //! the argument and return types they use. One implementation is compiled per
 //! build: `sqlite::SqliteBoard` or `surreal::SurrealBoard`.
 
+use super::text::SessionRow;
+
 /// A task as the caller describes it; `add` supplies id, timestamps and lease.
 pub struct NewTask<'a> {
     pub title: &'a str,
@@ -148,6 +150,7 @@ pub trait Board {
     fn epic_edit(&self, actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, String>;
 
     fn sessions(&self) -> Result<String, String>;
+    fn session_rows(&self) -> Result<Vec<SessionRow>, String>;
     fn prune(&self, dry_run: bool) -> Result<String, String>;
     fn unregister(&self, name: &str) -> Result<String, String>;
     fn register_session(

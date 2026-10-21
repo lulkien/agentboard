@@ -39,6 +39,17 @@ pub struct TaskRow {
     pub reopen_count: i64,
 }
 
+/// One registry row as `sessions` lists it and `manager status` joins it.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct SessionRow {
+    pub name: String,
+    pub agent: String,
+    pub cwd: Option<String>,
+    pub task_id: Option<i64>,
+    pub seen: i64,
+    pub status: String,
+}
+
 /// One diff as stored: what a coder submitted for review, verbatim.
 #[derive(Clone, Debug)]
 pub struct DiffRow {

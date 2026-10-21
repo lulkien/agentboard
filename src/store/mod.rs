@@ -295,6 +295,9 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
 pub fn sessions() -> Result<String, String> {
     BACKEND.sessions()
 }
+pub fn session_rows() -> Result<Vec<text::SessionRow>, String> {
+    BACKEND.session_rows()
+}
 pub fn prune(dry_run: bool) -> Result<String, String> {
     BACKEND.prune(dry_run)
 }

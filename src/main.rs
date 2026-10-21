@@ -17,12 +17,16 @@ compile_error!(
 
 mod cli;
 mod clip;
+mod manager;
 mod server;
 mod store;
 
 use clap::Parser;
 use clap::error::ErrorKind;
-use cli::{Cli, Cmd, DiffCmd, EpicCmd, SessionsCmd};
+use cli::{
+    Cli, Cmd, DiffCmd, EpicCmd, ManagerAgentCmd, ManagerCmd, ManagerPaneCmd, ManagerTabCmd,
+    SessionsCmd,
+};
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 
@@ -79,6 +83,7 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
     match cmd {
         Cmd::Serve | Cmd::Wait { .. } => unreachable!("handled in main"),
         Cmd::Path => store::board_path().map(|p| p.display().to_string()),
+        Cmd::Manager { tmux, verb, .. } => manager(tmux, verb),
         Cmd::Add {
             title,
             description,
@@ -258,6 +263,40 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
             print,
         } => store::dispatch(actor, tid(&id)?, to.as_deref(), force, print),
         Cmd::Send { name, text } => store::send(&name, &text),
+    }
+}
+
+/// `manager`: read-only herdr verbs. The socket is found and the protocol pinned
+/// before any verb runs; `--tmux` is refused before the socket is touched.
+fn manager(tmux: bool, verb: ManagerCmd) -> Result<String, String> {
+    if tmux {
+        return Err("--tmux: no tmux backend yet; only --herdr is implemented".to_owned());
+    }
+    let c = manager::Client::connect()?;
+    match verb {
+        ManagerCmd::Status { json } => manager::status(&c, json),
+        ManagerCmd::Snapshot { json } => manager::snapshot(&c, json),
+        ManagerCmd::Agent { action } => match action {
+            ManagerAgentCmd::List => manager::agent_list(&c),
+            ManagerAgentCmd::Get { target } => manager::agent_get(&c, &target),
+            ManagerAgentCmd::Read {
+                target,
+                source,
+                lines,
+            } => manager::agent_read(&c, &target, &source, lines),
+        },
+        ManagerCmd::Tab {
+            action: ManagerTabCmd::List,
+        } => manager::tab_list(&c),
+        ManagerCmd::Pane { action } => match action {
+            ManagerPaneCmd::List => manager::pane_list(&c),
+            ManagerPaneCmd::Get { pane_id } => manager::pane_get(&c, &pane_id),
+            ManagerPaneCmd::Read {
+                pane_id,
+                source,
+                lines,
+            } => manager::pane_read(&c, &pane_id, &source, lines),
+        },
     }
 }
 

@@ -8,25 +8,20 @@
 use super::tasks::{Txn, fetch_opt};
 use super::{block_on, db_err, session};
 use crate::store::bridge::{Liveness, tmux_up};
-use crate::store::text::ago;
+use crate::store::text::{SessionRow, ago};
 use crate::store::{now_ms, short};
 use serde::Deserialize;
 
-/// One registry row as `sessions` lists it. `cwd` is stored but not shown.
-#[derive(Deserialize)]
-struct SessionRow {
-    name: String,
-    agent: String,
-    task_id: Option<i64>,
-    seen: i64,
-}
-
 async fn rows(db: &super::Db) -> Result<Vec<SessionRow>, String> {
     let mut r = db
-        .query("SELECT meta::id(id) AS name, agent, task_id, seen FROM sessions ORDER BY seen DESC, name")
+        .query("SELECT meta::id(id) AS name, agent, cwd, task_id, seen, status FROM sessions ORDER BY seen DESC, name")
         .await
         .map_err(|e| db_err(&e))?;
     r.take(0).map_err(|e| db_err(&e))
+}
+
+pub fn session_rows() -> Result<Vec<SessionRow>, String> {
+    block_on(rows(&session(false)?.db))
 }
 
 pub fn sessions() -> Result<String, String> {
@@ -42,6 +37,7 @@ pub fn sessions() -> Result<String, String> {
         agent,
         task_id,
         seen,
+        ..
     } in names
     {
         let alive = live.alive(&name, &agent);

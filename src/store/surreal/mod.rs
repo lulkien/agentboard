@@ -24,6 +24,7 @@ use tokio::runtime::Runtime;
 
 use super::board::{Board, ClaimError, EpicEdit, NewTask, Outcome, Patch, TaskEdit, Wait};
 use super::bridge;
+use super::text::SessionRow;
 
 /// Every board operation, on SurrealDB.
 pub struct SurrealBoard;
@@ -128,6 +129,9 @@ impl Board for SurrealBoard {
     }
     fn sessions(&self) -> Result<String, String> {
         sessions::sessions()
+    }
+    fn session_rows(&self) -> Result<Vec<SessionRow>, String> {
+        sessions::session_rows()
     }
     fn prune(&self, dry_run: bool) -> Result<String, String> {
         sessions::prune(dry_run)
