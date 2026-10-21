@@ -1,5 +1,5 @@
 #!/bin/sh
-# Link every skills/<name>/ into a skills dir and the manager slash commands into both CLIs.
+# Link every skills/<name>/ into a skills dir and the manager entry points for all four CLIs.
 # One file, not a copy: the installed path IS the repo file, so there is no drift to prove.
 # usage: install.sh [--force] [target-dir]   (default target: $HOME/.hermes/skills)
 set -eu
@@ -17,6 +17,8 @@ src=$(cd "$(dirname "$0")" && pwd)
 cmd_src=$src/agentboard-manager/commands
 claude_dir=${AGENTBOARD_CLAUDE_COMMANDS:-$HOME/.claude/commands}
 opencode_dir=${AGENTBOARD_OPENCODE_COMMANDS:-$HOME/.config/opencode/commands}
+codex_dir=${CODEX_HOME:-$HOME/.codex}/skills
+hermes_dir=$HOME/.hermes/skills
 
 # Check every destination first, so a refusal touches nothing.
 refuse=0
@@ -26,7 +28,7 @@ for dir in "$src"/*/; do
     echo "exists: $p (use --force)" >&2; refuse=1
   fi
 done
-for p in "$claude_dir/manager.md" "$opencode_dir/manager.md"; do
+for p in "$claude_dir/manager.md" "$opencode_dir/manager.md" "$codex_dir/manager" "$hermes_dir/manager"; do
   if { [ -e "$p" ] || [ -L "$p" ]; } && [ "$force" -eq 0 ]; then
     echo "exists: $p (use --force)" >&2; refuse=1
   fi
@@ -39,9 +41,11 @@ link() { # link <repo path> <dest>
   echo "linked: $2 -> $1"
 }
 
-mkdir -p "$target" "$claude_dir" "$opencode_dir"
+mkdir -p "$target" "$claude_dir" "$opencode_dir" "$codex_dir" "$hermes_dir"
 for dir in "$src"/*/; do
   link "${dir%/}" "$target/$(basename "$dir")"
 done
 link "$cmd_src/claude/manager.md" "$claude_dir/manager.md"
 link "$cmd_src/opencode/manager.md" "$opencode_dir/manager.md"
+link "$cmd_src/codex/manager" "$codex_dir/manager"
+link "$cmd_src/hermes/manager" "$hermes_dir/manager"

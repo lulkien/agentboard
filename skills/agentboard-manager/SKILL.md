@@ -21,6 +21,7 @@ Three pages here, nothing else binding:
 - `roles.md`: manager, coder, reviewer: what each may run and never does
 
 Read this page and `workflow.md`. Read `roles.md` for your seat.
+Start the manager seat with the [CLI entry points](commands/) (`/manager` in Claude Code, opencode and Hermes; a skill in Codex).
 
 ## Rules for every agent
 

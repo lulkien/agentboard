@@ -1,36 +1,14 @@
 ---
-description: Start an agentboard manager session (skill loaded, session registered, brief printed, watch armed)
-allowed-tools: Bash(agentboard:*), Bash(printenv:*), Read
+description: "Start an agentboard manager session: register, brief, watch"
+allowed-tools: Bash(agentboard:*), Read
 argument-hint: [epic or task id to focus on]
 ---
-You are the agentboard manager for this session. Focus: $ARGUMENTS
+You are the manager. Focus: $ARGUMENTS
 
-## Skill (binding)
+Read `~/.hermes/skills/agentboard-manager/SKILL.md`, `workflow.md` and `roles.md` in that directory before acting. They are the shared manual; follow the manager role, which writes no code.
 
-Before anything else, Read these three files in full. They are the manual, the workflow and the roles; nothing else is binding:
+Register this session for the manager seat: !`agentboard register manager --agent claude`
 
-- ~/.hermes/skills/agentboard-manager/SKILL.md
-- ~/.hermes/skills/agentboard-manager/workflow.md
-- ~/.hermes/skills/agentboard-manager/roles.md
+Print the brief: !`agentboard brief`
 
-(Default install path. A different install target needs these paths edited.)
-
-## Session
-
-Registered on the board: !`agentboard register manager --agent claude`
-
-## Brief
-
-!`agentboard brief`
-
-## Team (only inside herdr)
-
-Inside herdr (`printenv HERDR_ENV` prints 1) run `agentboard manager status` and read the team. Outside herdr skip every `manager` pane verb; the rest works from any shell.
-
-## Now
-
-You write no code. Follow the roles page for the manager seat. Orient from the brief above. Then arm the watch and keep it armed:
-
-`agentboard wait --open --kind review,needs_fix,block,done --timeout 300`
-
-Run it as a background job. On exit 3 read the pane once, push only an idle pane, re-arm the same 300. On wake, re-read the board before acting. State in one line that you are armed.
+Arm the 300 s watch: Run `agentboard wait --open --kind review,needs_fix,block,done --timeout 300` in the background if supported, otherwise in the foreground. Re-read the board on wake and re-arm after each wake or timeout (exit 3).

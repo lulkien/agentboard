@@ -22,6 +22,7 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 
 | Command | Expected |
 |---|---|
+| `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `cargo build --release` | `Finished` |
 | `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 48 passed` (unit) and `test result: ok. 26 passed` (`tests/manager.rs`, the stub-herdr suite); add `-- --nocapture` and `rg -c SKIP` prints nothing |
 | `cargo test --no-default-features --features sqlite` | `test result: ok. 38 passed` and `26 passed` (needs no `surreal` binary) |
@@ -125,7 +126,8 @@ Rule 5 of the reviewer rules in `PROTOCOL.md`.
 
 - `skills/agentboard-manager` — running a team with this tool. The repo copy is canonical:
   edit it there. `skills/install.sh --force` symlinks it (and the `/manager` command files)
-  into `~/.hermes/skills`, `~/.claude/commands` and `~/.config/opencode/commands`, so the
+  into `~/.hermes/skills`, `~/.claude/commands`, `~/.config/opencode/commands` and
+  `${CODEX_HOME:-~/.codex}/skills`, so the
   installed path is the repo file: no copy, no drift, nothing to `diff`. Never copy over
   those links.
 - `PROTOCOL.md` — the wire surface: the chain, the cap, the diff verbs, who moves which status.
