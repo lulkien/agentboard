@@ -37,6 +37,7 @@ A fix row reaching `done` is the reviewer's signature and its `report` must carr
 2. Review the new diff only: the newest diff of the row under review. An older diff, or code the new diff did not touch, is not in scope.
 3. Classify every finding as **blocker**, **follow-up** or **nit**. An observation that is not classified is not a finding and does not go in the fix row.
 4. Never re-report a closed finding without new evidence quoted from the current diff.
+5. Never edit. The reviewer reads the newest diff plus the row's `description` and `goal`, judges logic and edge cases against that spec, and files classified findings; it writes nothing to the tree (no edit, commit, build or install), because an edit makes the verdict grade its own change and leaves an unowned write behind.
 
 The board does not check a diff body, so rule 2 has a companion: the reviewer rejects a body that is neither a diff nor a stated reason why nothing changed (`diff_get` shows what the reviewer is judging).
 

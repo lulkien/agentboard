@@ -107,6 +107,13 @@ have both adapters call it, so a rule exists once.
 - `git add` explicit paths, never `-A`: it sweeps scratch files into the commit.
 - Commits land locally and are never pushed by an agent; pushing is the human's call.
 
+## If you are the reviewer
+
+You read and judge; you never edit. Inputs: the newest diff (`diff_list`, `diff_get`), the row's
+`description` and `goal`. Output: findings classified blocker, follow-up or nit. No file edit, no
+commit, no build, no install, no probe that creates state; `git status --short` stays clean.
+Rule 5 of the reviewer rules in `PROTOCOL.md`.
+
 ## Decide with the human, not alone
 
 - Pushing.
