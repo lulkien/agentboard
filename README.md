@@ -2,7 +2,7 @@
 
 A task board shared by a handful of CLI coding agents (Claude Code in a herdr
 pane, Hermes, subagents) plus you. 19 MCP tools over stdio and one board, stored
-either in a single SQLite file (default) or in SurrealDB. The point is to replace
+either in SurrealDB (the default build) or in a single SQLite file (opt-in). The point is to replace
 "write status to NOTES.md and hope somebody reads it" with a board that answers in
 one line and costs few tokens.
 
@@ -93,14 +93,14 @@ wide surface is a permanent token tax. `answer` is not a tool — it is
 Two exclusive build features. A binary carries exactly one backend, chosen at compile
 time; building with neither or with both fails on one `compile_error!` line.
 
-| | `sqlite` (default) | `surreal` |
+| | `surreal` (default) | `sqlite` (opt-in) |
 |---|---|---|
-| board | one file | a directory behind a SurrealDB daemon |
-| server | none | one local daemon, auto-started |
-| right for | one box, one board file, zero setup | many processes claiming at once, a real query engine |
+| board | a directory behind a SurrealDB daemon | one file |
+| server | one local daemon, auto-started | none |
+| right for | many processes claiming at once, a real query engine | one box, one board file, zero setup |
 
-    cargo build --release                                    # sqlite
-    cargo build --release --no-default-features --features surreal
+    cargo build --release                                    # surreal (default)
+    cargo build --release --no-default-features --features sqlite
 
 Which build am I running? `agentboard path` prints a `.db` file for SQLite and a
 directory for SurrealDB. Behaviour, not a timestamp, is the proof.
@@ -109,7 +109,7 @@ Where the board lives:
 
 | | path |
 |---|---|
-| sqlite | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/board.db` |
+| sqlite (opt-in) | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/board.db` |
 | surreal | `--db` / `$AGENTBOARD_DB`, else `$XDG_STATE_HOME/agentboard/surreal` (a directory) |
 
 Surreal settings, all optional: `$AGENTBOARD_SURREAL_URL` (`127.0.0.1:18720`, loopback
@@ -130,12 +130,14 @@ recreate the old schema in the new location.
 ## Build and install
 
     cd ~/Projects/agentboard
-    cargo build --release                                  # ~4 s incremental, SQLite bundled
+    cargo build --release                                  # surreal, the default build
     cargo install --path . --locked                        # what every agent execs
 
-For a SurrealDB board, install the other flavour — same lockfile, different feature:
+The default build needs a `surreal` 2.7.x binary on `PATH` or at `~/.surrealdb/surreal`
+(it starts the local board server from it). For a single-file SQLite board, install the
+opt-in flavour — same lockfile, different feature:
 
-    cargo install --path . --locked --no-default-features --features surreal
+    cargo install --path . --locked --no-default-features --features sqlite
 
 Agents run `~/.cargo/bin/agentboard`, so install after changing the CLI or MCP surface;
 `./target/release/agentboard` is only the checkout, and `tests/mcp_client.py` drives it.
@@ -198,28 +200,30 @@ on SurrealDB).
 `dispatch`, `send`, `tail` and `sessions`: a wedged pane client is killed (with its
 process group) at the deadline instead of hanging the caller, and `dispatch` falls
 back from herdr to tmux. Lower it only to test the kill path.
-Default board: `$XDG_STATE_HOME/agentboard/board.db` (SQLite) or
-`$XDG_STATE_HOME/agentboard/surreal` (SurrealDB).
+Default board: `$XDG_STATE_HOME/agentboard/surreal` (SurrealDB, the default build) or
+`$XDG_STATE_HOME/agentboard/board.db` (SQLite, the opt-in build).
 
 ## Tests
 
-    python3 tests/mcp_client.py   # real stdio checks: claim, ask→wait, acks
+    AGENTBOARD_REQUIRE_SURREAL=1 cargo test          # default (surreal) build; a missing surreal binary FAILS, not SKIPs
+    cargo test --no-default-features --features sqlite
     bash tests/cli.sh             # CLI contract: exit codes, stderr, flag spellings, no ANSI
     bash tests/dispatch.sh        # dispatch with stub herdr/tmux: refusal, --force, fallback, hang killed at the deadline
-    ./tests/race.sh               # 8 concurrent claimers: 80 claims, 80 unique, ~124 ms
-    bash tests/wait.sh            # long-poll returns on the event, not the timeout
+    bash tests/surreal.sh         # cli.sh, dispatch.sh and mcp_client.py on BOTH builds, plus parity, claims under 8 processes, auto-serve, outage, starvation
     ./target/release/agentboard < tests/mcp-smoke.jsonl   # handshake + tool list
 
-The SurrealDB backend has its own suite, which builds both feature sets and a debug
-`surreal` binary, then restores the default release build (about a minute once warm):
+`AGENTBOARD_REQUIRE_SURREAL=1` matters because unit tests that need a live server print
+`SKIP` and pass when no `surreal` binary is found; with it set, the skip is a failure, so
+a surreal change cannot pass unnoticed. A default `cargo test` expects a `surreal` 2.7.x
+binary on `PATH` or at `~/.surrealdb/surreal`; the sqlite test run needs none.
 
-    bash tests/surreal.sh         # parity, claims under 8 processes, auto-serve, outage, starvation
-
-Unit tests that need a live server print `SKIP` and pass when no `surreal` binary is
-found; on a box that carries one, `AGENTBOARD_REQUIRE_SURREAL=1` turns that skip into a
-failure so a surreal change cannot pass unnoticed:
-
-    AGENTBOARD_REQUIRE_SURREAL=1 cargo test --no-default-features --features surreal
+`cli.sh` and `dispatch.sh` pick the backend from the binary under test
+(`AGENTBOARD_TEST_BIN=<binary>`) and start their own throwaway servers.
+`tests/mcp_client.py` needs `AGENTBOARD_TEST_DB` and `AGENTBOARD_SURREAL_URL` on the
+surreal build; `tests/surreal.sh` supplies both and builds both feature sets, a debug
+`surreal` binary, then restores the default release build (about a minute once warm).
+`tests/race.sh` and `tests/wait.sh` have not been moved to a throwaway server yet; do not
+run them against the default build.
 
 Static gates, run before every commit (no CI): `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings`; both must print nothing.

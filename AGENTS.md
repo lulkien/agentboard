@@ -13,31 +13,40 @@ Read first:
 ## Prove it
 
 Run these from the repo root. A change is not done until each prints what is beside it.
+The default build is SurrealDB; sqlite is the opt-in build (`--no-default-features --features sqlite`).
+
+Fresh-box prerequisite: a `surreal` binary, version 2.7.x, on `PATH` or at
+`~/.surrealdb/surreal`. A default `cargo test` starts throwaway servers from it, so with
+`AGENTBOARD_REQUIRE_SURREAL=1` a missing binary fails the run instead of printing `SKIP`.
+A server of any other version is refused by name (`want surrealdb 2.7.x`).
 
 | Command | Expected |
 |---|---|
 | `cargo build --release` | `Finished` |
-| `cargo test` | `test result: ok. 22 passed` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test --no-default-features --features surreal` | `test result: ok. 32 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
-| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (needs a `surreal` binary; builds both feature sets itself and a debug surreal build under `target/surreal-debug`, then restores the default release build; about a minute once that cache is warm) |
-| `python3 tests/mcp_client.py` | `125/125 checks passed` |
-| `bash tests/cli.sh` | `120/120 passed` |
-| `bash tests/dispatch.sh` | `59/59 passed` |
-| `bash tests/race.sh` | `claims=80 unique=80` |
-| `bash tests/wait.sh` | ends with `elapsed_ms=...`, no `FAIL` |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 32 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 22 passed` (needs no `surreal` binary) |
+| `bash tests/cli.sh` | `116/116 passed` (the default build; against the sqlite binary: `120/120 passed`) |
+| `bash tests/dispatch.sh` | `59/59 passed` (either build) |
+| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `116/116`, `120/120`, `59/59`, `125/125` for them; about a minute once that cache is warm) |
+| `bash tests/race.sh`, `bash tests/wait.sh` | do not run on the default build yet: they set no `AGENTBOARD_SURREAL_URL` and would write to the live board (task T217). Sqlite-era expectations: `claims=80 unique=80`; ends with `elapsed_ms=...`, no `FAIL` |
 | `cargo fmt --check` | no output |
-| `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only) |
+| `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 
 The suites drive `target/release/agentboard`: build release before running them.
+`tests/cli.sh` and `tests/dispatch.sh` read the backend off the binary
+(`AGENTBOARD_TEST_BIN` picks it) and start their own throwaway servers, so a bare run is
+safe. `python3 tests/mcp_client.py` is not: on the default build it needs
+`AGENTBOARD_TEST_DB` (a fresh data directory) and `AGENTBOARD_SURREAL_URL` (a throwaway
+server), or it talks to the server on the default port, which is the live board. Prefer
+`bash tests/surreal.sh`, which supplies both and prints `125/125 checks passed`. With a
+sqlite binary and no `AGENTBOARD_TEST_DB`, it uses `.probe/client.db`.
 Add or change behaviour with a test in the suite that owns that kind of check
 (`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`
 for the bridge). When a count changes, update the expectation here.
 
-`tests/mcp_client.py` runs against either build: set `AGENTBOARD_TEST_BIN` to the binary and `AGENTBOARD_TEST_DB` to the board (a fresh data directory plus `AGENTBOARD_SURREAL_URL` for the surreal build); unset, it uses `target/release/agentboard` and `.probe/client.db`. `tests/surreal.sh` does this for you.
-
 A change under `src/store/surreal/` is not done on a box where any of its tests
-printed `SKIP` (no `surreal` binary): run the `AGENTBOARD_REQUIRE_SURREAL=1` row, which
-turns a skip into a failure. SKIP is fine on a device that builds the sqlite binary.
+printed `SKIP` (no `surreal` binary): the `AGENTBOARD_REQUIRE_SURREAL=1` row turns a
+skip into a failure. SKIP is fine on a device that builds only the sqlite binary.
 
 ## Layout
 
