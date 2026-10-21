@@ -24,8 +24,8 @@ mod store;
 use clap::Parser;
 use clap::error::ErrorKind;
 use cli::{
-    Cli, Cmd, DiffCmd, EpicCmd, ManagerAgentCmd, ManagerCmd, ManagerPaneCmd, ManagerTabCmd,
-    SessionsCmd,
+    Cli, Cmd, DiffCmd, EpicCmd, ManagerAgentCmd, ManagerCmd, ManagerEventsCmd, ManagerPaneCmd,
+    ManagerTabCmd, SessionsCmd,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -326,6 +326,14 @@ fn manager(tmux: bool, verb: ManagerCmd) -> Result<String, manager::Failure> {
                 timeout_ms,
             } => manager::agent_wait(&c, &target, &until, timeout_ms)?,
         },
+        ManagerCmd::Events { action } => match action {
+            ManagerEventsCmd::Wait {
+                until,
+                agent,
+                timeout,
+                json,
+            } => manager::events_wait(&c, &agent, &until, timeout, json)?,
+        },
         ManagerCmd::Tab { action } => match action {
             ManagerTabCmd::List => manager::tab_list(&c)?,
             ManagerTabCmd::New { cwd, label } => manager::tab_new(&c, &cwd, label.as_deref())?,
@@ -356,6 +364,7 @@ fn manager(tmux: bool, verb: ManagerCmd) -> Result<String, manager::Failure> {
 }
 
 /// `wait` is the one command whose exit code carries data: 0 matched, 3 timeout.
+/// With `--agent` it also wakes on a herdr agent's transition, whichever comes first.
 async fn wait(cmd: Cmd) -> Result<(String, ExitCode), String> {
     let Cmd::Wait {
         ids,
@@ -364,12 +373,14 @@ async fn wait(cmd: Cmd) -> Result<(String, ExitCode), String> {
         status,
         kind,
         after,
+        agent,
+        until,
         timeout,
     } = cmd
     else {
         unreachable!("caller matched Wait")
     };
-    let out = store::wait(store::Wait {
+    let board = store::Wait {
         ids: &ids,
         epic: epic.as_deref(),
         open,
@@ -377,16 +388,98 @@ async fn wait(cmd: Cmd) -> Result<(String, ExitCode), String> {
         kind: kind.as_deref(),
         after,
         timeout_ms: timeout.saturating_mul(1000),
-    })
-    .await?;
-    Ok((
-        out.text,
-        if out.timed_out {
+    };
+    let code = |timed_out| {
+        if timed_out {
             ExitCode::from(3)
         } else {
             ExitCode::SUCCESS
+        }
+    };
+    if agent.is_empty() {
+        let out = store::wait(board).await?;
+        return Ok((out.text, code(out.timed_out)));
+    }
+
+    let named = !ids.is_empty() || epic.is_some() || open;
+    if !named && (status.is_some() || kind.is_some() || after.is_some()) {
+        return Err(
+            "wait: --status, --kind and --after need task ids, --epic or --open".to_owned(),
+        );
+    }
+    let until = manager::parse_until(&if until.is_empty() {
+        vec!["idle,blocked,done".to_owned()]
+    } else {
+        until
+    })?;
+    let limit = std::time::Duration::from_secs(timeout);
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = cancel.clone();
+    // Connecting is part of the watch, so every herdr failure reaches one place.
+    let mut watch = tokio::task::spawn_blocking(move || {
+        let c = manager::Client::connect()?;
+        manager::watch(&c, &agent, &until, limit, &flag)
+    });
+
+    if !named {
+        return Ok(match flatten((&mut watch).await)? {
+            (_, Some(h)) => (manager::hit_line(&h), ExitCode::SUCCESS),
+            (seen, None) => (manager::timeout_line(limit, &seen), ExitCode::from(3)),
+        });
+    }
+    let board = store::wait(board);
+    tokio::pin!(board);
+    tokio::select! {
+        biased;
+        b = &mut board => {
+            // Stop the stream and join it, so its connection is closed before we return.
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            settle(b?, flatten(watch.await), limit)
+        }
+        w = &mut watch => match flatten(w) {
+            Ok((_, Some(h))) => Ok((manager::hit_line(&h), ExitCode::SUCCESS)),
+            Ok(seen) => settle(board.await?, Ok(seen), limit),
+            // herdr failed while the board is still waiting. A board that is already
+            // ready (herdr failing fast) still wins; otherwise the herdr error decides.
+            Err(e) => match tokio::time::timeout(AGENT_ERROR_GRACE, &mut board).await {
+                Ok(b) => settle(b?, Err(e), limit),
+                Err(_) => Err(e),
+            },
         },
-    ))
+    }
+}
+
+/// How long a board that is ready or about to be is given once the agent side failed.
+const AGENT_ERROR_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
+
+type Watched = (Vec<String>, Option<manager::Hit>);
+
+fn flatten(r: Result<Result<Watched, String>, tokio::task::JoinError>) -> Result<Watched, String> {
+    r.map_err(|e| e.to_string())?
+        .map_err(|e| format!("wait: agent watch failed: {e}"))
+}
+
+/// The board finished and the agent watch is stopped. One rule: a board match is
+/// returned whatever the agent side did (its failure is noted on stderr, so a degraded
+/// `--agent` is visible); only when the board timed out does the agent side decide.
+fn settle(
+    b: store::Outcome,
+    w: Result<Watched, String>,
+    limit: std::time::Duration,
+) -> Result<(String, ExitCode), String> {
+    if !b.timed_out {
+        if let Err(e) = w {
+            eprintln!("agentboard: board matched, --agent watch degraded: {e}");
+        }
+        return Ok((b.text, ExitCode::SUCCESS));
+    }
+    match w? {
+        (_, Some(h)) => Ok((manager::hit_line(&h), ExitCode::SUCCESS)),
+        (seen, None) => Ok((
+            format!("{}\n{}", b.text, manager::timeout_line(limit, &seen)),
+            ExitCode::from(3),
+        )),
+    }
 }
 
 #[tokio::main]
@@ -425,6 +518,10 @@ async fn main() -> ExitCode {
             // A refusal is "not now", not "broken": exit 3, as `wait` does for a timeout.
             Err(manager::Failure::Refused(why)) => {
                 eprintln!("agentboard: {why}");
+                return ExitCode::from(3);
+            }
+            Err(manager::Failure::TimedOut(text)) => {
+                println!("{text}");
                 return ExitCode::from(3);
             }
             Err(manager::Failure::Other(why)) => Err(why),

@@ -209,6 +209,16 @@ are removed too: run it with herdr up.
     agentboard --help                 # every command, flag and default
     agentboard wait --help            # selectors, filters, markers
 
+Waking on an agent instead of polling: `agentboard wait T221 --agent coder --status review,done`
+watches the rows and herdr's `coder` at once and returns on whichever moves first
+(`matched: agent coder -> idle after 4.2s` for the agent side; the board's own text for a
+row). `--until` picks the agent statuses (default `idle,blocked,done`); `--agent` alone
+needs no task ids, and `--status`/`--kind`/`--after` without ids are refused. Only
+transitions after the subscription is established count (names are resolved first); `manager agent wait` is the "has it reached"
+check. `agentboard manager events wait --until working [--agent coder] [--timeout 60] [--json]`
+is the agent side alone, exit 0 or 3. Both ride `events.subscribe` (herdr's `events.wait`
+takes one pane and one status) and close the stream on a match, a timeout and a cancel.
+
 `agentboard` with no command serves MCP on stdio. Misuse (unknown flag,
 unknown task, bad value) is exit 1 with an `agentboard: ` prefix on stderr;
 `wait` exits 0 on a match and 3 on a timeout, and its output starts with

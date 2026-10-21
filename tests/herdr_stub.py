@@ -7,13 +7,33 @@ named as asked, pane.close removes the agents in that pane, agent.rename renames
 Every request but ping is appended to LOG as {"method", "params"}. AGENTS_JSON is a
 file holding the agents live at the start.
 """
-import json, os, socket, sys
+import json, os, socket, sys, time
 
 sock_path, log_path = sys.argv[1], sys.argv[2]
 agents = json.load(open(sys.argv[3])) if len(sys.argv) > 3 else []
 # STUB_BUSY=N: the first N agent.start calls answer agent_pane_busy, as herdr does
 # while a fresh pane's shell is still starting.
 busy = [int(os.environ.get("STUB_BUSY", "0"))]
+
+
+# STUB_EVENTS="MS:agent:status,..." scripts what events.subscribe streams after its ack:
+# at MS since the ack, one pane.agent_status_changed for that agent. STUB_EVENTS_CLOSE=1
+# then hangs up; otherwise the stream stays open until the client closes it. The stub is
+# serial, so a subscription holds it until then: STUB_EVENTS_LOG, when set, gets
+# "subscribed" and "closed by client" lines proving the client let go.
+events = [e.split(":") for e in os.environ.get("STUB_EVENTS", "").split(",") if e]
+events_log = os.environ.get("STUB_EVENTS_LOG")
+
+
+def note(msg):
+    if events_log:
+        with open(events_log, "a") as f:
+            f.write(msg + "\n")
+
+
+# STUB_HANG=METHOD: that method is accepted and never answered; the stub waits for the
+# client to give up and hang up (so it is serial-safe) before serving the next request.
+hang = os.environ.get("STUB_HANG")
 
 
 # STUB_SEAT puts a started agent behind a screen, blocked+launch_pending:
@@ -98,6 +118,36 @@ while True:
         if req["method"] != "ping":
             with open(log_path, "a") as f:
                 f.write(json.dumps({"method": req["method"], "params": req["params"]}) + "\n")
+        if req["method"] == hang:
+            conn.settimeout(30)
+            try:
+                while conn.recv(4096):
+                    pass
+            except OSError:
+                pass
+            conn.close()
+            continue
+        if req["method"] == "events.subscribe":
+            conn.sendall((json.dumps({"id": req["id"], "result": {"type": "subscription_started"}}) + "\n").encode())
+            note("subscribed " + json.dumps(req["params"], sort_keys=True))
+            t0 = time.time()
+            for ms, name, status in events:
+                time.sleep(max(0, int(ms) / 1000 - (time.time() - t0)))
+                pane = next(a["pane_id"] for a in agents if a["name"] == name)
+                ev = {"event": "pane.agent_status_changed",
+                      "data": {"type": "pane_agent_status_changed", "pane_id": pane,
+                               "workspace_id": "s", "agent_status": status}}
+                conn.sendall((json.dumps(ev) + "\n").encode())
+            if os.environ.get("STUB_EVENTS_CLOSE") != "1":
+                conn.settimeout(30)
+                try:
+                    while conn.recv(4096):
+                        pass
+                except OSError:
+                    pass
+                note("closed by client")
+            conn.close()
+            continue
         try:
             reply = {"id": req["id"], "result": handle(req["method"], req["params"])}
         except Busy:

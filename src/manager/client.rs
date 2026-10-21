@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -193,6 +193,22 @@ impl Client {
         method: &str,
         params: Value,
     ) -> Result<Value, String> {
+        let id = self.send(s, end, method, params)?;
+        match self.read_line(s, end, method, &mut Vec::new())? {
+            Line::Got(line) => reply(method, &id, &line),
+            Line::Eof => Err(format!("herdr: {method}: connection closed before a reply")),
+            Line::Idle => Err(self.timed_out(method)),
+        }
+    }
+
+    /// Writes one request line; returns its id.
+    fn send(
+        &self,
+        s: &mut UnixStream,
+        end: Instant,
+        method: &str,
+        params: Value,
+    ) -> Result<String, String> {
         let id = next_id();
         let mut line = json!({"id": id, "method": method, "params": params}).to_string();
         line.push('\n');
@@ -207,24 +223,38 @@ impl Client {
             ErrorKind::WouldBlock | ErrorKind::TimedOut => self.timed_out(method),
             _ => format!("herdr: {method}: write: {e}"),
         })?;
+        Ok(id)
+    }
 
-        let mut buf = Vec::new();
+    /// The next NDJSON line off `s`, waiting until `until`. `buf` carries bytes read
+    /// past a line to the next call.
+    fn read_line(
+        &self,
+        s: &mut UnixStream,
+        until: Instant,
+        method: &str,
+        buf: &mut Vec<u8>,
+    ) -> Result<Line, String> {
         let mut chunk = [0u8; 8192];
-        let nl = loop {
+        loop {
             if let Some(i) = buf.iter().position(|&b| b == b'\n') {
-                break i;
+                let line = buf[..=i].to_vec();
+                buf.drain(..=i);
+                return Ok(Line::Got(line));
             }
             if buf.len() > MAX_REPLY {
                 return Err(format!("herdr: {method}: reply over {MAX_REPLY} bytes"));
             }
-            let left = end
+            let Some(left) = until
                 .checked_duration_since(Instant::now())
                 .filter(|d| !d.is_zero())
-                .ok_or_else(|| self.timed_out(method))?;
+            else {
+                return Ok(Line::Idle);
+            };
             s.set_read_timeout(Some(left))
                 .map_err(|e| format!("herdr: {method}: {e}"))?;
             match s.read(&mut chunk) {
-                Ok(0) => return Err(format!("herdr: {method}: connection closed before a reply")),
+                Ok(0) => return Ok(Line::Eof),
                 Ok(n) => buf.extend_from_slice(&chunk[..n]),
                 Err(e)
                     if matches!(
@@ -233,30 +263,175 @@ impl Client {
                     ) => {}
                 Err(e) => return Err(format!("herdr: {method}: read: {e}")),
             }
-        };
-        let first = &buf[..=nl];
-        let reply: Value = serde_json::from_slice(first).map_err(|e| {
-            format!(
-                "herdr: {method}: malformed reply: {}",
-                one_line(&e.to_string())
-            )
-        })?;
-        if reply.get("id").and_then(Value::as_str) != Some(id.as_str()) {
-            return Err(format!(
-                "herdr: {method}: reply id does not match the request"
-            ));
         }
-        if let Some(err) = reply.get("error") {
-            let field = |k: &str| err.get(k).and_then(Value::as_str).unwrap_or("?");
-            return Err(format!(
-                "herdr: {method}: {}: {}",
-                one_line(field("code")),
-                one_line(field("message"))
-            ));
+    }
+
+    /// A subscription held open for at most `wait`: `on` sees every event line and
+    /// the first `Some` it returns wins. `Ok(None)` is a timeout or a `cancel`,
+    /// noticed within `SLICE`. The connection closes on every way out, and a server
+    /// that hangs up mid-wait is an error, never a hang.
+    pub(super) fn subscribe<T>(
+        &self,
+        params: Value,
+        wait: Duration,
+        cancel: &AtomicBool,
+        mut on: impl FnMut(&Value) -> Option<T>,
+    ) -> Result<Option<T>, String> {
+        const METHOD: &str = "events.subscribe";
+        const SLICE: Duration = Duration::from_millis(200);
+        let start = Instant::now();
+        self.pin(start + self.deadline)?;
+        let end = start + self.deadline;
+        let mut s = self.dial(end)?;
+        let id = self.send(&mut s, end, METHOD, params)?;
+        let mut buf = Vec::new();
+        match self.read_line(&mut s, end, METHOD, &mut buf)? {
+            Line::Got(line) => reply(METHOD, &id, &line).map(drop)?,
+            Line::Eof => return Err(format!("herdr: {METHOD}: connection closed before a reply")),
+            Line::Idle => return Err(self.timed_out(METHOD)),
         }
-        reply
-            .get("result")
-            .cloned()
-            .ok_or_else(|| format!("herdr: {method}: reply has neither result nor error"))
+        let end = Instant::now() + wait;
+        loop {
+            let now = Instant::now();
+            if cancel.load(Ordering::Relaxed) || now >= end {
+                return Ok(None);
+            }
+            match self.read_line(&mut s, end.min(now + SLICE), METHOD, &mut buf)? {
+                Line::Got(line) => {
+                    let ev: Value = serde_json::from_slice(&line).map_err(|e| {
+                        format!(
+                            "herdr: {METHOD}: malformed event: {}",
+                            one_line(&e.to_string())
+                        )
+                    })?;
+                    if let Some(hit) = on(&ev) {
+                        return Ok(Some(hit));
+                    }
+                }
+                Line::Eof => return Err(format!("herdr: {METHOD}: connection closed mid-wait")),
+                Line::Idle => {}
+            }
+        }
+    }
+}
+
+enum Line {
+    Got(Vec<u8>),
+    Eof,
+    /// The wait ran out before a full line arrived.
+    Idle,
+}
+
+/// One reply line to its `result`, checking it answers request `id`.
+fn reply(method: &str, id: &str, line: &[u8]) -> Result<Value, String> {
+    let reply: Value = serde_json::from_slice(line).map_err(|e| {
+        format!(
+            "herdr: {method}: malformed reply: {}",
+            one_line(&e.to_string())
+        )
+    })?;
+    if reply.get("id").and_then(Value::as_str) != Some(id) {
+        return Err(format!(
+            "herdr: {method}: reply id does not match the request"
+        ));
+    }
+    if let Some(err) = reply.get("error") {
+        let field = |k: &str| err.get(k).and_then(Value::as_str).unwrap_or("?");
+        return Err(format!(
+            "herdr: {method}: {}: {}",
+            one_line(field("code")),
+            one_line(field("message"))
+        ));
+    }
+    reply
+        .get("result")
+        .cloned()
+        .ok_or_else(|| format!("herdr: {method}: reply has neither result nor error"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+
+    /// A herdr that answers ping, acks `events.subscribe` and streams one
+    /// `pane.agent_status_changed` when `emit`, counting subscription connections the
+    /// client has opened and the ones it has closed (read EOF).
+    fn serve(emit: bool) -> (PathBuf, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let sock = std::env::temp_dir().join(format!(
+            "ab-sub-{}-{}.sock",
+            std::process::id(),
+            next_id().replace('-', "")
+        ));
+        let _ = std::fs::remove_file(&sock);
+        let l = UnixListener::bind(&sock).unwrap();
+        let (opened, closed) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (o, c) = (opened.clone(), closed.clone());
+        thread::spawn(move || {
+            for conn in l.incoming().flatten() {
+                let (o, c) = (o.clone(), c.clone());
+                thread::spawn(move || {
+                    let mut line = String::new();
+                    let mut r = std::io::BufReader::new(conn.try_clone().unwrap());
+                    std::io::BufRead::read_line(&mut r, &mut line).unwrap();
+                    let req: Value = serde_json::from_str(&line).unwrap();
+                    let mut w = conn;
+                    let reply =
+                        |res: Value| format!("{}\n", json!({"id": req["id"], "result": res}));
+                    if req["method"] == "ping" {
+                        let _ = w.write_all(
+                            reply(json!({"type": "pong", "version": "t", "protocol": 22}))
+                                .as_bytes(),
+                        );
+                        return;
+                    }
+                    o.fetch_add(1, Ordering::SeqCst);
+                    let _ = w.write_all(reply(json!({"type": "subscription_started"})).as_bytes());
+                    if emit {
+                        let ev = json!({"event": "pane.agent_status_changed", "data": {"pane_id": "p", "agent_status": "idle"}});
+                        let _ = writeln!(w, "{ev}");
+                    }
+                    let mut buf = [0u8; 16];
+                    while std::io::Read::read(&mut r, &mut buf).unwrap_or(0) > 0 {}
+                    c.fetch_add(1, Ordering::SeqCst);
+                });
+            }
+        });
+        (sock, opened, closed)
+    }
+
+    fn settled(opened: &AtomicUsize, closed: &AtomicUsize) -> bool {
+        let end = Instant::now() + Duration::from_secs(2);
+        while closed.load(Ordering::SeqCst) < opened.load(Ordering::SeqCst) && Instant::now() < end
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        opened.load(Ordering::SeqCst) == closed.load(Ordering::SeqCst)
+    }
+
+    /// The process outlives each call, so a connection the server sees closed was
+    /// closed by `subscribe` itself, not by exit.
+    #[test]
+    fn subscribe_closes_its_connection_on_match_timeout_and_cancel() {
+        let (sock, opened, closed) = serve(true);
+        let c = Client::at(sock, Duration::from_secs(2)).unwrap();
+        let no = AtomicBool::new(false);
+        let hit = c.subscribe(json!({}), Duration::from_secs(5), &no, |ev| {
+            ev["data"]["agent_status"].as_str().map(str::to_owned)
+        });
+        assert_eq!(hit.unwrap().as_deref(), Some("idle"));
+        assert!(settled(&opened, &closed), "match left a connection open");
+
+        let miss = c.subscribe(json!({}), Duration::from_millis(300), &no, |_| None::<()>);
+        assert_eq!(miss.unwrap(), None);
+        assert!(settled(&opened, &closed), "timeout left a connection open");
+
+        let yes = AtomicBool::new(true);
+        let cut = c.subscribe(json!({}), Duration::from_secs(30), &yes, |_| None::<()>);
+        assert_eq!(cut.unwrap(), None);
+        assert!(settled(&opened, &closed), "cancel left a connection open");
+        assert_eq!(opened.load(Ordering::SeqCst), 3);
     }
 }

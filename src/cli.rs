@@ -211,6 +211,12 @@ pub enum Cmd {
         kind: Option<String>,
         #[arg(long, value_name = "SEQ", allow_negative_numbers = true)]
         after: Option<i64>,
+        /// Also wake on this herdr agent's transition (name or pane id), repeatable
+        #[arg(long)]
+        agent: Vec<String>,
+        /// With --agent: the agent statuses that wake it (default idle,blocked,done)
+        #[arg(long, requires = "agent")]
+        until: Vec<String>,
         /// Seconds
         #[arg(long, default_value_t = 60, allow_negative_numbers = true)]
         timeout: u64,
@@ -292,6 +298,11 @@ pub enum ManagerCmd {
         #[command(subcommand)]
         action: ManagerAgentCmd,
     },
+    /// herdr events: block until something happens instead of polling
+    Events {
+        #[command(subcommand)]
+        action: ManagerEventsCmd,
+    },
     /// herdr tabs
     Tab {
         #[command(subcommand)]
@@ -333,6 +344,24 @@ pub enum ManagerCmd {
     Renew {
         #[arg(long, value_delimiter = ',', default_value = "coder,reviewer")]
         names: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ManagerEventsCmd {
+    /// Block until an agent moves to a status; exit 0 matched, 3 timeout
+    Wait {
+        /// idle, working, blocked, done or unknown; comma list or repeat
+        #[arg(long, required = true)]
+        until: Vec<String>,
+        /// Agent name or pane id, repeatable (default: every live agent)
+        #[arg(long)]
+        agent: Vec<String>,
+        /// Seconds
+        #[arg(long, default_value_t = 60, allow_negative_numbers = true)]
+        timeout: u64,
+        #[arg(long)]
+        json: bool,
     },
 }
 

@@ -122,5 +122,51 @@ M renew --names coder
 check "renew refuses an idle pane whose screen shows no prompt marker, and prints the screen" $([ $rc -eq 1 ] && has "$err" "no prompt marker" && has "$err" "auto mode on" && [ -z "$out" ] && echo 0 || echo 1)
 unset STUB_PROMPT
 
+# agentboard wait --agent: one call watches board rows and an agent's transitions.
+EV='[{"name":"coder","agent":"claude","agent_status":"idle","workspace_id":"s","tab_id":"s:t1","pane_id":"s:p1","focused":false}]'
+export STUB_EVENTS_LOG=$S/events.log
+T=$($B add "watched row" 2>/dev/null | grep -o 'T[0-9]*' | head -1)
+reset_events() { : >"$STUB_EVENTS_LOG"; }
+reset_events; export STUB_EVENTS=300:coder:idle; stub "$EV"
+run $B wait "$T" --agent coder --status done --timeout 5
+echo "wait --agent (agent fires): $out"
+check "the agent's transition wakes a wait on a quiet board row, naming the agent side" $([ $rc -eq 0 ] && [ "$out" != "${out#matched: agent coder -> idle after 0.}" ] && echo 0 || echo 1)
+check "...and the stream is closed by the client (stub saw EOF)" $(for _ in $(seq 1 20); do grep -q "closed by client" "$STUB_EVENTS_LOG" && break; sleep 0.1; done; grep -q "closed by client" "$STUB_EVENTS_LOG" && echo 0 || echo 1)
+unset STUB_EVENTS
+reset_events; stub "$EV"
+( sleep 0.5; $B claim "$T" >/dev/null 2>&1 ) &
+CLAIMER=$!
+run $B wait "$T" --agent coder --status working --timeout 5
+wait "$CLAIMER"
+echo "wait --agent (board fires): $out"
+check "a board row moving first wakes it with the board's own text, not an agent line" $([ $rc -eq 0 ] && has "$out" "matched: 1 of 1 watched" && ! has "$out" "agent coder" && echo 0 || echo 1)
+check "...and the stream is closed by the client when the board wins" $(for _ in $(seq 1 20); do grep -q "closed by client" "$STUB_EVENTS_LOG" && break; sleep 0.1; done; grep -q "closed by client" "$STUB_EVENTS_LOG" && echo 0 || echo 1)
+reset_events; stub "$EV"
+run $B wait "$T" --agent coder --status done --timeout 1
+echo "wait --agent (timeout): $out"
+check "nothing firing is one timeout, exit 3, with the board's text and the agent line" $([ $rc -eq 3 ] && has "$out" "timeout: nothing matched after 1s" && has "$out" "timeout: no agent transition after 1s (watching coder)" && echo 0 || echo 1)
+reset_events; export STUB_EVENTS=200:coder:working; stub "$EV"
+run $B wait --agent coder --until working --timeout 5
+check "--agent alone needs no task ids" $([ $rc -eq 0 ] && has "$out" "matched: agent coder -> working after 0." && echo 0 || echo 1)
+unset STUB_EVENTS
+run $B wait --agent coder --status done --timeout 1
+check "--status without task ids is refused, not silently ignored" $([ $rc -eq 1 ] && has "$err" "need task ids, --epic or --open" && echo 0 || echo 1)
+run $B wait "$T" --until idle --timeout 1
+check "--until without --agent is refused" $([ $rc -eq 1 ] && has "$err" "--agent" && echo 0 || echo 1)
+run $B wait "$T" --agent ghost --timeout 1
+check "an unknown agent is refused before blocking" $([ $rc -eq 1 ] && has "$err" 'no live agent "ghost"' && echo 0 || echo 1)
+unset STUB_EVENTS_LOG
+
+# A herdr that hangs must not discard a board match: the row is already working.
+$B claim "$T" >/dev/null 2>&1
+export STUB_HANG=agent.list; stub "$EV"
+run env AGENTBOARD_HERDR_TIMEOUT_MS=500 $B wait "$T" --agent coder --status working --timeout 8
+echo "wait --agent (herdr hangs, board matched): out=[$out] err=[$err]"
+check "a board match is returned with exit 0 though herdr never answers" $([ $rc -eq 0 ] && has "$out" "matched: 1 of 1 watched" && echo 0 || echo 1)
+check "...and the degraded --agent side is noted on stderr, not swallowed" $(has "$err" "board matched, --agent watch degraded: wait: agent watch failed: herdr: agent.list timed out" && echo 0 || echo 1)
+run env AGENTBOARD_HERDR_TIMEOUT_MS=500 $B wait "$T" --agent coder --status done --timeout 8
+check "with no board match the herdr error decides, naming the agent side" $([ $rc -eq 1 ] && [ -z "$out" ] && has "$err" "wait: agent watch failed: herdr: agent.list timed out" && echo 0 || echo 1)
+unset STUB_HANG
+
 echo "$pass/$total passed (backend: $BACKEND)"
 [ "$pass" -eq "$total" ]

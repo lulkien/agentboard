@@ -6,9 +6,11 @@
 
 mod api;
 mod client;
+mod events;
 mod team;
 mod write;
 
+pub use events::{Hit, hit_line, parse_until, timeout_line, watch};
 pub use team::{Up, down, renew, up};
 use write::guard;
 
@@ -20,11 +22,13 @@ use crate::store::{self, short};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-/// Why a verb stopped. A refusal (a working agent, no `--force`) exits 3 so a
-/// script can tell "not now" from "broken"; everything else exits 1.
+/// Why a verb stopped. A refusal (a working agent, no `--force`) and a timeout exit 3 so
+/// a script can tell "not now" from "broken"; everything else exits 1.
 #[derive(Debug)]
 pub enum Failure {
     Refused(String),
+    /// A bounded wait that ran out: its text goes to stdout, the exit is 3.
+    TimedOut(String),
     Other(String),
 }
 
@@ -424,6 +428,41 @@ pub fn agent_wait(
         .and_then(Value::as_str)
         .unwrap_or("reached");
     Ok(format!("{target}: {status}"))
+}
+
+/// `manager events wait`: the first transition into `until` on the named agents
+/// (every live agent when none), one line or one JSON object. A timeout is
+/// `Failure::TimedOut`, exit 3, as `agentboard wait`.
+pub fn events_wait(
+    c: &Client,
+    names: &[String],
+    until: &[String],
+    timeout_s: u64,
+    json: bool,
+) -> Result<String, Failure> {
+    let until = parse_until(until)?;
+    let wait = std::time::Duration::from_secs(timeout_s);
+    let (watched, hit) = watch(
+        c,
+        names,
+        &until,
+        wait,
+        &std::sync::atomic::AtomicBool::new(false),
+    )?;
+    let render = |v: Value, text: String| {
+        if json {
+            serde_json::to_string(&v).map_err(|e| e.to_string())
+        } else {
+            Ok(text)
+        }
+    };
+    match hit {
+        Some(h) => Ok(render(events::hit_json(&h), hit_line(&h))?),
+        None => Err(Failure::TimedOut(render(
+            events::timeout_json(wait, &watched),
+            timeout_line(wait, &watched),
+        )?)),
+    }
 }
 
 fn forced_note(done: String, forced: &[String]) -> String {

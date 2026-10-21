@@ -9,7 +9,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -34,7 +34,14 @@ impl Drop for Stub {
     }
 }
 
+/// What a stub does with an `events.subscribe` connection after its ack.
+type Stream = Arc<dyn Fn(&mut UnixStream) + Send + Sync>;
+
 fn stub(name: &str, script: Script) -> Stub {
+    stub_streaming(name, script, None)
+}
+
+fn stub_streaming(name: &str, script: Script, stream: Option<Stream>) -> Stub {
     let dir =
         std::env::temp_dir().join(format!("agentboard-manager-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -48,11 +55,12 @@ fn stub(name: &str, script: Script) -> Stub {
     let script = Arc::new(script);
     thread::spawn(move || {
         for conn in listener.incoming().flatten() {
-            let (seen, by_conn, by_req, script) = (
+            let (seen, by_conn, by_req, script, stream) = (
                 seen.clone(),
                 by_conn.clone(),
                 by_req.clone(),
                 script.clone(),
+                stream.clone(),
             );
             let n = {
                 let mut c = by_conn.lock().unwrap();
@@ -88,6 +96,11 @@ fn stub(name: &str, script: Script) -> Stub {
                         }
                     };
                     let _ = writeln!(conn, "{reply}");
+                    if method == "events.subscribe"
+                        && let Some(stream) = &stream
+                    {
+                        stream(&mut conn);
+                    }
                     return; // herdr answers one request and closes
                 }
             });
@@ -690,4 +703,273 @@ fn renew_refuses_an_idle_pane_that_shows_no_prompt_marker() {
         "{err}"
     );
     assert!(text(&o.stdout).is_empty(), "{}", text(&o.stdout));
+}
+
+/// A stub herdr with coder (w1:p2) and reviewer (w1:p3) that answers
+/// `events.subscribe` with `plan`: `(ms since the ack, pane, status)` events, then
+/// hangs up when `close`, else holds the stream until the client lets go (`released`).
+fn events_stub(
+    name: &str,
+    plan: Vec<(u64, &'static str, &'static str)>,
+    close: bool,
+) -> (Stub, Arc<AtomicBool>) {
+    let released = Arc::new(AtomicBool::new(false));
+    let flag = released.clone();
+    let stream: Stream = Arc::new(move |conn| {
+        let t0 = Instant::now();
+        for (ms, pane, status) in &plan {
+            thread::sleep(Duration::from_millis(*ms).saturating_sub(t0.elapsed()));
+            let ev = json!({"event": "pane.agent_status_changed", "data": {
+                "type": "pane_agent_status_changed", "pane_id": pane,
+                "workspace_id": "w1", "agent_status": status}});
+            let _ = writeln!(conn, "{ev}");
+        }
+        if close {
+            return;
+        }
+        let _ = conn.set_read_timeout(Some(Duration::from_secs(10)));
+        let mut buf = [0u8; 64];
+        while std::io::Read::read(conn, &mut buf).unwrap_or(0) > 0 {}
+        flag.store(true, Ordering::SeqCst);
+    });
+    let script: Script = Box::new(|method, _| {
+        Some(Ok(match method {
+            "ping" => pong(22),
+            "agent.list" => json!({"type": "agent_list", "agents": [
+                agent("coder", "w1:p2", "idle"), agent("reviewer", "w1:p3", "idle")]}),
+            "events.subscribe" => json!({"type": "subscription_started"}),
+            _ => return Some(Err(("method_not_found", "no such method"))),
+        }))
+    });
+    (stub_streaming(name, script, Some(stream)), released)
+}
+
+fn wait_released(released: &AtomicBool) {
+    let end = Instant::now() + Duration::from_secs(2);
+    while !released.load(Ordering::SeqCst) && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        released.load(Ordering::SeqCst),
+        "the client never closed the stream"
+    );
+}
+
+#[test]
+fn events_wait_wakes_on_the_named_agents_transition_and_says_so() {
+    let (s, released) = events_stub("ev-match", vec![(300, "w1:p2", "working")], false);
+    let (o, took) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "events",
+            "wait",
+            "--until",
+            "working",
+            "--agent",
+            "coder",
+            "--timeout",
+            "5",
+        ],
+        &[],
+    );
+    let out = text(&o.stdout);
+    println!("{out}");
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    assert!(
+        out.starts_with("matched: agent coder -> working after 0.")
+            && out.trim_end().lines().count() == 1,
+        "{out}"
+    );
+    assert!(took < Duration::from_secs(3), "took {took:?}");
+    let subs = s.reqs.lock().unwrap().clone();
+    let sub = subs
+        .iter()
+        .find(|r| r["method"] == "events.subscribe")
+        .unwrap();
+    assert_eq!(
+        sub["params"],
+        json!({"subscriptions": [{"type": "pane.agent_status_changed", "pane_id": "w1:p2"}]})
+    );
+    wait_released(&released);
+}
+
+#[test]
+fn events_wait_json_is_one_object() {
+    let (s, _) = events_stub("ev-json", vec![(100, "w1:p3", "idle")], false);
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "events",
+            "wait",
+            "--until",
+            "idle,done",
+            "--timeout",
+            "5",
+            "--json",
+        ],
+        &[],
+    );
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        (
+            v["matched"].clone(),
+            v["agent"].clone(),
+            v["status"].clone()
+        ),
+        (json!(true), json!("reviewer"), json!("idle"))
+    );
+    assert!(v["waited_ms"].as_u64().unwrap() >= 90, "{v}");
+    // No --agent: every live agent is watched, one subscription each.
+    let subs = s.reqs.lock().unwrap().clone();
+    let n = subs
+        .iter()
+        .find(|r| r["method"] == "events.subscribe")
+        .unwrap()["params"]["subscriptions"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(n, 2);
+}
+
+#[test]
+fn events_wait_times_out_exit_3_in_wait_shape_and_lets_go_of_the_socket() {
+    let (s, released) = events_stub("ev-timeout", vec![], false);
+    let (o, took) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "events",
+            "wait",
+            "--until",
+            "working",
+            "--agent",
+            "coder",
+            "--timeout",
+            "1",
+        ],
+        &[],
+    );
+    let out = text(&o.stdout);
+    println!("{out}");
+    assert_eq!(o.status.code(), Some(3), "{}", text(&o.stderr));
+    assert_eq!(
+        out.trim_end(),
+        "timeout: no agent transition after 1s (watching coder)"
+    );
+    assert!(
+        took >= Duration::from_secs(1) && took < Duration::from_secs(3),
+        "took {took:?}"
+    );
+    assert!(text(&o.stderr).is_empty());
+    wait_released(&released);
+}
+
+#[test]
+fn events_wait_ignores_other_agents_and_unwanted_statuses() {
+    // reviewer works (wrong agent), coder goes idle (wrong status): neither wakes it.
+    let plan = vec![(100, "w1:p3", "working"), (200, "w1:p2", "idle")];
+    let (s, _) = events_stub("ev-ignore", plan.clone(), false);
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "events",
+            "wait",
+            "--until",
+            "working",
+            "--agent",
+            "coder",
+            "--timeout",
+            "1",
+        ],
+        &[],
+    );
+    assert_eq!(o.status.code(), Some(3), "{}", text(&o.stdout));
+    // The same stream does wake it once coder reaches the wanted status.
+    let mut plan = plan;
+    plan.push((400, "w1:p2", "working"));
+    let (s, _) = events_stub("ev-ignore2", plan, false);
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "events",
+            "wait",
+            "--until",
+            "working",
+            "--agent",
+            "coder",
+            "--timeout",
+            "5",
+        ],
+        &[],
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    assert!(
+        text(&o.stdout).starts_with("matched: agent coder -> working after 0.4"),
+        "{}",
+        text(&o.stdout)
+    );
+}
+
+#[test]
+fn events_wait_on_a_server_that_hangs_up_is_one_error_line_not_a_hang() {
+    let (s, _) = events_stub("ev-close", vec![], true);
+    let (o, took) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "events",
+            "wait",
+            "--until",
+            "working",
+            "--agent",
+            "coder",
+            "--timeout",
+            "30",
+        ],
+        &[],
+    );
+    let err = text(&o.stderr);
+    assert_eq!(o.status.code(), Some(1), "{err}");
+    assert_eq!(
+        err.trim_end(),
+        "agentboard: herdr: events.subscribe: connection closed mid-wait"
+    );
+    assert!(text(&o.stdout).is_empty());
+    assert!(took < Duration::from_secs(5), "took {took:?}");
+}
+
+#[test]
+fn events_wait_refuses_a_typo_and_an_unknown_agent_before_blocking() {
+    let (s, _) = events_stub("ev-refuse", vec![], false);
+    let (o, took) = manager(&s.sock, &s.dir, &["events", "wait", "--until", "idel"], &[]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        text(&o.stderr).contains("bad agent status \"idel\""),
+        "{}",
+        text(&o.stderr)
+    );
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &["events", "wait", "--until", "idle", "--agent", "ghost"],
+        &[],
+    );
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        text(&o.stderr).contains("no live agent \"ghost\""),
+        "{}",
+        text(&o.stderr)
+    );
+    assert!(took < Duration::from_secs(2));
+    assert!(
+        !s.reqs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r["method"] == "events.subscribe")
+    );
 }
