@@ -1,10 +1,16 @@
-//! `agentboard manager`: herdr read from the binary. `client` is the socket
-//! (discovery, protocol pin, deadline), `api` the typed read methods; this file
-//! joins the board's session registry against live herdr truth and renders it.
-//! Nothing here writes to herdr or to the board.
+//! `agentboard manager`: herdr driven from the binary. `client` is the socket
+//! (discovery, protocol pin, deadline), `api` the typed read methods, `write` the
+//! methods that change the session plus the working guard, `team` the composite
+//! verbs (`up`, `down`, `renew`). This file joins the board's session registry
+//! against live herdr truth and renders the verbs' one-line results.
 
 mod api;
 mod client;
+mod team;
+mod write;
+
+pub use team::{Up, down, renew, up};
+use write::guard;
 
 pub use api::Agent;
 pub use client::Client;
@@ -13,6 +19,34 @@ use crate::store::text::{SessionRow, ago};
 use crate::store::{self, short};
 use serde::Serialize;
 use serde_json::{Value, json};
+
+/// Why a verb stopped. A refusal (a working agent, no `--force`) exits 3 so a
+/// script can tell "not now" from "broken"; everything else exits 1.
+#[derive(Debug)]
+pub enum Failure {
+    Refused(String),
+    Other(String),
+}
+
+impl From<String> for Failure {
+    fn from(s: String) -> Self {
+        Failure::Other(s)
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(s: &str) -> Self {
+        Failure::Other(s.to_owned())
+    }
+}
+
+/// One seat of a team: the board role it takes its MCP config from, the agent
+/// kind to start, and the herdr name (role plus any prefix).
+pub struct Seat<'a> {
+    pub role: &'a str,
+    pub kind: &'a str,
+    pub name: String,
+}
 
 /// One line of `manager status`: a registry row, a live agent, or both.
 #[derive(Debug, Serialize, PartialEq)]
@@ -310,6 +344,96 @@ pub fn pane_read(
         .to_owned())
 }
 
+pub fn tab_new(c: &Client, cwd: &str, label: Option<&str>) -> Result<String, String> {
+    let t = c.tab_create(cwd, label, &[])?;
+    Ok(format!("tab {} root pane {}", t.tab_id, t.root_pane))
+}
+
+/// `K=V` strings into pairs; the value may itself contain `=`.
+fn parse_env(env: &[String]) -> Result<Vec<(String, String)>, String> {
+    env.iter()
+        .map(|kv| {
+            kv.split_once('=')
+                .filter(|(k, _)| !k.is_empty())
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .ok_or_else(|| format!("--env {kv:?}: want K=V"))
+        })
+        .collect()
+}
+
+pub fn pane_split(
+    c: &Client,
+    target: &str,
+    direction: &str,
+    cwd: Option<&str>,
+    env: &[String],
+) -> Result<String, String> {
+    let env = parse_env(env)?;
+    let pane = c.pane_split(target, direction, cwd, &env)?;
+    Ok(format!("pane {pane} split {direction} of {target}"))
+}
+
+pub fn pane_close(c: &Client, pane_id: &str, force: bool) -> Result<String, Failure> {
+    let forced = guard(&c.agents()?, "stop", &[pane_id], force)?;
+    c.pane_close(pane_id)?;
+    Ok(forced_note(format!("closed pane {pane_id}"), &forced))
+}
+
+pub fn agent_start(
+    c: &Client,
+    name: &str,
+    kind: &str,
+    pane: &str,
+    timeout_ms: Option<u64>,
+    args: &[String],
+) -> Result<String, String> {
+    c.agent_start(name, kind, pane, timeout_ms, args)?;
+    Ok(format!("started {name} ({kind}) in {pane}"))
+}
+
+pub fn agent_prompt(c: &Client, target: &str, text: &str) -> Result<String, String> {
+    c.agent_prompt(target, text)?;
+    Ok(format!("prompted {target}"))
+}
+
+pub fn agent_keys(c: &Client, target: &str, keys: &[String]) -> Result<String, String> {
+    c.agent_send_keys(target, keys)?;
+    Ok(format!("sent {} to {target}", keys.join(" ")))
+}
+
+pub fn agent_rename(c: &Client, target: &str, name: &str, force: bool) -> Result<String, Failure> {
+    let forced = guard(&c.agents()?, "rename", &[target], force)?;
+    c.agent_rename(target, name)?;
+    Ok(forced_note(format!("renamed {target} to {name}"), &forced))
+}
+
+pub fn agent_focus(c: &Client, target: &str) -> Result<String, String> {
+    c.agent_focus(target)?;
+    Ok(format!("focused {target}"))
+}
+
+pub fn agent_wait(
+    c: &Client,
+    target: &str,
+    until: &[String],
+    timeout_ms: Option<u64>,
+) -> Result<String, String> {
+    let r = c.agent_wait(target, until, timeout_ms)?;
+    let status = r
+        .pointer("/agent/agent_status")
+        .and_then(Value::as_str)
+        .unwrap_or("reached");
+    Ok(format!("{target}: {status}"))
+}
+
+fn forced_note(done: String, forced: &[String]) -> String {
+    if forced.is_empty() {
+        done
+    } else {
+        format!("{done}; forced: {}", forced.join(", "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +460,7 @@ mod tests {
             cwd: Some("/live".to_owned()),
             foreground_cwd: None,
             focused: false,
+            launch_pending: false,
         }
     }
 

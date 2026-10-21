@@ -165,6 +165,26 @@ impl Client {
         self.exchange(&mut s, end, method, params)
     }
 
+    /// A long-poll method (`agent.start`, `agent.wait`): pinned under the normal
+    /// deadline, then the method itself gets `wait` plus the normal deadline, so the
+    /// caller's own timeout governs and a timeout message names the real budget.
+    pub(super) fn call_for(
+        &self,
+        method: &str,
+        params: Value,
+        wait: Duration,
+    ) -> Result<Value, String> {
+        self.pin(Instant::now() + self.deadline)?;
+        let long = Client {
+            sock: self.sock.clone(),
+            deadline: self.deadline + wait,
+            version: self.version.clone(),
+        };
+        let end = Instant::now() + long.deadline;
+        let mut s = long.dial(end)?;
+        long.exchange(&mut s, end, method, params)
+    }
+
     /// Writes one request and reads its one reply line.
     fn exchange(
         &self,

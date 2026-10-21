@@ -9,6 +9,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,6 +24,8 @@ struct Stub {
     log: Arc<Mutex<Vec<String>>>,
     /// The methods each connection carried, in order.
     conns: Arc<Mutex<Vec<Vec<String>>>>,
+    /// Every non-ping request as `{method, params}`, in arrival order.
+    reqs: Arc<Mutex<Vec<Value>>>,
 }
 
 impl Drop for Stub {
@@ -40,11 +43,17 @@ fn stub(name: &str, script: Script) -> Stub {
     let listener = UnixListener::bind(&sock).unwrap();
     let log = Arc::new(Mutex::new(Vec::new()));
     let conns: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
-    let (seen, by_conn) = (Arc::clone(&log), Arc::clone(&conns));
+    let reqs: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let (seen, by_conn, by_req) = (Arc::clone(&log), Arc::clone(&conns), Arc::clone(&reqs));
     let script = Arc::new(script);
     thread::spawn(move || {
         for conn in listener.incoming().flatten() {
-            let (seen, by_conn, script) = (seen.clone(), by_conn.clone(), script.clone());
+            let (seen, by_conn, by_req, script) = (
+                seen.clone(),
+                by_conn.clone(),
+                by_req.clone(),
+                script.clone(),
+            );
             let n = {
                 let mut c = by_conn.lock().unwrap();
                 c.push(Vec::new());
@@ -64,6 +73,12 @@ fn stub(name: &str, script: Script) -> Stub {
                     let method = req["method"].as_str().unwrap_or("").to_owned();
                     seen.lock().unwrap().push(method.clone());
                     by_conn.lock().unwrap()[n].push(method.clone());
+                    if method != "ping" {
+                        by_req
+                            .lock()
+                            .unwrap()
+                            .push(json!({"method": method, "params": req["params"]}));
+                    }
                     let id = req["id"].clone();
                     let reply = match script(&method, &req["params"]) {
                         None => continue,
@@ -83,6 +98,7 @@ fn stub(name: &str, script: Script) -> Stub {
         sock,
         log,
         conns,
+        reqs,
     }
 }
 
@@ -133,7 +149,10 @@ fn manager_env(
         .env_remove("AGENTBOARD_HERDR_SOCK")
         .env("HERDR_SOCKET", home.join("none"))
         .env("XDG_CONFIG_HOME", home.join("xdg"))
-        .env("HOME", home);
+        .env("HOME", home)
+        // Nothing here may reach a board: a verb that does hits a closed port.
+        .env("AGENTBOARD_SURREAL_URL", "127.0.0.1:1")
+        .env("AGENTBOARD_DB", home.join("board"));
     if let Some(sock) = sock {
         cmd.env("AGENTBOARD_HERDR_SOCK", sock);
     }
@@ -368,4 +387,307 @@ fn tmux_is_refused_by_name_before_any_socket_is_touched() {
         text(&o.stderr)
     );
     assert!(s.log.lock().unwrap().is_empty());
+}
+
+/// Replies shaped like herdr's for every mutating method, with `coder` in pane
+/// `w1:p2` at `status`.
+fn write_script(status: &'static str) -> Script {
+    Box::new(move |method, _| {
+        Some(Ok(match method {
+            "ping" => pong(22),
+            "agent.list" => {
+                json!({"type": "agent_list", "agents": [agent("coder", "w1:p2", status)]})
+            }
+            "tab.create" => json!({"type": "tab_created",
+                "tab": {"tab_id": "w1:t5"}, "root_pane": {"pane_id": "w1:p6"}}),
+            "pane.split" => json!({"type": "pane_info", "pane": {"pane_id": "w1:p7"}}),
+            _ => json!({"type": "ok"}),
+        }))
+    })
+}
+
+/// Runs one verb against a fresh stub; returns (exit code, stdout, stderr, requests).
+fn run_write(status: &'static str, args: &[&str]) -> (Option<i32>, String, String, Vec<Value>) {
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let s = stub(
+        &format!("write{}", N.fetch_add(1, Ordering::Relaxed)),
+        write_script(status),
+    );
+    let (o, _) = manager(&s.sock, &s.dir, args, &[]);
+    let reqs = s.reqs.lock().unwrap().clone();
+    (o.status.code(), text(&o.stdout), text(&o.stderr), reqs)
+}
+
+fn show(args: &[&str], out: &str, reqs: &[Value]) {
+    println!("$ agentboard manager {}", args.join(" "));
+    for r in reqs {
+        println!("  -> {r}");
+    }
+    println!("  out: {}", out.trim_end());
+}
+
+#[test]
+fn each_mutating_verb_sends_its_method_and_params() {
+    let cases: [(Vec<&str>, Value, &str); 8] = [
+        (
+            vec!["tab", "new", "--cwd", "/repo", "--label", "team"],
+            json!({"method": "tab.create", "params": {"cwd": "/repo", "label": "team"}}),
+            "tab w1:t5 root pane w1:p6",
+        ),
+        (
+            vec![
+                "pane", "split", "w1:p6", "--right", "--cwd", "/repo", "--env", "A=1", "--env",
+                "B=x=y",
+            ],
+            json!({"method": "pane.split", "params": {"direction": "right",
+                "target_pane_id": "w1:p6", "cwd": "/repo", "env": {"A": "1", "B": "x=y"}}}),
+            "pane w1:p7 split right of w1:p6",
+        ),
+        (
+            vec!["pane", "split", "w1:p6", "--down"],
+            json!({"method": "pane.split", "params": {"direction": "down", "target_pane_id": "w1:p6"}}),
+            "pane w1:p7 split down of w1:p6",
+        ),
+        (
+            vec![
+                "agent",
+                "start",
+                "coder",
+                "--kind",
+                "claude",
+                "--pane",
+                "w1:p6",
+                "--timeout-ms",
+                "120000",
+            ],
+            json!({"method": "agent.start", "params": {"name": "coder", "kind": "claude",
+                "pane_id": "w1:p6", "timeout_ms": 120000}}),
+            "started coder (claude) in w1:p6",
+        ),
+        (
+            vec!["agent", "prompt", "coder", "- claim T1"],
+            json!({"method": "agent.prompt", "params": {"target": "coder", "text": "- claim T1"}}),
+            "prompted coder",
+        ),
+        (
+            vec!["agent", "keys", "coder", "down", "enter"],
+            json!({"method": "agent.send_keys", "params": {"target": "coder", "keys": ["down", "enter"]}}),
+            "sent down enter to coder",
+        ),
+        (
+            vec!["agent", "focus", "coder"],
+            json!({"method": "agent.focus", "params": {"target": "coder"}}),
+            "focused coder",
+        ),
+        (
+            vec!["pane", "close", "w1:p9"],
+            json!({"method": "pane.close", "params": {"pane_id": "w1:p9"}}),
+            "closed pane w1:p9",
+        ),
+    ];
+    for (args, want, out_line) in cases {
+        let (code, out, err, reqs) = run_write("idle", &args);
+        show(&args, &out, &reqs);
+        assert_eq!(code, Some(0), "{args:?}: {err}");
+        assert_eq!(out.trim_end(), out_line, "{args:?}");
+        let sent: Vec<&Value> = reqs
+            .iter()
+            .filter(|r| r["method"] != "agent.list")
+            .collect();
+        assert_eq!(sent, [&want], "{args:?}");
+    }
+}
+
+#[test]
+fn argv_after_dashdash_reaches_agent_start_verbatim() {
+    let claude = [
+        "--strict-mcp-config",
+        "--mcp-config=/home/u/.claude/coding-mcp.json",
+        "--append-system-prompt-file=/home/u/.claude/caveman-full.md",
+        "--model",
+        "sonnet",
+    ];
+    for (name, kind, argv) in [
+        ("coder", "claude", claude.to_vec()),
+        ("reviewer", "opencode", vec!["--standalone"]),
+    ] {
+        let mut args = vec![
+            "agent", "start", name, "--kind", kind, "--pane", "w1:p6", "--",
+        ];
+        args.extend(&argv);
+        let (code, out, err, reqs) = run_write("idle", &args);
+        show(&args, &out, &reqs);
+        assert_eq!(code, Some(0), "{err}");
+        assert_eq!(reqs.len(), 1, "{reqs:?}");
+        assert_eq!(reqs[0]["params"]["args"], json!(argv), "{reqs:?}");
+        assert!(
+            reqs[0]["params"].get("timeout_ms").is_none(),
+            "no timeout asked, none sent: {reqs:?}"
+        );
+    }
+}
+
+#[test]
+fn a_working_agent_is_refused_exit_3_and_nothing_is_closed_until_force() {
+    for (verb, closes) in [
+        (vec!["pane", "close", "w1:p2"], "pane.close"),
+        (vec!["pane", "close", "w1:p2", "--force"], "pane.close"),
+        (vec!["agent", "rename", "coder", "other"], "agent.rename"),
+        (
+            vec!["agent", "rename", "coder", "other", "--force"],
+            "agent.rename",
+        ),
+        (vec!["down"], "pane.close"),
+    ] {
+        let forced = verb.contains(&"--force");
+        let (code, out, err, reqs) = run_write("working", &verb);
+        show(&verb, &out, &reqs);
+        let sent: Vec<&str> = reqs.iter().map(|r| r["method"].as_str().unwrap()).collect();
+        if forced {
+            assert!(sent.contains(&closes), "{verb:?}: {sent:?}");
+            assert_eq!(code, Some(0), "{verb:?}: {err}");
+            assert!(out.contains("forced: coder was working"), "{out}");
+        } else {
+            assert_eq!(code, Some(3), "{verb:?}: {err}");
+            assert!(
+                err.contains("refusing to ") && err.contains("status=working"),
+                "{err}"
+            );
+            assert!(one_line(&err), "{err}");
+            assert!(!sent.contains(&closes), "{verb:?} sent {closes}: {sent:?}");
+            assert!(out.is_empty(), "{out}");
+        }
+    }
+}
+
+#[test]
+fn down_names_the_agent_in_its_refusal() {
+    let (code, _, err, _) = run_write("working", &["down"]);
+    assert_eq!(code, Some(3));
+    assert!(
+        err.contains("refusing to stop coder: status=working"),
+        "{err}"
+    );
+}
+
+#[test]
+fn renew_refuses_a_working_pane_before_typing_anything() {
+    let (code, _, err, reqs) = run_write("working", &["renew", "--names", "coder"]);
+    assert_eq!(code, Some(3), "{err}");
+    assert!(
+        err.contains("refusing to clear coder: status=working"),
+        "{err}"
+    );
+    let sent: Vec<&str> = reqs.iter().map(|r| r["method"].as_str().unwrap()).collect();
+    assert_eq!(
+        sent,
+        ["agent.list"],
+        "nothing but the status read: {sent:?}"
+    );
+}
+
+#[test]
+fn renew_clears_through_send_text_then_enter_waits_and_cites_the_marker() {
+    let s = stub(
+        "renew",
+        Box::new(|method, _| {
+            Some(Ok(match method {
+                "ping" => pong(22),
+                "agent.list" => {
+                    json!({"type": "agent_list", "agents": [agent("coder", "w1:p2", "idle")]})
+                }
+                "agent.wait" => json!({"type": "agent_info", "agent": {"agent_status": "idle"}}),
+                "pane.read" => json!({"type": "pane_read", "read": {"text": "banner\n❯ \n\n"}}),
+                _ => json!({"type": "ok"}),
+            }))
+        }),
+    );
+    let (o, _) = manager(&s.sock, &s.dir, &["renew", "--names", "coder"], &[]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let reqs = s.reqs.lock().unwrap().clone();
+    show(&["renew", "--names", "coder"], &text(&o.stdout), &reqs);
+    let sent: Vec<&str> = reqs.iter().map(|r| r["method"].as_str().unwrap()).collect();
+    assert_eq!(
+        sent,
+        [
+            "agent.list",
+            "pane.send_text",
+            "pane.send_keys",
+            "agent.wait",
+            "pane.read"
+        ]
+    );
+    assert_eq!(
+        reqs[1]["params"],
+        json!({"pane_id": "w1:p2", "text": "/clear"})
+    );
+    assert_eq!(
+        reqs[2]["params"],
+        json!({"pane_id": "w1:p2", "keys": ["enter"]})
+    );
+    assert_eq!(reqs[3]["params"]["until"], json!(["idle", "done"]));
+    assert!(
+        text(&o.stdout).contains("idle, prompt marker \"❯\" on screen"),
+        "{}",
+        text(&o.stdout)
+    );
+}
+
+#[test]
+fn renew_says_still_launching_when_the_seat_never_reaches_a_prompt() {
+    let s = stub(
+        "launching",
+        Box::new(|method, _| {
+            let mut a = agent("coder", "w1:p2", "idle");
+            if method == "agent.wait" {
+                return Some(Err(("timeout", "timed out waiting for agent status")));
+            }
+            Some(Ok(match method {
+                "ping" => pong(22),
+                "agent.list" => {
+                    a["launch_pending"] = json!(true);
+                    json!({"type": "agent_list", "agents": [a]})
+                }
+                "pane.read" => json!({"type": "pane_read", "read": {"text": "Pick a theme\n"}}),
+                _ => json!({"type": "ok"}),
+            }))
+        }),
+    );
+    let (o, _) = manager(&s.sock, &s.dir, &["renew", "--names", "coder"], &[]);
+    assert_eq!(o.status.code(), Some(1));
+    let err = text(&o.stderr);
+    println!("{err}");
+    assert!(
+        err.contains("still launching") && err.contains("Pick a theme") && one_line(&err),
+        "{err}"
+    );
+}
+
+#[test]
+fn renew_refuses_an_idle_pane_that_shows_no_prompt_marker() {
+    let s = stub(
+        "nomarker",
+        Box::new(|method, _| {
+            Some(Ok(match method {
+                "ping" => pong(22),
+                "agent.list" => {
+                    json!({"type": "agent_list", "agents": [agent("coder", "w1:p2", "idle")]})
+                }
+                "agent.wait" => json!({"type": "agent_info", "agent": {"agent_status": "idle"}}),
+                "pane.read" => {
+                    json!({"type": "pane_read", "read": {"text": "banner\nauto mode on\n"}})
+                }
+                _ => json!({"type": "ok"}),
+            }))
+        }),
+    );
+    let (o, _) = manager(&s.sock, &s.dir, &["renew", "--names", "coder"], &[]);
+    let err = text(&o.stderr);
+    println!("{err}");
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        err.contains("no prompt marker") && err.contains("auto mode on") && one_line(&err),
+        "{err}"
+    );
+    assert!(text(&o.stdout).is_empty(), "{}", text(&o.stdout));
 }

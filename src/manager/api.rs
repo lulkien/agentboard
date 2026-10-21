@@ -17,6 +17,9 @@ pub struct Agent {
     pub cwd: Option<String>,
     pub foreground_cwd: Option<String>,
     pub focused: bool,
+    /// herdr sets this while a freshly started agent has not yet reached its prompt.
+    #[serde(default)]
+    pub launch_pending: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -262,7 +262,7 @@ pub enum Cmd {
     },
     /// Where the database lives
     Path,
-    /// Read the herdr session: `manager [--herdr|--tmux] <verb>`; nothing here writes
+    /// Drive the herdr session: `manager [--herdr|--tmux] <verb>`
     Manager {
         /// herdr backend (the default)
         #[arg(long, global = true, conflicts_with = "tmux")]
@@ -302,6 +302,38 @@ pub enum ManagerCmd {
         #[command(subcommand)]
         action: ManagerPaneCmd,
     },
+    /// Open a team: tab, two panes, coder and reviewer started and registered by name
+    Up {
+        /// Repo the tab and both agents are rooted in
+        #[arg(long)]
+        repo: String,
+        #[arg(long, default_value = "claude")]
+        coder: String,
+        #[arg(long, default_value = "opencode")]
+        reviewer: String,
+        /// Tab label (default: the repo directory name)
+        #[arg(long, allow_hyphen_values = true)]
+        label: Option<String>,
+        /// Prepended to `coder` and `reviewer` to make the herdr and board names
+        #[arg(long, default_value = "")]
+        role_name_prefix: String,
+        /// K=V set in both panes' environment, repeatable
+        #[arg(long, allow_hyphen_values = true)]
+        env: Vec<String>,
+    },
+    /// Close a team's panes and unregister it; refuses while an agent is working or blocked
+    Down {
+        /// Stop agents that are working or blocked anyway
+        #[arg(long)]
+        force: bool,
+        #[arg(long, value_delimiter = ',', default_value = "coder,reviewer")]
+        names: Vec<String>,
+    },
+    /// Epic boundary: /clear each agent's context and confirm it is back at a prompt
+    Renew {
+        #[arg(long, value_delimiter = ',', default_value = "coder,reviewer")]
+        names: Vec<String>,
+    },
 }
 
 const READ_SOURCES: [&str; 4] = ["visible", "recent", "recent_unwrapped", "detection"];
@@ -320,12 +352,61 @@ pub enum ManagerAgentCmd {
         #[arg(long)]
         lines: Option<u32>,
     },
+    /// Start an agent in an existing shell pane; argv after `--` reaches herdr verbatim
+    Start {
+        name: String,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+        #[arg(last = true, allow_hyphen_values = true)]
+        argv: Vec<String>,
+    },
+    /// Submit one turn to an agent
+    Prompt {
+        target: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
+    /// Send keystrokes (`down`, `enter`, ...) to an agent
+    Keys {
+        target: String,
+        #[arg(required = true, allow_hyphen_values = true)]
+        keys: Vec<String>,
+    },
+    /// Rename an agent; refuses while it is working or blocked
+    Rename {
+        target: String,
+        name: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Focus an agent's pane
+    Focus { target: String },
+    /// Block until an agent reaches a status
+    Wait {
+        target: String,
+        /// idle, working, blocked, done or unknown; repeat for several
+        #[arg(long)]
+        until: Vec<String>,
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum ManagerTabCmd {
     /// One line per tab
     List,
+    /// Create a tab rooted in a directory
+    New {
+        #[arg(long)]
+        cwd: String,
+        #[arg(long, allow_hyphen_values = true)]
+        label: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -334,6 +415,25 @@ pub enum ManagerPaneCmd {
     List,
     /// One pane
     Get { pane_id: String },
+    /// Split a pane
+    Split {
+        pane_id: String,
+        #[arg(long, conflicts_with = "down", required_unless_present = "down")]
+        right: bool,
+        #[arg(long)]
+        down: bool,
+        #[arg(long)]
+        cwd: Option<String>,
+        /// K=V, repeatable
+        #[arg(long, allow_hyphen_values = true)]
+        env: Vec<String>,
+    },
+    /// Close a pane; refuses while an agent in it is working or blocked
+    Close {
+        pane_id: String,
+        #[arg(long)]
+        force: bool,
+    },
     /// Screen text of a pane
     Read {
         pane_id: String,
