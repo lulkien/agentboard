@@ -262,6 +262,57 @@ run $B --db "$X" edit E1 --priority 3;                                 check "--
 run $B --db "$X" edit E1;                                              check "epic edit with no field: exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
 run $B --db "$X" edit E1 --title "Epic two";                           check "epic edit with equal values: unchanged" $([ "$out" = "E1 unchanged" ] && echo 0 || echo 1)
 
+# review chain: three levels, the fourth reopen lands not_done and cascades one level
+use chain; C=$BOARD
+run $B --db "$C" add impl;                                             check "chain: level 1 (parentless)" $rc
+run $B --db "$C" add review --parent T1;                               check "chain: level 2 accepted" $rc
+run $B --db "$C" add fix --parent T2;                                  check "chain: level 3 accepted" $rc
+run $B --db "$C" add deeper --parent T3
+check "chain: add under a level-3 row refused, exit 1, chain line" $([ $rc -eq 1 ] && has "$err" "chain too deep: T3 is level 3 and the new subtree spans 1, reaching level 4 (implement -> review -> fix); no fourth level" && echo 0 || echo 1)
+run $B --db "$C" add loose; run $B --db "$C" parent T4 T3
+check "chain: parent under a level-3 row refused, exit 1, chain line" $([ $rc -eq 1 ] && has "$err" "chain too deep: T3 is level 3 and the new subtree spans 1" && echo 0 || echo 1)
+run $B --db "$C" parent T4 T1;                                         check "chain: parent under level 1 still fine" $rc
+for i in 1 2 3; do run $B --db "$C" status T3 needs_fix "findings $i"; run $B --db "$C" status T3 working; done
+run $B --db "$C" get T3;                                               check "reopens: 3/3 after three moves" $(has "$out" "reopens: 3/3" && ! has "$out" "cap hit" && echo 0 || echo 1)
+run $B --db "$C" status T2 review "parent at review"
+run $B --db "$C" status T1 review "impl at review"
+run $B --db "$C" status T3 needs_fix "findings 4: the body"
+check "cap: fourth move into needs_fix exits 1 naming the cap and not_done" $([ $rc -eq 1 ] && has "$err" "T3 reopen cap 3 hit" && has "$err" "not_done" && echo 0 || echo 1)
+run $B --db "$C" get T3
+check "cap: the row landed not_done, shows 4/3 cap hit, note carries the passed body" $(has "$out" "T3 not_done" && has "$out" "reopens: 4/3 (cap hit, stopped)" && has "$out" "findings 4: the body" && echo 0 || echo 1)
+run $B --db "$C" get T2;                                               check "cap: the parent review row landed not_done with its own event" $(has "$out" "T2 not_done" && has "$out" "T3 hit the reopen cap 3" && echo 0 || echo 1)
+run $B --db "$C" get T1;                                               check "cap: one level only, the implement row stays at review" $(has "$out" "T1 review" && echo 0 || echo 1)
+run $B --db "$C" status T3 needs_fix "again";                          check "cap: a fifth try is refused too" $([ $rc -eq 1 ] && has "$err" "reopen cap" && echo 0 || echo 1)
+run $B --db "$C" status T4 needs_fix x; run $B --db "$C" status T4 working; run $B --db "$C" get T4
+check "reopens: 1/3 after one move" $(has "$out" "reopens: 1/3" && echo 0 || echo 1)
+run $B --db "$C" status T4 not-done;                                   check "not_done spelling: not-done accepted" $(has "$out" "T4 not_done" && echo 0 || echo 1)
+run $B --db "$C" ls;                                                   check "not_done is listed as nd before the working rows" $(has "$out" "nd" && echo 0 || echo 1)
+
+# re-parenting counts the whole moved subtree; a closed parent is not cascaded onto
+run $B --db "$C" add top;                                              check "subtree: a level-1 row" $rc
+run $B --db "$C" add mid --parent T5;                                  check "subtree: a level-2 row under it" $rc
+run $B --db "$C" add moved;                                            check "subtree: a loose row" $rc
+run $B --db "$C" add moved-kid --parent T7;                            check "subtree: the loose row gets one child" $rc
+run $B --db "$C" parent T7 T6
+check "subtree: a row with one child under a level-2 row refused, exit 1, level named" $([ $rc -eq 1 ] && has "$err" "chain too deep: T6 is level 2 and the new subtree spans 2, reaching level 4" && echo 0 || echo 1)
+run $B --db "$C" get T7;                                               check "subtree: the refused row did not move" $(has "$out" "parent:" && echo 1 || echo 0)
+run $B --db "$C" parent T7 T5;                                         check "subtree: the same row under a level-1 row succeeds" $([ $rc -eq 0 ] && has "$out" "T7 parent T5" && echo 0 || echo 1)
+run $B --db "$C" add rev2; run $B --db "$C" add fix2 --parent T9
+for i in 1 2 3; do run $B --db "$C" status T10 needs_fix "f$i"; run $B --db "$C" status T10 working; done
+run $B --db "$C" status T9 done "closed review"
+run $B --db "$C" status T10 needs_fix "findings four"
+check "closed parent: the capped child still exits 1 naming the cap" $([ $rc -eq 1 ] && has "$err" "T10 reopen cap 3 hit" && echo 0 || echo 1)
+run $B --db "$C" get T9;                                              check "closed parent: a done parent stays done" $(has "$out" "T9 done" && ! has "$out" "hit the reopen cap" && echo 0 || echo 1)
+run $B --db "$C" get T10;                                              check "closed parent: the child note names the parent and its status" $(has "$out" "T10 not_done" && has "$out" "parent T9 is done, left as it is" && has "$out" "findings four" && echo 0 || echo 1)
+
+# a blocking parent that cascades to not_done must not keep needs=input
+run $B --db "$C" add rev3; run $B --db "$C" add fix3 --parent T11
+run $B --db "$C" block T11 "waiting on a human"
+for i in 1 2 3; do run $B --db "$C" status T12 needs_fix "g$i"; run $B --db "$C" status T12 working; done
+run $B --db "$C" status T12 needs_fix "capped"
+run $B --db "$C" ls
+check "cascade: a blocking parent lands not_done with needs cleared (no [input])" $(line=$(grep -E "^T11 " <<<"$out"); has "$line" "nd" && ! has "$line" "input" && echo 0 || echo 1)
+
 # a board file from before epics is refused, untouched, with the way out (sqlite only;
 # the surreal build's wrong-kind and schema refusals are phase (n)/(o) of surreal.sh)
 if [ "$BACKEND" = sqlite ]; then
@@ -277,6 +328,15 @@ run $B --db "$O" ls
 check "old board: exit 1, says it predates epics and how to move it aside" $([ $rc -eq 1 ] && has "$err" "predates epics" && has "$err" "mv $O $O.old" && echo 0 || echo 1)
 run $B --db "$O" add nope;                                             check "old board: writes refused too" $([ $rc -eq 1 ] && has "$err" "predates epics" && echo 0 || echo 1)
 check "old board file is byte-identical afterwards (never half-migrated)" $([ "$(sha1sum "$O" | cut -d' ' -f1)" = "$before" ] && [ ! -e "$O-wal" ] && echo 0 || echo 1)
+R=$S/noreopen.db
+python3 - "$R" <<'PY'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.executescript("CREATE TABLE tasks(id INTEGER PRIMARY KEY, title TEXT, epic_id INTEGER, parent_id INTEGER, path TEXT, branch TEXT); CREATE TABLE epics(id INTEGER PRIMARY KEY); CREATE TABLE events(seq INTEGER PRIMARY KEY, task_id INTEGER, epic_id INTEGER);")
+c.commit()
+PY
+run $B --db "$R" ls
+check "board without reopen_count: exit 1, one-line move-it-aside refusal" $([ $rc -eq 1 ] && has "$err" "predates task reopen_count" && has "$err" "mv $R $R.old" && echo 0 || echo 1)
 run $B --db "$O" path;                                                 check "'path' still works on an old board (it names the file to move)" $([ $rc -eq 0 ] && [ "$out" = "$O" ] && echo 0 || echo 1)
 fi
 

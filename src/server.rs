@@ -175,7 +175,7 @@ pub struct EpicEditArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListArgs {
-    /// ready|working|blocking|needs_fix|review|done|dropped. Omit for all open work.
+    /// ready|working|blocking|not_done|needs_fix|review|done|dropped. Omit for all open work.
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
@@ -213,7 +213,7 @@ pub struct ClaimArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdateArgs {
     pub id: String,
-    /// ready|working|blocking|needs_fix|review|done|dropped. Omit to keep the current one.
+    /// ready|working|blocking|not_done|needs_fix|review|done|dropped. Omit to keep the current one.
     #[serde(default)]
     pub status: Option<String>,
     /// Worker's findings or outcome. Stored as the task report.
@@ -254,7 +254,7 @@ pub struct WaitArgs {
     /// Watch every task whose status is not done/dropped.
     #[serde(default)]
     pub open: bool,
-    /// CSV of statuses (ready|working|blocking|needs_fix|review|done|dropped): match only while the task's CURRENT status is in it. Already true => returns at once.
+    /// CSV of statuses (ready|working|blocking|not_done|needs_fix|review|done|dropped): match only while the task's CURRENT status is in it. Already true => returns at once.
     #[serde(default)]
     pub status: Option<String>,
     /// CSV of event kinds (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch; ask = block): match only new events of these kinds.
@@ -536,7 +536,7 @@ impl Board {
 
     #[tool(
         name = "task_update",
-        description = "Write back to the board: status (ready|working|blocking|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.",
+        description = "Write back to the board: status (ready|working|blocking|not_done|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.",
         annotations(
             title = "Update task",
             read_only_hint = false,

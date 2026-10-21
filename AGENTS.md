@@ -23,11 +23,11 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | Command | Expected |
 |---|---|
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 32 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 22 passed` (needs no `surreal` binary) |
-| `bash tests/cli.sh` | `116/116 passed (backend: surreal)` (against the sqlite binary: `120/120 passed (backend: sqlite)`) |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 33 passed`; add `-- --nocapture` and `rg -c SKIP` prints nothing |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 24 passed` (needs no `surreal` binary) |
+| `bash tests/cli.sh` | `142/142 passed (backend: surreal)` (against the sqlite binary: `147/147 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
-| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `116/116`, `120/120`, `59/59`, `125/125` for them; about a minute once that cache is warm) |
+| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `142/142`, `147/147`, `59/59`, `129/129` for them; about a minute once that cache is warm) |
 | `bash tests/race.sh` | `claims=80 unique=80 elapsed_ms=... (backend: surreal)` (`AGENTBOARD_TEST_BIN` picks the binary; sqlite prints `(backend: sqlite)`) |
 | `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
 | `cargo fmt --check` | no output |
@@ -42,7 +42,7 @@ loopback ports, so a bare run never touches the default board. Each prints
 `python3 tests/mcp_client.py` cannot start a server itself: on the default build it refuses
 (exit 1, one line) unless `AGENTBOARD_TEST_DB` (a fresh data directory) and
 `AGENTBOARD_SURREAL_URL` (a throwaway server, never port 18720) are both set. Prefer
-`bash tests/surreal.sh`, which supplies both and prints `125/125 checks passed (backend: surreal)`. With a
+`bash tests/surreal.sh`, which supplies both and prints `129/129 checks passed (backend: surreal)`. With a
 sqlite binary and no `AGENTBOARD_TEST_DB`, it uses `.probe/client.db`.
 Add or change behaviour with a test in the suite that owns that kind of check
 (`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`

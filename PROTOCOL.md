@@ -45,7 +45,7 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 | title | One-line summary |
 | description | Everything the worker needs (repo, files, situation) |
 | goal | How to do it + definition of done |
-| status | ready \| working \| blocking \| needs_fix \| review \| done \| dropped |
+| status | ready \| working \| blocking \| not_done \| needs_fix \| review \| done \| dropped |
 | assignee | Profile or tmux session name |
 | priority | Lower runs first (default 100) |
 | epic | Epic id (e.g., E3) the work belongs to; inherited from `parent` when omitted |
@@ -85,6 +85,7 @@ Other clips, all marked or absent:
 - `working` — actively being done (alias: `running`)
 - `blocking` — waiting on external input (alias: `blocked`)
 - `needs_fix` — review found work, waiting for a fix (aliases: `need fix`, `needs-fix`, `fix`)
+- `not_done` — the board stopped the row: its fourth move into `needs_fix` (the reopen cap is 3) is refused with exit 1, the row lands here with the caller's body kept in the event, and its parent row, if open (`ready`, `working`, `blocking`, `needs_fix`, `review`), lands here too (one level only; a `done`, `dropped` or `not_done` parent is left alone and the capped row gets a note naming it); aliases `not-done`, `nd`. `get` shows `reopens: N/3`, and `(cap hit, stopped)` above 3. A parent chain is at most three levels (implement → review → fix); a child of a level-3 row is refused.
 - `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation
 - `done` — verified complete
 - `dropped` — abandoned

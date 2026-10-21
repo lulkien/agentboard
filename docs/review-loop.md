@@ -39,8 +39,10 @@ ready → working (coder claims) → review (coder reports; "fixed" state) → n
 States are exactly those in `src/schema.sql`:
 
 ```
-ready | working | blocking | needs_fix | review | done | dropped
+ready | working | blocking | not_done | needs_fix | review | done | dropped
 ```
+
+`not_done` is set by the board, not by an agent: a row's fourth move into `needs_fix` (the reopen cap is 3) is refused with exit 1 and the row lands `not_done`, its caller body kept in the event. An open parent of that row (`ready`, `working`, `blocking`, `needs_fix` or `review`) lands `not_done` in the same transaction (one level up only); a `done`, `dropped` or `not_done` parent is left as it is and the capped row gets a note naming it, so a capped fix row stops its review row and leaves the implement row at `review` for the manager. A parent chain is at most three levels (implement → review → fix); a child of a level-3 row is refused.
 
 The `review` state on a fix task means "fixed, awaiting re-check". The `needs_fix` state means "re-check found remaining work". The reviewer drives the transition from `review` to `done` (on the fix task) or `needs_fix` (on the fix task), and subsequently closes the review task `done`. The coder drives `ready` → `working` → `review`.
 
@@ -70,7 +72,7 @@ The loop and the fix-task lifecycle are drawn in [workflow.md](workflow.md), tog
 From `src/schema.sql` line 27:
 
 ```sql
-status TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|needs_fix|review|done|dropped
+status TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|not_done|needs_fix|review|done|dropped
 ```
 
-Aliases accepted on input (matching `src/store/mod.rs` `norm()`): `running`→`working`, `started`→`working`, `blocked`→`blocking`, `triage`→`ready`, `need fix`/`needs-fix`/`need-fix`/`need_fix`/`needs fix`/`fix`→`needs_fix`.
+Aliases accepted on input (matching `src/store/mod.rs` `norm()`): `running`→`working`, `started`→`working`, `blocked`→`blocking`, `triage`→`ready`, `need fix`/`needs-fix`/`need-fix`/`need_fix`/`needs fix`/`fix`→`needs_fix`, `not-done`/`not done`/`nd`→`not_done`.

@@ -227,9 +227,19 @@ def main():
     ok = "(lease)" not in refusal(s, id=child_id)
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "no (lease) text for lease-less needs_fix")
+    # Each move into needs_fix counts toward the reopen cap, so the aliases and the
+    # cap itself are probed on a task of their own, outside the epic.
+    probe = s.call("task_add", title="alias probe").split()[0]
     for alias in ("needs-fix", "fix", "Needs Fix"):
-        s.call("task_update", id=child_id, status="working")
-        expect(f"alias {alias!r}", s.call("task_update", id=child_id, status=alias), f"{child_id} needs_fix")
+        s.call("task_update", id=probe, status="working")
+        expect(f"alias {alias!r}", s.call("task_update", id=probe, status=alias), f"{probe} needs_fix")
+    expect("three reopens shown as 3/3", s.call("task_get", id=probe), "reopens: 3/3")
+    s.call("task_update", id=probe, status="working")
+    capped = refusal_text(lambda: s.call("task_update", id=probe, status="needs_fix", note="finding four"))
+    expect("fourth move into needs_fix is refused naming the cap and not_done", capped, f"{probe} reopen cap 3 hit", "not_done")
+    expect("the capped row landed not_done with the body kept", s.call("task_get", id=probe), f"{probe} not_done", "reopens: 4/3 (cap hit, stopped)", "finding four")
+    expect("not_done alias nd accepted", s.call("task_update", id=probe, status="nd"), f"{probe} not_done")
+    s.call("task_update", id=probe, status="dropped")
     expect("needs_fix -> working re-grants lease", s.call("task_update", id=child_id, status="working"), f"{child_id} working")
     ok = "lease:" in s.call("task_get", id=child_id)
     checks.append(ok)

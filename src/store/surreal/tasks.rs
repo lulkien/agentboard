@@ -16,8 +16,9 @@ use super::{Db, block_on, db_err, session};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
-    self, EpicRow, EventRow, TaskRow, field_names, held_text, norm_branch, normalize_path,
-    text_change, value_change, workdir_text,
+    self, EpicRow, EventRow, MAX_CHAIN, TaskRow, cap_cascade_note, cap_note, cap_refusal,
+    cap_skipped_note, cascades_to, chain_refusal, field_names, held_text, norm_branch,
+    normalize_path, reopen_after, text_change, value_change, workdir_text,
 };
 use crate::store::{DEFAULT_TTL_S, Ref, STATUS_LIST, norm, now_ms, short, short_epic};
 use serde::Deserialize;
@@ -52,6 +53,9 @@ pub(super) struct Row {
     pub(super) priority: i64,
     pub(super) epic_id: Option<i64>,
     pub(super) parent_id: Option<i64>,
+    /// Absent on a record written before the field existed: reads as never reopened.
+    #[serde(default)]
+    pub(super) reopen_count: i64,
 }
 
 const SELECT_TASK: &str = "SELECT meta::id(id) AS tid, * FROM tasks";
@@ -193,6 +197,7 @@ impl From<Row> for TaskRow {
             priority: r.priority,
             epic_id: r.epic_id,
             parent_id: r.parent_id,
+            reopen_count: r.reopen_count,
         }
     }
 }
@@ -233,6 +238,45 @@ async fn resolve_epic(
     }
 }
 
+/// Levels from `id` up to its root, itself included: a parentless task is level 1.
+async fn chain_level(db: &Db, id: i64) -> Result<usize, String> {
+    let mut level = 1;
+    let mut at = fetch(db, id).await?.parent_id;
+    while let Some(a) = at {
+        if level > 10_000 {
+            return Err(format!("cycle above {}", short(id)));
+        }
+        level += 1;
+        at = fetch(db, a).await?.parent_id;
+    }
+    Ok(level)
+}
+
+/// Levels of the subtree rooted at `id`, itself included: a leaf is 1.
+async fn subtree_height(db: &Db, id: i64) -> Result<usize, String> {
+    let mut height = 0;
+    let mut level = vec![id];
+    while !level.is_empty() {
+        height += 1;
+        if height > 10_000 {
+            return Err(format!("cycle below {}", short(id)));
+        }
+        let rows = select_rows(db, "WHERE parent_id IN $ids", json!({ "ids": level })).await?;
+        level = rows.into_iter().map(|r| r.tid).collect();
+    }
+    Ok(height)
+}
+
+/// Refuses a subtree `height` levels deep (1 for a new row) under `parent` when its
+/// deepest row would pass the last level of the chain.
+async fn check_depth(db: &Db, parent: i64, height: usize) -> Result<(), String> {
+    let level = chain_level(db, parent).await?;
+    if level + height > MAX_CHAIN {
+        return Err(chain_refusal(parent, level, height));
+    }
+    Ok(())
+}
+
 pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let NewTask {
         title,
@@ -253,6 +297,11 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let s = session(true)?;
     block_on(async {
         let epic = resolve_epic(&s.db, epic, parent).await?;
+        if let Some(p) = parent {
+            check_depth(&s.db, p, 1)
+                .await
+                .map_err(|e| format!("add: {e}"))?;
+        }
         // A task created already `working` belongs to its creator unless named.
         let assignee = assignee.or_else(|| (status == "working").then_some(actor));
         let now = now_ms();
@@ -418,6 +467,7 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
                 at = fetch(&s.db, a).await?.parent_id;
                 steps += 1;
             }
+            check_depth(&s.db, p, subtree_height(&s.db, id).await?).await?;
         }
         let mut tx = Txn::new();
         let mut sets = Vec::new();
@@ -530,8 +580,15 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             None => cur.status.as_str(),
         };
         let moved = status != cur.status;
+        // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
+        let reopen = moved && status == "needs_fix";
+        let capped = reopen && reopen_after(cur.reopen_count).1;
+        let status = if capped { "not_done" } else { status };
         let mut tx = Txn::new();
         let mut sets: Vec<String> = Vec::new();
+        if reopen {
+            sets.push("reopen_count = (reopen_count ?? 0) + 1".to_owned());
+        }
         if let Some(rp) = p.report {
             assign(&mut tx, &mut sets, "report", Some(rp.into()));
         }
@@ -603,6 +660,30 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             "UPDATE type::thing('tasks', {idp}) SET {};",
             sets.join(", ")
         ));
+        if capped {
+            tx.event(&idp, actor, kind, &cap_note(body));
+            // One level up only: the grandparent is the manager's to look at.
+            if let Some(parent) = cur.parent_id {
+                let above = fetch(&s.db, parent).await?;
+                if cascades_to(&above.status) {
+                    let pp = tx.p(parent);
+                    let np = tx.p(now);
+                    tx.raw(&format!(
+                        "UPDATE type::thing('tasks', {pp}) SET status = 'not_done', needs = NONE, lease_until = NONE, updated_at = {np};"
+                    ));
+                    tx.event(&pp, actor, "edit", &cap_cascade_note(id));
+                } else {
+                    tx.event(
+                        &idp,
+                        actor,
+                        "note",
+                        &cap_skipped_note(parent, &above.status),
+                    );
+                }
+            }
+            tx.run(&s.db, "$seq").await?;
+            return Err(cap_refusal(id));
+        }
         tx.event(&idp, actor, kind, body);
         let seq = int_of(&tx.run(&s.db, "$seq").await?, "event seq")?;
         Ok(format!("{} {status} #{seq}", short(id)))

@@ -18,7 +18,7 @@ pub fn list(status: Option<&str>, assignee: Option<&str>, limit: usize) -> Resul
         sql.push_str(" AND assignee=?");
         args.push(a.to_owned());
     }
-    sql.push_str(" ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'needs_fix' THEN 1 WHEN 'working' THEN 2 WHEN 'review' THEN 3 WHEN 'ready' THEN 4 ELSE 5 END, priority, id LIMIT ?");
+    sql.push_str(" ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'not_done' THEN 1 WHEN 'needs_fix' THEN 2 WHEN 'working' THEN 3 WHEN 'review' THEN 4 WHEN 'ready' THEN 5 ELSE 6 END, priority, id LIMIT ?");
     args.push(limit.to_string());
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows: Vec<Row> = stmt
@@ -193,7 +193,7 @@ pub fn brief(since_min: i64) -> Result<String, String> {
     }
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {COLS} FROM tasks WHERE status NOT IN ('done','dropped') AND epic_id IS NULL ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'needs_fix' THEN 1 WHEN 'working' THEN 2 WHEN 'review' THEN 3 ELSE 4 END, priority, id LIMIT 25"
+            "SELECT {COLS} FROM tasks WHERE status NOT IN ('done','dropped') AND epic_id IS NULL ORDER BY CASE status WHEN 'blocking' THEN 0 WHEN 'not_done' THEN 1 WHEN 'needs_fix' THEN 2 WHEN 'working' THEN 3 WHEN 'review' THEN 4 ELSE 5 END, priority, id LIMIT 25"
         ))
         .map_err(|e| e.to_string())?;
     let rows: Vec<Row> = stmt

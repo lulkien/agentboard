@@ -321,6 +321,7 @@ DEFINE FIELD IF NOT EXISTS assignee ON tasks TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS priority ON tasks TYPE int DEFAULT 100;
 DEFINE FIELD IF NOT EXISTS epic_id ON tasks TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS parent_id ON tasks TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS reopen_count ON tasks TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS needs ON tasks TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS report ON tasks TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS note ON tasks TYPE option<string>;
@@ -921,7 +922,7 @@ mod tests {
         // Make it a board from before the field existed: marker intact, field gone.
         runtime().block_on(async {
             c.db.query(
-                "REMOVE FIELD branch ON tasks; REMOVE FIELD path ON tasks; REMOVE FIELD board ON tasks; \
+                "REMOVE FIELD branch ON tasks; REMOVE FIELD path ON tasks; REMOVE FIELD board ON tasks; REMOVE FIELD reopen_count ON tasks; \
                  CREATE tasks:98 SET title = 'old', created_at = 1, updated_at = 1",
             )
             .await
@@ -970,14 +971,14 @@ mod tests {
                 .check()
                 .expect("a row older than the fields accepts a write");
             let mut r =
-                w.db.query("SELECT status, board, path, branch FROM tasks:98")
+                w.db.query("SELECT status, board, path, branch, reopen_count FROM tasks:98")
                     .await
                     .unwrap();
             r.take(0).unwrap()
         });
         assert_eq!(
             old[0],
-            serde_json::json!({"status": "working", "board": "main", "path": "", "branch": "HEAD"})
+            serde_json::json!({"status": "working", "board": "main", "path": "", "branch": "HEAD", "reopen_count": 0})
         );
     }
 

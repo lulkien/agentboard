@@ -4,7 +4,10 @@ use super::{
 };
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
-use crate::store::text::{held_text, norm_branch, normalize_path, workdir_text};
+use crate::store::text::{
+    MAX_CHAIN, cap_cascade_note, cap_note, cap_refusal, cap_skipped_note, cascades_to,
+    chain_refusal, held_text, norm_branch, normalize_path, reopen_after, workdir_text,
+};
 use rusqlite::{OptionalExtension, params};
 
 /// The epic a new task lands in: the explicit one, else the parent's. An
@@ -39,6 +42,56 @@ fn resolve_epic(
     }
 }
 
+/// Levels from `id` up to its root, itself included: a parentless task is level 1.
+fn chain_level(conn: &rusqlite::Connection, id: i64) -> Result<usize, String> {
+    let mut level = 1;
+    let mut at = fetch(conn, id)?.parent_id;
+    while let Some(a) = at {
+        if level > 10_000 {
+            return Err(format!("cycle above {}", short(id)));
+        }
+        level += 1;
+        at = fetch(conn, a)?.parent_id;
+    }
+    Ok(level)
+}
+
+/// Levels of the subtree rooted at `id`, itself included: a leaf is 1.
+fn subtree_height(conn: &rusqlite::Connection, id: i64) -> Result<usize, String> {
+    let mut height = 0;
+    let mut level = vec![id];
+    while !level.is_empty() {
+        height += 1;
+        if height > 10_000 {
+            return Err(format!("cycle below {}", short(id)));
+        }
+        let mut next = Vec::new();
+        let mut stmt = conn
+            .prepare("SELECT id FROM tasks WHERE parent_id=?")
+            .map_err(|e| e.to_string())?;
+        for at in &level {
+            let kids = stmt
+                .query_map(params![at], |r| r.get::<_, i64>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|e| e.to_string())?;
+            next.extend(kids);
+        }
+        level = next;
+    }
+    Ok(height)
+}
+
+/// Refuses a subtree `height` levels deep (1 for a new row) under `parent` when its
+/// deepest row would pass the last level of the chain.
+fn check_depth(conn: &rusqlite::Connection, parent: i64, height: usize) -> Result<(), String> {
+    let level = chain_level(conn, parent)?;
+    if level + height > MAX_CHAIN {
+        return Err(chain_refusal(parent, level, height));
+    }
+    Ok(())
+}
+
 pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let NewTask {
         title,
@@ -63,6 +116,9 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     let epic = resolve_epic(&tx, epic, parent)?;
+    if let Some(p) = parent {
+        check_depth(&tx, p, 1).map_err(|e| format!("add: {e}"))?;
+    }
     // A task created already `working` belongs to its creator unless named.
     let assignee = assignee.or_else(|| (status == "working").then_some(actor));
     let now = now_ms();
@@ -203,6 +259,7 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
             at = fetch(&tx, a)?.parent_id;
             steps += 1;
         }
+        check_depth(&tx, p, subtree_height(&tx, id)?)?;
     }
     tx.execute(
         "UPDATE tasks SET parent_id=?, updated_at=? WHERE id=?",
@@ -308,6 +365,17 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         None => cur.status.as_str(),
     };
     let moved = status != cur.status;
+    // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
+    let reopen = moved && status == "needs_fix";
+    let capped = reopen && reopen_after(cur.reopen_count).1;
+    let status = if capped { "not_done" } else { status };
+    if reopen {
+        tx.execute(
+            "UPDATE tasks SET reopen_count=reopen_count+1 WHERE id=?",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     if let Some(rp) = p.report {
         tx.execute("UPDATE tasks SET report=? WHERE id=?", params![rp, id])
             .map_err(|e| e.to_string())?;
@@ -375,6 +443,37 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         }
     };
     let body = p.note.or(p.report).unwrap_or("");
+    if capped {
+        log_event(&tx, Subject::Task(id), actor, kind, &cap_note(body))?;
+        // One level up only: the grandparent is the manager's to look at.
+        if let Some(parent) = cur.parent_id {
+            let above = fetch(&tx, parent)?;
+            if cascades_to(&above.status) {
+                tx.execute(
+                    "UPDATE tasks SET status='not_done', needs=NULL, lease_until=NULL, updated_at=? WHERE id=?",
+                    params![now, parent],
+                )
+                .map_err(|e| e.to_string())?;
+                log_event(
+                    &tx,
+                    Subject::Task(parent),
+                    actor,
+                    "edit",
+                    &cap_cascade_note(id),
+                )?;
+            } else {
+                log_event(
+                    &tx,
+                    Subject::Task(id),
+                    actor,
+                    "note",
+                    &cap_skipped_note(parent, &above.status),
+                )?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        return Err(cap_refusal(id));
+    }
     let seq = log_event(&tx, Subject::Task(id), actor, kind, body)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} {status} #{seq}", short(id)))

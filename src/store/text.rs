@@ -35,6 +35,8 @@ pub struct TaskRow {
     pub priority: i64,
     pub epic_id: Option<i64>,
     pub parent_id: Option<i64>,
+    /// Moves into `needs_fix` so far; above `MAX_REOPENS` the cap stopped the row.
+    pub reopen_count: i64,
 }
 
 /// One epic as stored.
@@ -84,6 +86,68 @@ pub struct BriefData {
     pub dones: Vec<(i64, Option<String>)>,
 }
 
+// ---- the review chain ----------------------------------------------------------------
+
+/// Moves into `needs_fix` a row may take; the next one is refused and lands `not_done`.
+pub const MAX_REOPENS: i64 = 3;
+
+/// Levels of a parent chain: implement -> review -> fix. A child of a level-3 row is refused.
+pub const MAX_CHAIN: usize = 3;
+
+/// A move into `needs_fix` from a row already reopened `count` times: the count it
+/// would reach, and whether that is over the cap.
+pub fn reopen_after(count: i64) -> (i64, bool) {
+    (count + 1, count + 1 > MAX_REOPENS)
+}
+
+/// The refusal for a subtree `height` levels deep placed under `parent`, which is at
+/// level `parent_level`: the deepest row would reach `parent_level + height`.
+pub fn chain_refusal(parent: i64, parent_level: usize, height: usize) -> String {
+    format!(
+        "chain too deep: {} is level {parent_level} and the new subtree spans {height}, reaching level {} (implement -> review -> fix); no fourth level",
+        short(parent),
+        parent_level + height
+    )
+}
+
+/// Whether a capped child moves its parent to `not_done`: only an open parent. Closed
+/// work (`done`, `dropped`) and a parent already `not_done` are left alone.
+pub fn cascades_to(parent_status: &str) -> bool {
+    matches!(
+        parent_status,
+        "ready" | "working" | "blocking" | "needs_fix" | "review"
+    )
+}
+
+/// The note on a capped child whose parent was not moved.
+pub fn cap_skipped_note(parent: i64, parent_status: &str) -> String {
+    format!(
+        "reopen cap {MAX_REOPENS} hit; parent {} is {parent_status}, left as it is",
+        short(parent)
+    )
+}
+
+/// The event body of a row the cap stopped: the caller's body is kept after it.
+pub fn cap_note(body: &str) -> String {
+    format!("reopen cap {MAX_REOPENS} hit: not needs_fix, now not_done\n{body}")
+}
+
+/// The event body of a parent whose child the cap stopped.
+pub fn cap_cascade_note(child: i64) -> String {
+    format!(
+        "{} hit the reopen cap {MAX_REOPENS}; this row is now not_done",
+        short(child)
+    )
+}
+
+/// The one-line `Err` a capped move returns, after the row has landed `not_done`.
+pub fn cap_refusal(id: i64) -> String {
+    format!(
+        "{} reopen cap {MAX_REOPENS} hit: the row is now not_done, not needs_fix",
+        short(id)
+    )
+}
+
 // ---- time and status --------------------------------------------------------------
 
 pub fn code(status: &str) -> &str {
@@ -91,6 +155,7 @@ pub fn code(status: &str) -> &str {
         "ready" | "triage" => "rdy",
         "working" | "running" => "wrk",
         "blocking" | "blocked" => "blk",
+        "not_done" => "nd",
         "needs_fix" => "fix",
         "review" => "rev",
         "done" => "don",
@@ -121,8 +186,9 @@ pub fn when(ts: i64) -> String {
 }
 
 /// Canonical status order for summaries: most urgent first.
-const STATUS_ORDER: [&str; 7] = [
+const STATUS_ORDER: [&str; 8] = [
     "blocking",
+    "not_done",
     "needs_fix",
     "working",
     "review",
@@ -137,11 +203,12 @@ const STATUS_ORDER: [&str; 7] = [
 pub fn list_rank(status: &str) -> u8 {
     match status {
         "blocking" => 0,
-        "needs_fix" => 1,
-        "working" => 2,
-        "review" => 3,
-        "ready" => 4,
-        _ => 5,
+        "not_done" => 1,
+        "needs_fix" => 2,
+        "working" => 3,
+        "review" => 4,
+        "ready" => 5,
+        _ => 6,
     }
 }
 
@@ -150,10 +217,11 @@ pub fn list_rank(status: &str) -> u8 {
 pub fn brief_rank(status: &str) -> u8 {
     match status {
         "blocking" => 0,
-        "needs_fix" => 1,
-        "working" => 2,
-        "review" => 3,
-        _ => 4,
+        "not_done" => 1,
+        "needs_fix" => 2,
+        "working" => 3,
+        "review" => 4,
+        _ => 5,
     }
 }
 
@@ -414,6 +482,14 @@ pub fn get_text(
     if let Some(p) = r.parent_id {
         out.push_str(&format!("parent: {}\n", short(p)));
     }
+    if r.reopen_count > MAX_REOPENS {
+        out.push_str(&format!(
+            "reopens: {}/{MAX_REOPENS} (cap hit, stopped)\n",
+            r.reopen_count
+        ));
+    } else if r.reopen_count > 0 {
+        out.push_str(&format!("reopens: {}/{MAX_REOPENS}\n", r.reopen_count));
+    }
     out.push_str(&format!("created: {}\n", when(r.created_at)));
     if let Some(s) = r.started_at {
         out.push_str(&format!("started: {}\n", when(s)));
@@ -605,6 +681,25 @@ mod tests {
 
     fn n(raw: &str) -> String {
         normalize_path(raw, Path::new(CWD), Some("/home/u"))
+    }
+
+    #[test]
+    fn the_fourth_reopen_is_over_the_cap() {
+        assert_eq!(reopen_after(0), (1, false));
+        assert_eq!(reopen_after(2), (3, false));
+        assert_eq!(reopen_after(3), (4, true));
+        assert_eq!(reopen_after(4), (5, true));
+        assert_eq!((MAX_REOPENS, MAX_CHAIN), (3, 3));
+        let c = chain_refusal(7, 2, 2);
+        assert!(
+            c.contains("T7 is level 2")
+                && c.contains("reaching level 4")
+                && c.contains("no fourth level")
+        );
+        assert!(cascades_to("review") && cascades_to("ready"));
+        assert!(!cascades_to("done") && !cascades_to("dropped") && !cascades_to("not_done"));
+        let note = cap_note("findings: x");
+        assert!(note.contains("not_done") && note.ends_with("findings: x"));
     }
 
     #[test]

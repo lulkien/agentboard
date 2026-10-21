@@ -26,11 +26,12 @@ CREATE TABLE IF NOT EXISTS tasks(
   goal         TEXT NOT NULL DEFAULT '',      -- how to do it + definition of done
   path         TEXT NOT NULL DEFAULT '',      -- absolute project root; '' = not repo-bound
   branch       TEXT NOT NULL DEFAULT 'HEAD',  -- git ref the worker starts on; HEAD = leave the checkout alone
-  status       TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|needs_fix|review|done|dropped
+  status       TEXT NOT NULL DEFAULT 'ready', -- ready|working|blocking|not_done|needs_fix|review|done|dropped
   assignee     TEXT,
   priority     INTEGER NOT NULL DEFAULT 100,
   epic_id      INTEGER REFERENCES epics(id),   -- the epic the work belongs to
   parent_id    INTEGER REFERENCES tasks(id),   -- subtask link: a fix task under the review task that found it
+  reopen_count INTEGER NOT NULL DEFAULT 0,    -- moves into needs_fix; over 3 the row lands not_done
   needs        TEXT,                          -- 'input' while blocking on a human
   report       TEXT,                          -- worker's findings/outcome, written any time
   note         TEXT,                          -- last progress note (history lives in events)

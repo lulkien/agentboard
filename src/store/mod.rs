@@ -80,6 +80,7 @@ pub fn norm(raw: &str) -> Option<&'static str> {
         "needs_fix" | "needs-fix" | "need fix" | "needs fix" | "need-fix" | "need_fix" | "fix" => {
             Some("needs_fix")
         }
+        "not_done" | "not-done" | "not done" | "nd" => Some("not_done"),
         "review" => Some("review"),
         "done" => Some("done"),
         "dropped" => Some("dropped"),
@@ -88,7 +89,7 @@ pub fn norm(raw: &str) -> Option<&'static str> {
 }
 
 /// Canonical task status names, for error messages.
-pub const STATUS_LIST: &str = "ready|working|blocking|needs_fix|review|done|dropped";
+pub const STATUS_LIST: &str = "ready|working|blocking|not_done|needs_fix|review|done|dropped";
 
 /// Canonical epic status names, for error messages.
 pub const EPIC_STATUS_LIST: &str = "open|done|dropped";

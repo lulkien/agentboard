@@ -15,7 +15,7 @@ Selectors (union, at least one; ids need no flag):
   --epic E1  every task in that epic
   --open     every task not done/dropped, re-evaluated while waiting (new tasks count)
 
---status CSV  current status in CSV (ready|working|blocking|needs_fix|review|done|dropped); already true => returns at once
+--status CSV  current status in CSV (ready|working|blocking|not_done|needs_fix|review|done|dropped); already true => returns at once
 --kind CSV    new event kind in CSV (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch; `ask` is an alias of `block`)
 Both filters => both must hold; neither => any new event. --after: only events with seq > SEQ.
 
@@ -178,7 +178,7 @@ pub enum Cmd {
         #[arg(long)]
         commit: Option<String>,
     },
-    /// Set a status (ready|working|blocking|needs_fix|review|done|dropped)
+    /// Set a status (ready|working|blocking|not_done|needs_fix|review|done|dropped)
     Status {
         id: String,
         status: String,

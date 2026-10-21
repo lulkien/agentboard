@@ -79,6 +79,13 @@ fn check_schema(conn: &Connection) -> Result<(), String> {
             p.display()
         ));
     }
+    if !tasks.iter().any(|c| c == "reopen_count") {
+        let p = db_path();
+        return Err(format!(
+            "this board file predates task reopen_count and cannot be used; move it aside and start fresh (there is no migration): mv {0} {0}.old",
+            p.display()
+        ));
+    }
     Ok(())
 }
 
@@ -114,7 +121,7 @@ fn log_event(
 
 pub(super) use super::text::{TaskRow as Row, field_names, text_change, value_change};
 
-const COLS: &str = "id,status,assignee,needs,title,description,goal,path,branch,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id";
+const COLS: &str = "id,status,assignee,needs,title,description,goal,path,branch,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id,reopen_count";
 
 fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
     Ok(Row {
@@ -138,6 +145,7 @@ fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         priority: r.get(17)?,
         epic_id: r.get(18)?,
         parent_id: r.get(19)?,
+        reopen_count: r.get(20)?,
     })
 }
 
@@ -327,6 +335,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tables, 3, "the check must not create anything");
+    }
+
+    #[test]
+    fn a_board_without_reopen_count_is_refused_untouched() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE tasks(id INTEGER PRIMARY KEY, epic_id INTEGER, parent_id INTEGER, path TEXT, branch TEXT);
+             CREATE TABLE epics(id INTEGER PRIMARY KEY);
+             CREATE TABLE events(seq INTEGER PRIMARY KEY, task_id INTEGER, epic_id INTEGER);",
+        )
+        .unwrap();
+        let err = check_schema(&c).unwrap_err();
+        assert!(
+            err.contains("predates task reopen_count") && err.contains("mv "),
+            "{err}"
+        );
+        println!("{err}");
     }
 
     #[test]
