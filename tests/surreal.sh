@@ -250,7 +250,7 @@ fi
 schema_records() { # how many meta:schema records the server holds
   curl -s -u root:root -H 'surreal-ns: agentboard' -H 'surreal-db: board' \
     -H 'Accept: application/json' -H 'Content-Type: text/plain' \
-    --data 'SELECT * FROM meta' "http://127.0.0.1:$PORT/sql" \
+    --data 'SELECT * FROM meta:schema' "http://127.0.0.1:$PORT/sql" \
     | python3 -c 'import json,sys; print(len(json.load(sys.stdin)[0]["result"]))'
 }
 first_use() { # verb: add | ls  (8 simultaneous first calls on a fresh board)
@@ -653,7 +653,7 @@ if want cli; then
     -H 'Content-Type: text/plain' --data 'UPDATE meta:schema SET version = 99' "http://127.0.0.1:$PORT/sql" >/dev/null
   out=$(ab ls 2>&1); rc=$?
   echo "wrong marker: rc=$rc: $out" | cut -c1-200
-  [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] && printf '%s' "$out" | rg -q '^agentboard: board schema mismatch: found schema version 99, want version 1\.' || clifail=1
+  [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] && printf '%s' "$out" | rg -q '^agentboard: board schema mismatch: found schema version 99, want version 2\.' || clifail=1
   stop_server
   check "cli adapter: path, wrong-kind refusals, marker line" $clifail
 fi

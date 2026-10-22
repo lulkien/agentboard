@@ -27,3 +27,16 @@ pub const BACKEND: &str = if cfg!(feature = "sqlite") {
 pub fn line(tools: usize) -> String {
     format!("{NAME} {VERSION} tools={tools} commit={COMMIT} backend={BACKEND}")
 }
+
+/// Store identity without a dependency on the MCP adapter. The build derives the
+/// count from tool attributes; the server test compares it to the actual router.
+pub fn stamp() -> String {
+    line(
+        env!("AGENTBOARD_TOOL_COUNT")
+            .parse()
+            .expect("derived tool count"),
+    )
+}
+
+/// Bump for incompatible schema OR tool-surface rules. Never auto-upgrade a board.
+pub const GENERATION: i64 = 2;

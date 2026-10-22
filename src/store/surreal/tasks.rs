@@ -142,7 +142,16 @@ impl Txn {
         ));
     }
 
-    pub(super) async fn run(mut self, db: &Db, ret: &str) -> Result<Value, String> {
+    pub(super) async fn run(self, db: &Db, ret: &str) -> Result<Value, String> {
+        self.run_as(db, ret, &crate::ident::stamp()).await
+    }
+
+    pub(super) async fn run_as(mut self, db: &Db, ret: &str, build: &str) -> Result<Value, String> {
+        let build = self.p(build);
+        self.raw(&format!(
+            "UPSERT meta:writer SET version = {}, build = {build};",
+            super::SCHEMA_VERSION
+        ));
         self.raw(&format!("RETURN {ret};\nCOMMIT TRANSACTION;"));
         let mut res = db
             .query(self.sql)

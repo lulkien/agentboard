@@ -24,6 +24,7 @@ fn open() -> Result<Connection, String> {
     // "database is locked".
     conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         .map_err(|e| e.to_string())?;
+    check_schema(&conn)?;
     // A failed init is retried on the next open instead of being cached for the
     // life of a long-running MCP server.
     let mut done = INIT
@@ -32,10 +33,32 @@ fn open() -> Result<Connection, String> {
     if !*done {
         // First: a refused file is left exactly as it was (no WAL switch, no DDL).
         check_schema(&conn)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL")
-            .map_err(|e| e.to_string())?;
+        // SQLite's journal-mode transition can return BUSY immediately even
+        // with busy_timeout, when another cold opener is switching to WAL.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match conn.execute_batch("PRAGMA journal_mode=WAL") {
+                Ok(()) => break,
+                Err(e)
+                    if matches!(
+                        e.sqlite_error_code(),
+                        Some(
+                            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                        )
+                    ) && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
         conn.execute_batch(SCHEMA)
             .map_err(|e| format!("schema: {e}"))?;
+        conn.execute(
+            "UPDATE board_stamp SET opened_by=? WHERE id=1",
+            [crate::ident::stamp()],
+        )
+        .map_err(|e| e.to_string())?;
         *done = true;
     }
     drop(done);
@@ -87,10 +110,53 @@ fn check_schema(conn: &Connection) -> Result<(), String> {
             p.display()
         ));
     }
+    check_stamp(conn)
+}
+
+fn check_stamp(conn: &Connection) -> Result<(), String> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='board_stamp')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let found: Option<(i64, String)> = if exists {
+        conn.query_row(
+            "SELECT generation, opened_by FROM board_stamp WHERE id=1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    } else {
+        None
+    };
+    if found
+        .as_ref()
+        .is_some_and(|(v, _)| *v == crate::ident::GENERATION)
+    {
+        return Ok(());
+    }
+    let board = found.map_or_else(
+        || "unstamped".to_owned(),
+        |(v, b)| format!("generation={v} {b}"),
+    );
+    Err(format!(
+        "board surface mismatch: board {board}; client generation={} {}; file {}; no migration",
+        crate::ident::GENERATION,
+        crate::ident::stamp(),
+        db_path().display()
+    ))
+}
+
+fn stamp_writer(conn: &Connection, build: &str) -> Result<(), String> {
+    conn.execute("UPDATE board_stamp SET last_writer=? WHERE id=1", [build])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Schema + WAL applied once per process; later opens are pure connection setup.
+/// Schema + WAL applied once per process; later opens still check the stamp.
 static INIT: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 
 /// What an event is about. One timeline serves both; the schema CHECK makes
@@ -117,7 +183,9 @@ fn log_event(
         params![task, epic, actor, kind, body, now_ms()],
     )
     .map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    let seq = conn.last_insert_rowid();
+    stamp_writer(conn, &crate::ident::stamp())?;
+    Ok(seq)
 }
 
 pub(super) use super::text::{TaskRow as Row, field_names, text_change, value_change};
@@ -317,6 +385,143 @@ impl Board for SqliteBoard {
 #[cfg(test)]
 mod tests {
     use super::{Connection, SCHEMA, check_schema};
+
+    #[test]
+    fn schema_generation_matches_rust() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        let generation: i64 = c
+            .query_row("SELECT generation FROM board_stamp WHERE id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(generation, crate::ident::GENERATION);
+    }
+
+    #[test]
+    fn first_use_hides_partial_schema_and_rolls_back_interrupted_init() {
+        let path = std::env::temp_dir().join(format!(
+            "agentboard-init-{}-{}.db",
+            std::process::id(),
+            super::now_ms()
+        ));
+        // Stop after tasks exists, before events and the stamp. This is the
+        // exact window that used to expose an unusable board to another open.
+        let (prefix, tail) = SCHEMA
+            .split_once("CREATE TABLE IF NOT EXISTS events(")
+            .unwrap();
+        let writer = Connection::open(&path).unwrap();
+        writer.execute_batch(prefix).unwrap();
+        let reader_path = path.clone();
+        std::thread::spawn(move || {
+            let reader = Connection::open(reader_path).unwrap();
+            check_schema(&reader).unwrap();
+            let tables: i64 = reader
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(tables, 0, "partial init must be invisible");
+        })
+        .join()
+        .unwrap();
+        // Closing without COMMIT models an interrupted first initialization.
+        drop(writer);
+        let retry = Connection::open(&path).unwrap();
+        check_schema(&retry).unwrap();
+        assert_eq!(
+            retry
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0,
+            "interrupted DDL must roll back"
+        );
+        retry.execute_batch(prefix).unwrap();
+        retry
+            .execute_batch(&format!("CREATE TABLE IF NOT EXISTS events({tail}"))
+            .unwrap();
+        check_schema(&retry).unwrap();
+        drop(retry);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn surface_stamp_refuses_missing_and_future_generation_without_ddl() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        c.execute(
+            "UPDATE board_stamp SET generation=99, opened_by='future tools=99 commit=future'",
+            [],
+        )
+        .unwrap();
+        let err = check_schema(&c).unwrap_err();
+        assert!(
+            err.contains("board generation=99 future tools=99 commit=future"),
+            "{err}"
+        );
+        assert!(
+            err.contains("client generation=2 agentboard") && err.contains("file "),
+            "{err}"
+        );
+        assert_eq!(
+            c.query_row("SELECT generation FROM board_stamp", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            99
+        );
+        c.execute("DROP TABLE board_stamp", []).unwrap();
+        assert!(check_schema(&c).unwrap_err().contains("board unstamped"));
+        assert_eq!(
+            c.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='board_stamp'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn participating_writers_move_the_stamp_but_legacy_writes_are_undetectable() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        let read = || {
+            c.query_row("SELECT last_writer FROM board_stamp", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        for build in [
+            "agentboard 0.1.0 tools=23 commit=first",
+            "agentboard 0.1.0 tools=23 commit=second",
+        ] {
+            super::stamp_writer(&c, build).unwrap();
+            assert_eq!(read(), build);
+            check_schema(&c).unwrap();
+            assert_eq!(read(), build, "reads preserve writer");
+        }
+        // Pre-stamp clients never call stamp_writer. Their writes cannot be attributed.
+        c.execute(
+            "INSERT INTO sessions(name,agent,seen) VALUES('legacy','old',0)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(read(), "agentboard 0.1.0 tools=23 commit=second");
+        c.execute(
+            "INSERT INTO tasks(id,title,created_at,updated_at) VALUES(1,'test',0,0)",
+            [],
+        )
+        .unwrap();
+        super::log_event(&c, super::Subject::Task(1), "test", "note", "stamp path").unwrap();
+        assert_eq!(read(), crate::ident::stamp());
+    }
 
     #[test]
     fn fresh_and_current_files_pass_the_schema_check() {

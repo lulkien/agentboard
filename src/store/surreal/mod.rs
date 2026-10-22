@@ -173,7 +173,7 @@ impl Board for SurrealBoard {
 /// version. Adding a field with a DEFAULT is compatible — old records read with
 /// the default and no board is refused — so `tasks.path` / `tasks.branch` did
 /// not move this marker.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = crate::ident::GENERATION;
 const NAMESPACE: &str = "agentboard";
 const DATABASE: &str = "board";
 
@@ -309,6 +309,7 @@ fn runtime() -> &'static Runtime {
 const SCHEMA: &str = "
 DEFINE TABLE IF NOT EXISTS meta SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS version ON meta TYPE int;
+DEFINE FIELD IF NOT EXISTS build ON meta TYPE string DEFAULT '';
 
 DEFINE TABLE IF NOT EXISTS counters SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS n ON counters TYPE int;
@@ -517,8 +518,9 @@ async fn bootstrap(db: &Db, s: &Settings) -> Result<Bootstrap, String> {
     if found.is_some() {
         return Ok(Bootstrap::Already);
     }
-    db.query("CREATE meta:schema SET version = $v")
+    db.query("CREATE meta:schema SET version = $v, build = $build")
         .bind(("v", SCHEMA_VERSION))
+        .bind(("build", crate::ident::stamp()))
         .await
         .and_then(surrealdb::Response::check)
         .map_err(|e| db_err(&e))?;
@@ -622,7 +624,25 @@ fn session_with(
         // serde defaults on its row type.
         Some(v) if v == SCHEMA_VERSION && write => bounded(s, t, bootstrap(&db, s))?,
         Some(v) if v == SCHEMA_VERSION => Bootstrap::Already,
-        Some(v) => return Err(schema_refusal(Some(v), s)),
+        Some(v) => {
+            let build = bounded(s, t, async {
+                let mut r = db
+                    .query("SELECT VALUE build FROM meta:schema")
+                    .await
+                    .map_err(|e| db_err(&e))?;
+                let builds: Vec<Option<String>> = r.take(0).map_err(|e| db_err(&e))?;
+                Ok(builds
+                    .into_iter()
+                    .next()
+                    .flatten()
+                    .unwrap_or_else(|| "unstamped".to_owned()))
+            })?;
+            return Err(format!(
+                "{} board build={build}; client build={}",
+                schema_refusal(Some(v), s),
+                crate::ident::stamp()
+            ));
+        }
         None => {
             // First use of this database: bootstrap under the lock so two
             // processes never define the schema at once.
@@ -632,6 +652,17 @@ fn session_with(
             bounded(s, t, bootstrap(&db, s))?
         }
     };
+    if write {
+        bounded(s, t, async {
+            db.query("UPSERT meta:opened SET version=$v, build=$build")
+                .bind(("v", SCHEMA_VERSION))
+                .bind(("build", crate::ident::stamp()))
+                .await
+                .and_then(surrealdb::Response::check)
+                .map_err(|e| db_err(&e))?;
+            Ok(())
+        })?;
+    }
     Ok(Session {
         db,
         bootstrap,
@@ -1179,6 +1210,78 @@ mod tests {
     }
 
     #[test]
+    fn surface_stamp_tracks_writers_and_refuses_a_running_stale_client() {
+        let Some(srv) = start_server("surface-stamp") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        runtime().block_on(async {
+            for build in [
+                "version=first tools=23 commit=one",
+                "version=second tools=23 commit=two",
+            ] {
+                let mut tx = tasks::Txn::new();
+                tx.raw("UPSERT sessions:aware SET agent='new', seen=0, status='up';");
+                tx.run_as(&c.db, "true", build).await.unwrap();
+                let mut r =
+                    c.db.query("SELECT VALUE build FROM meta:writer")
+                        .await
+                        .unwrap();
+                assert_eq!(r.take::<Vec<String>>(0).unwrap(), vec![build]);
+            }
+            c.db.query("UPSERT sessions:legacy SET agent='old', seen=0, status='up'")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+            let mut r =
+                c.db.query("SELECT VALUE build FROM meta:writer")
+                    .await
+                    .unwrap();
+            assert_eq!(
+                r.take::<Vec<String>>(0).unwrap(),
+                vec!["version=second tools=23 commit=two"]
+            );
+            let mut tx = tasks::Txn::new();
+            tx.raw("UPSERT sessions:aware SET agent='new', seen=0, status='up';");
+            tx.run(&c.db, "true").await.unwrap();
+            let mut r =
+                c.db.query("SELECT VALUE build FROM meta:writer")
+                    .await
+                    .unwrap();
+            assert_eq!(
+                r.take::<Vec<String>>(0).unwrap(),
+                vec![crate::ident::stamp()]
+            );
+            c.db.query("UPDATE meta:schema SET version=99, build='future tools=99 commit=future'")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        // Reopening a write session is precisely what each operation of an
+        // already-running MCP process does; no bootstrap or mutation may follow.
+        let err = session_with(
+            &srv.settings,
+            &serve::Timing::default(),
+            None,
+            lock::DEFAULT_WAIT,
+            true,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            err.contains("schema version 99") && err.contains("want version 2"),
+            "{err}"
+        );
+        assert!(
+            err.contains("board build=future tools=99 commit=future")
+                && err.contains(&crate::ident::stamp()),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn a_wrong_or_missing_marker_is_refused_with_the_exact_line() {
         let Some(srv) = start_server("marker") else {
             return;
@@ -1197,7 +1300,9 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "board schema mismatch: found schema version 99, want version {SCHEMA_VERSION}. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {url}'), move the data dir aside (mv {dir} {dir}.old) and retry."
+                "board schema mismatch: found schema version 99, want version {SCHEMA_VERSION}. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {url}'), move the data dir aside (mv {dir} {dir}.old) and retry. board build={}; client build={}",
+                crate::ident::stamp(),
+                crate::ident::stamp()
             )
         );
         println!("wrong-marker refusal: {err}");

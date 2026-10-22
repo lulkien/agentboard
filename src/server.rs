@@ -31,7 +31,11 @@ fn text(s: String) -> CallToolResult {
 }
 
 fn err(e: String) -> ErrorData {
-    ErrorData::invalid_params(e, None)
+    if e.starts_with("board surface mismatch:") || e.starts_with("board schema mismatch:") {
+        ErrorData::internal_error(e, None)
+    } else {
+        ErrorData::invalid_params(e, None)
+    }
 }
 
 /// A claim refused because someone holds the task is not a malformed request;
@@ -828,6 +832,7 @@ mod tests {
             .filter(|l| l.trim_start().starts_with(marker))
             .count();
         assert_eq!(tool_count(), markers);
+        assert_eq!(ident::stamp(), ident::line(tool_count()));
     }
 
     #[test]

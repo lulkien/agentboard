@@ -302,3 +302,15 @@ asks, read `board_brief`), not for the worker.
 The orchestrator's playbook lives in `skills/`; see [skills/README.md](skills/README.md).
 
 Agent setup (build, MCP registration, skills): [docs/agent-install.md](docs/agent-install.md).
+
+Boards carry a surface generation and build stamps; incompatible generations are
+refused before DDL rather than upgraded. See [the stamp protocol and its legacy
+client limits](PROTOCOL.md#board-surface-stamp). Stamp-aware SQLite builds recheck
+on every operation, so a generation change refuses the next operation without a
+restart. Stamp-aware SurrealDB sessions check at session open: restart an already-open
+session to bind it to the new generation; new incompatible sessions are refused.
+A pre-stamp SQLite binary can keep writing without consulting or updating the stamp;
+its writes cannot be attributed on the board. Replace/retire pre-stamp binaries and
+stop their processes at cutover; restarting a pre-stamp binary is not enough.
+Older SurrealDB binaries with an existing schema-version check refuse incompatible
+generations through that gate.

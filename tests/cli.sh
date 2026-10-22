@@ -404,6 +404,24 @@ PY
 run $B --db "$R" ls
 check "board without reopen_count: exit 1, one-line move-it-aside refusal" $([ $rc -eq 1 ] && has "$err" "predates task reopen_count" && has "$err" "mv $R $R.old" && echo 0 || echo 1)
 run $B --db "$O" path;                                                 check "'path' still works on an old board (it names the file to move)" $([ $rc -eq 0 ] && [ "$out" = "$O" ] && echo 0 || echo 1)
+P=$S/surface.db
+run $B --db "$P" ls
+python3 - "$P" <<'PYDB'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as c:
+    c.execute("UPDATE board_stamp SET generation=99, opened_by='future tools=99 commit=future'")
+PYDB
+run $B --db "$P" add refused
+check "surface mismatch: exit 1, one line names both stamps and file" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "board generation=99 future tools=99 commit=future" && has "$err" "client generation=2 agentboard" && has "$err" "file $P" && echo 0 || echo 1)
+python3 - "$P" <<'PYDB'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as c:
+    c.execute("DROP TABLE board_stamp")
+PYDB
+before=$(sha1sum "$P" | cut -d' ' -f1)
+run $B --db "$P" add refused
+check "unstamped board: refused before DDL, file unchanged" $([ $rc -eq 1 ] && has "$err" "board unstamped" && [ "$(sha1sum "$P" | cut -d' ' -f1)" = "$before" ] && echo 0 || echo 1)
+
 fi
 
 # manager: --tmux is refused by name; a bad socket is one line, exit 1. HOME and the

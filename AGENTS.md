@@ -24,16 +24,17 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 |---|---|
 | `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 48 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 38 passed`, `27 passed`, and `2 passed` (needs no `surreal` binary) |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 49 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 42 passed`, `27 passed`, and `2 passed` (needs no `surreal` binary) |
 | `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
-| `bash tests/cli.sh` | `191/191 passed (backend: surreal)` (against the sqlite binary: `196/196 passed (backend: sqlite)`) |
+| `bash tests/cli.sh` | `191/191 passed (backend: surreal)` (against the sqlite binary: `198/198 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
 | `bash tests/manager.sh` | `50/50 passed (backend: surreal)`: `manager up/down/renew` and `wait --agent` against `tests/herdr_stub.py` and a throwaway board. `AGENTBOARD_HERDR_LIVE=1 bash tests/manager-live.sh` is the one round against the real herdr (scratch agents only); without the variable it prints `skipped` |
-| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `191/191`, `196/196`, `59/59`, `151/151` for them; about a minute once that cache is warm) |
+| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `191/191`, `198/198`, `59/59`, `153/153` for them; about a minute once that cache is warm) |
 | `bash tests/race.sh` | `claims=80 unique=80 elapsed_ms=... (backend: surreal)` (`AGENTBOARD_TEST_BIN` picks the binary; sqlite prints `(backend: sqlite)`) |
 | `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
 | `rg -c '#\[tool\(' src/server.rs` | `23`, equal to the count on line 1 of `src/server.rs` (`MCP surface: 23 tools`) and to what `agentboard board-build` prints |
+| `python3 tests/sqlite-first-use.py` (after a sqlite release build) | `sqlite-first-use: 20 rounds x 8 simultaneous first adds passed` (fresh scratch files only) |
 | `cargo fmt --check` | no output |
 | `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 
@@ -46,7 +47,7 @@ loopback ports, so a bare run never touches the default board. Each prints
 `python3 tests/mcp_client.py` cannot start a server itself: on the default build it refuses
 (exit 1, one line) unless `AGENTBOARD_TEST_DB` (a fresh data directory) and
 `AGENTBOARD_SURREAL_URL` (a throwaway server, never port 18720) are both set. Prefer
-`bash tests/surreal.sh`, which supplies both and prints `151/151 checks passed (backend: surreal)`. With a
+`bash tests/surreal.sh`, which supplies both and prints `153/153 checks passed (backend: surreal)`. With a
 sqlite binary and no `AGENTBOARD_TEST_DB`, it uses `.probe/client.db`.
 Add or change behaviour with a test in the suite that owns that kind of check
 (`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`

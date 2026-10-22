@@ -9,6 +9,12 @@
 use std::process::Command;
 
 fn main() {
+    let surface = std::fs::read_to_string("src/server.rs").expect("MCP source");
+    println!(
+        "cargo:rustc-env=AGENTBOARD_TOOL_COUNT={}",
+        surface.matches("#[tool(").count()
+    );
+    println!("cargo:rerun-if-changed=src/server.rs");
     println!("cargo:rustc-env=AGENTBOARD_COMMIT={}", describe());
     // A checkout moves HEAD without touching a tracked file, and that alone owes a
     // rebuild of the stamp.

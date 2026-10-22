@@ -662,7 +662,8 @@ pub fn block(actor: &str, id: i64, reason: &str) -> Result<String, String> {
 }
 
 pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
-    let conn = open()?;
+    let mut db = open()?;
+    let conn = db.transaction().map_err(|e| e.to_string())?;
     let lease = now_ms() + ttl_s * 1000;
     // Only the holder may extend: a stale owner must not refresh a lease that
     // another agent reclaimed after expiry.
@@ -675,6 +676,8 @@ pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
     if n != 1 {
         return Err(format!("{} not working or not held by {actor}", short(id)));
     }
+    super::stamp_writer(&conn, &crate::ident::stamp())?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(format!("ok {} lease {}m", short(id), ttl_s / 60))
 }
 

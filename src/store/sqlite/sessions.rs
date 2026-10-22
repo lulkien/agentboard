@@ -60,7 +60,7 @@ pub fn sessions() -> Result<String, String> {
 /// dead row captures a dispatch to its name, so this is the supported cleanup.
 /// Refuses when neither tmux nor herdr answers: every row would look dead.
 pub fn prune(dry_run: bool) -> Result<String, String> {
-    let conn = open()?;
+    let mut conn = open()?;
     let all = rows(&conn)?;
     let live = Liveness::new();
     let herdr_up = live.herdr().is_some();
@@ -84,8 +84,11 @@ pub fn prune(dry_run: bool) -> Result<String, String> {
             continue;
         }
         if !dry_run {
-            conn.execute("DELETE FROM sessions WHERE name=?", params![r.name])
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM sessions WHERE name=?", params![r.name])
                 .map_err(|e| e.to_string())?;
+            super::stamp_writer(&tx, &crate::ident::stamp())?;
+            tx.commit().map_err(|e| e.to_string())?;
         }
         dead += 1;
         out.push_str(&format!("{verb} {} ({}): {why}\n", r.name, r.agent));
@@ -99,13 +102,16 @@ pub fn prune(dry_run: bool) -> Result<String, String> {
 }
 
 pub fn unregister(name: &str) -> Result<String, String> {
-    let conn = open()?;
+    let mut db = open()?;
+    let conn = db.transaction().map_err(|e| e.to_string())?;
     let n = conn
         .execute("DELETE FROM sessions WHERE name=?", params![name])
         .map_err(|e| e.to_string())?;
     if n == 0 {
         return Err(format!("no registered session {name:?}"));
     }
+    super::stamp_writer(&conn, &crate::ident::stamp())?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(format!("ok session {name} removed"))
 }
 
@@ -115,7 +121,8 @@ pub fn register_session(
     cwd: &str,
     task: Option<i64>,
 ) -> Result<String, String> {
-    let conn = open()?;
+    let mut db = open()?;
+    let conn = db.transaction().map_err(|e| e.to_string())?;
     if let Some(t) = task {
         fetch(&conn, t)?;
     }
@@ -125,6 +132,8 @@ pub fn register_session(
         params![name, agent, cwd, task, now_ms()],
     )
     .map_err(|e| e.to_string())?;
+    super::stamp_writer(&conn, &crate::ident::stamp())?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(format!("ok session {name} up"))
 }
 

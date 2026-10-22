@@ -1,4 +1,5 @@
-PRAGMA journal_mode=WAL;
+-- Publish the complete schema and stamp together, including on first use.
+BEGIN IMMEDIATE;
 
 -- An epic is not a task: it is never claimed, leased or dispatched. It names the
 -- project the work belongs to (`path`), so a manager can tell when a pane rooted
@@ -81,3 +82,14 @@ CREATE TABLE IF NOT EXISTS sessions(
   seen    INTEGER NOT NULL,
   status  TEXT NOT NULL DEFAULT 'up'
 );
+
+-- Stamp protocol generation. Existing unstamped files are refused before DDL.
+CREATE TABLE IF NOT EXISTS board_stamp(
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  generation INTEGER NOT NULL,
+  opened_by TEXT NOT NULL DEFAULT '',
+  last_writer TEXT NOT NULL DEFAULT ''
+);
+INSERT OR IGNORE INTO board_stamp(id,generation) VALUES(1,2);
+
+COMMIT;

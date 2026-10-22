@@ -586,6 +586,26 @@ def main():
     expect("the existing review row is told the new diff", s.call("task_get", id=rv), f"{gp} submitted again: newest diff {d2} (round 2)")
 
     expect("session list", s.call("session_list"), "session")
+    # Change the board stamp behind an already initialized MCP process. The
+    # next write must fail, even on SQLite where initialization used to be cached.
+    if BACKEND == "sqlite":
+        import sqlite3
+        with sqlite3.connect(DB) as c:
+            c.execute("UPDATE board_stamp SET generation=99, opened_by='future tools=99 commit=future'")
+    else:
+        import urllib.request
+        req = urllib.request.Request("http://" + URL.removeprefix("http://") + "/sql",
+            data=b"UPDATE meta:schema SET version=99, build='future tools=99 commit=future'",
+            headers={"Authorization": "Basic cm9vdDpyb290", "surreal-ns": "agentboard",
+                     "surreal-db": "board", "Accept": "application/json", "Content-Type": "text/plain"})
+        with urllib.request.urlopen(req) as response:
+            response.read()
+    refused = refusal_text(lambda: s.call("task_add", title="surface-refused"))
+    expect("surface refusal has MCP -32603 and both build identities", refused,
+           "-32603", "future tools=99 commit=future", "agentboard 0.1.0 tools=")
+    expect("surface refusal names board and client generations", refused,
+           *( ["generation=99", "client generation=2"] if BACKEND == "sqlite"
+              else ["schema version 99", "want version 2"] ))
     s.close()
     print(f"\n{sum(checks)}/{len(checks)} checks passed (backend: {BACKEND})")
     return 0 if all(checks) else 1

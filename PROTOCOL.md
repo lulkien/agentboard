@@ -132,3 +132,25 @@ Other clips, all marked or absent:
 ## Cost note
 
 The full tool surface is ~1.8k tokens per request; `task_claim` returns the task so a follow-up `task_get` is never needed. Writes ack in one line on purpose.
+## Board surface stamp
+
+Schema generation 2 also versions the tool-surface rules: bump it when those rules
+change incompatibly. SurrealDB checks `meta:schema.version` on every session before
+DDL; SQLite refuses existing unstamped or mismatched files before DDL, naming the
+file, and stamp-aware processes check on every open, even after initialization.
+There is no automatic upgrade. Refusals are CLI errors and MCP -32603 errors,
+naming board and client stamps. A legacy binary can only print its legacy error.
+
+The board stores the creating/opening build and last stamp-aware writer (version,
+derived tool count, commit, backend): SurrealDB `meta:schema`, `meta:opened`,
+`meta:writer`; SQLite `board_stamp`. Write transactions update the writer stamp;
+reads preserve it. These records are inspectable through the database's read API.
+A stamp-aware SQLite build rechecks on every operation: after a generation change,
+its next operation is refused without a restart. A stamp-aware SurrealDB session
+checks `meta:schema.version` when opened: an already-open session keeps its view
+until restarted, while a new session is refused after a generation change.
+A pre-stamp SQLite binary never consults the stamp and can keep writing; its writes
+leave the last-writer record unchanged and cannot be attributed on the board.
+Replace/retire pre-stamp binaries and stop their processes at cutover; restarting
+a pre-stamp binary is not enough. Older SurrealDB binaries that already check the
+schema version refuse incompatible generations through that existing gate.

@@ -10,7 +10,6 @@ use super::{block_on, db_err, session};
 use crate::store::bridge::{Liveness, tmux_up};
 use crate::store::text::{SessionRow, ago};
 use crate::store::{now_ms, short};
-use serde::Deserialize;
 
 async fn rows(db: &super::Db) -> Result<Vec<SessionRow>, String> {
     let mut r = db
@@ -96,16 +95,13 @@ pub fn prune(dry_run: bool) -> Result<String, String> {
 /// Deletes one row; returns how many existed (0 or 1).
 fn delete(db: &super::Db, name: &str) -> Result<usize, String> {
     block_on(async {
-        let mut r = db
-            .query("DELETE type::thing('sessions', $name) RETURN BEFORE")
-            .bind(("name", name.to_owned()))
-            .await
-            .map_err(|e| db_err(&e))?;
-        // Only the row count matters; the record id cannot be read as plain JSON.
-        #[derive(Deserialize)]
-        struct Gone {}
-        let gone: Vec<Gone> = r.take(0).map_err(|e| db_err(&e))?;
-        Ok(gone.len())
+        let mut tx = Txn::new();
+        let name = tx.p(name);
+        tx.raw(&format!(
+            "LET $gone = (SELECT * FROM type::thing('sessions', {name})); DELETE type::thing('sessions', {name});"
+        ));
+        let count = tx.run(db, "array::len($gone)").await?;
+        Ok(count.as_u64().unwrap_or(0) as usize)
     })
 }
 
