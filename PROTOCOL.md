@@ -55,7 +55,7 @@ An epic is closed by the manager once every row in it is `done` or `dropped`; a 
 
 Inspect with `epic_get(E1)` (task counts, path, timeline) and `task_children(id)`: an epic id lists every task in it, a task id lists its subtasks (CLI: `agentboard children E1` / `T27`). `task_get` shows `epic:` and `parent:` lines and, for a task with subtasks, `children: N (2 done, ...)`.
 
-The two id spaces never mix: `E` ids go to epic verbs and `epic=`/`--epic`, `T` ids to task verbs and `parent=`; the wrong one is refused with a hint. A subtask must live in its parent's epic; a self-parent, a cycle and a cross-epic parent are errors (`agentboard parent T5 T3|none` re-parents). `dispatch` warns (never refuses) when a task's epic has a path and the target pane's cwd, as herdr reports it, is outside it.
+The two id spaces never mix: `E` ids go to epic verbs and `epic=`/`--epic`, `T` ids to task verbs and `parent=`; the wrong one is refused with a hint. At creation or re-parenting, a subtask must live in its parent's epic; a self-parent, a cycle and a cross-epic parent are errors (`agentboard parent T5 T3|none` re-parents). `dispatch` warns (never refuses) when a task's epic has a path and the target pane's cwd, as herdr reports it, is outside it.
 
 Create the task with `task_add(title, description, goal, priority, assignee, epic, parent, path, branch)`. `path` is the project root the work lives in (`~` expands, relative resolves against the server's cwd) and `branch` the git ref the worker starts on; the default `HEAD` (or an empty string) means leave the pane's checkout alone. Branch names are case-sensitive: only the literal `HEAD` means that, `head` is an ordinary branch name. `task_get` shows both as `path:` (`-` when unset) and `branch:`. `description` holds everything the worker needs: repo path, files, situation, constraints. `goal` holds how to do it and the definition of done. Do not block — poll `task_get` or `board_brief` for status changes. When status is `review` or `done`, read `report` for the outcome.
 
@@ -106,9 +106,11 @@ Each object has one MCP setter. `task_update` and `epic_update` accept spec and 
 
 The manager moves one task with `edit T7 --epic E3` or `task_update(id="T7",
 epic="E3")`. The target must exist and be open. A live worker lease refuses the
-edit; a move that would separate the task from its parent or children refuses by
-name. The move preserves status, lease, parent, reports, diffs and existing events,
-and records one `edit` event, `epic E1->E3` (`none->E3` for an ungrouped task).
+edit. A move may separate the task from its parent or children; it records a
+`note` event naming each immediate relative outside the destination, including
+ungrouped relatives (shown as "remains in none"). The move
+preserves status, lease, parent, reports, diffs and existing events,
+and records an `edit` event, `epic E1->E3` (`none->E3` for an ungrouped task).
 The same epic returns `T7 unchanged` without an event. There is no bulk move or
 merge command; the manager chooses rows individually.
 

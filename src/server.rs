@@ -229,7 +229,7 @@ pub struct ClaimArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateArgs {
-    /// Target open epic, E3; cannot split a parent/child chain.
+    /// Target open epic, E3; a split family is recorded in a note event.
     #[serde(default)]
     pub epic: Option<String>,
     #[serde(default)]

@@ -10,6 +10,25 @@ use crate::clip::{
 use crate::store::{now_ms, short, short_diff, short_epic};
 use std::path::{Component, Path, PathBuf};
 
+/// One durable event line for a move that leaves immediate relatives elsewhere.
+pub fn epic_gap(members: &[(i64, Option<i64>)]) -> Option<String> {
+    if members.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "family spans epics: {}",
+        members
+            .iter()
+            .map(|(id, epic)| format!(
+                "{} remains in {}",
+                short(*id),
+                epic.map_or("none".to_owned(), short_epic)
+            ))
+            .collect::<Vec<_>>()
+            .join("; ")
+    ))
+}
+
 /// One task as stored.
 #[derive(Clone, Debug)]
 pub struct TaskRow {

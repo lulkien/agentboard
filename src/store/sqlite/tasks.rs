@@ -6,7 +6,7 @@ use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
     MAX_CHAIN, Submission, cap_cascade_note, cap_note, cap_refusal, cap_skipped_note, cascades_to,
-    chain_refusal, gate_refusal, held_text, norm_branch, normalize_path, reopen_after,
+    chain_refusal, epic_gap, gate_refusal, held_text, norm_branch, normalize_path, reopen_after,
     review_description, review_filed_note, review_goal, review_resubmitted_note, review_title,
     workdir_text,
 };
@@ -175,6 +175,7 @@ fn edit_in_tx(
         return Err(ClaimError::Held(held_text(&cur)));
     }
     let mut diffs = Vec::new();
+    let mut family = Vec::new();
     let epic = e.epic.or(cur.epic_id);
     if epic != cur.epic_id {
         let target = super::epics::fetch_epic(tx, epic.unwrap())?;
@@ -187,29 +188,20 @@ fn edit_in_tx(
             )
             .into());
         }
-        if let Some(parent) = cur.parent_id
-            && fetch(tx, parent)?.epic_id != epic
-        {
-            return Err(format!(
-                "cannot move {} to {}: cross-epic parent {}",
-                short(id),
-                short_epic(target.id),
-                short(parent)
-            )
-            .into());
+        if let Some(parent) = cur.parent_id {
+            let row = fetch(tx, parent)?;
+            if row.epic_id != epic {
+                family.push((parent, row.epic_id));
+            }
         }
-        let child: Option<i64> = tx.query_row(
-            "SELECT id FROM tasks WHERE parent_id=? AND (epic_id IS NULL OR epic_id != ?) ORDER BY id LIMIT 1",
-            params![id, target.id], |r| r.get(0),
-        ).optional().map_err(|e| e.to_string())?;
-        if let Some(child) = child {
-            return Err(format!(
-                "cannot move {} to {}: cross-epic child {}",
-                short(id),
-                short_epic(target.id),
-                short(child)
-            )
-            .into());
+        let mut statement = tx.prepare(
+            "SELECT id, epic_id FROM tasks WHERE parent_id=? AND (epic_id IS NULL OR epic_id != ?) ORDER BY id"
+        ).map_err(|e| e.to_string())?;
+        let children = statement
+            .query_map(params![id, target.id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        for child in children {
+            family.push(child.map_err(|e| e.to_string())?);
         }
         diffs.push(format!(
             "epic {}->{}",
@@ -267,6 +259,9 @@ fn edit_in_tx(
         ],
     )
     .map_err(|e| e.to_string())?;
+    if let Some(note) = epic_gap(&family) {
+        log_event(tx, Subject::Task(id), actor, "note", &note)?;
+    }
     let seq = log_event(tx, Subject::Task(id), actor, "edit", &diffs.join(", "))?;
     Ok(format!(
         "{} edited {} #{seq}",

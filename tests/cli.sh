@@ -298,13 +298,44 @@ run $B --db "$M" edit T1 --epic E1
 check "epic move: live worker lease refused by name" $([ $rc -eq 1 ] && has "$err" 'T1 working by' && echo 0 || echo 1)
 $B --db "$M" status T1 ready >/dev/null
 $B --db "$M" add child --parent T1 >/dev/null
-run $B --db "$M" edit T2 --epic E1
-check "epic move: cannot split from parent" $([ $rc -eq 1 ] && has "$err" 'cross-epic parent T1' && echo 0 || echo 1)
+$B --db "$M" add grandchild --parent T2 >/dev/null
+declare -A family_patches=()
+for id in 1 2 3; do
+    $B --db "$M" status T$id done >/dev/null
+    patch=$($B --db "$M" diff add T$id --body "family patch $id")
+    family_patches[$id]=${patch%% *}
+done
 run $B --db "$M" edit T1 --epic E1
-check "epic move: cannot leave child behind" $([ $rc -eq 1 ] && has "$err" 'cross-epic child T2' && echo 0 || echo 1)
-$B --db "$M" add unattached >/dev/null
+check "epic move: parent can leave child behind" $rc
+run $B --db "$M" get T1 --full
+check "epic move: first gap names the remaining child and epic" $(has "$out" 'family spans epics: T2 remains in E2' && echo 0 || echo 1)
+run $B --db "$M" edit T2 --epic E1
+check "epic move: middle row can follow parent" $rc
+run $B --db "$M" get T2 --full
+check "epic move: second gap names remaining grandchild" $(has "$out" 'family spans epics: T3 remains in E2' && has "$out" 'parent: T1' && echo 0 || echo 1)
 run $B --db "$M" edit T3 --epic E1
-check "epic move: previously ungrouped task can join an epic" $([ $rc -eq 0 ] && has "$out" 'T3 edited epic #' && echo 0 || echo 1)
+check "epic move: final row closes gap" $rc
+run $B --db "$M" get T3 --full
+check "epic move: final move has no gap note and preserves parent" $(has "$out" 'parent: T2' && ! has "$out" 'family spans epics:' && echo 0 || echo 1)
+for id in 1 2 3; do
+    run $B --db "$M" get T$id --full
+    check "epic move: T$id arrived done in source epic" $(has "$out" 'epic: E1 source' && has "$out" ' done ' && echo 0 || echo 1)
+    run $B --db "$M" diff get "${family_patches[$id]}" --full
+    check "epic move: T$id patch remains intact" $(has "$out" "T$id" && has "$out" "family patch $id" && echo 0 || echo 1)
+done
+run $B --db "$M" edit T2 --epic E2
+check "epic move: middle row can split from both relatives" $rc
+run $B --db "$M" get T2 --full
+check "epic move: gap names parent and child in one line" $(has "$out" 'family spans epics: T1 remains in E1; T3 remains in E1' && echo 0 || echo 1)
+$B --db "$M" edit T2 --epic E1 >/dev/null
+run $B --db "$M" add invalid --parent T1 --epic E2
+check "epic move: creation still refuses cross-epic parent" $([ $rc -eq 1 ] && has "$err" 'parent T1 belongs to E1, not E2' && echo 0 || echo 1)
+$B --db "$M" add unattached >/dev/null
+$B --db "$M" add ungrouped-child --parent T4 >/dev/null
+run $B --db "$M" edit T4 --epic E1
+check "epic move: previously ungrouped task can join an epic" $([ $rc -eq 0 ] && has "$out" 'T4 edited epic #' && echo 0 || echo 1)
+run $B --db "$M" get T4 --full
+check "epic move: note names ungrouped relative" $(has "$out" 'family spans epics: T5 remains in none' && echo 0 || echo 1)
 run $B --db "$M" edit E1 --epic E2
 check "epic move: flag is for tasks only" $([ $rc -eq 1 ] && has "$err" '--epic is for tasks' && echo 0 || echo 1)
 

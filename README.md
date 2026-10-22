@@ -35,9 +35,11 @@ A board file from before diffs gains the table; nothing is refused.
 An **epic** is not a task: it has its own ids (`E1`), is never claimed, leased or
 dispatched, and carries the project `path` its work belongs to. A task points at an
 epic (`epic_id`) and optionally at another task (`parent_id`, a subtask that
-inherits the parent's epic; cycles and cross-epic parents are refused). A board
-file without a schema version is refused with the manual step to inspect and
-stamp the legacy board offline.
+inherits the parent's epic at creation). Cycles are refused; creation and
+re-parenting also refuse cross-epic parents. A move may split a family and records
+a note event naming immediate relatives outside the destination, including
+ungrouped relatives. A board file without a schema version is refused with the
+manual step to inspect and stamp the legacy board offline.
 
 Statuses: `ready → working → (blocking → working)* → review → done`,
 plus `needs_fix` (review found work, waiting for a fix; shown as `fix`),

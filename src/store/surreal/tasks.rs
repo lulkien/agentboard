@@ -17,7 +17,7 @@ use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
     self, EpicRow, EventRow, MAX_CHAIN, Submission, TaskRow, cap_cascade_note, cap_note,
-    cap_refusal, cap_skipped_note, cascades_to, chain_refusal, field_names, gate_refusal,
+    cap_refusal, cap_skipped_note, cascades_to, chain_refusal, epic_gap, field_names, gate_refusal,
     held_text, norm_branch, normalize_path, reopen_after, review_description, review_filed_note,
     review_goal, review_resubmitted_note, review_title, text_change, value_change, workdir_text,
 };
@@ -400,6 +400,7 @@ async fn edit_in_tx(
         return Err(ClaimError::Held(held_text(&TaskRow::from(cur.clone()))));
     }
     let mut diffs = Vec::new();
+    let mut family = Vec::new();
     let epic = e.epic.or(cur.epic_id);
     if epic != cur.epic_id {
         let target = super::epics::fetch_epic(db, epic.unwrap()).await?;
@@ -412,29 +413,16 @@ async fn edit_in_tx(
             )
             .into());
         }
-        if let Some(parent) = cur.parent_id
-            && fetch(db, parent).await?.epic_id != epic
-        {
-            return Err(format!(
-                "cannot move {} to {}: cross-epic parent {}",
-                short(id),
-                short_epic(target.tid),
-                short(parent)
-            )
-            .into());
+        if let Some(parent) = cur.parent_id {
+            let row = fetch(db, parent).await?;
+            if row.epic_id != epic {
+                family.push((parent, row.epic_id));
+            }
         }
-        let mut result = db.query("SELECT VALUE meta::id(id) FROM tasks WHERE parent_id=$id AND (epic_id IS NONE OR epic_id != $epic) LIMIT 1")
-                .bind(("id", id)).bind(("epic", target.tid)).await.map_err(|e| db_err(&e))?;
-        let children: Vec<i64> = result.take(0).map_err(|e| db_err(&e))?;
-        if let Some(child) = children.first() {
-            return Err(format!(
-                "cannot move {} to {}: cross-epic child {}",
-                short(id),
-                short_epic(target.tid),
-                short(*child)
-            )
-            .into());
-        }
+        let mut result = db.query("SELECT *, meta::id(id) AS tid FROM tasks WHERE parent_id=$id AND (epic_id IS NONE OR epic_id != $epic) ORDER BY tid")
+            .bind(("id", id)).bind(("epic", target.tid)).await.map_err(|e| db_err(&e))?;
+        let children: Vec<Row> = result.take(0).map_err(|e| db_err(&e))?;
+        family.extend(children.into_iter().map(|row| (row.tid, row.epic_id)));
         diffs.push(format!(
             "epic {}->{}",
             cur.epic_id.map_or("none".to_owned(), short_epic),
@@ -495,6 +483,9 @@ async fn edit_in_tx(
         "UPDATE type::thing('tasks', {idp}) SET {};",
         sets.join(", ")
     ));
+    if let Some(note) = epic_gap(&family) {
+        tx.event(&idp, actor, "note", &note);
+    }
     tx.event(&idp, actor, "edit", &diffs.join(", "));
     cur.title = title.to_owned();
     cur.description = description.to_owned();

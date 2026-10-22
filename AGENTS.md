@@ -28,10 +28,10 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 53 passed` (unit), `28 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
 | `cargo test --no-default-features --features sqlite` | `test result: ok. 45 passed`, `28 passed`, and `2 passed` (needs no `surreal` binary) |
 | `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
-| `bash tests/cli.sh` | `228/228 passed (backend: surreal)` (against the sqlite binary: `235/235 passed (backend: sqlite)`) |
+| `bash tests/cli.sh` | `242/242 passed (backend: surreal)` (against the sqlite binary: `249/249 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
 | `bash tests/manager.sh` | `50/50 passed (backend: surreal)`: `manager up/down/renew` and `wait --agent` against `tests/herdr_stub.py` and a throwaway board. `AGENTBOARD_HERDR_LIVE=1 bash tests/manager-live.sh` is the one round against the real herdr (scratch agents only); without the variable it prints `skipped` |
-| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `228/228`, `235/235`, `59/59`, `197/197` for them; about a minute once that cache is warm) |
+| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `242/242`, `249/249`, `59/59`, `214/214` for them; about a minute once that cache is warm) |
 | `bash tests/race.sh` | `claims=80 unique=80 elapsed_ms=... (backend: surreal)` (`AGENTBOARD_TEST_BIN` picks the binary; sqlite prints `(backend: sqlite)`) |
 | `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 16 tools; published counts match`; source header and docs are generated from the router with this script (omit `--check` to update) |
@@ -51,7 +51,7 @@ loopback ports, so a bare run never touches the default board. Each prints
 `python3 tests/mcp_client.py` cannot start a server itself: on the default build it refuses
 (exit 1, one line) unless `AGENTBOARD_TEST_DB` (a fresh data directory) and
 `AGENTBOARD_SURREAL_URL` (a throwaway server, never port 18720) are both set. Prefer
-`bash tests/surreal.sh`, which supplies both and prints `197/197 checks passed (backend: surreal)`. With a
+`bash tests/surreal.sh`, which supplies both and prints `214/214 checks passed (backend: surreal)`. With a
 sqlite binary and no `AGENTBOARD_TEST_DB`, it uses `.probe/client.db`.
 Add or change behaviour with a test in the suite that owns that kind of check
 (`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`

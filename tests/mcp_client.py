@@ -568,8 +568,34 @@ def main():
     expect("epic move refuses held row", refusal_text(lambda: s.call("task_update", id=moving, epic=source)), "-32603", f"{moving} working by claude1")
     s.call("task_update", id=moving, status="ready")
     child = s.call("task_add", title="move child", parent=moving).split()[0]
-    expect("epic move refuses cross-epic parent", refusal_text(lambda: s.call("task_update", id=child, epic=source)), f"cross-epic parent {moving}")
-    expect("epic move refuses cross-epic child", refusal_text(lambda: s.call("task_update", id=moving, epic=source)), f"cross-epic child {child}")
+    grandchild = s.call("task_add", title="move grandchild", parent=child).split()[0]
+    family = (moving, child, grandchild)
+    family_patches = []
+    for member in family:
+        s.call("task_update", id=member, status="done")
+        family_patches.append(s.call("diff_add", id=member, body=f"family patch {member}").split()[0])
+    for member, remaining in ((moving, child), (child, grandchild)):
+        expect("family row can move individually", s.call("task_update", id=member, epic=source), f"{member} edited epic #")
+        expect("gap is recorded on moved row", s.call("task_get", id=member, full=True), f"family spans epics: {remaining} remains in {target}")
+    expect("final family row can move", s.call("task_update", id=grandchild, epic=source), f"{grandchild} edited epic #")
+    final = s.call("task_get", id=grandchild, full=True)
+    checks.append('family spans epics:' not in final)
+    print(("PASS " if checks[-1] else "FAIL ") + "final family move has no gap")
+    for member, parent, patch_id in zip(family, (None, moving, child), family_patches):
+        record = s.call("task_get", id=member, full=True)
+        expect("family member arrives done", record, f"epic: {source} move source", f"{member} done")
+        checks.append((f"parent: {parent}" in record) if parent else 'parent:' not in record)
+        print(("PASS " if checks[-1] else "FAIL ") + "family parent preserved")
+        expect("family diff preserved", s.call("diff_get", id=patch_id, full=True), member, f"family patch {member}")
+    expect("middle row can split from both relatives", s.call("task_update", id=child, epic=target), f"{child} edited epic #")
+    expect("one gap line names parent and child", s.call("task_get", id=child, full=True), f"family spans epics: {moving} remains in {source}; {grandchild} remains in {source}")
+    s.call("task_update", id=child, epic=source)
+    expect("creation still refuses cross-epic parent", refusal_text(lambda: s.call("task_add", title="invalid", parent=moving, epic=target)), f"parent {moving} belongs to {source}, not {target}")
+
+    ungrouped = s.call("task_add", title="ungrouped parent").split()[0]
+    ungrouped_child = s.call("task_add", title="ungrouped child", parent=ungrouped).split()[0]
+    s.call("task_update", id=ungrouped, epic=target)
+    expect("epic move notes ungrouped relative", s.call("task_get", id=ungrouped, full=True), f"family spans epics: {ungrouped_child} remains in none")
 
     # Diffs: append-only, round from the reopen count, only the newest is reviewed.
     dt = s.call("task_add", title="diffed").split()[0]
