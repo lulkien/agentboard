@@ -549,6 +549,17 @@ async fn main() -> ExitCode {
         }
     }
 
+    if !matches!(cli.cmd, None | Some(Cmd::Serve) | Some(Cmd::Board { .. })) {
+        let checked = store::check_entry();
+        for line in store::take_migrations() {
+            eprintln!("{line}");
+        }
+        if let Err(error) = checked {
+            eprintln!("agentboard: {error}");
+            return ExitCode::FAILURE;
+        }
+    }
+
     let result = match cli.cmd {
         None | Some(Cmd::Serve) => return serve().await,
         Some(c @ Cmd::Wait { .. }) => wait(c).await,
@@ -567,6 +578,9 @@ async fn main() -> ExitCode {
         },
         Some(c) => dispatch(c, &actor).map(|text| (text, ExitCode::SUCCESS)),
     };
+    for line in store::take_migrations() {
+        eprintln!("{line}");
+    }
     match result {
         Ok((text, code)) => {
             println!("{text}");

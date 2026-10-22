@@ -664,7 +664,7 @@ pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
     if n != 1 {
         return Err(format!("{} not working or not held by {actor}", short(id)));
     }
-    super::stamp_writer(&conn, &crate::ident::stamp())?;
+
     conn.commit().map_err(|e| e.to_string())?;
     Ok(format!("ok {} lease {}m", short(id), ttl_s / 60))
 }

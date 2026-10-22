@@ -350,3 +350,26 @@ pub fn board_upgrade(owner: bool) -> Result<String, String> {
         Err("board upgrade supports v1 SurrealDB boards only; SQLite pre-stamp clients cannot be fenced and must be retired by the owner".into())
     }
 }
+
+/// Check the persisted schema on every adapter entry, including bridge-only calls.
+pub fn check_entry() -> Result<(), String> {
+    #[cfg(feature = "surreal")]
+    {
+        surreal::session(false).map(|_| ())
+    }
+    #[cfg(feature = "sqlite")]
+    {
+        sqlite::open().map(|_| ())
+    }
+}
+
+static MIGRATIONS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+pub(super) fn migrated(from: i64, definitions: usize, rows: usize) {
+    MIGRATIONS.lock().unwrap().push(format!(
+        "migrated v{from} -> v{}: {definitions} definitions, {rows} rows backfilled",
+        crate::ident::GENERATION
+    ));
+}
+pub fn take_migrations() -> Vec<String> {
+    std::mem::take(&mut *MIGRATIONS.lock().unwrap())
+}

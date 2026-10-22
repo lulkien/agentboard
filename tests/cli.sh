@@ -436,8 +436,8 @@ c.commit()
 PY
 before=$(sha1sum "$O" | cut -d' ' -f1)
 run $B --db "$O" ls
-check "old board: exit 1, says it predates epics and how to move it aside" $([ $rc -eq 1 ] && has "$err" "predates epics" && has "$err" "mv $O $O.old" && echo 0 || echo 1)
-run $B --db "$O" add nope;                                             check "old board: writes refused too" $([ $rc -eq 1 ] && has "$err" "predates epics" && echo 0 || echo 1)
+check "old board: exit 1, names missing schema version and manual step" $([ $rc -eq 1 ] && has "$err" "no schema version" && has "$err" "manual step" && echo 0 || echo 1)
+run $B --db "$O" add nope;                                             check "old board: writes refused too" $([ $rc -eq 1 ] && has "$err" "no schema version" && echo 0 || echo 1)
 check "old board file is byte-identical afterwards (never half-migrated)" $([ "$(sha1sum "$O" | cut -d' ' -f1)" = "$before" ] && [ ! -e "$O-wal" ] && echo 0 || echo 1)
 R=$S/noreopen.db
 python3 - "$R" <<'PY'
@@ -447,17 +447,17 @@ c.executescript("CREATE TABLE tasks(id INTEGER PRIMARY KEY, title TEXT, epic_id 
 c.commit()
 PY
 run $B --db "$R" ls
-check "board without reopen_count: exit 1, one-line move-it-aside refusal" $([ $rc -eq 1 ] && has "$err" "predates task reopen_count" && has "$err" "mv $R $R.old" && echo 0 || echo 1)
-run $B --db "$O" path;                                                 check "'path' still works on an old board (it names the file to move)" $([ $rc -eq 0 ] && [ "$out" = "$O" ] && echo 0 || echo 1)
+check "unstamped legacy board: exit 1, names manual step" $([ $rc -eq 1 ] && has "$err" "no schema version" && has "$err" "manual step" && echo 0 || echo 1)
+run $B --db "$O" path;                                                 check "path checks the schema version too" $([ $rc -eq 1 ] && has "$err" "no schema version" && echo 0 || echo 1)
 P=$S/surface.db
 run $B --db "$P" ls
 python3 - "$P" <<'PYDB'
 import sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as c:
-    c.execute("UPDATE board_stamp SET generation=99, opened_by='future tools=99 commit=future'")
+    c.execute("UPDATE board_stamp SET generation=99")
 PYDB
 run $B --db "$P" add refused
-check "surface mismatch: exit 1, one line names both stamps and file" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "board generation=99 future tools=99 commit=future" && has "$err" "client generation=2 agentboard" && has "$err" "file $P" && echo 0 || echo 1)
+check "future schema: exit 1, one line names versions" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "schema version 99" && has "$err" "understands version 2" && has "$err" "binary is older than the board" && echo 0 || echo 1)
 python3 - "$P" <<'PYDB'
 import sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as c:
@@ -465,7 +465,7 @@ with sqlite3.connect(sys.argv[1]) as c:
 PYDB
 before=$(sha1sum "$P" | cut -d' ' -f1)
 run $B --db "$P" add refused
-check "unstamped board: refused before DDL, file unchanged" $([ $rc -eq 1 ] && has "$err" "board unstamped" && [ "$(sha1sum "$P" | cut -d' ' -f1)" = "$before" ] && echo 0 || echo 1)
+check "unstamped board: refused before DDL, file unchanged" $([ $rc -eq 1 ] && has "$err" "no schema version" && [ "$(sha1sum "$P" | cut -d' ' -f1)" = "$before" ] && echo 0 || echo 1)
 
 fi
 

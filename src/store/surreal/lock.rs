@@ -19,6 +19,12 @@ pub struct WriteLock {
     file: Option<File>,
 }
 
+impl WriteLock {
+    pub fn held(&self) -> bool {
+        self.file.is_some()
+    }
+}
+
 impl Drop for WriteLock {
     fn drop(&mut self) {
         if let Some(f) = &self.file {

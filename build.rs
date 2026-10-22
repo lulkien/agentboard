@@ -3,23 +3,16 @@
 //! `git describe --always --dirty --abbrev=8` in the crate directory, or `unknown`
 //! when there is no checkout to ask (a release tarball, a vendored build). The value
 //! is emitted as `AGENTBOARD_COMMIT` and read with `env!` in `src/ident.rs`, so two
-//! builds of the same crate version stay distinguishable in an MCP `initialize`, in
-//! `board-build`, and in a log line. `AGENTBOARD_BUILD_COMMIT` overrides it when a
-//! packager knows the revision and git does not.
+//! builds of the same crate version stay distinguishable in informational MCP
+//! `initialize` and `board-build` output. This is a compile-time label, with no
+//! runtime checkout check or compatibility decision. `AGENTBOARD_BUILD_COMMIT`
+//! overrides it when a packager knows the revision and git does not.
 use std::process::Command;
 
 fn main() {
-    let surface = std::fs::read_to_string("src/server.rs").expect("MCP source");
-    println!(
-        "cargo:rustc-env=AGENTBOARD_TOOL_COUNT={}",
-        surface.matches("#[tool(").count()
-    );
-    println!("cargo:rerun-if-changed=src/server.rs");
     println!("cargo:rustc-env=AGENTBOARD_COMMIT={}", describe());
-    // A checkout moves HEAD without touching a tracked file, and that alone owes a
-    // rebuild of the stamp. This is only a Cargo hint: an installed artifact
-    // cannot rerun this script, and symbolic HEAD can stay unchanged when its
-    // branch ref moves. ident::line also checks the build checkout at runtime.
+    // A changed HEAD file can refresh the compile-time label on a later build.
+    // This hint does not detect every branch-ref move or update installed builds.
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-env-changed=AGENTBOARD_BUILD_COMMIT");
 }

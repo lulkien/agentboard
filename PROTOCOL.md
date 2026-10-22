@@ -133,47 +133,29 @@ Other clips, all marked or absent:
 ## Cost note
 
 The full tool surface is ~1.8k tokens per request; `task_claim` returns the task so a follow-up `task_get` is never needed. Writes ack in one line on purpose.
-## Board surface stamp
+## Board schema version
 
-Schema generation 2 also versions the tool-surface rules: bump it when those rules
-change incompatibly. SurrealDB checks `meta:schema.version` on every session before
-DDL; SQLite refuses existing unstamped or mismatched files before DDL, naming the
-file, and stamp-aware processes check on every open, even after initialization.
-There is no automatic upgrade. An owner can explicitly upgrade a stopped
-generation-1 SurrealDB board using `agentboard board upgrade --owner`; see the
-[cutover order](docs/agent-install.md#owner-cutover-for-an-existing-surrealdb-board).
-Seats report the refusal to the owner and never perform live maintenance. Refusals are CLI errors and MCP -32603 errors,
-naming board and client stamps. A legacy binary can only print its legacy error.
+Every CLI invocation and MCP tool call reads the persisted schema version
+(`meta:schema.version` on SurrealDB, `board_stamp.generation` on SQLite).
+The current version is 2. Equal serves immediately. An older version migrates
+additively in that call, then serves the request. A newer version refuses by name:
+`binary is older than the board`, with the board and supported versions.
 
-The board stores the creating/opening build and last stamp-aware writer (version,
-derived tool count, commit, backend): SurrealDB `meta:schema`, `meta:opened`,
-`meta:writer`; SQLite `board_stamp`. Write transactions update the writer stamp;
-reads preserve it. These records are inspectable through the database's read API.
-A stamp-aware SQLite build rechecks on every operation: after a generation change,
-its next operation is refused without a restart. A stamp-aware SurrealDB session
-checks `meta:schema.version` when opened: an already-open session keeps its view
-until restarted, while a new session is refused after a generation change.
-A pre-stamp SQLite binary never consults the stamp and can keep writing; its writes
-leave the last-writer record unchanged and cannot be attributed on the board.
-Replace/retire pre-stamp binaries and stop their processes at cutover; restarting
-a pre-stamp binary is not enough. Older SurrealDB binaries that already check the
-schema version refuse incompatible generations through that existing gate.
+Migration holds the board write lock and commits definitions, missing-default
+backfills and the version bump in one transaction. A concurrent caller waits and
+rechecks under the lock; it cannot see a partially migrated schema. One line is
+printed to stderr by the call that migrated:
+`migrated vN -> vM: <x> definitions, <y> rows backfilled`.
+Existing values and record IDs are preserved. Definitions use `IF NOT EXISTS`;
+backfills affect only missing fields. Type conflicts and fields requiring a value
+without a default refuse with a named manual step. Unstamped nonempty boards and
+unsupported historical versions require manual inspection. No drops, type changes
+or rewriting present values run automatically. Failure to acquire the write lock
+refuses; retry after the holder releases it.
 
-### Per-write tool count
-
-Generation-2 boards also record `surface_tools` on SurrealDB `meta:schema` and
-SQLite `board_stamp`. Initialization, additive v2 backfill and the offline SurrealDB
-upgrade derive it from the binary's router count. Normal writes never replace a
-published count. Every guarded write transaction supplies its own compiled count
-from `ident`; no CLI argument or MCP tool parameter accepts a seat-provided count.
-A missing or mismatched count refuses before mutation, naming both counts and
-requiring the seat binary to be reinstalled and its MCP server reloaded. The
-comparison runs again for already-open clients. The friendly seat-start catalog
-and commit check remains in `roles.md`.
-
-This additive field does not change generation 2 or remove existing data. Readers
-may ignore the field. Binaries predating this write guard still need owner
-retirement, as with pre-stamp clients above: a new client-side guard cannot fence
-an old process that connects directly to the database and never executes it.
-Rolling back the binary leaves the additive field/data intact but also removes
-that binary's enforcement; restart only matching guarded seats to restore it.
+Build commits, dirty checkouts and tool counts do not decide board compatibility.
+There is no seat-start check. The manager reloads MCP processes when needed.
+Legacy build and tool-count columns may remain as inert historical data; they are
+neither compared nor updated. Older binaries may retain their former policy:
+rollback requires a binary that understands the resulting schema, or restoring a
+stopped backup with its old binary. There is no automatic downgrade.

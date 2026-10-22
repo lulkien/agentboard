@@ -87,7 +87,7 @@ pub fn prune(dry_run: bool) -> Result<String, String> {
             let tx = super::write_transaction(&mut conn)?;
             tx.execute("DELETE FROM sessions WHERE name=?", params![r.name])
                 .map_err(|e| e.to_string())?;
-            super::stamp_writer(&tx, &crate::ident::stamp())?;
+
             tx.commit().map_err(|e| e.to_string())?;
         }
         dead += 1;
@@ -110,7 +110,7 @@ pub fn unregister(name: &str) -> Result<String, String> {
     if n == 0 {
         return Err(format!("no registered session {name:?}"));
     }
-    super::stamp_writer(&conn, &crate::ident::stamp())?;
+
     conn.commit().map_err(|e| e.to_string())?;
     Ok(format!("ok session {name} removed"))
 }
@@ -132,7 +132,7 @@ pub fn register_session(
         params![name, agent, cwd, task, now_ms()],
     )
     .map_err(|e| e.to_string())?;
-    super::stamp_writer(&conn, &crate::ident::stamp())?;
+
     conn.commit().map_err(|e| e.to_string())?;
     Ok(format!("ok session {name} up"))
 }

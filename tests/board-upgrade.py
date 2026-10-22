@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
     def cli(binary, *args, ok=True):
         p = subprocess.run([binary, *args], env=env, text=True, capture_output=True, timeout=30)
         assert (p.returncode == 0) == ok, (args, p.stdout, p.stderr)
-        return p.stdout if ok else p.stderr
+        return p.stdout + p.stderr if ok else p.stderr
 
     def start(url=endpoint):
         log = open(root / f'server-{len(processes)}.log', 'w')
@@ -90,9 +90,13 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         cli(old, 'register', 'scratch-seat', '--agent', 'human', '--task', 'T1')
         before = snapshot()
         assert len(before['tasks']) == 1 and len(before['epics']) == 1 and len(before['events']) == 4
-        refusal = cli(new, 'get', 'T1', ok=False)
-        assert 'board upgrade --owner' in refusal and 'restart seats' in refusal and 'mv ' not in refusal
-        assert snapshot() == before, 'implicit open must leave rows untouched'
+        first = cli(new, 'get', 'T1')
+        assert 'preserved task' in first
+        assert 'migrated v1 -> v2:' in first
+        assert snapshot() == before, 'additive migration must preserve all stored rows'
+        assert sql('SELECT version FROM meta:schema;')[0]['result'][0]['version'] == 2
+        # Reset a scratch v1 fixture to exercise offline interruption/exclusion.
+        sql('REMOVE FIELD reviews ON diffs; UPDATE meta:schema SET version=1;')
         assert 'server running at' in cli(new, 'board', 'upgrade', '--owner', ok=False)
         stop(server)
         # A server using the same data at another port must also be named/refused.
@@ -116,13 +120,13 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         marker.daemon_threads = True
         threading.Thread(target=marker.serve_forever, daemon=True).start()
         server = start()
-        assert 'build' not in sql('INFO FOR TABLE meta;')[0]['result']['fields']
+        assert 'reviews' not in sql('INFO FOR TABLE diffs;')[0]['result']['fields']
         # A non-stamp meta row proves backfill independently of stamp UPSERTs.
         sql('CREATE meta:legacy SET version=1;')
         meta_before = sql('SELECT * FROM meta ORDER BY id;')[0]['result']
         marker_url = f'http://127.0.0.1:{marker.server_port}/stamp?before='
         sql("DEFINE EVENT pause_upgrade ON TABLE meta WHEN $after.version = 2 AND $before.version = 1 "
-            f"THEN http::get('{marker_url}' + $before.build);")
+            f"THEN http::get('{marker_url}' + <string>$before.version);")
         stop(server)
         # Permit only this loopback marker in the test server; production
         # startup arguments and capabilities remain unchanged.
@@ -169,7 +173,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         else:
             raise AssertionError('private server health never reached')
         try:
-            assert reached.get(timeout=10) == '/stamp?before='
+            assert reached.get(timeout=10) == '/stamp?before=1'
             assert owner.poll() is None, owner.communicate()
         except queue.Empty:
             owner.kill()
@@ -193,7 +197,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         server = start()
         assert sql('SELECT version FROM meta:schema;')[0]['result'][0]['version'] == 1
         assert snapshot() == before
-        assert 'build' not in sql('INFO FOR TABLE meta;')[0]['result']['fields']
+        assert 'reviews' not in sql('INFO FOR TABLE diffs;')[0]['result']['fields']
         assert sql('SELECT * FROM meta ORDER BY id;')[0]['result'] == meta_before
         sql('REMOVE EVENT pause_upgrade ON TABLE meta;')
         stop(server)
@@ -201,27 +205,21 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         print(output)
         for table, rows in before.items():
             assert f'rows {table}: {len(rows)} -> {len(rows)}' in output, output
-        assert "DEFINE FIELD IF NOT EXISTS build ON meta TYPE string DEFAULT '';" in output
-        assert "UPDATE meta SET build = build ?? '' WHERE build IS NONE;" in output
+        assert "DEFINE FIELD IF NOT EXISTS reviews ON diffs TYPE option<int>;" in output
+        assert "WHERE" in output and "IS NONE" in output
         assert 'additive definitions checked (IF NOT EXISTS):' in output
         assert 'backfill missing defaults only:' in output
         server = start()
-        assert 'build' in sql('INFO FOR TABLE meta;')[0]['result']['fields']
-        assert sql('SELECT build FROM meta:legacy;')[0]['result'] == [{'build': ''}]
+        assert 'reviews' in sql('INFO FOR TABLE diffs;')[0]['result']['fields']
+        assert sql('SELECT version FROM meta:legacy;')[0]['result'] == [{'version': 1}]
         after = snapshot()
         assert after == before, 'every stored row must remain byte-identical in canonical JSON'
         for table, rows in before.items():
             print(f'preserved {table}: {len(rows)} -> {len(after[table])}')
         assert json.dumps(before['tasks'][0], sort_keys=True).encode() == json.dumps(after['tasks'][0], sort_keys=True).encode()
-        stamps = sql('SELECT * FROM meta:schema; SELECT * FROM meta:opened; SELECT * FROM meta:writer;')
-        expected_tools = int(re.search(r'\btools=(\d+)', cli(new, 'board-build'))[1])
-        assert stamps[0]['result'][0]['surface_tools'] == expected_tools
-        print(f'upgrade surface_tools={expected_tools}: matches binary-derived router count')
-        upgrading_build = output.split('generation=2 ', 1)[1].splitlines()[0]
-        for stamp in stamps:
-            assert stamp['result'][0]['version'] == 2
-            assert stamp['result'][0]['build'] == upgrading_build
-            assert 'commit=' in upgrading_build and f'tools={expected_tools}' in upgrading_build
+        assert sql('SELECT version FROM meta:schema;')[0]['result'] == [{'version': 2}]
+        assert sql('SELECT * FROM meta:opened; SELECT * FROM meta:writer;')[0]['result'] == []
+        assert 'schema version=2' in output
         assert 'want version 1' in cli(old, 'get', 'T1', ok=False)
         assert 'preserved task' in cli(new, 'get', 'T1')
         stop(server)
@@ -284,7 +282,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         assert sql('SELECT version FROM meta:schema;')[0]['result'][0]['version'] == 99
         assert snapshot() == before
         stop(server)
-        print('board-upgrade: owner gate, fail-closed open, both server refusals, unreadable process warned and continued, pure-v1 DDL/backfill rollback and retry, output asserted, killed-owner child dead, cleanup descendant dead, all rows preserved, stamps, v1 refused, v2 accepted, idempotent retry passed')
+        print('board-upgrade: owner gate, first-call additive migration, both server refusals, unreadable process warned and continued, pure-v1 DDL/backfill rollback and retry, output asserted, killed-owner child dead, cleanup descendant dead, all rows preserved, schema version, v1 refused, v2 accepted, idempotent retry passed')
     finally:
         if owner is not None and owner.poll() is None:
             owner.kill()

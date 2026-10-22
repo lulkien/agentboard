@@ -2,22 +2,12 @@
 
 Three seats. Standing seats: coder `claude`, reviewer `opencode` (its board actor reads `opencode`). The user can name other seats for a round; follow that and say who the reviewer of record is. Kind is the seat, not the vendor. One actor per pane, so the event log names the writer.
 
-## Seat-start surface check
+## Schema compatibility
 
-Every seat (manager, coder and reviewer), before its first board write or review,
-calls MCP `board_build` and checks the tool catalog available in its own session.
-The expected count is the derived `tools=` value printed by MCP `board_build` and
-verified against the router by the checker;
-`board_build`, `diff_add`, `diff_get` and `diff_list` must all be available. A coder
-without `diff_add` cannot submit; a reviewer without `diff_get` cannot review.
-From the checkout run `python3 scripts/check-seat-surface.py --mcp-surface`, supplying
-JSON on stdin: `{"build":"<verbatim MCP board_build text>","tools":["<each available agentboard MCP tool name>"]}`.
-Use unprefixed tool names and include the complete agentboard catalog. The check
-derives the expected count from the source router and compares the build commit
-with the checkout revision, including dirty state. Do not substitute a fresh CLI
-server's catalog for the tools this seat actually holds. On refusal stop and report
-the observed count and identity; the owner repairs the installation or restarts the
-client. Never claim, register or submit through a stale surface.
+Every CLI invocation and MCP call checks the board schema version. Older boards
+migrate additively inside the call; newer boards refuse by name. There is no
+seat-start catalog, tool-count or commit check. The manager reloads MCP processes
+when a new binary is needed. See `PROTOCOL.md`, Board schema version.
 
 ## Manager
 

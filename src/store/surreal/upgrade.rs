@@ -319,19 +319,7 @@ async fn apply(db: &Db) -> Result<String, String> {
         ));
     }
     let before = counts(db).await?;
-    // BEGIN covers definitions, backfill and stamps. A crash before COMMIT leaves
-    // version 1 and its rows unchanged; IF NOT EXISTS also tolerates earlier DDL.
-    let query = format!(
-        "BEGIN TRANSACTION;\n{SCHEMA}\n{}\nUPSERT meta:schema SET version=$v, build=$build, surface_tools=$tools;\nUPSERT meta:opened SET version=$v, build=$build;\nUPSERT meta:writer SET version=$v, build=$build;\nCOMMIT TRANSACTION;",
-        backfill()
-    );
-    db.query(query)
-        .bind(("v", SCHEMA_VERSION))
-        .bind(("tools", crate::ident::surface_tools()))
-        .bind(("build", crate::ident::stamp()))
-        .await
-        .and_then(surrealdb::Response::check)
-        .map_err(|e| db_err(&e))?;
+    bootstrap(db, &Settings::from_env()?).await?;
     let after = counts(db).await?;
     let mut out = format!(
         "board upgrade: version {} -> {SCHEMA_VERSION}\n",
@@ -344,7 +332,9 @@ async fn apply(db: &Db) -> Result<String, String> {
     for ((table, n), (_, m)) in before.iter().zip(&after) {
         out.push_str(&format!("rows {table}: {n} -> {m}\n"));
     }
-    out.push_str(&format!("board_stamp (SurrealDB meta:schema, meta:opened, meta:writer): generation={SCHEMA_VERSION} {}\ncommitted atomically", crate::ident::stamp()));
+    out.push_str(&format!(
+        "schema version={SCHEMA_VERSION}\ncommitted atomically"
+    ));
     Ok(out)
 }
 

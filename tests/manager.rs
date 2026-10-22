@@ -162,6 +162,10 @@ fn manager_env(
     args: &[&str],
     extra: &[(&str, &str)],
 ) -> (Output, Duration) {
+    // Manager-only commands now check the board schema too. Supply an actual
+    // throwaway server, while keeping HOME isolated from the user's herdr config.
+    #[cfg(feature = "surreal")]
+    let board_server = ScratchBoard::start(home);
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_agentboard"));
     cmd.arg("manager")
         .args(args)
@@ -169,9 +173,10 @@ fn manager_env(
         .env("HERDR_SOCKET", home.join("none"))
         .env("XDG_CONFIG_HOME", home.join("xdg"))
         .env("HOME", home)
-        // Nothing here may reach a board: a verb that does hits a closed port.
-        .env("AGENTBOARD_SURREAL_URL", "127.0.0.1:1")
+        .env_remove("AGENTBOARD_SURREAL_URL")
         .env("AGENTBOARD_DB", home.join("board"));
+    #[cfg(feature = "surreal")]
+    cmd.env("AGENTBOARD_SURREAL_URL", &board_server.url);
     if let Some(sock) = sock {
         cmd.env("AGENTBOARD_HERDR_SOCK", sock);
     }
@@ -181,6 +186,70 @@ fn manager_env(
     let start = Instant::now();
     let out = cmd.output().unwrap();
     (out, start.elapsed())
+}
+
+#[cfg(feature = "surreal")]
+struct ScratchBoard {
+    child: std::process::Child,
+    url: String,
+}
+#[cfg(feature = "surreal")]
+impl ScratchBoard {
+    fn start(home: &Path) -> Self {
+        use std::process::Stdio;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = listener.local_addr().unwrap().to_string();
+        drop(listener);
+        std::fs::create_dir_all(home).unwrap();
+        let binary = std::env::var("HOME")
+            .map(|h| PathBuf::from(h).join(".surrealdb/surreal"))
+            .unwrap();
+        let binary = if binary.is_file() {
+            binary
+        } else {
+            PathBuf::from("surreal")
+        };
+        let child = Command::new(binary)
+            .args([
+                "db",
+                "start",
+                "--no-banner",
+                "--log",
+                "error",
+                "--bind",
+                &url,
+                "--username",
+                "root",
+                "--password",
+                "root",
+                "memory",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let board = Self { child, url };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !Command::new("curl")
+            .args(["-sf", &format!("http://{}/health", board.url)])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+        {
+            assert!(Instant::now() < deadline, "scratch board never started");
+            thread::sleep(Duration::from_millis(20));
+        }
+        board
+    }
+}
+#[cfg(feature = "surreal")]
+impl Drop for ScratchBoard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 fn text(b: &[u8]) -> String {
@@ -1264,7 +1333,7 @@ fn pre_gate_mcp_client_cannot_submit_without_a_diff() {
     let output = Command::new("python3")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/surface-write-gate.py"
+            "/tests/schema-version.py"
         ))
         .arg("--review-only")
         .arg(env!("CARGO_BIN_EXE_agentboard"))

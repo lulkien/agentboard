@@ -176,10 +176,11 @@ impl Board for SurrealBoard {
     }
 }
 
-/// Bumped when a change to the schema below is NOT readable by the previous
-/// version. Adding a field with a DEFAULT is compatible — old records read with
-/// the default and no board is refused — so `tasks.path` / `tasks.branch` did
-/// not move this marker.
+/// Bump when the required persisted shape changes. Omitting unused legacy meta
+/// definitions on fresh Surreal boards is exempt: existing fields are never
+/// removed, and older readers tolerate missing metadata. SQLite's legacy stamp
+/// columns must remain because older v2 readers require them. Older versions
+/// migrate additively; incompatible changes require a named manual migration.
 pub const SCHEMA_VERSION: i64 = crate::ident::GENERATION;
 const NAMESPACE: &str = "agentboard";
 const DATABASE: &str = "board";
@@ -286,15 +287,18 @@ pub fn check_version(url: &str, body: &str) -> Result<(), String> {
 
 /// The refusal for a database that is not a current agentboard board.
 pub fn schema_refusal(found: Option<i64>, s: &Settings) -> String {
-    let found = found.map_or("no schema marker".to_owned(), |v| {
-        format!("schema version {v}")
-    });
-    format!(
-        "board schema mismatch: found {found}, want version {SCHEMA_VERSION}. Board {} at {}. Owner cutover: stop every seat and server (pkill -f 'bind {}'); run agentboard board upgrade --owner with the same --db and AGENTBOARD_SURREAL_URL; reinstall; restart seats; run python3 scripts/check-seat-surface.py. No automatic upgrade; unsupported generations are refused.",
-        s.dir.display(),
-        s.url,
-        s.url
-    )
+    match found {
+        Some(v) if v > SCHEMA_VERSION => format!(
+            "board schema mismatch: board schema version {v}; binary is older than the board (understands version {SCHEMA_VERSION}); board {} at {}; use a newer binary",
+            s.dir.display(),
+            s.url
+        ),
+        _ => format!(
+            "board schema mismatch: unsupported schema version {found:?}; manual step: inspect the board schema and provide an additive migration; board {} at {}",
+            s.dir.display(),
+            s.url
+        ),
+    }
 }
 
 /// The one shared runtime. The sync surface `block_on`s it per call.
@@ -317,8 +321,6 @@ fn runtime() -> &'static Runtime {
 const SCHEMA: &str = "
 DEFINE TABLE IF NOT EXISTS meta SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS version ON meta TYPE int;
-DEFINE FIELD IF NOT EXISTS build ON meta TYPE string DEFAULT '';
-DEFINE FIELD IF NOT EXISTS surface_tools ON meta TYPE option<int>;
 
 DEFINE TABLE IF NOT EXISTS counters SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS n ON counters TYPE int;
@@ -391,7 +393,8 @@ DEFINE FIELD IF NOT EXISTS status ON sessions TYPE string DEFAULT 'up';
 /// A `DEFAULT` applies when a row is created, never to a row already stored, and
 /// SCHEMAFULL refuses any write to a row that lacks a non-optional field. So the
 /// `DEFINE FIELD f ON t TYPE <not option> DEFAULT d` lines of `SCHEMA` also yield,
-/// per table, one `UPDATE t SET f = f ?? d, ... WHERE f IS NONE OR ...` run right
+/// per table, one `UPDATE t SET f = IF f IS NONE { d } ELSE { f }, ...
+/// WHERE f IS NONE OR ...` run right
 /// after the definitions: a field added to `SCHEMA` reaches the rows that predate it
 /// with no further code. One statement per table, because a row is validated whole
 /// after each update and would still lack the table's other new fields.
@@ -424,11 +427,11 @@ fn backfill() -> String {
         .map(|(table, fields)| {
             let set: Vec<_> = fields
                 .iter()
-                .map(|(f, d)| format!("{f} = {f} ?? {d}"))
+                .map(|(f, d)| format!("{f} = IF {f} IS NONE {{ {d} }} ELSE {{ {f} }}"))
                 .collect();
             let missing: Vec<_> = fields.iter().map(|(f, _)| format!("{f} IS NONE")).collect();
             format!(
-                "UPDATE {table} SET {} WHERE {};\n",
+                "UPDATE {table} SET {} WHERE {} RETURN VALUE 1;\n",
                 set.join(", "),
                 missing.join(" OR ")
             )
@@ -440,7 +443,8 @@ fn backfill() -> String {
 pub enum Bootstrap {
     /// An empty database: tables defined and the marker written.
     Created,
-    /// A current board: definitions re-applied, nothing changed.
+    /// An existing board, either already current or migrated successfully.
+    /// This test-facing distinction tracks first creation, not migration work.
     Already,
 }
 
@@ -491,56 +495,133 @@ fn db_err(e: &surrealdb::Error) -> String {
     format!("board database: {msg}")
 }
 
+/// Accept only additive definitions. Data backfills are generated separately,
+/// with a missing-field predicate and a per-field NONE check.
+fn validate_plan(sql: &str) -> Result<(), String> {
+    for statement in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        if ![
+            "DEFINE TABLE IF NOT EXISTS ",
+            "DEFINE FIELD IF NOT EXISTS ",
+            "DEFINE INDEX IF NOT EXISTS ",
+        ]
+        .iter()
+        .any(|prefix| statement.starts_with(prefix))
+        {
+            return Err(format!(
+                "board schema mismatch: non-additive migration statement {statement}; manual step: provide an offline migration"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Brings the database to the current schema, or refuses it. The caller holds
 /// the write lock, so two processes never bootstrap at once.
 async fn bootstrap(db: &Db, s: &Settings) -> Result<Bootstrap, String> {
-    let mut r = db
-        .query("SELECT version FROM meta:schema")
-        .await
-        .map_err(|e| db_err(&e))?;
-    let marker: Vec<Marker> = r.take(0).map_err(|e| db_err(&e))?;
-    let found = marker.first().map(|m| m.version);
-    if let Some(v) = found
-        && v != SCHEMA_VERSION
-    {
-        return Err(schema_refusal(Some(v), s));
-    }
-    if found.is_none() {
-        let mut r = db.query("INFO FOR DB").await.map_err(|e| db_err(&e))?;
-        let info: Option<serde_json::Value> = r.take(0).map_err(|e| db_err(&e))?;
-        let tables = info
-            .as_ref()
-            .and_then(|v| v.get("tables"))
-            .and_then(|t| t.as_object())
-            .map_or(0, serde_json::Map::len);
-        if tables > 0 {
-            return Err(schema_refusal(None, s));
-        }
-    }
-    db.query(SCHEMA)
-        .await
-        .and_then(surrealdb::Response::check)
-        .map_err(|e| db_err(&e))?;
-    db.query(backfill())
-        .await
-        .and_then(surrealdb::Response::check)
-        .map_err(|e| db_err(&e))?;
-    db.query("UPDATE meta:schema SET surface_tools=$tools WHERE surface_tools=NONE")
-        .bind(("tools", crate::ident::surface_tools()))
-        .await
-        .and_then(surrealdb::Response::check)
-        .map_err(|e| db_err(&e))?;
-    if found.is_some() {
+    let found = marker_version(db).await?;
+    if found == Some(SCHEMA_VERSION) {
         return Ok(Bootstrap::Already);
     }
-    db.query("CREATE meta:schema SET version = $v, build = $build, surface_tools=$tools")
+    if found.is_some_and(|v| !(1..=SCHEMA_VERSION).contains(&v)) {
+        return Err(schema_refusal(found, s));
+    }
+    validate_plan(SCHEMA)?;
+    let mut response = db.query("INFO FOR DB").await.map_err(|e| db_err(&e))?;
+    let info: Option<serde_json::Value> = response.take(0).map_err(|e| db_err(&e))?;
+    let tables = info.as_ref().and_then(|i| i["tables"].as_object());
+    if found.is_none() && tables.is_some_and(|t| !t.is_empty()) {
+        return Err(schema_refusal(None, s));
+    }
+    // Inspect existing types before applying IF NOT EXISTS: it must not silently
+    // accept a type change. Existing values are never rewritten by this plan.
+    let mut definitions = 0;
+    let mut fields = std::collections::HashMap::new();
+    for line in SCHEMA.lines() {
+        if let Some(rest) = line.strip_prefix("DEFINE TABLE IF NOT EXISTS ") {
+            let table = rest.split_whitespace().next().unwrap();
+            if tables.is_some_and(|t| t.contains_key(table)) {
+                let mut r = db
+                    .query(format!("INFO FOR TABLE {table}"))
+                    .await
+                    .map_err(|e| db_err(&e))?;
+                let info: Option<serde_json::Value> = r.take(0).map_err(|e| db_err(&e))?;
+                fields.insert(table.to_owned(), info.unwrap_or_default());
+            } else {
+                definitions += 1;
+            }
+        } else if let Some(rest) = line.strip_prefix("DEFINE FIELD IF NOT EXISTS ") {
+            let (field, rest) = rest.split_once(" ON ").unwrap();
+            let (table, ty) = rest.split_once(" TYPE ").unwrap();
+            let ty = ty.split(" DEFAULT ").next().unwrap().trim_end_matches(';');
+            if let Some(existing) = fields.get(table).and_then(|i| i["fields"][field].as_str()) {
+                let old_type = existing
+                    .split(" TYPE ")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split(" DEFAULT ")
+                    .next()
+                    .unwrap_or("")
+                    .split(" ASSERT ")
+                    .next()
+                    .unwrap_or("")
+                    .split(" PERMISSIONS ")
+                    .next()
+                    .unwrap_or("")
+                    .trim_end_matches(';');
+                if old_type.replace(' ', "") != ty.replace(' ', "") {
+                    return Err(format!(
+                        "board schema mismatch: non-additive type change {table}.{field}: {old_type} -> {ty}; manual step: reconcile field types offline"
+                    ));
+                }
+            } else {
+                if fields.contains_key(table)
+                    && !ty.starts_with("option<")
+                    && !rest.contains(" DEFAULT ")
+                {
+                    return Err(format!(
+                        "board schema mismatch: non-additive field {table}.{field} has no default; manual step: supply an offline migration"
+                    ));
+                }
+                definitions += 1;
+            }
+        } else if let Some(rest) = line.strip_prefix("DEFINE INDEX IF NOT EXISTS ") {
+            let (name, rest) = rest.split_once(" ON ").unwrap();
+            let table = rest.split_whitespace().next().unwrap();
+            if fields
+                .get(table)
+                .and_then(|i| i["indexes"][name].as_str())
+                .is_none()
+            {
+                definitions += 1;
+            }
+        }
+    }
+    let fill = backfill();
+    let sql = format!(
+        "BEGIN TRANSACTION;\n{SCHEMA}\n{fill}\nUPSERT meta:schema SET version=$v;\nCOMMIT TRANSACTION;"
+    );
+    let mut result = db
+        .query(sql)
         .bind(("v", SCHEMA_VERSION))
-        .bind(("tools", crate::ident::surface_tools()))
-        .bind(("build", crate::ident::stamp()))
         .await
         .and_then(surrealdb::Response::check)
         .map_err(|e| db_err(&e))?;
-    Ok(Bootstrap::Created)
+    // Each UPDATE returns exactly the affected rows. Count within this same
+    // transaction, rather than racing a second query after releasing the lock.
+    let offset = SCHEMA.matches(';').count();
+    let mut rows = 0;
+    for i in 0..fill.matches(';').count() {
+        let changed: Vec<i64> = result.take(offset + i).map_err(|e| db_err(&e))?;
+        rows += changed.len();
+    }
+    if let Some(v) = found {
+        crate::store::migrated(v, definitions, rows);
+    }
+    Ok(if found.is_none() {
+        Bootstrap::Created
+    } else {
+        Bootstrap::Already
+    })
 }
 
 /// Serve if needed, check the version, then connect, sign in and bootstrap.
@@ -618,80 +699,27 @@ fn session_with(
         .map_err(|e| serve::unavailable(s, &format!("/version failed ({e}) for")))?;
     check_version(&s.url, &body)?;
     std::fs::create_dir_all(&s.dir).map_err(|e| format!("data dir {}: {e}", s.dir.display()))?;
-    // A write takes the lock before it reads anything, so nothing it reads can
-    // change under it.
-    let mut guard = if write {
-        Some(lock::acquire(&s.dir, lock_wait)?)
-    } else {
-        None
-    };
-    // A server can answer /health and /version and still never finish the
-    // WebSocket upgrade; every phase is bounded.
     let db = bounded(s, t, open_db(s))?;
-    let found = bounded(s, t, marker_version(&db))?;
-    // Refuse before additive DDL, opened stamps, or any application write.
-    // Missing field is the one-time v2 additive backfill below.
-    if write && found == Some(SCHEMA_VERSION) {
-        let expected = bounded(s, t, surface_count(&db))?;
-        if let Some(board) = expected
-            && board != crate::ident::surface_tools()
-        {
-            return Err(crate::ident::surface_refusal(
-                Some(crate::ident::surface_tools()),
-                Some(board),
-            ));
-        }
+    // Current readers need no writer lock. Only migration and writes acquire
+    // it; migration rechecks the version after waiting for another caller.
+    if !write && bounded(s, t, marker_version(&db))? == Some(SCHEMA_VERSION) {
+        return Ok(Session {
+            db,
+            bootstrap: Bootstrap::Already,
+            spawned_pid: served.spawned_pid,
+            _lock: None,
+        });
     }
-    let bootstrap = match found {
-        // The marker only says which schema generation the board is, not that every
-        // field of this build exists on it. Every write session (the lock is already
-        // held, so two processes never define at once) re-runs SCHEMA: `IF NOT EXISTS`
-        // makes it a no-op except for a field added since the board was created, so
-        // any call that writes is guaranteed to carry a new field. A read session
-        // skips the pass (it would pay a DDL round trip and, unlocked, race a
-        // writer); a record written before a field existed reads back through the
-        // serde defaults on its row type.
-        Some(v) if v == SCHEMA_VERSION && write => bounded(s, t, bootstrap(&db, s))?,
-        Some(v) if v == SCHEMA_VERSION => Bootstrap::Already,
-        Some(v) => {
-            let build = bounded(s, t, async {
-                let mut r = db
-                    .query("SELECT VALUE build FROM meta:schema")
-                    .await
-                    .map_err(|e| db_err(&e))?;
-                let builds: Vec<Option<String>> = r.take(0).map_err(|e| db_err(&e))?;
-                Ok(builds
-                    .into_iter()
-                    .next()
-                    .flatten()
-                    .unwrap_or_else(|| "unstamped".to_owned()))
-            })?;
-            return Err(format!(
-                "{} board build={build}; client build={}",
-                schema_refusal(Some(v), s),
-                crate::ident::stamp()
-            ));
-        }
-        None => {
-            // First use of this database: bootstrap under the lock so two
-            // processes never define the schema at once.
-            if guard.is_none() {
-                guard = Some(lock::acquire(&s.dir, lock_wait)?);
-            }
-            bounded(s, t, bootstrap(&db, s))?
-        }
-    };
-    if write {
-        bounded(s, t, async {
-            db.query("UPSERT meta:opened SET version=$v, build=$build")
-                .bind(("v", SCHEMA_VERSION))
-                .bind(("build", crate::ident::stamp()))
-                .await
-                .and_then(surrealdb::Response::check)
-                .map_err(|e| db_err(&e))?;
-            Ok(())
-        })?;
+    let guard = Some(
+        lock::acquire(&s.dir, lock_wait)
+            .map_err(|e| format!("{e}; manual step: release the board writer and retry"))?,
+    );
+    if !guard.as_ref().is_some_and(lock::WriteLock::held)
+        && bounded(s, t, marker_version(&db))? != Some(SCHEMA_VERSION)
+    {
+        return Err("board schema mismatch: migration requires the board write lock; manual step: enable the write lock and retry".into());
     }
+    let bootstrap = bounded(s, t, bootstrap(&db, s))?;
     Ok(Session {
         db,
         bootstrap,
@@ -734,15 +762,6 @@ async fn open_db(s: &Settings) -> Result<Db, String> {
         .await
         .map_err(|e| db_err(&e))?;
     Ok(db)
-}
-
-async fn surface_count(db: &Db) -> Result<Option<i64>, String> {
-    let mut r = db
-        .query("SELECT VALUE surface_tools FROM meta:schema")
-        .await
-        .map_err(|e| db_err(&e))?;
-    let values: Vec<Option<i64>> = r.take(0).map_err(|e| db_err(&e))?;
-    Ok(values.into_iter().next().flatten())
 }
 
 async fn marker_version(db: &Db) -> Result<Option<i64>, String> {
@@ -865,22 +884,6 @@ mod tests {
         // The CLI's `main` is async; `runtime().block_on` here would panic with
         // "Cannot start a runtime from within a runtime".
         assert_eq!(block_on(async { 7 }), 7);
-    }
-
-    #[test]
-    fn the_pkill_hint_matches_the_command_line_the_server_is_started_with() {
-        let s = Settings::defaults_for_test("/tmp/ab-hint/data", "127.0.0.1:18720");
-        let line = schema_refusal(Some(99), &s);
-        let pattern = line
-            .split_once("pkill -f '")
-            .and_then(|(_, rest)| rest.split_once('\''))
-            .map(|(p, _)| p)
-            .expect("the refusal names a pkill pattern");
-        let cmdline = serve::server_args(&s).join(" ");
-        assert!(
-            cmdline.contains(pattern),
-            "pkill pattern {pattern:?} does not match the server command line {cmdline:?}"
-        );
     }
 
     // ---- tests against a real server -------------------------------------------
@@ -1221,275 +1224,118 @@ mod tests {
     }
 
     #[test]
-    fn a_write_session_adds_a_field_the_existing_board_lacks() {
-        let Some(srv) = start_server("additive_field") else {
+    fn non_additive_statements_are_named() {
+        for statement in [
+            "REMOVE TABLE tasks;",
+            "DEFINE FIELD OVERWRITE title ON tasks TYPE int;",
+            "UPDATE tasks SET title='rewrite';",
+        ] {
+            let error = validate_plan(statement).unwrap_err();
+            assert!(error.contains("non-additive") && error.contains("manual step"));
+        }
+        validate_plan(SCHEMA).unwrap();
+    }
+
+    #[test]
+    fn first_read_migrates_older_schema_and_preserves_rows() {
+        let Some(srv) = start_server("schema-migrate") else {
             return;
         };
         let c = connect(&srv.settings).unwrap();
-        let fields = |c: &Conn| -> String {
-            runtime().block_on(async {
-                let info: Option<serde_json::Value> =
-                    c.db.query("INFO FOR TABLE tasks")
-                        .await
-                        .unwrap()
-                        .take(0)
-                        .unwrap();
-                info.unwrap()["fields"].to_string()
-            })
+        block_on(async {
+            c.db.query("REMOVE FIELD branch ON tasks; REMOVE FIELD path ON tasks; CREATE tasks:98 SET title='old', created_at=1, updated_at=1; UPDATE meta:schema SET version=1;")
+                .await.unwrap().check().unwrap();
+        });
+        let first = connect(&srv.settings).unwrap();
+        block_on(async {
+            let row = tasks::fetch(&first.db, 98).await.unwrap();
+            assert_eq!(
+                (row.title.as_str(), row.branch.as_str(), row.path.as_str()),
+                ("old", "HEAD", "")
+            );
+            assert_eq!(
+                marker_version(&first.db).await.unwrap(),
+                Some(SCHEMA_VERSION)
+            );
+            first
+                .db
+                .query("UPDATE tasks:98 SET branch='feat/keep'; UPDATE meta:schema SET version=1;")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        let again = connect(&srv.settings).unwrap();
+        assert_eq!(
+            block_on(tasks::fetch(&again.db, 98)).unwrap().branch,
+            "feat/keep"
+        );
+    }
+
+    #[test]
+    fn failed_version_bump_rolls_back_definitions() {
+        let Some(srv) = start_server("schema-rollback") else {
+            return;
         };
-        assert!(fields(&c).contains("\"branch\""), "fresh board has branch");
-        // Make it a board from before the field existed: marker intact, field gone.
-        runtime().block_on(async {
+        let c = connect(&srv.settings).unwrap();
+        block_on(async {
+            c.db.query("REMOVE FIELD reviews ON diffs; UPDATE meta:schema SET version=1; DEFINE EVENT fail_version ON meta WHEN $before.version=1 AND $after.version=2 THEN { THROW 'simulated interruption'; };")
+                .await.unwrap().check().unwrap();
+        });
+        assert!(connect(&srv.settings).is_err());
+        block_on(async {
+            assert_eq!(marker_version(&c.db).await.unwrap(), Some(1));
+            let mut result = c.db.query("INFO FOR TABLE diffs").await.unwrap();
+            let info: Option<serde_json::Value> = result.take(0).unwrap();
+            assert!(info.unwrap()["fields"].get("reviews").is_none());
+            c.db.query("REMOVE EVENT fail_version ON meta")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        connect(&srv.settings).unwrap();
+        assert_eq!(block_on(marker_version(&c.db)).unwrap(), Some(2));
+    }
+
+    #[test]
+    fn future_version_is_refused_on_the_next_call() {
+        let Some(srv) = start_server("schema-future") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        block_on(async {
+            c.db.query("UPDATE meta:schema SET version=3")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        let error = connect(&srv.settings).err().unwrap();
+        assert!(error.contains("binary is older than the board"), "{error}");
+    }
+
+    #[test]
+    fn non_additive_type_change_is_refused_without_bumping() {
+        let Some(srv) = start_server("schema-type") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        block_on(async {
             c.db.query(
-                "REMOVE FIELD branch ON tasks; REMOVE FIELD path ON tasks; REMOVE FIELD board ON tasks; REMOVE FIELD reopen_count ON tasks; \
-                 CREATE tasks:98 SET title = 'old', created_at = 1, updated_at = 1",
+                "DEFINE FIELD OVERWRITE title ON tasks TYPE int; UPDATE meta:schema SET version=1;",
             )
             .await
-                .unwrap()
-                .check()
-                .unwrap();
+            .unwrap()
+            .check()
+            .unwrap();
         });
-        assert!(!fields(&c).contains("\"branch\""), "field removed");
-        // A read session leaves the board alone ...
-        let r = connect(&srv.settings).unwrap();
-        assert_eq!(r.bootstrap, Bootstrap::Already);
-        assert!(!fields(&r).contains("\"branch\""), "a read must not define");
-        // ... a write session defines it, and a row then keeps the value.
-        let w = session_with(
-            &srv.settings,
-            &serve::Timing::default(),
-            None,
-            lock::DEFAULT_WAIT,
-            true,
-        )
-        .unwrap();
-        assert_eq!(w.bootstrap, Bootstrap::Already);
+        let error = connect(&srv.settings).err().unwrap();
         assert!(
-            fields(&c).contains("\"branch\""),
-            "write session re-defined branch"
+            error.contains("non-additive type change tasks.title") && error.contains("manual step"),
+            "{error}"
         );
-        let kept: Option<String> = runtime().block_on(async {
-            w.db.query("CREATE tasks:99 SET title = 't', created_at = 1, updated_at = 1, branch = 'feat/x'")
-                .await
-                .unwrap()
-                .check()
-                .unwrap();
-            let mut r =
-                w.db.query("SELECT VALUE branch FROM tasks:99")
-                    .await
-                    .unwrap();
-            r.take(0).unwrap()
-        });
-        assert_eq!(kept.as_deref(), Some("feat/x"));
-        // The row written while the fields were absent takes an ordinary write and
-        // reads back each field's default.
-        let old: Vec<serde_json::Value> = runtime().block_on(async {
-            w.db.query("UPDATE tasks:98 SET status = 'working'")
-                .await
-                .unwrap()
-                .check()
-                .expect("a row older than the fields accepts a write");
-            let mut r =
-                w.db.query("SELECT status, board, path, branch, reopen_count FROM tasks:98")
-                    .await
-                    .unwrap();
-            r.take(0).unwrap()
-        });
-        assert_eq!(
-            old[0],
-            serde_json::json!({"status": "working", "board": "main", "path": "", "branch": "HEAD", "reopen_count": 0})
-        );
-    }
-
-    #[test]
-    fn surface_write_gate_refuses_stale_and_missing_clients_before_first_write() {
-        let Some(srv) = start_server("surface-write-gate") else {
-            return;
-        };
-        let c = connect(&srv.settings).unwrap();
-        runtime().block_on(async {
-            let expected = crate::ident::surface_tools();
-            assert_eq!(super::surface_count(&c.db).await.unwrap(), Some(expected));
-            for client in [Some(19), None] {
-                let mut tx = tasks::Txn::new();
-                tx.raw("UPSERT sessions:stale SET agent='stub', seen=0;");
-                let error = tx
-                    .run_with_surface(&c.db, "true", "stub", client)
-                    .await
-                    .expect_err("stale seat reached first write");
-                assert!(
-                    error.contains(&crate::ident::surface_refusal(client, Some(expected))),
-                    "{error}"
-                );
-                for table in ["sessions", "events", "tasks", "diffs", "meta:writer"] {
-                    let mut r = c.db.query(format!("SELECT * FROM {table}")).await.unwrap();
-                    assert!(
-                        r.take::<Vec<serde_json::Value>>(0).unwrap().is_empty(),
-                        "{table} changed"
-                    );
-                }
-            }
-            let mut tx = tasks::Txn::new();
-            tx.raw("UPSERT sessions:matching SET agent='stub', seen=0;");
-            tx.run(&c.db, "true").await.unwrap();
-            let mut r = c.db.query("SELECT agent FROM sessions").await.unwrap();
-            assert_eq!(r.take::<Vec<serde_json::Value>>(0).unwrap().len(), 1);
-            c.db.query("UPDATE meta:schema SET surface_tools += 1")
-                .await
-                .unwrap()
-                .check()
-                .unwrap();
-            let mut tx = tasks::Txn::new();
-            tx.raw("DELETE sessions:matching;");
-            assert!(
-                tx.run(&c.db, "true").await.is_err(),
-                "already-open seat bypassed gate"
-            );
-        });
-        assert!(
-            super::session_with(
-                &srv.settings,
-                &serve::Timing::default(),
-                None,
-                lock::DEFAULT_WAIT,
-                true
-            )
-            .is_err()
-        );
-        runtime().block_on(async {
-            let expected = crate::ident::surface_tools();
-            assert_eq!(
-                super::surface_count(&c.db).await.unwrap(),
-                Some(expected + 1)
-            );
-            // Simulate v2 before the additive field and verify a locked write-open backfill.
-            c.db.query("UPDATE meta:schema UNSET surface_tools")
-                .await
-                .unwrap()
-                .check()
-                .unwrap();
-        });
-        let _w = super::session_with(
-            &srv.settings,
-            &serve::Timing::default(),
-            None,
-            lock::DEFAULT_WAIT,
-            true,
-        )
-        .unwrap();
-        assert_eq!(
-            runtime().block_on(super::surface_count(&c.db)).unwrap(),
-            Some(crate::ident::surface_tools())
-        );
-    }
-
-    #[test]
-    fn surface_stamp_tracks_writers_and_refuses_a_running_stale_client() {
-        let Some(srv) = start_server("surface-stamp") else {
-            return;
-        };
-        let c = connect(&srv.settings).unwrap();
-        runtime().block_on(async {
-            for build in [
-                "version=first tools=23 commit=one",
-                "version=second tools=23 commit=two",
-            ] {
-                let mut tx = tasks::Txn::new();
-                tx.raw("UPSERT sessions:aware SET agent='new', seen=0, status='up';");
-                tx.run_as(&c.db, "true", build).await.unwrap();
-                let mut r =
-                    c.db.query("SELECT VALUE build FROM meta:writer")
-                        .await
-                        .unwrap();
-                assert_eq!(r.take::<Vec<String>>(0).unwrap(), vec![build]);
-            }
-            c.db.query("UPSERT sessions:legacy SET agent='old', seen=0, status='up'")
-                .await
-                .unwrap()
-                .check()
-                .unwrap();
-            let mut r =
-                c.db.query("SELECT VALUE build FROM meta:writer")
-                    .await
-                    .unwrap();
-            assert_eq!(
-                r.take::<Vec<String>>(0).unwrap(),
-                vec!["version=second tools=23 commit=two"]
-            );
-            let mut tx = tasks::Txn::new();
-            tx.raw("UPSERT sessions:aware SET agent='new', seen=0, status='up';");
-            tx.run(&c.db, "true").await.unwrap();
-            let mut r =
-                c.db.query("SELECT VALUE build FROM meta:writer")
-                    .await
-                    .unwrap();
-            assert_eq!(
-                r.take::<Vec<String>>(0).unwrap(),
-                vec![crate::ident::stamp()]
-            );
-            c.db.query("UPDATE meta:schema SET version=99, build='future tools=99 commit=future'")
-                .await
-                .unwrap()
-                .check()
-                .unwrap();
-        });
-        // Reopening a write session is precisely what each operation of an
-        // already-running MCP process does; no bootstrap or mutation may follow.
-        let err = session_with(
-            &srv.settings,
-            &serve::Timing::default(),
-            None,
-            lock::DEFAULT_WAIT,
-            true,
-        )
-        .err()
-        .unwrap();
-        assert!(
-            err.contains("schema version 99") && err.contains("want version 2"),
-            "{err}"
-        );
-        assert!(
-            err.contains("board build=future tools=99 commit=future")
-                && err.contains(&crate::ident::stamp()),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn a_wrong_or_missing_marker_is_refused_with_the_exact_line() {
-        let Some(srv) = start_server("marker") else {
-            return;
-        };
-        let c = connect(&srv.settings).unwrap();
-        runtime().block_on(async {
-            c.db.query("UPDATE meta:schema SET version = 99")
-                .await
-                .unwrap()
-                .check()
-                .unwrap();
-        });
-        let err = connect(&srv.settings).err().unwrap();
-        assert_eq!(
-            err,
-            format!(
-                "{} board build={}; client build={}",
-                schema_refusal(Some(99), &srv.settings),
-                crate::ident::stamp(),
-                crate::ident::stamp()
-            )
-        );
-        println!("wrong-marker refusal: {err}");
-        // tables but no marker at all: also refused, differently worded
-        runtime().block_on(async {
-            c.db.query("DELETE meta:schema")
-                .await
-                .unwrap()
-                .check()
-                .unwrap();
-        });
-        let err = connect(&srv.settings).err().unwrap();
-        assert!(err.contains("found no schema marker"), "{err}");
-        println!("missing-marker refusal: {err}");
+        assert_eq!(block_on(marker_version(&c.db)).unwrap(), Some(1));
     }
 
     #[test]

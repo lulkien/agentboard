@@ -9,7 +9,7 @@ Read first:
 - `README.md` — the model and the tools.
 - `PROTOCOL.md` — the wire surface agents see.
 - `src/schema.sql` — SQLite schema; SurrealDB definitions live in `src/store/surreal/mod.rs`.
-  The only supported forward upgrade is explicit offline SurrealDB v1 -> v2.
+  Version 1 -> 2 migrates additively on every CLI/MCP entry when needed.
 
 ## Prove it
 
@@ -25,8 +25,8 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 |---|---|
 | `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 54 passed` (unit), `28 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 48 passed`, `28 passed`, and `2 passed` (needs no `surreal` binary) |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 53 passed` (unit), `28 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 45 passed`, `28 passed`, and `2 passed` (needs no `surreal` binary) |
 | `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
 | `bash tests/cli.sh` | `213/213 passed (backend: surreal)` (against the sqlite binary: `220/220 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
@@ -36,11 +36,9 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
 | `rg -c '#\[tool\(' src/server.rs` | `23`, equal to the count on line 1 of `src/server.rs` (`MCP surface: 23 tools`) and to what `agentboard board-build` prints |
 | `python3 tests/sqlite-first-use.py` (after a sqlite release build) | `sqlite-first-use: 20 rounds x 8 simultaneous first adds passed` (fresh scratch files only) |
-| `AGENTBOARD_BUILD_COMMIT=00000000 cargo build --release && python3 tests/build-stamp.py target/release/agentboard` | `build-stamp: stale CLI and MCP identities explicit; seat rejects stale commit and wrong tool count; matching surface accepted`; rebuild without the override afterward |
 | `python3 tests/board-upgrade.py OLD_BINARY target/release/agentboard` (OLD_BINARY built at `ea016707`) | `board-upgrade: ... passed`: host-runnable scratch preservation, interruption, positive-evidence guards, unreadable warnings and version compatibility; no PID namespace needed |
 | `python3 tests/server-lock.py target/release/agentboard` | `Ran 3 tests` and `OK`: host scratch managed-daemon lifetime flock, second-server/upgrade exclusion and progress after release |
-| `python3 tests/seat-surface.py` | published counts use derived output; stale catalog/commit rejected; checker mutation proofs pass |
-| `python3 tests/surface-write-gate.py` | `surface-write-gate: both backends and mutation checks passed` (compiled stub MCP clients, scratch boards only) |
+| `python3 tests/schema-version.py` | `schema-version: both backends and mutation checks passed` (CLI/MCP, concurrency, preservation and deleted-version-guard proofs; scratch boards only) |
 | `cargo fmt --check` | no output |
 | `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 
@@ -97,21 +95,18 @@ have both adapters call it, so a rule exists once.
   checkout, and `tests/mcp_client.py` drives the latter. After changing the CLI or
   MCP surface run `cargo install --path . --locked`, or the verbs you built are
   missing from the binary every agent executes.
-- An install that changes the board surface is not done at the install: every
-  process must prove the surface it holds, the panes already running and every
-  seat started later alike. In each, `agentboard board-build` prints the derived
-  `tools=` count and commit, and the seat's own catalog must match both. A tool
-  count that does not match is a defect, not a warning: the pane stops writing
-  until its MCP server is reloaded (a TUI reload alone is not enough; the child
-  holds the old process) and the check passes.
+- Board compatibility uses only the persisted schema version on every CLI/MCP
+  entry. No seat-start build identity or catalog check is required. The manager
+  reloads MCP processes when a new binary is needed.
 - Managed SurrealDB daemons hold `board.lock` for their lifetime; per-operation
   writers use `board.write.lock`. Legacy/manual raw daemons do not hold the
   lifetime lock: first cutover still needs the port/positive-fd checks and the
   owner's stopped-all-servers confirmation. Unreadable `/proc` entries warn; they
   are not positive holder evidence.
-- Normal opens refuse mismatched generations before DDL. Only the owner runs
-  `board upgrade --owner` against an offline v1 SurrealDB board; follow the numbered
-  cutover in `docs/agent-install.md`. Never install or upgrade from a coder seat.
+- Older schema versions migrate additively in the triggering call under the
+  write lock; DDL, backfill and version commit together. Newer boards refuse by
+  name. Type changes and unsupported transitions require manual inspection.
+  Coder seats never install or run offline maintenance on a live board.
 - Route every herdr/tmux bridge call through the one bounded runner in
   `src/store/proc.rs`, which honours `$AGENTBOARD_DELIVER_TIMEOUT_MS`. Before
   claiming "every call is bounded", run `rg "Command::output" src/` and check.

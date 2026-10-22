@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS sessions(
   status  TEXT NOT NULL DEFAULT 'up'
 );
 
--- Stamp protocol generation. Existing unstamped files are refused before DDL.
+-- Schema version. Legacy identity columns are retained as inert data for compatibility.
 CREATE TABLE IF NOT EXISTS board_stamp(
   id INTEGER PRIMARY KEY CHECK(id=1),
   generation INTEGER NOT NULL,

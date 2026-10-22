@@ -21,125 +21,35 @@ agentboard path
 
 - The binary lands in `~/.cargo/bin/agentboard`. Make sure `~/.cargo/bin` is on `PATH`.
 - `agentboard path` prints the board file (default `~/.local/state/agentboard/board.db`,
-  or `$AGENTBOARD_DB`). The state directory is created on the first write.
+  or `$AGENTBOARD_DB`). The state directory is created on the first call.
 - The installed binary is what agents run. `target/release/agentboard` from a
   checkout build is not. Reinstall after every change to the CLI or MCP surface.
 
-### Owner cutover for an existing SurrealDB board
+### Schema compatibility
 
-Reinstalling a build whose client generation is newer than the live board fails
-closed on board access until this cutover is followed. The refusal names
-`agentboard board upgrade --owner`; opening a board never upgrades it. Build the
-new checkout first (`cargo build --release`). Use the same board path and server
-environment throughout the cutover.
+Every CLI invocation and MCP tool call checks the board's schema version.
+Version 1 migrates additively to version 2 in the same call. Definitions,
+missing-default backfills and the version bump commit together under the board
+write lock. The caller prints one migration line on stderr. Concurrent callers
+wait and recheck, so only one migrates. Newer boards refuse an older binary by
+name. Type conflicts and unsupported transitions name a manual step.
+See [the schema protocol](../PROTOCOL.md#board-schema-version).
 
-1. Stop every seat, its MCP process, and the SurrealDB server. Keep them stopped
-   throughout maintenance. Preserve a backup of the stopped data directory.
-2. As the board's owner, never as root or with sudo, run
-   `./target/release/agentboard --db /absolute/board/data board upgrade --owner`
-   with the board's `AGENTBOARD_SURREAL_URL`, user and password. The owner flag
-   confirms ownership and that all seats and servers are stopped. Seats report a
-   mismatch to the owner; they never run this command against a live board.
-3. Reinstall with `cargo install --path . --locked`.
-4. Restart the seats and their MCP servers using the installed build.
-5. Run `python3 scripts/check-seat-surface.py` before dispatching work.
+The owner-only offline `board upgrade --owner` maintenance command remains
+available; ordinary additive transitions do not require it. Never run two raw
+SurrealDB servers against the same storage directory. Managed daemons hold
+`board.lock` for their lifetime; store operations use `board.write.lock`.
+The offline command retains its stopped-server ownership and exclusion checks.
 
-Upgrade supports SurrealDB generation 1 to 2 (and retrying an already-current
-board). It refuses an occupied endpoint or another process holding board files,
-including a server on another port. It holds the existing startup and write locks,
-uses an unadvertised temporary loopback server, kills its process group on exit,
-and gives it a parent-death signal so killing the upgrader also kills the server.
-Run maintenance as the owner to avoid creating root-owned storage files that
-later owner processes cannot update. Keep the storage private to the owner.
+Rollback is not an automatic downgrade. Use a binary that understands the
+resulting schema, or restore the stopped backup with its old binary.
 
-Agentboard-managed v2 SurrealDB daemons hold an exclusive `flock` on
-`board.lock` for their entire process lifetime, including after the starting CLI
-exits. A second managed daemon on that directory and an upgrade both refuse a
-held lock and name its holder pid. Here “managed v2” means a daemon started by a
-build containing this lifetime-lock change; earlier generation-2 builds are
-legacy too and must be stopped/restarted. The upgrade retains the same flock
-while its private server runs. Per-operation writers use a separate `board.write.lock`.
-This lock belongs to agentboard; SurrealKV 2.7.0 itself permits two servers to
-open the same directory and provides no such exclusion.
+## 3. Restart MCP processes when needed
 
-**First-upgrade limit:** v1 daemons do not hold the lifetime lock. Manually starting
-raw `surreal db start` also bypasses agentboard's lock, regardless of board
-schema generation. Stop every such daemon before cutover. For this transition,
-the configured-port check, positive fd evidence and the owner's `--owner`
-confirmation cover old/manual servers; do not claim the new flock proves their
-absence. Once all starts go through agentboard v2, `board.lock` is the exact
-cooperative server/upgrade exclusion gate.
-
-The Linux `/proc` scan checks the owner's effective UID and reports what it can
-observe. A listener on the configured port or an fd link resolving into the board
-directory is positive evidence and refuses the upgrade. Unreadable processes,
-including a same-UID non-dumpable `systemd`, print named warnings with pid, step,
-error and “treating as not a holder”; they never refuse merely for being
-unreadable. Other UIDs are outside the fd scan, and root may bypass storage
-permissions. The explicit stopped-all-servers confirmation includes root/other-UID
-and manual daemons. The scan reports; the managed-server lifetime flock decides.
-Do not start manually managed servers during maintenance; they do not honor
-agentboard's startup or lifetime locks.
-
-Host-runnable scratch proofs (no root, PID namespace, or stopped user service):
-
-```sh
-python3 tests/board-upgrade.py /tmp/agentboard-t281-old target/release/agentboard
-python3 tests/server-lock.py target/release/agentboard
-```
-
-The first binary is the pre-S2 build at `ea016707`; both proofs own random-port
-scratch storage. The first verifies v1 preservation, interruption, warnings and
-positive holder checks; the second verifies second-server refusal, locked-upgrade
-refusal and progress after release using actual daemon processes and kernel flocks.
-
-Only additive `IF NOT EXISTS` definitions and missing-default backfills run.
-Definitions, backfills and `meta:schema`, `meta:opened`, `meta:writer` stamps commit
-in one transaction. An interruption before commit rolls everything back; retry
-finishes the upgrade, including if additive definitions already existed. After
-commit, retry is idempotent. No original task, epic, event, diff or session is
-removed or renumbered. Output names every checked definition and backfill, prints
-before/after counts for every data table, and identifies the upgrading build.
-The SurrealDB board stamp is the existing `meta` records, equivalent to SQLite's
-`board_stamp` table; no second stamp format is introduced.
-
-An upgrade is forward-only: rollback means restoring the stopped backup and the
-old binary together, with every seat stopped. There is no in-place downgrade.
-SQLite and boards older than generation 1 are outside this command's scope.
-Pre-stamp SQLite binaries ignore stamps: retire them rather than assuming that
-upgrading a stamp can fence them.
-
-## 3. Assert the installed seat surface before wiring anything
-
-From this checkout, after installing and before starting each seat:
-
-```sh
-~/.cargo/bin/agentboard board-build
-python3 scripts/check-seat-surface.py
-```
-
-Expected identity: `agentboard <version> tools=<n> commit=<checkout revision> backend=surreal`
-(or `backend=sqlite` for that build). Expected assertion:
-`seat surface ok: tools=<n> commit=<checkout revision>`.
-`<n>` is the tool count the command derives from `src/server.rs`: read it from the
-output, never type it.
-The revision is exactly `git describe --always --dirty --abbrev=8`, including `-dirty`
-when tracked files are modified. The assertion compares both revision and the
-source-derived tool count; a rebuilt but unreinstalled binary is refused.
-It accepts an explicit binary path for checking a checkout build:
-`python3 scripts/check-seat-surface.py ./target/release/agentboard`.
-Neither command opens or writes a board.
-
-A suspiciously fast install can mean Cargo reused an older artifact; elapsed time
-alone is not proof. An embedded revision that differs from its build checkout is
-shown as `commit=<embedded> (stale, HEAD is <checkout revision>)` in both
-`board-build` and the MCP initialize title. An unavailable build checkout is marked
-`(unverified, build checkout unavailable)`; the assertion refuses both cases.
-The embedded revision is preserved, never replaced with a claim of a newer build.
-If refused, force a rebuild (`touch build.rs`), reinstall with
-`cargo install --path . --locked`, rerun the assertion, then restart the seats.
-Cargo's `.git/HEAD` rerun hint cannot update an already installed/running artifact,
-and symbolic HEAD can stay unchanged while the referenced branch moves.
+The manager reloads each MCP process to use an installed binary. There is no
+seat-start check, commit comparison or catalog refusal. `board-build` remains
+informational and prints version, derived tool count, commit and backend without
+stale or unverified annotations. Its removal is separate from schema migration.
 
 ## 4. Register the server with a client
 
@@ -262,8 +172,8 @@ line of `timeout:` when nothing moves, and 0 with `matched:` when it does.
 
 ## 7. Troubleshooting
 
-- **`this board file predates epics`**: the file was written by an older version.
-  There is no migration. Move it aside as the message says and start fresh.
+- **`no schema version`**: an unstamped legacy board requires the named manual
+  step: inspect and stamp the legacy board offline before using it.
 - **`command not found: agentboard`** after `cargo install`: add `~/.cargo/bin` to `PATH`.
 - **A verb works in the checkout but not for agents**: they run the installed
   binary. Run `cargo install --path . --locked` again and restart the agents (an MCP

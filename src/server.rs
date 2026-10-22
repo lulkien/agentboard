@@ -31,7 +31,7 @@ fn text(s: String) -> CallToolResult {
 }
 
 fn err(e: String) -> ErrorData {
-    if e.starts_with("board surface mismatch:") || e.starts_with("board schema mismatch:") {
+    if e.starts_with("board schema mismatch:") {
         ErrorData::internal_error(e, None)
     } else {
         ErrorData::invalid_params(e, None)
@@ -59,7 +59,11 @@ async fn offload<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> R
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    offload(f).await?
+    let result = offload(f).await?;
+    for line in store::take_migrations() {
+        eprintln!("{line}");
+    }
+    result
 }
 
 macro_rules! run {
@@ -361,6 +365,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<AddArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let parent = match a.parent.as_deref() {
             Some(p) => Some(store::parse_id(p).map_err(err)?),
             None => None,
@@ -402,6 +407,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<ListArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         run!(
             blocking(move || store::list(
                 a.status.as_deref(),
@@ -421,6 +427,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<GetArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_id(&a.id).map_err(err)?;
         run!(blocking(move || store::get(id, a.full)).await)
     }
@@ -434,6 +441,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<IdArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let of = store::parse_ref(&a.id).map_err(err)?;
         run!(blocking(move || store::children(of)).await)
     }
@@ -447,6 +455,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<EpicAddArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         run!(
             blocking(move || store::epic_add(
                 &actor(),
@@ -468,6 +477,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<EpicListArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         run!(blocking(move || store::epic_list(a.status.as_deref())).await)
     }
 
@@ -480,6 +490,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<DiffAddArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_id(&a.id).map_err(err)?;
         let reviews = a
             .reviews
@@ -500,6 +511,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<DiffGetArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_diff_id(&a.id).map_err(err)?;
         run!(blocking(move || store::diff_get(id, a.full)).await)
     }
@@ -513,6 +525,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<DiffListArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let of = store::parse_ref(&a.id).map_err(err)?;
         run!(blocking(move || store::diff_list(of)).await)
     }
@@ -526,6 +539,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<EpicGetArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_epic_id(&a.id).map_err(err)?;
         run!(blocking(move || store::epic_get(id, a.full)).await)
     }
@@ -543,6 +557,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<EpicUpdateArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_epic_id(&a.id).map_err(err)?;
         run!(blocking(move || store::epic_status(&actor(), id, &a.status, a.note.as_deref())).await)
     }
@@ -556,6 +571,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<EditArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_id(&a.id).map_err(err)?;
         offload(move || {
             let edit = store::TaskEdit {
@@ -584,6 +600,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<EpicEditArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_epic_id(&a.id).map_err(err)?;
         run!(
             blocking(move || {
@@ -608,6 +625,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<ClaimArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = match a.id.as_deref() {
             Some(s) => Some(store::parse_id(s).map_err(err)?),
             None => None,
@@ -633,6 +651,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<UpdateArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_id(&a.id).map_err(err)?;
         let who = actor();
         let ttl_s = a.ttl_min.unwrap_or(30).clamp(1, 720) * 60;
@@ -683,6 +702,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<AskArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_id(&a.id).map_err(err)?;
         run!(blocking(move || store::ask(&actor(), id, &a.question)).await)
     }
@@ -696,6 +716,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<WaitArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let ms = a.timeout_s.unwrap_or(60).clamp(1, 300) * 1000;
         let ids: Vec<String> = a.id.into_iter().chain(a.ids).collect();
         // The wait polls asynchronously, but its setup (sqlite open, surreal
@@ -726,6 +747,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<BriefArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let mins = a.since_min.unwrap_or(120).clamp(1, 20_160);
         run!(blocking(move || store::brief(mins)).await)
     }
@@ -739,6 +761,7 @@ impl Board {
         &self,
         Parameters(_): Parameters<Empty>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         run!(blocking(store::sessions).await)
     }
 
@@ -755,6 +778,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<RegisterArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let task = match a.task_id.as_deref() {
             Some(t) => Some(store::parse_id(t).map_err(err)?),
             None => None,
@@ -779,6 +803,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<TailArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         let lines = a.lines.unwrap_or(40).clamp(1, 400);
         run!(blocking(move || store::tail(&a.name, lines)).await)
     }
@@ -792,6 +817,7 @@ impl Board {
         &self,
         Parameters(a): Parameters<SendArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        blocking(store::check_entry).await.map_err(err)?;
         run!(blocking(move || store::send(&a.name, &a.text)).await)
     }
 
@@ -801,7 +827,9 @@ impl Board {
         annotations(title = "Build identity", read_only_hint = true)
     )]
     async fn board_build(&self) -> Result<CallToolResult, ErrorData> {
-        Ok(text(ident::line(self.tool_router.list_all().len())))
+        blocking(store::check_entry).await.map_err(err)?;
+        let count = self.tool_router.list_all().len();
+        run!(blocking(move || Ok(ident::line(count))).await)
     }
 }
 
@@ -845,7 +873,7 @@ mod tests {
             .count();
         assert_eq!(tool_count(), markers);
         assert_eq!(
-            ident::stamp(),
+            ident::line(tool_count()),
             format!(
                 "{} {} tools={} commit={} backend={}",
                 ident::NAME,

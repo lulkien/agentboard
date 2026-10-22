@@ -82,7 +82,11 @@ new_server() {
 ab() { "$AB_BIN" "$@"; }
 # First use bootstraps the schema. Do it once, alone, so the contention checks measure
 # claims and ids rather than a racing first bootstrap.
-prime() { ab ls >/dev/null || { echo "FAIL: first use of a fresh board"; exit 1; }; }
+prime() {
+  # Bootstrap always requires the write lock; disable it only for the later
+  # claim/id mutations this phase measures.
+  env -u AGENTBOARD_UNSAFE_NO_WRITE_LOCK "$AB_BIN" ls >/dev/null || { echo "FAIL: first use of a fresh board"; exit 1; }
+}
 
 # ---- (a) parity ---------------------------------------------------------------
 transcript() { # binary
@@ -622,10 +626,10 @@ fi
 if want cli; then
   echo "== (n) cli: path, wrong-kind board paths, schema marker"
   clifail=0
-  # `path`: the surreal data directory, resolved like the store does; it creates nothing
+  # `path` checks the board schema too, and may initialize scratch storage.
   got=$(env -u AGENTBOARD_DB XDG_STATE_HOME="$T/cli-state" "$T/ab-surreal" path)
   echo "path (default):        $got"
-  [ "$got" = "$T/cli-state/agentboard/surreal" ] && [ ! -e "$T/cli-state" ] || clifail=1
+  [ "$got" = "$T/cli-state/agentboard/surreal" ] || clifail=1
   got=$(AGENTBOARD_DB="$T/some-dir" "$T/ab-surreal" path); echo "path (AGENTBOARD_DB):  $got"
   [ "$got" = "$T/some-dir" ] || clifail=1
   got=$("$T/ab-surreal" --db "$T/other-dir" path); echo "path (--db):           $got"
@@ -653,7 +657,7 @@ if want cli; then
     -H 'Content-Type: text/plain' --data 'UPDATE meta:schema SET version = 99' "http://127.0.0.1:$PORT/sql" >/dev/null
   out=$(ab ls 2>&1); rc=$?
   echo "wrong marker: rc=$rc: $out" | cut -c1-200
-  [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] && printf '%s' "$out" | rg -q '^agentboard: board schema mismatch: found schema version 99, want version 2\.' || clifail=1
+  [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] && printf '%s' "$out" | rg -q '^agentboard: board schema mismatch: board schema version 99; binary is older than the board' || clifail=1
   stop_server
   check "cli adapter: path, wrong-kind refusals, marker line" $clifail
 fi

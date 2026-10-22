@@ -36,8 +36,8 @@ An **epic** is not a task: it has its own ids (`E1`), is never claimed, leased o
 dispatched, and carries the project `path` its work belongs to. A task points at an
 epic (`epic_id`) and optionally at another task (`parent_id`, a subtask that
 inherits the parent's epic; cycles and cross-epic parents are refused). A board
-file written before epics is refused with the command to move it aside: there is
-no migration.
+file without a schema version is refused with the manual step to inspect and
+stamp the legacy board offline.
 
 Statuses: `ready → working → (blocking → working)* → review → done`,
 plus `needs_fix` (review found work, waiting for a fix; shown as `fix`),
@@ -149,12 +149,12 @@ any version other than `surrealdb-2.7.x` is refused by name, and the Rust 3.x cr
 usable at all on this tree: its `diskann` dependency fails to compile. Stop the daemon with
 `pkill -f 'bind 127.0.0.1:18720'`.
 
-There is no migration between backends. A generation-1 SurrealDB board can be
-upgraded explicitly by its owner with `agentboard board upgrade --owner`; normal
-opens never upgrade. The command requires an offline board, preserves existing
-rows, and prints additive definitions, default backfills, row counts and stamps.
-See the [owner cutover order](docs/agent-install.md#owner-cutover-for-an-existing-surrealdb-board).
-SQLite pre-stamp binaries cannot be fenced and must be retired by the owner.
+There is no migration between backends. Schema version 1 migrates additively to
+version 2 on the first CLI or MCP call, under the write lock in one transaction.
+Newer boards refuse an older binary by name. See the
+[schema version protocol](PROTOCOL.md#board-schema-version).
+The owner-only offline `board upgrade --owner` command remains available for
+maintenance; it is no longer required for an additive version transition.
 
 ## Build and install
 
@@ -310,14 +310,6 @@ The orchestrator's playbook lives in `skills/`; see [skills/README.md](skills/RE
 
 Agent setup (build, MCP registration, skills): [docs/agent-install.md](docs/agent-install.md).
 
-Boards carry a surface generation and build stamps; incompatible generations are
-refused before DDL rather than upgraded. See [the stamp protocol and its legacy
-client limits](PROTOCOL.md#board-surface-stamp). Stamp-aware SQLite builds recheck
-on every operation, so a generation change refuses the next operation without a
-restart. Stamp-aware SurrealDB sessions check at session open: restart an already-open
-session to bind it to the new generation; new incompatible sessions are refused.
-A pre-stamp SQLite binary can keep writing without consulting or updating the stamp;
-its writes cannot be attributed on the board. Replace/retire pre-stamp binaries and
-stop their processes at cutover; restarting a pre-stamp binary is not enough.
-Older SurrealDB binaries with an existing schema-version check refuse incompatible
-generations through that gate.
+Boards carry a schema version, checked on every CLI invocation and MCP tool call.
+Older boards migrate in the same call; newer boards refuse. Build identity is
+informational. See the [schema version protocol](PROTOCOL.md#board-schema-version).

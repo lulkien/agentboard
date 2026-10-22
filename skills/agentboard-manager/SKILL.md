@@ -82,18 +82,9 @@ Manual moves that still need plain `herdr` (attach, `/btw`, killing a TUI by pro
 - `references/herdr-mechanics.md`: what the manager verbs do not cover.
 - `references/herdr-socket-api.md`: herdr socket protocol notes.
 
-## Prove the installed build before starting seats
+## Schema compatibility
 
-From the repo, the owner installs with `cargo install --path . --locked`, then runs
-`~/.cargo/bin/agentboard board-build` and `python3 scripts/check-seat-surface.py`.
-Expect one build line `agentboard <version> tools=<n> commit=<checkout revision>
-backend=surreal` (or sqlite), then `seat surface ok: tools=<n> commit=<checkout revision>`,
-where `<n>` is the derived count that command prints: read it, never type it.
-The revision is `git describe --always --dirty --abbrev=8`; the check derives the
-source tool count and refuses a mismatch in either count or revision. Run it before
-each seat start, including after a rebuild that has not yet been installed.
-A suspiciously fast install may have reused a stale artifact; prove the identity,
-not the elapsed time. `(stale, HEAD is ...)` or `(unverified, ...)` is a refusal:
-force rebuild with `touch build.rs`, have the owner reinstall, check again, then
-restart seats. See `docs/agent-install.md` for the full install proof. These checks
-are read-only and do not open a board. Coder/reviewer seats never install.
+Every CLI invocation and MCP tool call checks the board's schema version.
+Older boards migrate additively under the write lock in the same call; newer
+boards refuse by name. There is no seat-start refusal or build comparison.
+The manager handles MCP process reloads. See `PROTOCOL.md`, Board schema version.
