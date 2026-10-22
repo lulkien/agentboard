@@ -93,3 +93,6 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     check('custom canonical home, CODEX_HOME, and command paths with spaces are honored')
 print(f'{passed}/{passed} passed (skills installer)')
 PY
+
+# Usage names must match the built CLI and MCP surface before skills ship.
+python3 tests/doc-names.py
