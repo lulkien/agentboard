@@ -1,4 +1,4 @@
-//! MCP surface: 16 tools, text-only results, short acks.
+//! MCP surface: 17 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
@@ -74,6 +74,21 @@ macro_rules! run {
 #[derive(Clone)]
 pub struct Board {
     tool_router: ToolRouter<Self>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DispatchArgs {
+    /// Task id, T7.
+    pub id: String,
+    /// Target session; seat handoffs default to coder or reviewer.
+    pub to: Option<String>,
+    /// Root reporter only: reset a non-ready row before delivery.
+    #[serde(default)]
+    pub force: bool,
+    /// Validate and preview without delivery or event recording.
+    #[serde(default)]
+    pub print_only: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -364,6 +379,22 @@ impl Board {
                 store::add(&actor(), &task)
             })
             .await
+        )
+    }
+
+    #[tool(
+        name = "task_dispatch",
+        description = "Dispatch a ready task to a live seat. Root reporter manages its chain; analyze claimant may send its implement child only to coder, implement claimant its review child only to reviewer. Legacy implement claimant sends review to reviewer; legacy review claimant sends fix to coder. Repeated seat handoffs refuse. Manager force resets non-ready rows; print_only previews without delivery or writes. Refusals match CLI dispatch.",
+        annotations(title = "Dispatch task", read_only_hint = false)
+    )]
+    async fn task_dispatch(
+        &self,
+        Parameters(a): Parameters<DispatchArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = store::parse_id(&a.id).map_err(err)?;
+        run!(
+            blocking(move || store::dispatch(&actor(), id, a.to.as_deref(), a.force, a.print_only))
+                .await
         )
     }
 

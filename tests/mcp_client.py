@@ -681,7 +681,7 @@ def main():
     expect("the first evidence-only brief says so and copies the evidence verbatim", s.call("task_get", id=er, full=True), f"No new diff this round: {e2} is evidence-only for {e1}", f"the diff under review is {e1}", "Evidence (verbatim):", "all green", "evidence-only this round; it is not a patch", "the evidence report")
 
     catalog = {t["name"] for t in s.rpc("tools/list", {})["tools"]}
-    wanted = {"task_add", "task_list", "task_get", "task_children", "task_claim", "task_update", "task_wait",
+    wanted = {"task_add", "task_list", "task_get", "task_children", "task_claim", "task_update", "task_wait", "task_dispatch",
               "epic_add", "epic_list", "epic_get", "epic_update", "diff_add", "diff_get", "diff_list", "board_brief", "session_register"}
     checks.append(catalog == wanted)
     print(("PASS " if checks[-1] else "FAIL ") + f"router catalog is the retained surface: {len(catalog)} tools")

@@ -6,11 +6,46 @@ Never guess a missing requirement. `task_update(status="blocking", note=<ONE nar
 
 `done` means verified — run the check the goal names and put its output in `report`. `review` means ready for a second pair of eyes: the reviewer in the loop below, or a human when the change is an API break or an irreversible operation. It is not a finished state; `done` is. Notes are for the next reader: decisions, surprises, commands worth rerunning.
 
-## Workflow: epic, implement, review, fix
+## Workflow: epic, analyze, implement, review
 
 Work that needs review runs as one loop. An epic is not a task: it has its own table and ids (`E1`, `E2`...), is never claimed, leased or dispatched, and names the project the work belongs to (`path`). Tasks point at an epic (`epic=E1`) and optionally at another task (`parent=T7`, a subtask). `board_brief` shows one `EPIC E1 2/4 done [1 blocking] /abs/path <title>` line per open epic, then the open tasks that belong to no epic. Dropped tasks are left out of the total. Nothing closes an epic automatically.
 
-The chain is exactly three levels, **implement → review → fix**, and the board enforces it: the review row is a child of the implement row, the fix row is a child of the review row, and a child of a level-3 row (or a re-parent that would put a row at level 4) is refused with exit 1 and a `chain too deep` line. There is one fix row per review, reused across rounds.
+The primary chain is exactly three levels, **analyze → implement → review**.
+The analyzer publishes a plan as `needs_impl`; the coder submits the implementation
+as `needs_review`. These statuses opt the chain into the new workflow. Each row
+has at most one child, and a review row takes no child: fixes reuse the implement
+row rather than adding a fourth level.
+
+1. The manager opens the epic and files its analyze root. The root's immutable
+   reporter is the manager identity for dispatch throughout that chain.
+2. The analyzer claims the root, records its plan, and publishes it with
+   `task_update(report=<plan>, status="needs_impl")`. It creates the implement
+   child and uses `task_dispatch(id=<implement>, to="coder")` to hand it off.
+3. The coder claims the implement row, does the work, and records a complete
+   `diff_add` submission. It reports the evidence and publishes `needs_review`,
+   creates the review child, and calls `task_dispatch(id=<review>, to="reviewer")`.
+4. The reviewer claims that row and reads the newest implementation patch and
+   evidence. It records its verdict with `status="review"`; this gate checks the
+   implement parent's submission, rather than requiring a patch on the review row.
+   A subsequent `task_update(status="done", report=<verdict>)` closes all three
+   rows atomically. A `not_done` verdict also closes the chain atomically. The
+   identity that recorded the newest diff cannot close its own chain.
+5. A reviewer rejection through `status="needs_fix"` with a reason reopens the
+   existing implement row as `needs_impl`; the analyze plan remains `needs_impl`.
+   Reuse the same implement and review rows for the next round. The implement row
+   carries the reopen count; exceeding three reopens stops the entire chain.
+
+Dispatch distinguishes the two workflows from the chain's rows, not depth alone:
+any `needs_impl` or `needs_review` in the chain selects the new mapping. Recorded
+chain close/reopen/reject events retain that mapping after terminal statuses
+replace the published statuses. See [dispatch authority](#dispatch-authority).
+The store also has closed-chain reopen operations; dedicated adapter verbs are
+not yet exposed, so this protocol does not prescribe a CLI/MCP reopen command.
+
+### Legacy compatibility: implement, review, fix
+
+Existing chains without the new workflow statuses retain their legacy behavior.
+Their chain is exactly three levels, **implement → review → fix**, and the board enforces it: the review row is a child of the implement row, the fix row is a child of the review row, and a child of a level-3 row (or a re-parent that would put a row at level 4) is refused with exit 1 and a `chain too deep` line. There is one fix row per review, reused across rounds.
 
 1. Manager opens the epic: `epic_add(title, goal, path=<project root>)` (CLI: `agentboard epic add "..." --path /abs/dir`). A path that does not exist yet is accepted with a warning.
 2. Manager adds the implement row with `epic=<E id>` and dispatches it. Hand the worker only the task id; the row carries description and goal.
@@ -22,7 +57,7 @@ The chain is exactly three levels, **implement → review → fix**, and the boa
 8. Reviewer re-checks its own findings against the new diff on the fix row — the same reviewer, no separate checker row. Every finding closed: set the **fix** row `done` with the evidence in `report`, then re-read the file and set the review row `done`. Anything still open: write a `note` naming it on the fix row and set that fix row `needs_fix`; the review row stays `needs_fix`. Loop back to step 7 with the same fix row.
 9. Manager re-runs the gates the goal names, in that tree, before believing any report — a report is a claim, not proof. Only the manager closes the implement row (`done`), and closes the epic once every row is `done` or `dropped`: `epic_update(id, status="done")`.
 
-Status ownership in this loop is fixed:
+Status ownership in the legacy loop is fixed:
 
 - Coder: `ready`/`needs_fix` → `working` → `review`. Nothing else.
 - Reviewer: `review` → `done` or `needs_fix`, on a fix row and on a review row alike. Never on the implement row.
@@ -43,6 +78,9 @@ The board does not check a diff body, so rule 2 has a companion: a plain diff wh
 
 ### The reopen cap
 
+The primary chain counts reopens on its implement row and stops all three rows
+when capped. The following per-row cascade rules describe legacy chains.
+
 Each move of a row into `needs_fix` counts (`reopen_count`; `get` shows `reopens: N/3`, and `reopens: 4/3 (cap hit, stopped)` once capped). The count is never reset. The **fourth** attempt is refused: the CLI exits 1 and MCP returns a tool error, both with one line naming the cap and `not_done` (`T9 reopen cap 3 hit: the row is now not_done, not needs_fix`). The refused row is not left where it was; it lands `not_done`, and the body the caller passed is preserved in an event on the row, so the reviewer's findings survive.
 
 If the capped row has a parent that is open (`ready`, `working`, `blocking`, `needs_fix` or `review`), that parent lands `not_done` in the same transaction with its own event naming the child and the cap. One level only, and the grandparent is not touched. A parent that is `done`, `dropped` or already `not_done` is left as it is, and the capped row gets a note naming the parent and its status. So a capped **fix** row also stops its review row, and the implement row stays at `review` for the manager.
@@ -61,7 +99,7 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 
 ## Worker flow
 
-`task_claim(id)` → read `description` and `goal` → do the work → `task_update(note=...)` for progress → `diff_add(id, body=...)` → `task_update(report=..., status=review|done)` with the outcome. A move to `review` needs the diff (see the workflow above); `done` does not. Any agent may create a child task (`parent=<id>`); a reviewer uses this to file the fix task.
+In the primary chain the analyzer publishes `needs_impl`, the coder records `diff_add` and publishes `needs_review`, and the reviewer records a verdict on the review child. Each starts with `task_claim` and reads `description` and `goal`. Legacy workers follow `task_claim` → work → `diff_add` → `task_update(report=..., status="review")`. A move to `review` needs the diff (see the workflow above); `done` does not. Any agent may create a child task (`parent=<id>`); a reviewer uses this to file the fix task.
 
 ## Fields
 
@@ -137,15 +175,17 @@ Other clips, all marked or absent:
 - `ready` — waiting to be claimed (alias: `triage`)
 - `working` — actively being done (alias: `running`)
 - `blocking` — waiting on external input (alias: `blocked`)
-- `needs_fix` — review found work, waiting for a fix (aliases: `need fix`, `needs-fix`, `fix`)
-- `not_done` — set by the board, not by an agent: the row's fourth move into `needs_fix` was refused (see [The reopen cap](#the-reopen-cap)) and the row landed here instead, with the caller's body kept in an event; an open parent lands here too, one level only. Not claimable; the manager drops it or refiles (aliases `not-done`, `nd`). `get` shows `reopens: N/3`, and `(cap hit, stopped)` above 3.
+- `needs_impl` — published analyze plan, or an implement row reopened for coding.
+- `needs_review` — implementation submitted for review.
+- `needs_fix` — reviewer rejection; the primary chain reuses its implement row, while legacy chains wait for a fix child (aliases: `need fix`, `needs-fix`, `fix`)
+- `not_done` — a terminal verdict on the primary chain, or a legacy reopen-cap result: the row's fourth move into `needs_fix` was refused (see [The reopen cap](#the-reopen-cap)) and the row landed here instead, with the caller's body kept in an event; an open parent lands here too, one level only. Not claimable; the manager drops it or refiles (aliases `not-done`, `nd`). `get` shows `reopens: N/3`, and `(cap hit, stopped)` above 3.
 - `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation. A move into it needs a diff recorded since the last claim. On a parentless row the board files its review row.
 - `done` — verified complete
 - `dropped` — abandoned
 
 ## Cost note
 
-The MCP surface has 16 tools. Tool schemas accompany every request; `task_claim` returns the task so a follow-up `task_get` is never needed. Writes ack in one line on purpose.
+The MCP surface has 17 tools. Tool schemas accompany every request; `task_claim` returns the task so a follow-up `task_get` is never needed. Writes ack in one line on purpose.
 ## Board schema version
 
 Every CLI invocation and MCP tool call reads the persisted schema version
@@ -177,3 +217,20 @@ Legacy build and tool-count columns may remain as inert historical data; they ar
 neither compared nor updated. Older binaries may retain their former policy:
 rollback requires a binary that understands the resulting schema, or restoring a
 stopped backup with its old binary. There is no automatic downgrade.
+
+### Dispatch authority
+
+CLI `dispatch` and MCP `task_dispatch` use the same store operation. The reporter
+of the chain root has full dispatch authority over its rows, including `force`
+resets. This is a structural identity, never a configured manager-name roster.
+Other actors must be the actor of the parent's latest claim event: an analyze
+claimant may dispatch its implement child only to `coder`, and an implement
+claimant its review child only to `reviewer`. Assignee changes grant no authority.
+Legacy chains use their own mapping: the implement claimant sends its review
+child to `reviewer`, and the review claimant sends its fix child to `coder`.
+Both the explicit target and the resolved assignee must fit the selected mapping.
+Seats may dispatch only ready rows, once per parent claim; a successful handoff
+on any sibling or multiple children refuses another handoff. Authorization,
+delivery and dispatch recording are serialized for seat handoffs. Failed delivery
+records no dispatch, so it can be retried. Preview checks authority and readiness
+but sends nothing and records no event. Refusals name row, target and mapping.

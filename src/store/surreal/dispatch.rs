@@ -29,6 +29,54 @@ async fn registered_agent(db: &Db, name: &str) -> Result<Option<String>, String>
     Ok(rows.into_iter().next().map(|a| a.agent))
 }
 
+async fn chain(db: &Db, id: i64) -> Result<crate::store::bridge::DispatchChain, String> {
+    let task = fetch(db, id).await?;
+    let parent = task.parent_id;
+    let mut root = task;
+    let mut depth = 1;
+    while let Some(id) = root.parent_id {
+        root = fetch(db, id).await?;
+        depth += 1;
+        if depth > 3 {
+            return Err("chain too deep".into());
+        }
+    }
+    // New-chain status can be on any row; terminal chain events preserve the
+    // shape after close/reject replaces those statuses.
+    let mut shape = db.query("SELECT VALUE true FROM tasks WHERE status IN ['needs_impl','needs_review'] AND (meta::id(id)=$root OR parent_id=$root OR parent_id IN (SELECT VALUE meta::id(id) FROM tasks WHERE parent_id=$root)) LIMIT 1; SELECT VALUE true FROM events WHERE task_id=$root AND kind IN ['chain_close','chain_reopen','chain_reject'] LIMIT 1;")
+        .bind(("root", root.tid)).await.map_err(|e| db_err(&e))?;
+    let statuses: Vec<bool> = shape.take(0).map_err(|e| db_err(&e))?;
+    let history: Vec<bool> = shape.take(1).map_err(|e| db_err(&e))?;
+    let new_chain = !statuses.is_empty() || !history.is_empty();
+    #[derive(Deserialize)]
+    struct Claim {
+        seq: i64,
+        actor: String,
+    }
+    let mut result = db.query("SELECT meta::id(id) AS seq,actor FROM events WHERE task_id=$parent AND kind='claim' ORDER BY seq DESC LIMIT 1").bind(("parent",parent)).await.map_err(|e| db_err(&e))?;
+    let claims: Vec<Claim> = result.take(0).map_err(|e| db_err(&e))?;
+    let mut result = db
+        .query("SELECT VALUE meta::id(id) FROM tasks WHERE parent_id=$parent")
+        .bind(("parent", parent))
+        .await
+        .map_err(|e| db_err(&e))?;
+    let children: Vec<i64> = result.take(0).map_err(|e| db_err(&e))?;
+    let mut result = db.query("SELECT meta::id(id) AS seq FROM events WHERE kind='dispatch' AND task_id IN $children ORDER BY seq DESC LIMIT 1").bind(("children",children.clone())).await.map_err(|e| db_err(&e))?;
+    #[derive(Deserialize)]
+    struct Dispatch {
+        seq: i64,
+    }
+    let dispatched: Vec<Dispatch> = result.take(0).map_err(|e| db_err(&e))?;
+    Ok(crate::store::bridge::DispatchChain {
+        root_reporter: root.reporter,
+        new_chain,
+        depth,
+        parent_claim: claims.into_iter().next().map(|c| (c.seq, c.actor)),
+        children: children.len(),
+        dispatched: dispatched.first().map(|d| d.seq),
+    })
+}
+
 /// Tells a pane to claim task `id`. Refuses unless the task is `ready`; `force`
 /// resets it through the normal status->ready path first. `print_only` touches
 /// nothing: no reset, no event, no herdr/tmux.
@@ -39,10 +87,22 @@ pub fn dispatch(
     force: bool,
     print_only: bool,
 ) -> Result<String, String> {
-    let s = session(false)?;
+    let mut s = session(true)?;
     let task = block_on(fetch(&s.db, id))?;
+    let facts = block_on(chain(&s.db, id))?;
+    let expected = crate::store::bridge::dispatch_authority(actor, id, to, &facts)?;
+    if expected.is_some() {
+        crate::store::bridge::dispatch_authority(actor, id, task.assignee.as_deref(), &facts)?;
+    }
     let text = line(id);
-    if task.status != "ready" && !force {
+    if task.status != "ready" && (!force || expected.is_some()) {
+        if expected.is_some() {
+            return Err(crate::store::bridge::dispatch_refusal(
+                id,
+                to.or(expected),
+                "task is not ready; only the root reporter may force a reset",
+            ));
+        }
         return Err(not_ready_text(
             id,
             &task.status,
@@ -62,12 +122,13 @@ pub fn dispatch(
         .transpose()
     };
     let a = candidate(task.assignee.as_deref())?;
-    let t = candidate(to)?;
+    let t = candidate(to.or(expected))?;
     let target = resolve(
         a.as_ref().map(|(n, c)| (n.as_str(), *c)),
         t.as_ref().map(|(n, c)| (n.as_str(), *c)),
         id,
     )?;
+    crate::store::bridge::dispatch_authority(actor, id, Some(&target), &facts)?;
     let warning = match task.epic_id {
         Some(e) => {
             let epic = block_on(fetch_epic(&s.db, e))?;
@@ -75,7 +136,10 @@ pub fn dispatch(
         }
         None => None,
     };
-    drop(s);
+    if expected.is_none() {
+        drop(s);
+        s = session(false)?;
+    }
     let mut out = warning.unwrap_or_default();
     if task.status != "ready" {
         // Reset before sending: the pane claims immediately and must find it ready.
@@ -99,12 +163,15 @@ pub fn dispatch(
         ));
     }
     let path = deliver(&target, &text)?;
-    let w = session(true)?;
+    if expected.is_none() {
+        drop(s);
+        s = session(true)?;
+    }
     block_on(async {
         let mut tx = Txn::new();
         let idp = tx.p(id);
         tx.event(&idp, actor, "dispatch", &format!("{target} via {path}"));
-        tx.run(&w.db, "$seq").await.map(|_| ())
+        tx.run(&s.db, "$seq").await.map(|_| ())
     })?;
     out.push_str(&format!("dispatched to {target} via {path}: {text}"));
     Ok(out)

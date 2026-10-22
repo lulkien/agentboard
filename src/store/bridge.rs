@@ -8,6 +8,57 @@ use crate::store::proc;
 use crate::store::short;
 use std::process::Command;
 
+/// Authorization facts loaded under the backend's dispatch lock. Assignee is
+/// deliberately absent: only a recorded claim grants a seat authority.
+pub struct DispatchChain {
+    pub root_reporter: String,
+    pub depth: usize,
+    pub new_chain: bool,
+    pub parent_claim: Option<(i64, String)>,
+    pub children: usize,
+    pub dispatched: Option<i64>,
+}
+
+pub fn dispatch_refusal(id: i64, target: Option<&str>, reason: &str) -> String {
+    format!(
+        "dispatch {} to {} refused: {reason}; allowed: root reporter: any row/target; analyze claimant -> implement child to coder; implement claimant -> review child to reviewer; legacy implement claimant -> review child to reviewer; legacy review claimant -> fix child to coder",
+        short(id),
+        target.unwrap_or("(unspecified)")
+    )
+}
+
+pub fn dispatch_authority(
+    actor: &str,
+    id: i64,
+    target: Option<&str>,
+    chain: &DispatchChain,
+) -> Result<Option<&'static str>, String> {
+    if !actor.trim().is_empty() && actor == chain.root_reporter {
+        return Ok(None);
+    }
+    let refusal = |reason: &str| dispatch_refusal(id, target, reason);
+    let expected = match (chain.new_chain, chain.depth) {
+        (true, 2) | (false, 3) => "coder",
+        (true, 3) | (false, 2) => "reviewer",
+        _ => return Err(refusal("outside the next-seat mapping")),
+    };
+    let Some((claim, holder)) = &chain.parent_claim else {
+        return Err(refusal("parent has no recorded claim"));
+    };
+    if actor.trim().is_empty() || actor != holder {
+        return Err(refusal("actor did not claim the parent"));
+    }
+    if target.is_some_and(|target| target != expected) {
+        return Err(refusal("wrong next-seat target"));
+    }
+    if chain.children != 1 || chain.dispatched.is_some_and(|seq| seq > *claim) {
+        return Err(refusal(
+            "handoff already dispatched or chain has multiple children",
+        ));
+    }
+    Ok(Some(expected))
+}
+
 /// Which panes answer right now. A row is only a claim that a pane exists; this
 /// is the check. tmux is asked per name, herdr once, and only if tmux cannot
 /// vouch for a name.

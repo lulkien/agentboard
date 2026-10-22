@@ -1,7 +1,7 @@
 # agentboard
 
 A task board shared by a handful of CLI coding agents (Claude Code in a herdr
-pane, Hermes, subagents) plus you. 16 MCP tools over stdio and one board, stored
+pane, Hermes, subagents) plus you. 17 MCP tools over stdio and one board, stored
 either in SurrealDB (the default build) or in a single SQLite file (opt-in). The point is to replace
 "write status to NOTES.md and hope somebody reads it" with a board that answers in
 one line and costs few tokens.
@@ -80,13 +80,14 @@ completion is one row; nothing is mutable history.
 | `diff_add` | 1 line ack | record what you changed for a task, verbatim and append-only: `D12 (T7 round 2)`, round = the task's reopen count + 1; whitespace-only is refused. A re-run round with no tree change passes `reviews="D<n>"` naming the newest patch of this row and records evidence, marked not a patch. Only the newest patch is reviewed |
 | `diff_get` | header + body | one diff: task, round, age; evidence-only rows are labelled and point at the patch; the body is cut with a `[truncated ...]` marker, `full=true` returns it whole |
 | `diff_list` | 1 line/diff | a task's diffs (or an epic's, naming each task), newest first: `D12 round 2 3m 184 lines` or `D13 evidence-only -> D12`, or `(no diffs)` |
+| `task_dispatch` | short ack | dispatch a ready row to a live seat; root reporter manages the chain, analyze claimant hands its implement child to `coder`, implement claimant hands its review child to `reviewer`; legacy review goes to `reviewer`, legacy fix to `coder`; same store and refusal text as CLI `dispatch` |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | status, report, note, commit, heartbeat and spec fields title, description, goal, priority, assignee, path, branch, epic; combined spec/state changes are atomic; spec edits refuse a live worker lease; unknown fields refuse by name |
 | `task_wait` | delta only | server-side long-poll over `id`/`ids`/`epic`/`open` with `status`/`kind` filters; first line `matched:` or `timeout:` |
 | `board_brief` | ~1 screen | counts + one `EPIC` line per open epic (done/non-dropped tasks, blocking/needs_fix counts, path) + open tasks that belong to no epic + recent completions |
 | `session_register` | ack | map session → task |
 
-The surface has 16 MCP tools: every tool schema is resent on every request, so a
+The surface has 17 MCP tools: every tool schema is resent on every request, so a
 wide surface is a permanent token tax. `answer` is not a tool — it is
 `task_update(status="running", note=...)`.
 

@@ -232,5 +232,140 @@ run $B dispatch E1
 check "dispatch refuses an epic id" $([ $rc -eq 1 ] && has "$err" "E1 is an epic id" && echo 0 || echo 1)
 unset TMUX_LIVE
 
+# Chain authority follows root reporter and the parent's claim event, never assignee.
+use chain_authority
+export AGENTBOARD_DB=$BOARD
+$B register coder >/dev/null; $B register reviewer >/dev/null; $B register rogue >/dev/null
+$B add analyze >/dev/null
+$B --actor analyst-a claim T1 >/dev/null
+$B --actor analyst-a status T1 needs_impl >/dev/null
+$B --actor analyst-a add implement --parent T1 --assignee coder >/dev/null
+: >"$LOG"
+run $B --actor analyst-a dispatch T2 --to rogue
+check "chain wrong explicit target refuses with row, target and mapping" $([ $rc -eq 1 ] && has "$err" 'T2 to rogue refused' && has "$err" 'analyze claimant -> implement child to coder' && echo 0 || echo 1)
+check "chain authorization refusal sends no prompt" $([ ! -s "$LOG" ] && echo 0 || echo 1)
+run $B --actor stranger dispatch T2 --to coder
+check "unclaimed identity cannot dispatch" $([ $rc -eq 1 ] && has "$err" 'did not claim the parent' && echo 0 || echo 1)
+$B --actor boss edit T1 --assignee impostor >/dev/null
+run $B --actor impostor dispatch T2 --to coder
+check "parent assignee does not confer authority" $([ $rc -eq 1 ] && has "$err" 'did not claim the parent' && echo 0 || echo 1)
+run $B --actor analyst-a dispatch T2
+check "actual analyze claimant dispatches implement to coder" $([ $rc -eq 0 ] && has "$out" 'dispatched to coder via herdr' && echo 0 || echo 1)
+check "allowed handoff sends exactly the expected argv" $([ "$(calls 'herdr agent prompt coder Use the agentboard MCP tools: claim task T2')" = 1 ] && echo 0 || echo 1)
+run $B --actor analyst-a dispatch T2
+check "second unclaimed handoff refuses" $([ $rc -eq 1 ] && has "$err" 'handoff already dispatched' && echo 0 || echo 1)
+run $B --actor boss dispatch T2 --to rogue
+check "root reporter retains manager override" $([ $rc -eq 0 ] && has "$out" 'dispatched to coder' && echo 0 || echo 1)
+$B --actor implementer-a claim T2 >/dev/null
+$B --actor implementer-a diff add T2 --body 'patch' >/dev/null
+$B --actor implementer-a status T2 needs_review >/dev/null
+$B --actor implementer-a add review --parent T2 --assignee reviewer >/dev/null
+: >"$LOG"
+run $B --actor analyst-a dispatch T3 --to reviewer
+check "analyze claimant cannot skip implement claimant" $([ $rc -eq 1 ] && has "$err" 'did not claim the parent' && echo 0 || echo 1)
+run $B --actor implementer-a dispatch T3 --to coder
+check "implement claimant cannot send review to coder" $([ $rc -eq 1 ] && has "$err" 'T3 to coder refused' && echo 0 || echo 1)
+run $B --actor implementer-a dispatch T3
+check "implement claimant dispatches review to reviewer" $([ $rc -eq 0 ] && has "$out" 'dispatched to reviewer via herdr' && echo 0 || echo 1)
+check "review handoff argv names reviewer and review row" $([ "$(calls 'herdr agent prompt reviewer Use the agentboard MCP tools: claim task T3')" = 1 ] && echo 0 || echo 1)
+run $B --actor implementer-a dispatch T3
+check "review handoff cannot fork by repeated dispatch" $([ $rc -eq 1 ] && has "$err" 'handoff already dispatched' && echo 0 || echo 1)
+# A separate chain exercises an assignee override and concurrent handoffs.
+$B add second-analyze >/dev/null
+$B --actor analyst-b claim T4 >/dev/null
+$B --actor analyst-b status T4 needs_impl >/dev/null
+$B --actor analyst-b add second-implement --parent T4 --assignee rogue >/dev/null
+run $B --actor analyst-b dispatch T5 --to coder
+check "live wrong assignee cannot override allowed target" $([ $rc -eq 1 ] && has "$err" 'T5 to rogue refused' && echo 0 || echo 1)
+$B edit T5 --assignee coder >/dev/null
+$B status T5 working >/dev/null
+run $B --actor analyst-b dispatch T5 --force
+check "seat force cannot bypass ready-only rule" $([ $rc -eq 1 ] && has "$err" 'not ready' && has "$err" 'allowed:' && echo 0 || echo 1)
+$B status T5 ready >/dev/null
+: >"$LOG"
+$B --actor analyst-b dispatch T5 >"$S/first" 2>"$S/first.err" & first=$!
+$B --actor analyst-b dispatch T5 >"$S/second" 2>"$S/second.err" & second=$!
+wait "$first"; first_rc=$?; wait "$second"; second_rc=$?
+check "concurrent seat dispatches yield one success" $([ $((first_rc + second_rc)) -eq 1 ] && echo 0 || echo 1)
+check "concurrent handoff delivers exactly once" $([ "$(calls 'herdr agent prompt coder')" = 1 ] && echo 0 || echo 1)
+# Legacy branching cannot be used to bypass the single-handoff rule.
+$B add forked-analyze >/dev/null
+$B --actor analyst-c claim T6 >/dev/null
+$B add fork-one --parent T6 --assignee coder >/dev/null
+$B add fork-two --parent T6 --assignee coder >/dev/null
+run $B --actor analyst-c dispatch T7 --to reviewer
+check "seat refuses a pre-existing fork" $([ $rc -eq 1 ] && has "$err" 'multiple children' && echo 0 || echo 1)
+$B add unclaimed-analyze --status working --assignee analyst-d >/dev/null
+$B add unclaimed-implement --parent T9 --assignee coder >/dev/null
+run $B --actor analyst-d dispatch T10 --to coder
+check "creation with assignee but no claim grants no authority" $([ $rc -eq 1 ] && has "$err" 'parent has no recorded claim' && echo 0 || echo 1)
+# MCP shares the store refusal byte for byte and exposes the successful path.
+B="$B" python3 - <<'PYMCP'
+import json,os,subprocess
+b=os.environ['B']
+def cli(*args):
+ return subprocess.run([b,*args],capture_output=True,text=True,check=False)
+def call(actor,**args):
+ p=subprocess.Popen([b],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,env=dict(os.environ,AGENTBOARD_ACTOR=actor))
+ def rpc(i,method,params):
+  p.stdin.write(json.dumps(dict(jsonrpc='2.0',id=i,method=method,params=params))+'\n');p.stdin.flush()
+  while True:
+   r=json.loads(p.stdout.readline())
+   if r.get('id')==i:return r
+ rpc(1,'initialize',dict(protocolVersion='2025-11-25',capabilities={},clientInfo=dict(name='dispatch-test',version='1')))
+ p.stdin.write(json.dumps(dict(jsonrpc='2.0',method='notifications/initialized'))+'\n');p.stdin.flush()
+ r=rpc(2,'tools/call',dict(name='task_dispatch',arguments=args));p.stdin.close();assert p.wait(timeout=5)==0
+ return r
+refused=cli('--actor','stranger','dispatch','T3','--to','rogue')
+r=call('stranger',id='T3',to='rogue')
+assert r['error']['message']==refused.stderr.removeprefix('agentboard: ').strip(),r
+r=call('boss',id='T3',to='reviewer')
+assert 'dispatched to reviewer' in r['result']['content'][0]['text'],r
+print('MCP dispatch success and identical CLI/MCP refusal passed')
+PYMCP
+check "MCP dispatch uses same authority and refusal text" $?
+
+# Classification sees descendants and survives terminal chain statuses.
+$B status T1 ready >/dev/null
+run $B --actor implementer-a dispatch T3 --to coder --print
+check "new shape is retained by a descendant's needs_review status" $([ $rc -eq 1 ] && has "$err" 'wrong next-seat target' && echo 0 || echo 1)
+$B status T1 needs_impl >/dev/null
+$B --actor review-closer claim T3 >/dev/null
+$B --actor review-closer status T3 review 'clean' >/dev/null
+$B --actor review-closer status T3 done 'clean' >/dev/null
+run $B --actor analyst-a dispatch T2 --to reviewer --print
+check "closed new chain retains its routing from chain events" $([ $rc -eq 1 ] && has "$err" 'wrong next-seat target' && $B get T1 | grep -q '^T1 done' && echo 0 || echo 1)
+
+# Legacy implement -> review -> fix uses the old role mapping, not new-chain depth.
+use legacy_authority
+export AGENTBOARD_DB=$BOARD
+$B register coder >/dev/null; $B register reviewer >/dev/null
+$B add legacy-impl >/dev/null
+$B --actor legacy-coder claim T1 >/dev/null
+$B --actor legacy-coder diff add T1 --body 'legacy patch' >/dev/null
+$B --actor legacy-coder status T1 review >/dev/null
+: >"$LOG"
+run $B --actor legacy-coder dispatch T2 --to coder --print
+check "legacy review cannot be previewed to coder" $([ $rc -eq 1 ] && has "$err" 'T2 to coder refused' && echo 0 || echo 1)
+run $B --actor legacy-coder dispatch T2 --to reviewer --print
+check "legacy review preview routes to reviewer" $([ $rc -eq 0 ] && has "$out" 'claim task T2' && [ ! -s "$LOG" ] && echo 0 || echo 1)
+run $B --actor legacy-coder dispatch T2
+check "legacy implement claimant hands review to reviewer by default" $([ $rc -eq 0 ] && has "$out" 'dispatched to reviewer' && echo 0 || echo 1)
+check "legacy review delivery argv names reviewer" $([ "$(calls 'herdr agent prompt reviewer Use the agentboard MCP tools: claim task T2')" = 1 ] && echo 0 || echo 1)
+$B --actor legacy-reviewer claim T2 >/dev/null
+$B --actor legacy-reviewer add legacy-fix --parent T2 >/dev/null
+: >"$LOG"
+run $B --actor legacy-reviewer dispatch T3 --to reviewer --print
+check "legacy fix cannot be previewed to reviewer" $([ $rc -eq 1 ] && has "$err" 'T3 to reviewer refused' && echo 0 || echo 1)
+run $B --actor legacy-reviewer dispatch T3 --to coder --print
+check "legacy fix preview routes to coder" $([ $rc -eq 0 ] && has "$out" 'claim task T3' && [ ! -s "$LOG" ] && echo 0 || echo 1)
+run $B --actor legacy-reviewer dispatch T3
+check "legacy review claimant hands fix to coder by default" $([ $rc -eq 0 ] && has "$out" 'dispatched to coder' && echo 0 || echo 1)
+check "legacy fix delivery argv names coder" $([ "$(calls 'herdr agent prompt coder Use the agentboard MCP tools: claim task T3')" = 1 ] && echo 0 || echo 1)
+run $B dispatch T2 --to coder --force --print
+check "legacy root reporter retains review override" $([ $rc -eq 0 ] && echo 0 || echo 1)
+run $B dispatch T3 --to reviewer --print
+check "legacy root reporter retains fix override" $([ $rc -eq 0 ] && echo 0 || echo 1)
+
 echo "$pass/$total passed (backend: $BACKEND)"
 [ "$pass" -eq "$total" ]
