@@ -21,7 +21,7 @@ No match, no work: stop, do not claim, do not submit. Report the count and commi
 1. Manager files the implement row (`add --epic E`) with an executable goal and dispatches it. `dispatch --to <session>` is silently overridden by the row's assignee: a live registered assignee wins and the command still prints success. To hand the row to another pane, run `edit <id> --assignee reviewer` first, then dispatch bare.
 2. Coder: `task_claim`, work, `diff_add`, `task_update report= status=review`.
 3. Manager reads `children T<impl>` for the review row and dispatches the reviewer to it. The tree stays frozen while the reviewer reads.
-4. Reviewer reads the newest diff. Clean: review row `done`. Findings: it files the fix row (`--parent` = review row) and sets the review row `needs_fix`.
+4. Reviewer reads the newest patch. Clean: review row `done`. Findings: it files the fix row (`--parent` = review row) and sets the review row `needs_fix`.
 5. Coder fixes only the listed findings, `diff_add` on the fix row, answers each finding in `report`, sets the fix row `review`.
 6. Reviewer re-checks its own findings. All closed: fix row `done`, then review row `done`. Any open: `note` naming it, fix row `needs_fix`, back to 5.
 7. Manager reads the report against the goal, closes the implement row `done`, and commits explicit paths only after the owner authorizes it; never pushes.
@@ -30,7 +30,12 @@ The coder's round ends at `review`, with a diff; it never ends at a commit. Code
 
 ## The diff gate
 
-A move into `review` is refused unless a diff row was recorded on that task after its newest claim. The refusal names `agentboard diff add T<n>`. The body is the complete change itself, verbatim. A round that changed nothing records a body saying so and why. The board never reads the body; the reviewer rejects one that is neither a diff nor a stated no-change reason.
+A move into `review` is refused unless a submission row was recorded on that task after its newest claim. Two forms satisfy it:
+
+- a **diff**: the complete change itself, verbatim;
+- an **evidence-only** submission for a re-run round whose tree did not change: `diff_add(id, body=<what you ran and its output>, reviews="D<n>")` (CLI: `agentboard diff add T<n> --evidence-only --reviews D<n> --body-file -`). It must name the newest patch of this row (same row, no re-parent). The row is marked `evidence-only` and is never read as a patch: `diff_get` labels it, and the review brief names the patch under review.
+
+A real diff is preferred when both exist. The refusal names both forms. The board never reads a body; a plain diff whose body is prose is still not admissible — a round with no tree change records evidence-only instead.
 
 ## The reopen cap
 

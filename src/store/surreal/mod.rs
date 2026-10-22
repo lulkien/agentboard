@@ -91,8 +91,14 @@ impl Board for SurrealBoard {
     fn brief(&self, since_min: i64) -> Result<String, String> {
         render::brief(since_min)
     }
-    fn diff_add(&self, actor: &str, task: i64, body: &str) -> Result<String, String> {
-        diffs::diff_add(actor, task, body)
+    fn diff_add(
+        &self,
+        actor: &str,
+        task: i64,
+        body: &str,
+        reviews: Option<i64>,
+    ) -> Result<String, String> {
+        diffs::diff_add(actor, task, body, reviews)
     }
     fn diff_get(&self, id: i64, full: bool) -> Result<String, String> {
         diffs::diff_get(id, full)
@@ -371,6 +377,7 @@ DEFINE FIELD IF NOT EXISTS task_id ON diffs TYPE int;
 DEFINE FIELD IF NOT EXISTS round ON diffs TYPE int;
 DEFINE FIELD IF NOT EXISTS body ON diffs TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS created_at ON diffs TYPE int;
+DEFINE FIELD IF NOT EXISTS reviews ON diffs TYPE option<int>;
 DEFINE INDEX IF NOT EXISTS diffs_task ON diffs FIELDS task_id;
 
 DEFINE TABLE IF NOT EXISTS sessions SCHEMAFULL;
@@ -1051,9 +1058,9 @@ mod tests {
                 .check()
                 .unwrap();
             assert_eq!(listing(db, Ref::Task(1)).await.unwrap(), "(no diffs)");
-            assert_eq!(record(db, "a", 1, "one\ntwo\n").await.unwrap(), "D1 (T1 round 3)");
+            assert_eq!(record(db, "a", 1, "one\ntwo\n", None).await.unwrap(), "D1 (T1 round 3)");
             let long = "x".repeat(5000);
-            assert_eq!(record(db, "a", 1, &long).await.unwrap(), "D2 (T1 round 3)");
+            assert_eq!(record(db, "a", 1, &long, None).await.unwrap(), "D2 (T1 round 3)");
             let l = listing(db, Ref::Task(1)).await.unwrap();
             let lines: Vec<_> = l.lines().collect();
             assert!(lines[0].starts_with("D2 round 3 ") && lines[0].ends_with(" 1 lines"), "{l}");
@@ -1065,7 +1072,7 @@ mod tests {
             assert!(show(db, 1, true).await.unwrap().ends_with("one\ntwo\n"));
             assert_eq!(newest_diff(db, 1).await.unwrap().unwrap().id, 2);
             assert!(show(db, 9, false).await.unwrap_err().contains("no such diff D9"));
-            assert!(record(db, "a", 9, "x").await.unwrap_err().contains("no such task T9"));
+            assert!(record(db, "a", 9, "x", None).await.unwrap_err().contains("no such task T9"));
             let mut r = db
                 .query("SELECT body, meta::id(id) AS seq FROM events WHERE task_id = 1 AND kind = 'diff' ORDER BY seq LIMIT 1")
                 .await
@@ -1078,8 +1085,9 @@ mod tests {
 
     #[test]
     fn the_review_gate_and_the_review_row_filed_once() {
-        use super::diffs::record;
-        use super::tasks::{Txn, diff_since_claim, fetch, file_review};
+        use super::diffs::{check_evidence, newest_diff, record, submission_since_claim};
+        use super::tasks::{Txn, fetch, file_review};
+        use crate::store::text::Submission;
         let Some(srv) = start_server("review_gate") else {
             return;
         };
@@ -1101,19 +1109,22 @@ mod tests {
                 tx.event(&one, "a", tag, "");
                 tx.run(db, "$seq").await.unwrap();
             };
-            assert!(!diff_since_claim(db, 1).await.unwrap(), "no diff at all");
-            record(db, "a", 1, "first").await.unwrap();
-            assert!(diff_since_claim(db, 1).await.unwrap(), "no claim yet: any diff counts");
+            assert!(submission_since_claim(db, 1).await.unwrap().is_none(), "no diff at all");
+            record(db, "a", 1, "first", None).await.unwrap();
+            assert!(submission_since_claim(db, 1).await.unwrap().is_some(), "no claim yet: any diff counts");
             claim("claim").await;
-            assert!(!diff_since_claim(db, 1).await.unwrap(), "the old diff predates the new claim");
-            record(db, "a", 1, "second").await.unwrap();
-            assert!(diff_since_claim(db, 1).await.unwrap());
+            assert!(submission_since_claim(db, 1).await.unwrap().is_none(), "the old diff predates the new claim");
+            record(db, "a", 1, "second", None).await.unwrap();
+            assert!(submission_since_claim(db, 1).await.unwrap().is_some());
             claim("claim").await;
-            assert!(!diff_since_claim(db, 1).await.unwrap(), "every later claim resets it");
+            assert!(submission_since_claim(db, 1).await.unwrap().is_none(), "every later claim resets it");
 
+            let patch = || async {
+                Submission::patch(newest_diff(db, 1).await.unwrap().unwrap())
+            };
             let implement = fetch(db, 1).await.unwrap();
             let mut tx = Txn::new();
-            let review = file_review(db, &mut tx, "a", &implement, Some("the report")).await.unwrap();
+            let review = file_review(db, &mut tx, "a", &implement, Some("the report"), &patch().await).await.unwrap();
             tx.run(db, "true").await.unwrap();
             assert_eq!(review, 2);
             let r = fetch(db, 2).await.unwrap();
@@ -1125,9 +1136,9 @@ mod tests {
             assert!(r.assignee.is_none());
             assert!(r.description.contains("the report") && r.description.contains("D2"));
             let before = r.description.clone();
-            record(db, "a", 1, "third").await.unwrap();
+            record(db, "a", 1, "third", None).await.unwrap();
             let mut tx = Txn::new();
-            assert_eq!(file_review(db, &mut tx, "a", &implement, Some("again")).await.unwrap(), 2);
+            assert_eq!(file_review(db, &mut tx, "a", &implement, Some("again"), &patch().await).await.unwrap(), 2);
             tx.run(db, "true").await.unwrap();
             let mut q = db.query("SELECT count() FROM tasks WHERE parent_id = 1 GROUP ALL").await.unwrap();
             let n: Vec<serde_json::Value> = q.take(0).unwrap();
@@ -1142,10 +1153,10 @@ mod tests {
 
             // Renamed between rounds: still the same review row, and the note lands on it.
             db.query("UPDATE tasks:1 SET title = 'impl renamed'").await.unwrap().check().unwrap();
-            record(db, "a", 1, "fourth").await.unwrap();
+            record(db, "a", 1, "fourth", None).await.unwrap();
             let renamed = fetch(db, 1).await.unwrap();
             let mut tx = Txn::new();
-            assert_eq!(file_review(db, &mut tx, "a", &renamed, None).await.unwrap(), 2);
+            assert_eq!(file_review(db, &mut tx, "a", &renamed, None, &patch().await).await.unwrap(), 2);
             tx.run(db, "true").await.unwrap();
             let mut q = db.query("SELECT count() FROM tasks WHERE parent_id = 1 GROUP ALL").await.unwrap();
             let n: Vec<serde_json::Value> = q.take(0).unwrap();
@@ -1156,6 +1167,56 @@ mod tests {
                 .unwrap();
             let hit: Vec<serde_json::Value> = q.take(0).unwrap();
             assert_eq!(hit.len(), 1, "the note lands on the original row");
+
+            // Evidence-only: the named diff must be the newest patch of the same row.
+            // An ancestor's patch is in the chain but not on this row: no re-parent.
+            record(db, "a", 2, "review patch", None).await.unwrap();
+            check_evidence(db, 2, 5).await.unwrap();
+            let err = check_evidence(db, 2, 1).await.unwrap_err();
+            assert!(
+                err.contains("D1 is recorded on T1, not on T2") && err.contains("no re-parent"),
+                "{err}"
+            );
+            let mut tx = Txn::new();
+            let two = tx.p(2);
+            tx.event(&two, "a", "claim", "");
+            tx.run(db, "$seq").await.unwrap();
+            record(db, "a", 2, "re-ran: cargo test ok", Some(5)).await.unwrap();
+            let s = submission_since_claim(db, 2).await.unwrap().unwrap();
+            assert!(s.evidence_only());
+            assert_eq!((s.record.id, s.diff.id), (6, 5));
+            // Another evidence-only row is not a patch.
+            let err = check_evidence(db, 2, 6).await.unwrap_err();
+            assert!(
+                err.contains("D6 is evidence-only, not a patch") && err.contains("--reviews"),
+                "{err}"
+            );
+            db.query(
+                "CREATE tasks:9 SET title = 'other', created_at = 1, updated_at = 1",
+            )
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+            record(db, "a", 9, "other patch", None).await.unwrap();
+            let err = check_evidence(db, 2, 7).await.unwrap_err();
+            assert!(
+                err.contains("D7 is recorded on T9, not on T2"),
+                "{err}"
+            );
+            assert!(check_evidence(db, 2, 99)
+                .await
+                .unwrap_err()
+                .contains("no such diff D99"));
+            record(db, "a", 2, "the real patch", None).await.unwrap();
+            let err = check_evidence(db, 2, 5).await.unwrap_err();
+            assert!(
+                err.contains("D5 is not the newest patch of T2") && err.contains("D8"),
+                "{err}"
+            );
+            let s = submission_since_claim(db, 2).await.unwrap().unwrap();
+            assert!(!s.evidence_only());
+            assert_eq!((s.record.id, s.diff.id), (8, 8));
         });
     }
 

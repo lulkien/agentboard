@@ -175,6 +175,8 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
                 id,
                 body,
                 body_file,
+                evidence_only,
+                reviews,
             } => {
                 let task = tid(&id)?;
                 let body = match (body, body_file.as_deref()) {
@@ -189,7 +191,15 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
                         ));
                     }
                 };
-                store::diff_add(actor, task, &body)
+                // The flags are a pair: evidence without a named diff has nothing to
+                // re-run, and a named diff without the flag is a plain diff.
+                let reviews = match (evidence_only, reviews) {
+                    (true, None) => return Err(store::text::evidence_needs_reviews(task)),
+                    (false, Some(_)) => return Err(store::text::reviews_needs_evidence(task)),
+                    (true, Some(d)) => Some(store::parse_diff_id(&d)?),
+                    (false, None) => None,
+                };
+                store::diff_add(actor, task, &body, reviews)
             }
             DiffCmd::Ls { id } => store::diff_list(store::parse_ref(&id)?),
             DiffCmd::Get { id, full } => store::diff_get(store::parse_diff_id(&id)?, full),

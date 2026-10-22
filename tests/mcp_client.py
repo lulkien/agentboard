@@ -552,6 +552,19 @@ def main():
     print(("PASS " if ok else "FAIL ") + "diff_list is newest first :: " + " | ".join(listing))
     expect("task_get shows the newest diff line", s.call("task_get", id=dt), f"diff: {d2} round 2 ")
     expect("diff_add refuses a whitespace-only body", refusal_text(lambda: s.call("diff_add", id=dt, body=" \n ")), "the body is empty")
+    ev_full = s.call("diff_add", id=dt, body="re-ran: cargo test ok", reviews=d2)
+    ev = ev_full.split()[0]
+    expect("evidence-only records a marked row against the newest patch", ev_full, f"({dt} round 2)")
+    expect("diff_list marks the evidence-only row and names the patch", s.call("diff_list", id=dt), f"{ev} evidence-only -> {d2}")
+    expect("diff_get labels an evidence-only row as not a diff", s.call("diff_get", id=ev, full=True), f"{ev} {dt} round 2 evidence-only, reviews {d2}", "not a diff", "re-ran: cargo test ok")
+    expect("task_get still shows the patch, not the evidence row", s.call("task_get", id=dt), f"diff: {d2} round 2 ")
+    expect("evidence-only refuses an empty body", refusal_text(lambda: s.call("diff_add", id=dt, body=" \n ", reviews=d2)), "the evidence is empty")
+    expect("evidence-only refuses another evidence-only row", refusal_text(lambda: s.call("diff_add", id=dt, body="re-ran", reviews=ev)), f"{ev} is evidence-only, not a patch")
+    expect("evidence-only refuses a superseded patch and names the newest", refusal_text(lambda: s.call("diff_add", id=dt, body="re-ran", reviews=d1)), f"{d1} is not the newest patch of {dt}", d2)
+    other = s.call("task_add", title="another row").split()[0]
+    outside = s.call("diff_add", id=other, body="other patch").split()[0]
+    expect("evidence-only refuses a diff recorded on another row", refusal_text(lambda: s.call("diff_add", id=dt, body="re-ran", reviews=outside)), f"{outside} is recorded on {other}, not on {dt}")
+    expect("evidence-only refuses a missing diff", refusal_text(lambda: s.call("diff_add", id=dt, body="re-ran", reviews="D9999")), "no such diff D9999")
     expect("diff_add refuses an unknown task", refusal_text(lambda: s.call("diff_add", id="T9999", body="x")), "no such task T9999")
     expect("diff_add refuses an epic id", refusal_text(lambda: s.call("diff_add", id=epic_id, body="x")), "is an epic id")
     expect("diff_get refuses a task id", refusal_text(lambda: s.call("diff_get", id=dt)), "not a diff id")
@@ -584,6 +597,24 @@ def main():
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"a resubmission files no second review row :: {len(kids)} child")
     expect("the existing review row is told the new diff", s.call("task_get", id=rv), f"{gp} submitted again: newest diff {d2} (round 2)")
+
+    # A re-run round reaches review on evidence, and the brief names the patch to read.
+    s.call("task_update", id=gp, status="needs_fix")
+    s.call("task_update", id=gp, status="working")
+    ev = s.call("diff_add", id=gp, body="re-ran: cargo test ok", reviews=d2).split()[0]
+    moved = s.call("task_update", id=gp, status="review", report="re-ran the gates")
+    expect("evidence-only satisfies the gate on a resubmission", moved, f"{gp} review #", f"(review row {rv})")
+    expect("the resubmission note names the evidence row and the patch", s.call("task_get", id=rv), f"{gp} submitted again: no new diff; {ev} is evidence-only for {d2}", f"(round 2)", f"the diff under review is {d2}")
+    # A row whose first submission is evidence-only: the review brief names that case.
+    ep = s.call("task_add", title="evidence probe").split()[0]
+    s.call("task_claim", id=ep)
+    e1 = s.call("diff_add", id=ep, body="the first patch").split()[0]
+    s.call("task_update", id=ep, status="needs_fix")
+    s.call("task_update", id=ep, status="working")
+    e2 = s.call("diff_add", id=ep, body="re-ran: all green", reviews=e1).split()[0]
+    moved = s.call("task_update", id=ep, status="review", report="the evidence report")
+    er = moved.split("(review row ")[1].rstrip(")")
+    expect("the first evidence-only brief says so and copies the evidence verbatim", s.call("task_get", id=er, full=True), f"No new diff this round: {e2} is evidence-only for {e1}", f"the diff under review is {e1}", "Evidence (verbatim):", "all green", "evidence-only this round; it is not a patch", "the evidence report")
 
     expect("session list", s.call("session_list"), "session")
     # Change the board stamp behind an already initialized MCP process. The

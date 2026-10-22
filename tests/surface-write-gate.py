@@ -134,7 +134,7 @@ def review_probe(binary, env):
         reply = call('task_update', id=task, status='review', report='must not land')
         diagnostic = json.dumps(reply)
         assert failed(reply), f'no-diff review accepted: {reply}'
-        assert f'{task} cannot move to review: no diff recorded since it was last claimed' in diagnostic, reply
+        assert f'{task} cannot move to review: no diff or evidence-only submission recorded since it was last claimed' in diagnostic, reply
         assert f'agentboard diff add {task}' in diagnostic, reply
         assert f'diff_add id={task}' in diagnostic, reply
         after = call('task_get', id=task, full=True)
@@ -147,6 +147,20 @@ def review_probe(binary, env):
 
 
 def run_checks(review_binary=None):
+    # The board never reads a diff body, so the reviewer's rule is the only guard that
+    # a prose body is not a diff. Pin the sentence: deleting it must fail this suite.
+    protocol = (ROOT / 'PROTOCOL.md').read_text()
+    assert 'a plain diff whose body is prose is not admissible' in protocol, \
+        'the prose-is-inadmissible reviewer rule is missing from PROTOCOL.md'
+    # The pre-evidence workaround let a prose body stand for a round with no tree
+    # change. It contradicts the rule above; deleting the replacement must not bring
+    # it back in either the protocol or the manager's reference.
+    for name in ('PROTOCOL.md',
+                 'skills/agentboard-manager/references/diff-submission.md'):
+        doc = (ROOT / name).read_text()
+        for phrase in ('records a body saying so', 'stated no-change reason'):
+            assert phrase not in doc, \
+                f'the old no-change workaround is back in {name}: {phrase!r}'
     with tempfile.TemporaryDirectory(prefix='agentboard-write-gate-') as directory:
         scratch = pathlib.Path(directory)
         tree = scratch / 'source'
@@ -209,7 +223,7 @@ def run_checks(review_binary=None):
                 # Delete only the review gate, retaining the surface guard.
                 gatepath = f'src/store/{backend}/tasks.rs'
                 gatesource = (tree / gatepath).read_text()
-                deleted = gatesource.replace('if submit && !diff_since_claim(', 'if false && !diff_since_claim(')
+                deleted = gatesource.replace('if submit && submission.is_none() {', 'if false {')
                 assert deleted != gatesource
                 (tree / gatepath).write_text(deleted)
                 (tree / 'src/ident.rs').write_text(original['src/ident.rs'])

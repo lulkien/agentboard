@@ -199,6 +199,18 @@ fn init_surface(conn: &Connection) -> Result<(), String> {
             conn.execute_batch("ALTER TABLE board_stamp ADD COLUMN surface_tools INTEGER")
                 .map_err(|e| e.to_string())?;
         }
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(diffs)")
+            .map_err(|e| e.to_string())?;
+        let diff_cols = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| e.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        if !diff_cols.iter().any(|c| c == "reviews") {
+            conn.execute_batch("ALTER TABLE diffs ADD COLUMN reviews INTEGER")
+                .map_err(|e| e.to_string())?;
+        }
         conn.execute(
             "UPDATE board_stamp SET surface_tools=? WHERE id=1 AND surface_tools IS NULL",
             [crate::ident::surface_tools()],
@@ -397,8 +409,14 @@ impl Board for SqliteBoard {
         render::brief(since_min)
     }
 
-    fn diff_add(&self, actor: &str, task: i64, body: &str) -> Result<String, String> {
-        diffs::diff_add(actor, task, body)
+    fn diff_add(
+        &self,
+        actor: &str,
+        task: i64,
+        body: &str,
+        reviews: Option<i64>,
+    ) -> Result<String, String> {
+        diffs::diff_add(actor, task, body, reviews)
     }
     fn diff_get(&self, id: i64, full: bool) -> Result<String, String> {
         diffs::diff_get(id, full)
@@ -557,6 +575,52 @@ mod tests {
                 .unwrap(),
             crate::ident::GENERATION
         );
+    }
+
+    #[test]
+    fn reviews_backfill_records_evidence_without_changing_generation() {
+        let c = Connection::open_in_memory().unwrap();
+        // A v2 board before the additive column. Drop the preceding comma too, or
+        // the batch is not valid SQL.
+        c.execute_batch(&SCHEMA.replace(",\n  reviews    INTEGER\n", "\n"))
+            .unwrap();
+        let generation = |c: &Connection| {
+            c.query_row("SELECT generation FROM board_stamp WHERE id=1", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        let before = generation(&c);
+        super::init_surface(&c).unwrap();
+        super::init_surface(&c).unwrap();
+        assert_eq!(
+            generation(&c),
+            before,
+            "the additive column moves no generation"
+        );
+        c.execute(
+            "INSERT INTO tasks(title,created_at,updated_at) VALUES('t',1,1)",
+            [],
+        )
+        .unwrap();
+        super::diffs::record(&c, "a", 1, "the patch", None).unwrap();
+        super::log_event(&c, super::Subject::Task(1), "a", "claim", "").unwrap();
+        super::diffs::record(&c, "a", 1, "re-ran: cargo test ok", Some(1)).unwrap();
+        let reviews: Option<i64> = c
+            .query_row("SELECT reviews FROM diffs WHERE id=2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(reviews, Some(1), "the backfilled column stores the marker");
+        let newest = super::diffs::newest_diff(&c, 1).unwrap().unwrap();
+        assert_eq!(
+            (newest.id, newest.reviews),
+            (1, None),
+            "evidence is never the patch"
+        );
+        let s = super::diffs::submission_since_claim(&c, 1)
+            .unwrap()
+            .unwrap();
+        assert!(s.evidence_only());
+        assert_eq!((s.record.id, s.diff.id), (2, 1));
     }
 
     #[test]

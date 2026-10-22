@@ -335,6 +335,11 @@ run $B --db "$DF" diff add nonsense --body x;                          check "di
 run $B --db "$DF" diff add E1 --body x;                                check "diff add: an epic id exits 1 with the epic hint" $([ $rc -eq 1 ] && has "$err" "E1 is an epic id" && echo 0 || echo 1)
 run $B --db "$DF" diff add T1;                                         check "diff add: no body source exits 1" $([ $rc -eq 1 ] && has "$err" "--body" && echo 0 || echo 1)
 run $B --db "$DF" diff add T1 --body-file /nonexistent/x;              check "diff add: unreadable --body-file exits 1" $([ $rc -eq 1 ] && has "$err" "reading /nonexistent/x" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1 --evidence-only --body "ran it";         check "diff add: --evidence-only without --reviews exits 1, names --reviews" $([ $rc -eq 1 ] && has "$err" "--reviews" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1 --reviews D1 --body "ran it";            check "diff add: --reviews without --evidence-only exits 1, names --evidence-only" $([ $rc -eq 1 ] && has "$err" "--evidence-only" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1 --evidence-only --reviews D1 --body $'   \n  '; check "diff add: evidence-only with a whitespace body exits 1, says the evidence is empty" $([ $rc -eq 1 ] && has "$err" "the evidence is empty (whitespace only)" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1 --evidence-only --reviews D99 --body x;   check "diff add: evidence naming a missing diff exits 1" $([ $rc -eq 1 ] && has "$err" "no such diff D99" && echo 0 || echo 1)
+run $B --db "$DF" diff add T1 --evidence-only --reviews nonsense --body x; check "diff add: a bad --reviews id exits 1" $([ $rc -eq 1 ] && has "$err" "bad diff id" && echo 0 || echo 1)
 run $B --db "$DF" diff get D99;                                        check "diff get: unknown diff exits 1" $([ $rc -eq 1 ] && has "$err" "no such diff D99" && echo 0 || echo 1)
 run $B --db "$DF" diff get T1;                                         check "diff get: a task id exits 1 with a hint" $([ $rc -eq 1 ] && has "$err" "not a diff id" && echo 0 || echo 1)
 run $B --db "$DF" diff get nonsense;                                   check "diff get: a bad id exits 1" $([ $rc -eq 1 ] && has "$err" "bad diff id" && echo 0 || echo 1)
@@ -378,6 +383,46 @@ run $B --db "$G" diff add T3 --body "fix diff"; run $B --db "$G" review T3 "fixe
 check "autofile: a parented row moved to review files nothing" $([ $rc -eq 0 ] && ! has "$out" "review row" && echo 0 || echo 1)
 run $B --db "$G" children T3;                                          check "autofile: and still has no children after" $(has "$out" "has no children" && echo 0 || echo 1)
 run $B --db "$G" ls --limit 50;                                        check "autofile: nothing beyond T1..T3 exists" $(! has "$out" "T4" && echo 0 || echo 1)
+
+# evidence-only: a re-run round with no tree change reaches review without a fake diff
+run $B --db "$G" status T3 needs_fix "re-run the gates"; run $B --db "$G" status T3 working
+run $B --db "$G" review T3 "no change"
+check "evidence: a re-run round with no new diff is still refused" $([ $rc -eq 1 ] && has "$err" "agentboard diff add T3 --evidence-only --reviews" && echo 0 || echo 1)
+run $B --db "$G" diff add T3 --evidence-only --reviews D4 --body $'re-ran: cargo test ok\n-- no tree change --'
+check "evidence: a diff naming the newest patch is recorded (D5)" $([ $rc -eq 0 ] && [ "$out" = "D5 (T3 round 2)" ] && echo 0 || echo 1)
+run $B --db "$G" diff ls T3
+check "evidence: the listing marks it evidence-only and names the patch" $([ $rc -eq 0 ] && [[ "$(head -1 <<<"$out")" =~ ^D5\ evidence-only\ -\>\ D4\ [0-9]+s\ 2\ lines$ ]] && [[ "$(tail -n +2 <<<"$out" | head -1)" =~ ^D4\ round\ 1 ]] && echo 0 || echo 1)
+run $B --db "$G" diff get D5 --full
+check "evidence: diff get labels it not a diff and points at the patch" $(has "$out" "D5 T3 round 2 evidence-only, reviews D4" && has "$out" "not a diff" && has "$out" "agentboard diff get D4" && has "$out" "re-ran: cargo test ok" && echo 0 || echo 1)
+run $B --db "$G" get T3;                                               check "evidence: get still shows the patch, never the evidence row" $(has "$out" "diff: D4 round 1 " && ! has "$out" "diff: D5" && echo 0 || echo 1)
+run $B --db "$G" review T3 "re-ran two gates";                          check "evidence: the same move to review now succeeds" $([ $rc -eq 0 ] && has "$out" "T3 review #" && echo 0 || echo 1)
+run $B --db "$G" status T3 needs_fix "again"; run $B --db "$G" status T3 working
+run $B --db "$G" diff add T3 --evidence-only --reviews D4 --body "re-ran: docs only"
+run $B --db "$G" diff add T3 --body "the real patch"
+run $B --db "$G" review T3 "patch and evidence"
+check "evidence: a real diff recorded later is preferred to the evidence row" $([ $rc -eq 0 ] && has "$out" "T3 review #" && echo 0 || echo 1)
+run $B --db "$G" get T3;                                               check "evidence: get names the real patch as the newest diff" $(has "$out" "diff: D7 round 3 " && echo 0 || echo 1)
+run $B --db "$G" add outside; run $B --db "$G" diff add T4 --body "elsewhere"
+run $B --db "$G" diff add T3 --evidence-only --reviews D8 --body "re-ran: ok"
+check "evidence: naming a diff recorded on another row is refused" $([ $rc -eq 1 ] && has "$err" "D8 is recorded on T4, not on T3" && echo 0 || echo 1)
+run $B --db "$G" diff add T3 --evidence-only --reviews D1 --body "re-ran: ok"
+check "evidence: naming an ancestor's patch is refused (no re-parent)" $([ $rc -eq 1 ] && has "$err" "D1 is recorded on T1, not on T3" && echo 0 || echo 1)
+run $B --db "$G" diff add T3 --evidence-only --reviews D5 --body "re-ran: ok"
+check "evidence: naming an evidence-only row is refused" $([ $rc -eq 1 ] && has "$err" "D5 is evidence-only, not a patch" && echo 0 || echo 1)
+run $B --db "$G" diff add T3 --evidence-only --reviews D4 --body "re-ran: ok"
+check "evidence: naming a superseded patch is refused and names the newest" $([ $rc -eq 1 ] && has "$err" "D4 is not the newest patch of T3" && has "$err" "D7" && echo 0 || echo 1)
+run $B --db "$G" add re-run --path /tmp/agentboard-gate; run $B --db "$G" claim T5
+run $B --db "$G" diff add T5 --body "the first patch"
+run $B --db "$G" status T5 needs_fix "re-run"; run $B --db "$G" status T5 working
+run $B --db "$G" diff add T5 --evidence-only --reviews D9 --body $'re-ran: cargo test ok\nall green'
+run $B --db "$G" review T5 "re-ran"; run $B --db "$G" children T5
+check "evidence: a first submission by evidence files the review row with D<n>" $([ "$(grep -c . <<<"$out")" = 1 ] && has "$out" "T6 rdy" && echo 0 || echo 1)
+run $B --db "$G" get T6 --full
+check "evidence: the first brief says which case and copies the evidence verbatim" $(has "$out" "No new diff this round: D10 is evidence-only for D9" && has "$out" "the diff under review is D9" && ! has "$out" "which stays the diff under review" && has "$out" "Evidence (verbatim):" && has "$out" "all green" && has "$out" "evidence-only this round; it is not a patch" && echo 0 || echo 1)
+run $B --db "$G" status T5 needs_fix "again"; run $B --db "$G" status T5 working
+run $B --db "$G" diff add T5 --evidence-only --reviews D9 --body "re-ran again"
+run $B --db "$G" review T5 "again"; run $B --db "$G" get T6
+check "evidence: a resubmission notes the evidence row and the patch to read" $(has "$out" "T5 submitted again: no new diff; D11 is evidence-only for D9" && has "$out" "the diff under review is D9" && echo 0 || echo 1)
 
 # a board file from before epics is refused, untouched, with the way out (sqlite only;
 # the surreal build's wrong-kind and schema refusals are phase (n)/(o) of surreal.sh)

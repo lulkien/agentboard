@@ -131,8 +131,14 @@ pub struct EpicListArgs {
 pub struct DiffAddArgs {
     /// Task id the diff belongs to, T7 or 7.
     pub id: String,
-    /// The diff text, stored verbatim. Whitespace only is refused.
+    /// The diff text, stored verbatim. Whitespace only is refused. With reviews, the
+    /// evidence for a re-run round: what you ran and its output, never a patch.
     pub body: String,
+    /// Evidence-only submission: the newest patch of this row, D26. Omit for a normal
+    /// diff. The named diff must be a patch recorded on this row and must be its newest
+    /// patch (no re-parent); the gate then accepts this round without a new patch.
+    #[serde(default)]
+    pub reviews: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -467,7 +473,7 @@ impl Board {
 
     #[tool(
         name = "diff_add",
-        description = "Record what you changed for a task, verbatim: a diff row, append-only, round = the task's reopen count + 1. A reviewer reads only the newest diff, so record the complete change each time. Whitespace-only is refused. Returns D<n> (T<n> round <r>).",
+        description = "Record what you changed for a task, verbatim: a diff row, append-only, round = the task's reopen count + 1. A reviewer reads only the newest patch, so record the complete change each time. Whitespace-only is refused. A re-run round whose tree did not change records evidence instead: pass reviews=\"D<n>\" naming the newest patch of this row (the body is then evidence, never a patch; a superseded patch, a diff on another row and an evidence-only row are refused). Returns D<n> (T<n> round <r>).",
         annotations(title = "Add diff", read_only_hint = false, destructive_hint = false)
     )]
     async fn diff_add(
@@ -475,13 +481,19 @@ impl Board {
         Parameters(a): Parameters<DiffAddArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let id = store::parse_id(&a.id).map_err(err)?;
+        let reviews = a
+            .reviews
+            .as_deref()
+            .map(store::parse_diff_id)
+            .transpose()
+            .map_err(err)?;
         let actor = actor();
-        run!(blocking(move || store::diff_add(&actor, id, &a.body)).await)
+        run!(blocking(move || store::diff_add(&actor, id, &a.body, reviews)).await)
     }
 
     #[tool(
         name = "diff_get",
-        description = "One diff: task, round, age and body. Only the newest diff of a task is reviewed (`diff_list` shows which). A long body ends in a `[truncated ...]` marker; full=true returns it whole and verbatim.",
+        description = "One diff: task, round, age and body. Only the newest patch of a task is reviewed (`diff_list` shows which). An evidence-only row is labelled as such and points at the diff it re-runs; it is not a patch. A long body ends in a `[truncated ...]` marker; full=true returns it whole and verbatim.",
         annotations(title = "Get diff", read_only_hint = true)
     )]
     async fn diff_get(
@@ -494,7 +506,7 @@ impl Board {
 
     #[tool(
         name = "diff_list",
-        description = "A task's diffs (T7), or every diff of an epic's tasks (E3), newest first, one line each: D12 round 2 3m 184 lines. Only the newest diff of a task is reviewed. `(no diffs)` when there are none.",
+        description = "A task's diffs (T7), or every diff of an epic's tasks (E3), newest first, one line each: D12 round 2 3m 184 lines. An evidence-only row reads D13 evidence-only -> D12: it is not a patch. Only the newest patch of a task is reviewed. `(no diffs)` when there are none.",
         annotations(title = "List diffs", read_only_hint = true)
     )]
     async fn diff_list(

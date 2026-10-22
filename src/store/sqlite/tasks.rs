@@ -5,7 +5,7 @@ use super::{
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
-    MAX_CHAIN, cap_cascade_note, cap_note, cap_refusal, cap_skipped_note, cascades_to,
+    MAX_CHAIN, Submission, cap_cascade_note, cap_note, cap_refusal, cap_skipped_note, cascades_to,
     chain_refusal, gate_refusal, held_text, norm_branch, normalize_path, reopen_after,
     review_description, review_filed_note, review_goal, review_resubmitted_note, review_title,
     workdir_text,
@@ -347,29 +347,16 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
     Err("claim contention: retry".to_owned().into())
 }
 
-/// Whether a diff was recorded for `id` after its newest claim event. Both are read from
-/// the events table in `seq` order, so a diff and a claim in the same millisecond still
-/// sort; no claim at all means any diff counts.
-fn diff_since_claim(conn: &rusqlite::Connection, id: i64) -> Result<bool, String> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM events WHERE task_id=?1 AND kind='diff' AND seq > COALESCE((SELECT MAX(seq) FROM events WHERE task_id=?1 AND kind='claim'),0))",
-        params![id],
-        |r| r.get(0),
-    )
-    .map_err(|e| e.to_string())
-}
-
 /// Files the review row for a parentless task that just moved to review, or notes the
-/// new diff on the one already filed. Returns the review row's id. Runs inside
-/// `apply`'s write transaction, after the gate has proved a diff exists.
+/// new submission on the one already filed. Returns the review row's id. Runs inside
+/// `apply`'s write transaction, after the gate has proved a submission exists.
 fn file_review(
     conn: &rusqlite::Connection,
     actor: &str,
     implement: &super::Row,
     report: Option<&str>,
+    submission: &Submission,
 ) -> Result<i64, String> {
-    let diff =
-        super::diffs::newest_diff(conn, implement.id)?.ok_or_else(|| gate_refusal(implement.id))?;
     // A parentless row's only children are its review rows (fix rows hang off those), so
     // the link is the parent alone: renaming the row between rounds must not hide it.
     let title = review_title(&implement.title);
@@ -382,7 +369,7 @@ fn file_review(
         .optional()
         .map_err(|e| e.to_string())?;
     if let Some(review) = existing {
-        let note = review_resubmitted_note(implement.id, &diff);
+        let note = review_resubmitted_note(implement.id, submission);
         log_event(conn, Subject::Task(review), actor, "note", &note)?;
         return Ok(review);
     }
@@ -391,8 +378,8 @@ fn file_review(
         "INSERT INTO tasks(title,description,goal,path,branch,status,priority,epic_id,parent_id,created_at,updated_at) VALUES(?,?,?,?,?,'ready',?,?,?,?,?)",
         params![
             title,
-            review_description(implement, report, &diff),
-            review_goal(implement.id, diff.id),
+            review_description(implement, report, submission),
+            review_goal(implement.id, submission),
             implement.path,
             implement.branch,
             implement.priority,
@@ -425,10 +412,16 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         None => cur.status.as_str(),
     };
     let moved = status != cur.status;
-    // A move into review needs a diff recorded since the last claim: refused before
-    // anything is written, so a reviewer never gets an empty review.
+    // A move into review needs a submission recorded since the last claim (a diff, or
+    // evidence for a re-run round): refused before anything is written, so a reviewer
+    // never gets an empty review.
     let submit = moved && status == "review";
-    if submit && !diff_since_claim(&tx, id)? {
+    let submission = if submit {
+        super::diffs::submission_since_claim(&tx, id)?
+    } else {
+        None
+    };
+    if submit && submission.is_none() {
         return Err(gate_refusal(id));
     }
     // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
@@ -543,7 +536,12 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     // Only a parentless row files a review row: a fix row or a review row never does.
     let review = if submit && cur.parent_id.is_none() {
         let report = p.report.or(cur.report.as_deref());
-        Some(file_review(&tx, actor, &cur, report)?)
+        match submission.as_ref() {
+            Some(submission) => Some(file_review(&tx, actor, &cur, report, submission)?),
+            // The gate refused above; keeping this branch means deleting the gate
+            // still lets the status move, which the mutation proof checks.
+            None => None,
+        }
     } else {
         None
     };
@@ -675,7 +673,7 @@ pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
 mod tests {
     use super::super::SCHEMA;
     use super::*;
-    use crate::store::sqlite::diffs::record;
+    use crate::store::sqlite::diffs::{check_evidence, record, submission_since_claim};
 
     fn board() -> rusqlite::Connection {
         let c = rusqlite::Connection::open_in_memory().unwrap();
@@ -693,35 +691,106 @@ mod tests {
         c
     }
 
+    fn patch(c: &rusqlite::Connection, id: i64) -> Submission {
+        Submission::patch(super::super::diffs::newest_diff(c, id).unwrap().unwrap())
+    }
+
     #[test]
-    fn the_gate_wants_a_diff_after_the_newest_claim_event() {
+    fn the_gate_wants_a_submission_after_the_newest_claim_event() {
         let c = board();
-        assert!(!diff_since_claim(&c, 1).unwrap(), "no diff at all");
-        record(&c, "a", 1, "first").unwrap();
         assert!(
-            diff_since_claim(&c, 1).unwrap(),
+            submission_since_claim(&c, 1).unwrap().is_none(),
+            "no submission at all"
+        );
+        record(&c, "a", 1, "first", None).unwrap();
+        assert!(
+            submission_since_claim(&c, 1).unwrap().is_some(),
             "no claim yet: any diff counts"
         );
         log_event(&c, Subject::Task(1), "a", "claim", "").unwrap();
         assert!(
-            !diff_since_claim(&c, 1).unwrap(),
+            submission_since_claim(&c, 1).unwrap().is_none(),
             "the old diff predates the new claim"
         );
-        record(&c, "a", 1, "second").unwrap();
-        assert!(diff_since_claim(&c, 1).unwrap());
+        record(&c, "a", 1, "second", None).unwrap();
+        assert!(submission_since_claim(&c, 1).unwrap().is_some());
         log_event(&c, Subject::Task(1), "a", "claim", "").unwrap();
         assert!(
-            !diff_since_claim(&c, 1).unwrap(),
+            submission_since_claim(&c, 1).unwrap().is_none(),
             "every later claim resets it"
         );
     }
 
     #[test]
+    fn evidence_only_requires_the_newest_patch_of_the_same_row() {
+        let c = board();
+        record(&c, "a", 1, "the patch", None).unwrap();
+        // implement T1 -> review T2 -> fix T3
+        c.execute(
+            "INSERT INTO tasks(title,parent_id,created_at,updated_at) VALUES('rev',1,1,1)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO tasks(title,parent_id,created_at,updated_at) VALUES('fix',2,1,1)",
+            [],
+        )
+        .unwrap();
+        // An ancestor's patch is in the chain but not on this row: no re-parent.
+        let err = check_evidence(&c, 3, 1).unwrap_err();
+        assert!(
+            err.contains("D1 is recorded on T1, not on T3") && err.contains("no re-parent"),
+            "{err}"
+        );
+        record(&c, "a", 3, "the fix patch", None).unwrap();
+        check_evidence(&c, 3, 2).unwrap();
+        // A claim after the patch makes the evidence row this round's submission;
+        // without it the gate would prefer the patch itself.
+        log_event(&c, Subject::Task(3), "a", "claim", "").unwrap();
+        record(&c, "a", 3, "re-ran: cargo test ok", Some(2)).unwrap();
+        let s = submission_since_claim(&c, 3).unwrap().unwrap();
+        assert!(s.evidence_only());
+        assert_eq!((s.record.id, s.diff.id), (3, 2));
+        // Another evidence-only row is not a patch.
+        let err = check_evidence(&c, 3, 3).unwrap_err();
+        assert!(
+            err.contains("D3 is evidence-only, not a patch") && err.contains("--reviews"),
+            "{err}"
+        );
+        // A newer patch supersedes D2.
+        record(&c, "a", 3, "the real patch", None).unwrap();
+        let err = check_evidence(&c, 3, 2).unwrap_err();
+        assert!(
+            err.contains("D2 is not the newest patch of T3") && err.contains("D4"),
+            "{err}"
+        );
+        // An unrelated row's diff is refused by name too.
+        c.execute(
+            "INSERT INTO tasks(title,created_at,updated_at) VALUES('other',1,1)",
+            [],
+        )
+        .unwrap();
+        record(&c, "a", 4, "other patch", None).unwrap();
+        let err = check_evidence(&c, 3, 5).unwrap_err();
+        assert!(err.contains("D5 is recorded on T4, not on T3"), "{err}");
+        assert!(
+            check_evidence(&c, 3, 99)
+                .unwrap_err()
+                .contains("no such diff D99")
+        );
+        // A plain diff recorded later is still preferred; the patch is the artifact.
+        record(&c, "a", 3, "another plain patch", None).unwrap();
+        let s = submission_since_claim(&c, 3).unwrap().unwrap();
+        assert!(!s.evidence_only());
+        assert_eq!((s.record.id, s.diff.id), (6, 6));
+    }
+
+    #[test]
     fn a_review_row_is_filed_once_and_a_resubmission_only_notes_it() {
         let c = board();
-        record(&c, "a", 1, "d1").unwrap();
+        record(&c, "a", 1, "d1", None).unwrap();
         let implement = fetch(&c, 1).unwrap();
-        let review = file_review(&c, "a", &implement, Some("the report")).unwrap();
+        let review = file_review(&c, "a", &implement, Some("the report"), &patch(&c, 1)).unwrap();
         assert_eq!(review, 2);
         let r = fetch(&c, 2).unwrap();
         assert_eq!(
@@ -735,8 +804,11 @@ mod tests {
         assert!(r.assignee.is_none());
         assert!(r.description.contains("the report") && r.description.contains("D1"));
         let before = r.description.clone();
-        record(&c, "a", 1, "d2").unwrap();
-        assert_eq!(file_review(&c, "a", &implement, Some("again")).unwrap(), 2);
+        record(&c, "a", 1, "d2", None).unwrap();
+        assert_eq!(
+            file_review(&c, "a", &implement, Some("again"), &patch(&c, 1)).unwrap(),
+            2
+        );
         let n: i64 = c
             .query_row("SELECT COUNT(*) FROM tasks WHERE parent_id=1", [], |r| {
                 r.get(0)
@@ -760,9 +832,12 @@ mod tests {
         // Renamed between rounds: still the same review row, and the note lands on it.
         c.execute("UPDATE tasks SET title='impl renamed' WHERE id=1", [])
             .unwrap();
-        record(&c, "a", 1, "d3").unwrap();
+        record(&c, "a", 1, "d3", None).unwrap();
         let renamed = fetch(&c, 1).unwrap();
-        assert_eq!(file_review(&c, "a", &renamed, None).unwrap(), 2);
+        assert_eq!(
+            file_review(&c, "a", &renamed, None, &patch(&c, 1)).unwrap(),
+            2
+        );
         let n: i64 = c
             .query_row("SELECT COUNT(*) FROM tasks WHERE parent_id=1", [], |r| {
                 r.get(0)
@@ -781,6 +856,9 @@ mod tests {
         // A dropped review row is not reused: the next submission files a fresh one.
         c.execute("UPDATE tasks SET status='dropped' WHERE id=2", [])
             .unwrap();
-        assert_eq!(file_review(&c, "a", &renamed, None).unwrap(), 3);
+        assert_eq!(
+            file_review(&c, "a", &renamed, None, &patch(&c, 1)).unwrap(),
+            3
+        );
     }
 }

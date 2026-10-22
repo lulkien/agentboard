@@ -59,6 +59,33 @@ pub struct DiffRow {
     pub round: i64,
     pub body: String,
     pub created_at: i64,
+    /// `Some(diff)` marks an evidence-only submission for a re-run round: the body
+    /// is what was run, never a patch. `None` is a normal diff.
+    pub reviews: Option<i64>,
+}
+
+/// One round's submission: the row the coder recorded, and the patch a reviewer
+/// must read. For a normal diff the two are the same row; for an evidence-only
+/// submission `record` is the evidence and `diff` is the earlier patch it names.
+#[derive(Clone, Debug)]
+pub struct Submission {
+    pub record: DiffRow,
+    pub diff: DiffRow,
+}
+
+impl Submission {
+    /// A normal diff is its own submission.
+    pub fn patch(d: DiffRow) -> Self {
+        Self {
+            record: d.clone(),
+            diff: d,
+        }
+    }
+
+    /// Whether this round recorded evidence instead of a new patch.
+    pub fn evidence_only(&self) -> bool {
+        self.record.reviews.is_some()
+    }
 }
 
 /// One epic as stored.
@@ -172,11 +199,58 @@ pub fn cap_refusal(id: i64) -> String {
 
 // ---- the review gate and the auto-filed review row ---------------------------------
 
-/// The refusal for a move into `review` with no diff recorded since the last claim.
+/// The refusal for a move into `review` with no submission since the last claim.
 pub fn gate_refusal(id: i64) -> String {
     let t = short(id);
     format!(
-        "{t} cannot move to review: no diff recorded since it was last claimed; record one first: agentboard diff add {t} --body-file - (diff_add id={t}); a change-free task records a body saying so"
+        "{t} cannot move to review: no diff or evidence-only submission recorded since it was last claimed; record one first: agentboard diff add {t} --body-file - (diff_add id={t}); a round whose tree did not change records evidence for the newest patch of this row: agentboard diff add {t} --evidence-only --reviews D<n> --body-file - (diff_add id={t} reviews=D<n>)"
+    )
+}
+
+/// The refusal when `--evidence-only` names no diff.
+pub fn evidence_needs_reviews(id: i64) -> String {
+    let t = short(id);
+    format!(
+        "diff add --evidence-only {t}: name the newest patch of this row with --reviews D<n> (MCP: reviews=\"D<n>\")"
+    )
+}
+
+/// The refusal when `--reviews` arrives without `--evidence-only`.
+pub fn reviews_needs_evidence(id: i64) -> String {
+    let t = short(id);
+    format!(
+        "diff add {t} --reviews: --reviews belongs to an evidence-only submission; pass --evidence-only too (MCP: the reviews argument already means evidence-only), or omit it for a normal diff"
+    )
+}
+
+/// The refusal when an evidence-only submission names another evidence-only row.
+pub fn evidence_not_a_patch(task: i64, diff: i64) -> String {
+    format!(
+        "diff add --evidence-only {}: {} is evidence-only, not a patch; name the newest patch of this row with --reviews D<n>",
+        short(task),
+        short_diff(diff)
+    )
+}
+
+/// The refusal when an evidence-only submission names a diff recorded on another row.
+pub fn evidence_not_on_row(task: i64, diff: i64, owner: i64) -> String {
+    format!(
+        "diff add --evidence-only {}: {} is recorded on {}, not on {}; evidence names the newest patch of the submitting row (same row, no re-parent)",
+        short(task),
+        short_diff(diff),
+        short(owner),
+        short(task)
+    )
+}
+
+/// The refusal when an evidence-only submission names a superseded patch.
+pub fn evidence_stale(task: i64, diff: i64, newest: i64) -> String {
+    format!(
+        "diff add --evidence-only {}: {} is not the newest patch of {}; the newest patch is {} (name it with --reviews D<n>)",
+        short(task),
+        short_diff(diff),
+        short(task),
+        short_diff(newest)
     )
 }
 
@@ -185,35 +259,67 @@ pub fn review_title(implement_title: &str) -> String {
     format!("Review {}", clip(implement_title, 80))
 }
 
-/// The description of a new review row: the implement row, its newest diff and its report verbatim.
-pub fn review_description(implement: &TaskRow, report: Option<&str>, diff: &DiffRow) -> String {
-    let d = short_diff(diff.id);
+/// The description of a new review row: the implement row, the submission and the
+/// report verbatim. The first line names which case this round is, so the reviewer
+/// never has to guess which row to read.
+pub fn review_description(implement: &TaskRow, report: Option<&str>, s: &Submission) -> String {
+    let d = short_diff(s.diff.id);
+    let report = report.filter(|r| !r.trim().is_empty()).unwrap_or("(none)");
+    if s.evidence_only() {
+        return format!(
+            "Review of {} \"{}\" (round {}).\nNo new diff this round: {} is evidence-only for {d}; the diff under review is {d}; read only {d}: `agentboard diff get {d} --full` or diff_get id={d} full=true.\n\nEvidence (verbatim):\n{}\n\nImplement report (verbatim):\n{report}",
+            short(implement.id),
+            implement.title,
+            s.record.round,
+            short_diff(s.record.id),
+            s.record.body
+        );
+    }
     format!(
-        "Review of {} \"{}\" (round {}).\nNewest diff: {d}; read only this one: `agentboard diff get {d} --full` or diff_get id={d} full=true.\n\nImplement report (verbatim):\n{}",
+        "Review of {} \"{}\" (round {}).\nNewest diff: {d}; read only this one: `agentboard diff get {d} --full` or diff_get id={d} full=true.\n\nImplement report (verbatim):\n{report}",
         short(implement.id),
         implement.title,
-        diff.round,
-        report.filter(|r| !r.trim().is_empty()).unwrap_or("(none)")
+        s.diff.round
     )
 }
 
 /// What the reviewer does with a review row.
-pub fn review_goal(implement: i64, diff: i64) -> String {
+pub fn review_goal(implement: i64, s: &Submission) -> String {
+    let d = short_diff(s.diff.id);
+    let which = if s.evidence_only() {
+        format!(
+            "Read only {d}, the diff under review ({} is evidence-only this round; it is not a patch).",
+            short_diff(s.record.id)
+        )
+    } else {
+        format!(
+            "Read only the newest patch of {} (now {d}; a resubmission adds a newer one).",
+            short(implement)
+        )
+    };
     format!(
-        "Read only the newest diff of {} (now {}; a resubmission adds a newer one). Give the verdict in this row's report. Findings: file a fix row under this row (parent = this row). Clean: close this row done. Close the fix row and this review row yourself; never close {}, the manager does.",
-        short(implement),
-        short_diff(diff),
+        "{which} Give the verdict in this row's report. Findings: file a fix row under this row (parent = this row). Clean: close this row done. Close the fix row and this review row yourself; never close {}, the manager does.",
         short(implement)
     )
 }
 
 /// The note on an existing review row when its implement row is submitted again.
-pub fn review_resubmitted_note(implement: i64, diff: &DiffRow) -> String {
+pub fn review_resubmitted_note(implement: i64, s: &Submission) -> String {
+    if s.evidence_only() {
+        return format!(
+            "{} submitted again: no new diff; {} is evidence-only for {} (round {}); the diff under review is {}",
+            short(implement),
+            short_diff(s.record.id),
+            short_diff(s.diff.id),
+            s.diff.round,
+            short_diff(s.diff.id)
+        );
+    }
     format!(
         "{} submitted again: newest diff {} (round {})",
         short(implement),
-        short_diff(diff.id),
-        diff.round
+        short_diff(s.diff.id),
+        s.diff.round
     )
 }
 
@@ -523,26 +629,33 @@ pub fn events_text(newest_first: &[EventRow], full: bool, hint: &str) -> String 
 /// The refusal for a diff with nothing in it.
 pub const EMPTY_DIFF: &str = "diff add: the body is empty (whitespace only); pass the diff text with --body, --body-file PATH or --body-file -";
 
+/// The refusal for evidence-only with nothing in it.
+pub const EMPTY_EVIDENCE: &str = "diff add --evidence-only: the evidence is empty (whitespace only); pass what you ran and its output with --body, --body-file PATH or --body-file -, and name the diff under review with --reviews D<n>";
+
 /// The event body of a recorded diff: the row and its size, never the diff itself.
-pub fn diff_event(id: i64, round: i64, body: &str) -> String {
-    format!(
-        "{} round {round} {} lines",
-        short_diff(id),
-        body.lines().count()
-    )
+pub fn diff_event(id: i64, round: i64, body: &str, reviews: Option<i64>) -> String {
+    let what = match reviews {
+        Some(d) => format!("round {round} evidence-only -> {}", short_diff(d)),
+        None => format!("round {round}"),
+    };
+    format!("{} {what} {} lines", short_diff(id), body.lines().count())
 }
 
 /// `D12 round 2 3m 184 lines`; with `task`, `D12 T5 round 2 ...` (an epic's listing).
+/// An evidence-only row says so and names the diff it re-runs.
 pub fn diff_line(d: &DiffRow, task: bool) -> String {
     let of = if task {
         format!(" {}", short(d.task_id))
     } else {
         String::new()
     };
+    let what = match d.reviews {
+        Some(r) => format!("evidence-only -> {}", short_diff(r)),
+        None => format!("round {}", d.round),
+    };
     format!(
-        "{}{of} round {} {} {} lines",
+        "{}{of} {what} {} {} lines",
         short_diff(d.id),
-        d.round,
         ago(d.created_at),
         d.body.lines().count()
     )
@@ -560,14 +673,27 @@ pub fn diff_list_text(rows: &[DiffRow], task: bool) -> String {
 }
 
 /// `diff get`: a header line, then the body clipped with a marker unless `full`.
+/// An evidence-only row is labelled as such and points at the diff it re-runs, so it
+/// can never be read as a patch.
 pub fn diff_text(d: &DiffRow, full: bool) -> String {
     let tag = short_diff(d.id);
-    let head = format!(
-        "{tag} {} round {} {}",
-        short(d.task_id),
-        d.round,
-        when(d.created_at)
-    );
+    let head = match d.reviews {
+        Some(r) => format!(
+            "{tag} {} round {} evidence-only, reviews {} {}; not a diff: the patch under review is {} (`agentboard diff get {} --full`)",
+            short(d.task_id),
+            d.round,
+            short_diff(r),
+            when(d.created_at),
+            short_diff(r),
+            short_diff(r)
+        ),
+        None => format!(
+            "{tag} {} round {} {}",
+            short(d.task_id),
+            d.round,
+            when(d.created_at)
+        ),
+    };
     let body = if full {
         d.body.clone()
     } else {

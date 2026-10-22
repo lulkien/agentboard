@@ -17,16 +17,20 @@ SurrealDB (`src/store/surreal/`):
               parent_id, needs, report, commit_ref, lease_until, created_at, updated_at,
               started_at, completed_at, reopen_count     -- moves into needs_fix; 4 = capped
     events    seq, task_id | epic_id, actor, kind, body, ts  -- append-only, one timeline
-    diffs     id, task_id, round, body, created_at       -- D1, D2...; append-only, verbatim,
-                                                         -- outlive a dropped task
+    diffs     id, task_id, round, body, created_at, reviews -- D1, D2...; append-only, verbatim,
+                                                         -- outlive a dropped task; non-NULL reviews
+                                                         -- marks an evidence-only re-run, not a patch
     sessions  name, agent, cwd, task_id, seen, status    -- live panes: herdr or tmux
 
 A **diff** is what a coder submitted for review, stored verbatim and never checked by
 the board. It is append-only (no edit, no delete, no renumber) and outlives its task
-being dropped. `get` shows the newest one for the task (`diff: D12 round 2 3m 184
+being dropped. `get` shows the newest patch for the task (`diff: D12 round 2 3m 184
 lines`); the CLI verbs are `agentboard diff add T7 --body-file PATH|- | --body TEXT`,
-`diff ls T7|E3` and `diff get D12 [--full]`. A board file from before diffs gains the
-table; nothing is refused.
+`diff ls T7|E3` and `diff get D12 [--full]`. A re-run round whose tree did not change
+records **evidence-only** instead: `diff add T7 --evidence-only --reviews D12 --body-file
+PATH|-` (MCP: `reviews="D12"`). The row is marked in `diff ls`, labelled `not a diff` by
+`diff get`, and never becomes the newest patch; the brief names D12 as the diff to read.
+A board file from before diffs gains the table; nothing is refused.
 
 An **epic** is not a task: it has its own ids (`E1`), is never claimed, leased or
 dispatched, and carries the project `path` its work belongs to. A task points at an
@@ -43,8 +47,9 @@ thing that should ever interrupt you. Input aliases `running`→`working`,
 `blocked`→`blocking`, `triage`→`ready`, `need fix`/`needs-fix`/`fix`→`needs_fix` accepted on input.
 
 Reviewable work is a chain of three levels, implement → review → fix, and no fourth.
-Moving a task to `review` needs a diff recorded since its last claim (`diff_add`), and
-on a parentless task the board files the review row as its child, once. A row may move
+Moving a task to `review` needs a submission recorded since its last claim: a diff
+(`diff_add`), or an evidence-only row for a re-run round that names the newest patch of the same row.
+On a parentless task the board files the review row as its child, once. A row may move
 into `needs_fix` three times; the fourth is refused (CLI exit 1) and the row lands
 `not_done`, taking an open parent with it. The rules, who moves which status and the
 reviewer's four rules are in [PROTOCOL.md](PROTOCOL.md); the diagrams are in
@@ -68,9 +73,9 @@ completion is one row; nothing is mutable history.
 | `epic_update` | 1 line ack | set an epic `open`/`done`/`dropped`; closing is never automatic |
 | `epic_edit` | 1 line ack | amend title, description, goal, path (only the fields passed); logs old/new lengths |
 | `task_edit` | 1 line ack | amend title, description, goal, priority, assignee, path, branch (`HEAD` leaves the pane's checkout alone); refused while `working` with a live lease, because the worker is reading that text |
-| `diff_add` | 1 line ack | record what you changed for a task, verbatim and append-only: `D12 (T7 round 2)`, round = the task's reopen count + 1; whitespace-only is refused. Only the newest diff is reviewed |
-| `diff_get` | header + body | one diff: task, round, age; the body is cut with a `[truncated ...]` marker, `full=true` returns it whole |
-| `diff_list` | 1 line/diff | a task's diffs (or an epic's, naming each task), newest first: `D12 round 2 3m 184 lines`, or `(no diffs)` |
+| `diff_add` | 1 line ack | record what you changed for a task, verbatim and append-only: `D12 (T7 round 2)`, round = the task's reopen count + 1; whitespace-only is refused. A re-run round with no tree change passes `reviews="D<n>"` naming the newest patch of this row and records evidence, marked not a patch. Only the newest patch is reviewed |
+| `diff_get` | header + body | one diff: task, round, age; evidence-only rows are labelled and point at the patch; the body is cut with a `[truncated ...]` marker, `full=true` returns it whole |
+| `diff_list` | 1 line/diff | a task's diffs (or an epic's, naming each task), newest first: `D12 round 2 3m 184 lines` or `D13 evidence-only -> D12`, or `(no diffs)` |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
 | `task_update` | 1 line ack | note and/or status; `report=` when finishing |
 | `task_ask` | 1 line ack | block on a human decision |

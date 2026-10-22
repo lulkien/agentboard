@@ -8,7 +8,7 @@ other pages link here and carry none.
 One epic holds a chain of exactly three levels: an implement row, its review row (a child
 of the implement row) and a fix row (a child of the review row). There is no fourth level.
 The board files the review row itself when the implement row moves to `review`, and it
-refuses that move unless a diff was recorded since the last claim. A review that finds
+refuses that move unless a submission was recorded since the last claim: a diff, or an evidence-only row for a re-run round whose tree did not change. A review that finds
 problems files one fix row, reused across rounds. The coder stops at `review`; only the
 reviewer sets a fix row `done` and closes the review row; only the manager closes the
 implement row.
@@ -28,7 +28,7 @@ flowchart TD
 
     subgraph COD["Coder"]
         I1["task_claim, do the work, note decisions"]
-        I2["diff_add the change"]
+        I2["diff_add the change, or evidence-only for a re-run"]
         I3["task_update report, status=review"]
         FX["task_claim fix row, fix only those findings"]
         F1["diff_add the fix"]
@@ -36,13 +36,13 @@ flowchart TD
     end
 
     subgraph BRD["Board"]
-        G{"diff recorded since the last claim?"}
-        GR["refused, exit 1, names diff add"]
-        AF["files the review row, or notes the new diff on the existing one"]
+        G{"diff or evidence-only recorded since the last claim?"}
+        GR["refused, exit 1, names both forms"]
+        AF["files the review row, or notes the new submission; the brief names the diff to read"]
     end
 
     subgraph REV["Reviewer"]
-        R0["task_claim review row, read only the newest diff"]
+        R0["task_claim review row, read only the diff the brief names"]
         R1{"findings?"}
         RD["task_update report, status=done on the review row"]
         RF["task_add fix row, parent=review row"]
@@ -123,7 +123,7 @@ flowchart TD
 
 | Status move | Who |
 |---|---|
-| `ready`/`needs_fix` -> `working` -> `review` (a move to `review` needs a diff since the last claim) | coder |
+| `ready`/`needs_fix` -> `working` -> `review` (a move to `review` needs a diff or evidence-only submission since the last claim) | coder |
 | `review` -> `done` or `needs_fix`, on a fix row or a review row | reviewer |
 | `ready` (re-arm a crashed row), `dropped`, `done` on the implement row, epic status, clearing a `not_done` row | manager |
 | `not_done`, and filing the review row | the board |

@@ -16,10 +16,10 @@ use super::{Db, block_on, db_err, session};
 use crate::clip::{CAP_DESCRIPTION, CAP_GOAL, field};
 use crate::store::board::{ClaimError, NewTask, Patch, TaskEdit};
 use crate::store::text::{
-    self, EpicRow, EventRow, MAX_CHAIN, TaskRow, cap_cascade_note, cap_note, cap_refusal,
-    cap_skipped_note, cascades_to, chain_refusal, field_names, gate_refusal, held_text,
-    norm_branch, normalize_path, reopen_after, review_description, review_filed_note, review_goal,
-    review_resubmitted_note, review_title, text_change, value_change, workdir_text,
+    self, EpicRow, EventRow, MAX_CHAIN, Submission, TaskRow, cap_cascade_note, cap_note,
+    cap_refusal, cap_skipped_note, cascades_to, chain_refusal, field_names, gate_refusal,
+    held_text, norm_branch, normalize_path, reopen_after, review_description, review_filed_note,
+    review_goal, review_resubmitted_note, review_title, text_change, value_change, workdir_text,
 };
 use crate::store::{DEFAULT_TTL_S, Ref, STATUS_LIST, norm, now_ms, short, short_epic};
 use serde::Deserialize;
@@ -621,10 +621,8 @@ pub(super) async fn file_review(
     actor: &str,
     implement: &Row,
     report: Option<&str>,
+    submission: &Submission,
 ) -> Result<i64, String> {
-    let diff = super::diffs::newest_diff(db, implement.tid)
-        .await?
-        .ok_or_else(|| gate_refusal(implement.tid))?;
     // A parentless row's only children are its review rows (fix rows hang off those), so
     // the link is the parent alone: renaming the row between rounds must not hide it.
     let title = review_title(&implement.title);
@@ -642,7 +640,7 @@ pub(super) async fn file_review(
             &rp,
             actor,
             "note",
-            &review_resubmitted_note(implement.tid, &diff),
+            &review_resubmitted_note(implement.tid, submission),
         );
         return Ok(review.tid);
     }
@@ -657,8 +655,8 @@ pub(super) async fn file_review(
     let report = report.or(implement.report.as_deref());
     let mut content = json!({
         "title": title,
-        "description": review_description(&as_row, report, &diff),
-        "goal": review_goal(implement.tid, diff.id),
+        "description": review_description(&as_row, report, submission),
+        "goal": review_goal(implement.tid, submission),
         "path": implement.path, "branch": implement.branch, "status": "ready",
         "priority": implement.priority, "parent_id": implement.tid,
         "created_at": now, "updated_at": now,
@@ -677,7 +675,7 @@ pub(super) async fn file_review(
 }
 
 /// The `seq` of the newest event of `kind` on a task, if any.
-async fn last_event_seq(db: &Db, id: i64, kind: &str) -> Result<Option<i64>, String> {
+pub(super) async fn last_event_seq(db: &Db, id: i64, kind: &str) -> Result<Option<i64>, String> {
     #[derive(Deserialize)]
     struct Seq {
         seq: i64,
@@ -692,15 +690,6 @@ async fn last_event_seq(db: &Db, id: i64, kind: &str) -> Result<Option<i64>, Str
     Ok(rows.first().map(|s| s.seq))
 }
 
-/// Whether a diff was recorded for `id` after its newest claim event, both read from
-/// the events table in `seq` order (no claim at all means any diff counts).
-pub(super) async fn diff_since_claim(db: &Db, id: i64) -> Result<bool, String> {
-    let claim = last_event_seq(db, id, "claim").await?.unwrap_or(0);
-    Ok(last_event_seq(db, id, "diff")
-        .await?
-        .is_some_and(|diff| diff > claim))
-}
-
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let s = session(true)?;
     block_on(async {
@@ -711,10 +700,16 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             None => cur.status.as_str(),
         };
         let moved = status != cur.status;
-        // A move into review needs a diff recorded since the last claim: refused before
-        // anything is written, so a reviewer never gets an empty review.
+        // A move into review needs a submission recorded since the last claim (a diff,
+        // or evidence for a re-run round): refused before anything is written, so a
+        // reviewer never gets an empty review.
         let submit = moved && status == "review";
-        if submit && !diff_since_claim(&s.db, id).await? {
+        let submission = if submit {
+            super::diffs::submission_since_claim(&s.db, id).await?
+        } else {
+            None
+        };
+        if submit && submission.is_none() {
             return Err(gate_refusal(id));
         }
         // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
@@ -825,7 +820,12 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         // Only a parentless row files a review row: a fix row or a review row never does.
         let mut review = None;
         if submit && cur.parent_id.is_none() {
-            review = Some(file_review(&s.db, &mut tx, actor, &cur, p.report).await?);
+            // The gate refused above; keeping the None case means deleting the gate
+            // still lets the status move, which the mutation proof checks.
+            if let Some(submission) = submission.as_ref() {
+                review =
+                    Some(file_review(&s.db, &mut tx, actor, &cur, p.report, submission).await?);
+            }
         }
         let seq = int_of(&tx.run(&s.db, "$main").await?, "event seq")?;
         let filed = review.map_or(String::new(), |r| format!(" (review row {})", short(r)));

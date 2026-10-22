@@ -6,13 +6,17 @@ that survived review rounds where the body, not the code, was the defect.
 ## What the body must be
 
 - **The change itself, verbatim.** A prose summary naming the files is neither a diff
-  nor a stated no-change reason, so the reviewer refuses the round on the submission
-  alone even when the code is fine. Before accepting a submission, compare what the
-  body names against what the tree actually holds: `git status --short` (modified plus
-  untracked paths) versus the files the body mentions. Three named files against
-  sixteen changed paths is a refusal, not a nit.
-- A round that genuinely changed nothing records a body saying so and why. Nothing
-  else is admissible.
+  nor evidence, so the reviewer refuses the round on the submission alone even when the
+  code is fine. Before accepting a submission, compare what the body names against what
+  the tree actually holds: `git status --short` (modified plus untracked paths) versus
+  the files the body mentions. Three named files against sixteen changed paths is a
+  refusal, not a nit.
+- A round that genuinely changed nothing records an evidence-only submission naming the
+  newest patch of the same row: `agentboard diff add T<n> --evidence-only --reviews
+  D<m> --body-file <evidence>` (MCP: `reviews="D<m>"`). The body is what was run and its
+  output. `D<m>` must be a patch, recorded on T<n>, and the newest patch of T<n>; a
+  superseded patch, a diff on another row, or another evidence-only row is refused. A
+  prose body saying the change is unchanged is not admissible.
 
 ## Recording a large body
 

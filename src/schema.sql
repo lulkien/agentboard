@@ -63,13 +63,15 @@ CREATE INDEX IF NOT EXISTS ev_task ON events(task_id, seq);
 
 -- What a coder submitted for review, verbatim and append-only: no edit, no delete, and
 -- a row outlives its task being dropped. `round` is the task's reopen_count + 1 at the
--- time. Printed D1, D2...
+-- time. Printed D1, D2... `reviews` makes an evidence-only submission machine-checkable:
+-- non-NULL names the diff this round re-runs, and the body is evidence, never a patch.
 CREATE TABLE IF NOT EXISTS diffs(
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id    INTEGER NOT NULL REFERENCES tasks(id),
   round      INTEGER NOT NULL,
   body       TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  reviews    INTEGER
 );
 CREATE INDEX IF NOT EXISTS diffs_task ON diffs(task_id, id);
 CREATE INDEX IF NOT EXISTS ev_epic ON events(epic_id, seq);

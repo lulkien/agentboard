@@ -507,6 +507,12 @@ pub enum DiffCmd {
         /// Read the diff from a file, or from stdin with `-`
         #[arg(long, allow_hyphen_values = true)]
         body_file: Option<String>,
+        /// Record evidence for a re-run round instead of a diff; needs --reviews
+        #[arg(long)]
+        evidence_only: bool,
+        /// The newest patch of this row, e.g. D26 (evidence-only submissions only)
+        #[arg(long, allow_hyphen_values = true)]
+        reviews: Option<String>,
     },
     /// A task's diffs (or an epic's), newest first, one line each
     Ls {

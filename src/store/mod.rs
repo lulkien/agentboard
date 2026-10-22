@@ -257,8 +257,13 @@ pub fn children(of: Ref) -> Result<String, String> {
 pub fn brief(since_min: i64) -> Result<String, String> {
     BACKEND.brief(since_min)
 }
-pub fn diff_add(actor: &str, task: i64, body: &str) -> Result<String, String> {
-    BACKEND.diff_add(actor, task, body)
+pub fn diff_add(
+    actor: &str,
+    task: i64,
+    body: &str,
+    reviews: Option<i64>,
+) -> Result<String, String> {
+    BACKEND.diff_add(actor, task, body, reviews)
 }
 pub fn diff_get(id: i64, full: bool) -> Result<String, String> {
     BACKEND.diff_get(id, full)

@@ -56,7 +56,7 @@ Flow: `task_claim`, `task_get full=true`, work, `task_update note=` for decision
 
 Reads and judges. It never edits.
 
-Inputs: the newest diff (`diff_list`, `diff_get`), the row's `description`, the row's `goal`, and the coder's pasted evidence. Output: classified findings. Nothing else.
+Inputs: the newest patch (`diff_list`, `diff_get`), the row's `description`, the row's `goal`, and the coder's pasted evidence. Output: classified findings. Nothing else.
 
 May run: read-only board and git verbs. Rare exception: a throwaway probe under `$TMPDIR` that leaves the tree and the board exactly as found, used only to disprove a claim about blocking behaviour. The default is no probe. Evidence the coder owed is a finding ("prove X with a command that shows Y"), not something the reviewer produces.
 
@@ -65,7 +65,7 @@ Never: edits a file, commits, installs, builds or tests the project under review
 Rules for every review:
 
 1. The cap is final. Re-scoping belongs to the manager.
-2. Review the newest diff only.
+2. Review the newest patch only.
 3. Classify every finding blocker, follow-up or nit. An unclassified observation is not a finding.
 4. Do not re-report a closed finding without new evidence from the current diff.
 5. Reject an inadmissible submission (see the diff gate in `workflow.md`) before reading code.

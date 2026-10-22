@@ -18,10 +18,10 @@ Each pane runs its own `agentboard` MCP server. The actor name is recorded in ev
 The chain is three levels, **implement → review → fix**, and no fourth: the review row is a child of the implement row, the fix row is a child of the review row, and the board refuses a child of a level-3 row. One fix row serves a review across every round.
 
 1. **Manager** creates an epic (`E<n>`) with `epic_add` and an implement row with `epic=E<n>`, and dispatches the coder.
-2. **Coder** claims the implement row, works, writes progress with `note`, records the change with `diff_add`, then finishes with `task_update(report=..., status=review)`. The board refuses that move unless a diff was recorded after the newest claim, and the refusal names `agentboard diff add T<n>`. A round that changed nothing still records a body saying so and why.
-3. **The board** files the review row when a parentless row moves to `review`: one child, `ready`, unassigned, inheriting epic, path, branch and priority, with the report and the newest diff id in its description. A second submission of the same implement row reuses it and notes the new diff on it. A fix row or a review row never files another.
+2. **Coder** claims the implement row, works, writes progress with `note`, records the change with `diff_add`, then finishes with `task_update(report=..., status=review)`. The board refuses that move unless a submission was recorded after the newest claim, and the refusal names both forms: a diff, or an evidence-only submission for a re-run round whose tree did not change (`diff_add(..., reviews="D<n>")`, naming the newest patch of this row).
+3. **The board** files the review row when a parentless row moves to `review`: one child, `ready`, unassigned, inheriting epic, path, branch and priority, with the report, the diff id the reviewer must read, and one line saying whether the round is a diff or evidence-only. A second submission of the same implement row reuses it and notes the new submission on it. A fix row or a review row never files another.
 4. **Manager** reads the report (via `task_get` or `board_brief`, or `task_wait` for server-side blocking) and dispatches the reviewer to the review row.
-5. **Reviewer** claims the review row, reads only the newest diff (`diff_list`, `diff_get`) and either:
+5. **Reviewer** claims the review row, reads only the newest patch (`diff_list`, `diff_get`) and either:
    - Sets it `done` with a report (no changes needed), or
    - Files one fix row with `parent=<review row id>` (inherits the epic) and sets the review row `status=needs_fix`.
 6. **Coder** claims the fix row, fixes the listed findings, records `diff_add` on the fix row, writes `report` with the verdict per finding, and sets the fix row `status=review` (this is the "fixed" state; there is no `fixed` status).
@@ -36,11 +36,11 @@ Only the reviewer sets a fix row `done`. The coder never sets a fix row `done` a
 ### Reviewer rules
 
 1. The cap is final; re-scoping belongs to the manager.
-2. Review the new diff only.
+2. Review the new diff only: the diff the brief names (the newest patch, or the patch an evidence-only submission re-runs).
 3. Classify every finding blocker, follow-up or nit. An uncategorised observation is not a finding.
 4. Never re-report a closed finding without new evidence quoted from the current diff.
 
-The board does not verify a diff body, so the reviewer also rejects a body that is neither a diff nor a stated reason nothing changed.
+The board does not verify a diff body, so the reviewer also rejects a prose body submitted as a diff. A round with no tree change records an evidence-only submission instead; it is labelled as such and names the patch to read.
 
 ## Fix-row lifecycle
 
