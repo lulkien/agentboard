@@ -287,8 +287,8 @@ fn manager(tmux: bool, verb: ManagerCmd) -> Result<String, manager::Failure> {
     let c = manager::Client::connect()?;
     Ok(match verb {
         ManagerCmd::Layout { action } => match action {
-            ManagerLayoutCmd::Export { tab, json } => {
-                manager::layout_export(&c, tab.as_deref(), json)?
+            ManagerLayoutCmd::Export { tab, json: compact } => {
+                manager::layout_export(&c, tab.as_deref(), compact)?
             }
             ManagerLayoutCmd::Apply { tab, root, force } => {
                 return manager::layout_apply(

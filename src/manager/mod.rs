@@ -18,9 +18,9 @@ pub use api::Agent;
 pub use client::Client;
 pub use write::layout_apply;
 
-pub fn layout_export(c: &Client, tab: Option<&str>, pretty: bool) -> Result<String, String> {
+pub fn layout_export(c: &Client, tab: Option<&str>, compact: bool) -> Result<String, String> {
     let root = c.layout_export(tab)?;
-    if pretty {
+    if compact {
         serde_json::to_string(&root)
     } else {
         serde_json::to_string_pretty(&root)

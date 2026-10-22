@@ -1014,8 +1014,22 @@ fn layout_export_round_trip_and_apply_exact_bytes() {
     );
     assert!(o.status.success(), "{}", text(&o.stderr));
     let exported = text(&o.stdout);
+    assert_eq!(exported.trim_end().lines().count(), 1, "{exported}");
     assert_eq!(
         serde_json::from_str::<Value>(&exported).unwrap(),
+        layout_tree()
+    );
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &["layout", "export", "--tab", "w1:t1"],
+        &[],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let pretty = text(&o.stdout);
+    assert!(pretty.lines().count() > 1, "{pretty}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&pretty).unwrap(),
         layout_tree()
     );
     let file = s.dir.join("root.json");
@@ -1081,6 +1095,31 @@ fn layout_export_round_trip_and_apply_exact_bytes() {
 #[test]
 fn layout_apply_empty_malformed_missing_root_and_missing_tab_send_nothing() {
     let s = layout_stub("layout-invalid", "idle", false);
+    let missing = s.dir.join("missing-root.json");
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &[
+            "layout",
+            "apply",
+            "--tab",
+            "w1:t1",
+            "--root",
+            missing.to_str().unwrap(),
+        ],
+        &[],
+    );
+    let err = text(&o.stderr);
+    println!("missing root: {}", err.trim_end());
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        one_line(&err) && err.contains(missing.to_str().unwrap()),
+        "{err}"
+    );
+    assert!(
+        err.contains("read root file") && !err.contains("invalid JSON"),
+        "{err}"
+    );
     for root in [
         "",
         "{",
@@ -1109,6 +1148,28 @@ fn layout_apply_empty_malformed_missing_root_and_missing_tab_send_nothing() {
     }
     assert!(s.reqs.lock().unwrap().is_empty());
 }
+
+#[test]
+fn layout_apply_trims_tab_and_accepts_null_pane_options() {
+    let s = layout_stub("layout-null-options", "idle", false);
+    let root = r#"{"type":"pane","pane_id":null,"cwd":null,"label":null,"env":null}"#;
+    let (o, _) = manager(
+        &s.sock,
+        &s.dir,
+        &["layout", "apply", "--tab", " \tw1:t1 \n", "--root", root],
+        &[],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert_eq!(text(&o.stdout).trim_end(), "applied layout to w1:t1");
+    let reqs = s.reqs.lock().unwrap();
+    let sent = reqs.iter().find(|r| r["method"] == "layout.apply").unwrap();
+    assert_eq!(sent["params"]["tab_id"], "w1:t1");
+    assert_eq!(
+        sent["params"]["root"],
+        serde_json::from_str::<Value>(root).unwrap()
+    );
+    println!("padded tab: sent w1:t1; null pane options: accepted");
+}
 #[test]
 fn layout_apply_busy_guard_unknown_tab_and_herdr_error() {
     let root = layout_tree().to_string();
@@ -1128,6 +1189,14 @@ fn layout_apply_busy_guard_unknown_tab_and_herdr_error() {
             false,
             3,
             "status=blocked",
+        ),
+        (
+            "layout-padded-busy",
+            "working",
+            " \tw1:t1 \n",
+            false,
+            3,
+            "status=working",
         ),
         ("layout-unknown", "idle", "w1:t404", false, 1, "unknown tab"),
         (

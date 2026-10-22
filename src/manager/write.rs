@@ -188,13 +188,22 @@ impl Client {
 
 /// Replace only the named tab, through the same busy-agent guard as down/renew.
 pub fn layout_apply(c: &Client, tab: &str, source: &str, force: bool) -> Result<String, Failure> {
-    if tab.trim().is_empty() {
+    let tab = tab.trim();
+    if tab.is_empty() {
         return Err("layout apply requires a nonempty --tab".into());
     }
     let text = if source == "-" {
         std::io::read_to_string(std::io::stdin()).map_err(|e| e.to_string())?
-    } else if std::path::Path::new(source).is_file() {
-        std::fs::read_to_string(source).map_err(|e| e.to_string())?
+    } else if std::path::Path::new(source).is_file()
+        || !(["{", "[", "\""]
+            .iter()
+            .any(|prefix| source.trim_start().starts_with(prefix))
+            || serde_json::from_str::<Value>(source).is_ok())
+    {
+        // Object/array text (including malformed JSON) is inline; otherwise a
+        // non-JSON argument names a file, whose read error must name that path.
+        std::fs::read_to_string(source)
+            .map_err(|e| format!("layout apply: read root file {source:?}: {e}"))?
     } else {
         source.to_owned()
     };
@@ -243,6 +252,8 @@ pub fn layout_apply(c: &Client, tab: &str, source: &str, force: bool) -> Result<
 fn valid_tree(v: &Value) -> bool {
     match v.get("type").and_then(Value::as_str) {
         Some("pane") => {
+            // Optional pane metadata can be omitted or serialized as null;
+            // both represent an unset value, including env and command.
             ["pane_id", "cwd", "label"]
                 .iter()
                 .all(|k| v.get(k).is_none_or(|x| x.is_null() || x.is_string()))
@@ -250,8 +261,9 @@ fn valid_tree(v: &Value) -> bool {
                     x.is_null() || x.as_array().is_some_and(|a| a.iter().all(Value::is_string))
                 })
                 && v.get("env").is_none_or(|x| {
-                    x.as_object()
-                        .is_some_and(|o| o.values().all(Value::is_string))
+                    x.is_null()
+                        || x.as_object()
+                            .is_some_and(|o| o.values().all(Value::is_string))
                 })
         }
         Some("split") => {
