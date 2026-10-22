@@ -262,6 +262,52 @@ run $B --db "$X" edit E1 --priority 3;                                 check "--
 run $B --db "$X" edit E1;                                              check "epic edit with no field: exit 1" $([ $rc -eq 1 ] && has "$err" "nothing to edit" && echo 0 || echo 1)
 run $B --db "$X" edit E1 --title "Epic two";                           check "epic edit with equal values: unchanged" $([ "$out" = "E1 unchanged" ] && echo 0 || echo 1)
 
+# Moving one task between epics preserves its history and cannot split a chain.
+use epicmove; M=$BOARD
+$B --db "$M" epic add source >/dev/null
+$B --db "$M" epic add target >/dev/null
+$B --db "$M" epic add closed >/dev/null
+$B --db "$M" epic add dropped >/dev/null
+$B --db "$M" epic status E3 done >/dev/null
+$B --db "$M" epic status E4 dropped >/dev/null
+$B --db "$M" add moving --epic E1 --description preserved >/dev/null
+$B --db "$M" note T1 before-move >/dev/null
+$B --db "$M" diff add T1 --body 'preserved patch' >/dev/null
+run $B --db "$M" edit T1 --epic E2
+check "epic move: existing edit verb names changed field" $([ $rc -eq 0 ] && has "$out" 'T1 edited epic #' && echo 0 || echo 1)
+run $B --db "$M" get T1 --full
+check "epic move: target, old history and one move event remain" $(has "$out" 'epic: E2 target' && has "$out" 'before-move' && has "$out" 'epic E1->E2' && [ "$(rg -c ' edit ' <<<"$out")" = 1 ] && echo 0 || echo 1)
+run $B --db "$M" diff get D1 --full
+check "epic move: diff still belongs to the same task" $(has "$out" 'T1' && has "$out" 'preserved patch' && echo 0 || echo 1)
+before=$($B --db "$M" get T1 --full | sed -E '/^created:/d; /^diff:/d; s/ [0-9]+[smhd]:/:/')
+run $B --db "$M" edit T1 --epic E2
+after=$($B --db "$M" get T1 --full | sed -E '/^created:/d; /^diff:/d; s/ [0-9]+[smhd]:/:/')
+check "epic move: same epic is unchanged with no event" $([ $rc -eq 0 ] && [ "$out" = 'T1 unchanged' ] && [ "$before" = "$after" ] && echo 0 || echo 1)
+run $B --db "$M" edit T1 --epic E3
+check "epic move: done target refused by name" $([ $rc -eq 1 ] && has "$err" 'target epic is done' && echo 0 || echo 1)
+run $B --db "$M" edit T1 --epic E4 --title should-not-land
+check "epic move: dropped target refused by name" $([ $rc -eq 1 ] && has "$err" 'target epic is dropped' && echo 0 || echo 1)
+run $B --db "$M" get T1
+check "epic move: refused mixed edit leaves title and epic intact" $(has "$out" 'title: moving' && has "$out" 'epic: E2 target' && echo 0 || echo 1)
+run $B --db "$M" edit T1 --epic E999
+check "epic move: missing target refused by name" $([ $rc -eq 1 ] && has "$err" 'no such epic E999' && echo 0 || echo 1)
+run $B --db "$M" edit T1 --epic T1
+check "epic move: task id cannot name target epic" $([ $rc -eq 1 ] && has "$err" 'is a task id' && echo 0 || echo 1)
+$B --db "$M" claim T1 >/dev/null
+run $B --db "$M" edit T1 --epic E1
+check "epic move: live worker lease refused by name" $([ $rc -eq 1 ] && has "$err" 'T1 working by' && echo 0 || echo 1)
+$B --db "$M" status T1 ready >/dev/null
+$B --db "$M" add child --parent T1 >/dev/null
+run $B --db "$M" edit T2 --epic E1
+check "epic move: cannot split from parent" $([ $rc -eq 1 ] && has "$err" 'cross-epic parent T1' && echo 0 || echo 1)
+run $B --db "$M" edit T1 --epic E1
+check "epic move: cannot leave child behind" $([ $rc -eq 1 ] && has "$err" 'cross-epic child T2' && echo 0 || echo 1)
+$B --db "$M" add unattached >/dev/null
+run $B --db "$M" edit T3 --epic E1
+check "epic move: previously ungrouped task can join an epic" $([ $rc -eq 0 ] && has "$out" 'T3 edited epic #' && echo 0 || echo 1)
+run $B --db "$M" edit E1 --epic E2
+check "epic move: flag is for tasks only" $([ $rc -eq 1 ] && has "$err" '--epic is for tasks' && echo 0 || echo 1)
+
 # review chain: three levels, the fourth reopen lands not_done and cascades one level
 use chain; C=$BOARD
 run $B --db "$C" add impl --status review;                                check "chain: level 1 (parentless, created at review so no review row is filed)" $rc

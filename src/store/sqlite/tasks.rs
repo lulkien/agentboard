@@ -147,9 +147,10 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         && e.assignee.is_none()
         && e.path.is_none()
         && e.branch.is_none()
+        && e.epic.is_none()
     {
         return Err(String::from(
-            "nothing to edit: pass title, description, goal, priority, assignee, path or branch",
+            "nothing to edit: pass title, description, goal, priority, assignee, path, branch or epic",
         )
         .into());
     }
@@ -163,6 +164,48 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         return Err(ClaimError::Held(held_text(&cur)));
     }
     let mut diffs = Vec::new();
+    let epic = e.epic.or(cur.epic_id);
+    if epic != cur.epic_id {
+        let target = super::epics::fetch_epic(&tx, epic.unwrap())?;
+        if target.status != "open" {
+            return Err(format!(
+                "cannot move {} to {}: target epic is {}",
+                short(id),
+                short_epic(target.id),
+                target.status
+            )
+            .into());
+        }
+        if let Some(parent) = cur.parent_id
+            && fetch(&tx, parent)?.epic_id != epic
+        {
+            return Err(format!(
+                "cannot move {} to {}: cross-epic parent {}",
+                short(id),
+                short_epic(target.id),
+                short(parent)
+            )
+            .into());
+        }
+        let child: Option<i64> = tx.query_row(
+            "SELECT id FROM tasks WHERE parent_id=? AND (epic_id IS NULL OR epic_id != ?) ORDER BY id LIMIT 1",
+            params![id, target.id], |r| r.get(0),
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some(child) = child {
+            return Err(format!(
+                "cannot move {} to {}: cross-epic child {}",
+                short(id),
+                short_epic(target.id),
+                short(child)
+            )
+            .into());
+        }
+        diffs.push(format!(
+            "epic {}->{}",
+            cur.epic_id.map_or("none".to_owned(), short_epic),
+            short_epic(target.id)
+        ));
+    }
     let title = value_change(&mut diffs, "title", &cur.title, e.title);
     let description = text_change(&mut diffs, "description", &cur.description, e.description);
     let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
@@ -198,7 +241,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         return Ok(format!("{} unchanged", short(id)));
     }
     tx.execute(
-        "UPDATE tasks SET title=?, description=?, goal=?, path=?, branch=?, assignee=?, priority=?, updated_at=? WHERE id=?",
+        "UPDATE tasks SET title=?, description=?, goal=?, path=?, branch=?, assignee=?, priority=?, epic_id=?, updated_at=? WHERE id=?",
         params![
             title,
             description,
@@ -207,6 +250,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
             branch,
             (!assignee.is_empty()).then_some(assignee),
             priority,
+            epic,
             now_ms(),
             id
         ],

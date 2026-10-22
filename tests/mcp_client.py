@@ -533,6 +533,42 @@ def main():
     expect("epic_edit refuses a task id", refusal_text(lambda: s.call("epic_edit", id=ed, title="x")), "is a task id")
     expect("the tools are listed", " ".join(t["name"] for t in s.rpc("tools/list", {})["tools"]), "task_edit", "epic_edit", "diff_add", "diff_get", "diff_list")
 
+    # One-row epic moves use the existing setter, with no bulk or chain rewrite.
+    source = s.call("epic_add", title="move source").split()[0]
+    target = s.call("epic_add", title="move target").split()[0]
+    moving = s.call("task_add", title="moving", epic=source, description="original", priority=8).split()[0]
+    s.call("task_update", id=moving, note="before move", report="preserved report", commit="abc123")
+    patch = s.call("diff_add", id=moving, body="exact preserved patch").split()[0]
+    before = stable(s.call("task_get", id=moving, full=True))
+    expect("task_edit epic moves with the existing setter", s.call("task_edit", id=moving, epic=target), f"{moving} edited epic #")
+    after = stable(s.call("task_get", id=moving, full=True))
+    expect("epic move records old and new epic", after, f"epic: {target} move target", f"epic {source}->{target}")
+    def move_state(record):
+        return '\n'.join(line for line in record.splitlines()
+                         if not line.startswith(('epic:', 'diff:'))
+                         and not re.match(r'\s+#\d+ \S+ edit:', line))
+    ok = move_state(before) == move_state(after) and len(re.findall(r'^  #', after, re.M)) == len(re.findall(r'^  #', before, re.M)) + 1
+    checks.append(ok)
+    print(("PASS " if ok else "FAIL ") + "epic move preserves task fields and complete pre-move history, adds one event")
+    expect("epic move preserves submitted diff", s.call("diff_get", id=patch, full=True), moving, "exact preserved patch")
+    expect("same epic is a no-op", s.call("task_edit", id=moving, epic=target), f"{moving} unchanged")
+    unchanged = stable(s.call("task_get", id=moving, full=True))
+    checks.append(move_state(unchanged) == move_state(after) and re.findall(r'#\d+', unchanged) == re.findall(r'#\d+', after))
+    print(("PASS " if checks[-1] else "FAIL ") + "same-epic no-op records no event")
+    s.call("epic_update", id=source, status="done")
+    expect("epic move refuses done target", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), "target epic is done")
+    s.call("epic_update", id=source, status="dropped")
+    expect("epic move refuses dropped target", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), "target epic is dropped")
+    expect("epic move refuses missing target", refusal_text(lambda: s.call("task_edit", id=moving, epic="E999999")), "no such epic E999999")
+    expect("epic move validates target id space", refusal_text(lambda: s.call("task_edit", id=moving, epic=moving)), "is a task id")
+    s.call("epic_update", id=source, status="open")
+    s.call("task_claim", id=moving)
+    expect("epic move refuses held row", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), "-32603", f"{moving} working by claude1")
+    s.call("task_update", id=moving, status="ready")
+    child = s.call("task_add", title="move child", parent=moving).split()[0]
+    expect("epic move refuses cross-epic parent", refusal_text(lambda: s.call("task_edit", id=child, epic=source)), f"cross-epic parent {moving}")
+    expect("epic move refuses cross-epic child", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), f"cross-epic child {child}")
+
     # Diffs: append-only, round from the reopen count, only the newest is reviewed.
     dt = s.call("task_add", title="diffed").split()[0]
     expect("diff_list of a task with none", s.call("diff_list", id=dt), "(no diffs)")

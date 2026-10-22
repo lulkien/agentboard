@@ -86,6 +86,9 @@ pub enum Cmd {
     Edit {
         /// T3 or E3
         id: String,
+        /// Tasks only: move to an open epic, preserving the parent/child chain
+        #[arg(long)]
+        epic: Option<String>,
         #[arg(long, allow_hyphen_values = true)]
         title: Option<String>,
         #[arg(long, alias = "spec", allow_hyphen_values = true)]

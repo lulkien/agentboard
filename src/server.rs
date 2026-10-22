@@ -183,6 +183,9 @@ pub struct EpicUpdateArgs {
 pub struct EditArgs {
     /// Task id, T7.
     pub id: String,
+    /// Move to an open epic, E3. Refused if it would split a parent/child chain.
+    #[serde(default)]
+    pub epic: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -564,7 +567,7 @@ impl Board {
 
     #[tool(
         name = "task_edit",
-        description = "Amend a task's spec: title, description, goal, priority, assignee, path, branch (only the fields you pass). Logs an `edit` event with old/new lengths. Refused while the task is working with a live lease (the worker is reading it); the manager frees it with task_update status=ready. Returns the changed field names.",
+        description = "Amend a task's spec: title, description, goal, priority, assignee, path, branch, epic (only the fields you pass). Epic moves require an open target and cannot split a parent/child chain; logs one edit event naming old/new epic. Refused while working with a live lease; the manager frees it with task_update status=ready. Returns changed field names; equal values are unchanged.",
         annotations(title = "Edit task", read_only_hint = false, destructive_hint = false)
     )]
     async fn task_edit(
@@ -573,8 +576,15 @@ impl Board {
     ) -> Result<CallToolResult, ErrorData> {
         blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_id(&a.id).map_err(err)?;
+        let epic = a
+            .epic
+            .as_deref()
+            .map(store::parse_epic_id)
+            .transpose()
+            .map_err(err)?;
         offload(move || {
             let edit = store::TaskEdit {
+                epic,
                 title: a.title.as_deref(),
                 description: a.description.as_deref(),
                 goal: a.goal.as_deref(),

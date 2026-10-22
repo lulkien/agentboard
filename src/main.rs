@@ -122,6 +122,7 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
         }
         Cmd::Edit {
             id,
+            epic,
             title,
             description,
             goal,
@@ -132,6 +133,7 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
         } => match store::parse_ref(&id)? {
             store::Ref::Task(n) => {
                 let edit = store::TaskEdit {
+                    epic: epic.as_deref().map(store::parse_epic_id).transpose()?,
                     title: title.as_deref(),
                     description: description.as_deref(),
                     goal: goal.as_deref(),
@@ -143,6 +145,9 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
                 store::edit(actor, n, &edit).map_err(|e| e.to_string())
             }
             store::Ref::Epic(n) => {
+                if epic.is_some() {
+                    return Err("--epic is for tasks".to_owned());
+                }
                 if priority.is_some() || assignee.is_some() || branch.is_some() {
                     return Err("--priority, --assignee and --branch are for tasks".to_owned());
                 }

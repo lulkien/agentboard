@@ -72,7 +72,7 @@ completion is one row; nothing is mutable history.
 | `epic_get` | ~10 lines | status, path, task counts, description, goal, last 8 events; `full=true` unclipped |
 | `epic_update` | 1 line ack | set an epic `open`/`done`/`dropped`; closing is never automatic |
 | `epic_edit` | 1 line ack | amend title, description, goal, path (only the fields passed); logs old/new lengths |
-| `task_edit` | 1 line ack | amend title, description, goal, priority, assignee, path, branch (`HEAD` leaves the pane's checkout alone); refused while `working` with a live lease, because the worker is reading that text |
+| `task_edit` | 1 line ack | amend title, description, goal, priority, assignee, path, branch, epic; `epic=E3` (`edit T7 --epic E3`) moves one row to an open epic without splitting its parent/child chain; refused while `working` with a live lease |
 | `diff_add` | 1 line ack | record what you changed for a task, verbatim and append-only: `D12 (T7 round 2)`, round = the task's reopen count + 1; whitespace-only is refused. A re-run round with no tree change passes `reviews="D<n>"` naming the newest patch of this row and records evidence, marked not a patch. Only the newest patch is reviewed |
 | `diff_get` | header + body | one diff: task, round, age; evidence-only rows are labelled and point at the patch; the body is cut with a `[truncated ...]` marker, `full=true` returns it whole |
 | `diff_list` | 1 line/diff | a task's diffs (or an epic's, naming each task), newest first: `D12 round 2 3m 184 lines` or `D13 evidence-only -> D12`, or `(no diffs)` |

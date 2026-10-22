@@ -366,9 +366,10 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         && e.assignee.is_none()
         && e.path.is_none()
         && e.branch.is_none()
+        && e.epic.is_none()
     {
         return Err(String::from(
-            "nothing to edit: pass title, description, goal, priority, assignee, path or branch",
+            "nothing to edit: pass title, description, goal, priority, assignee, path, branch or epic",
         )
         .into());
     }
@@ -382,6 +383,47 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
             return Err(ClaimError::Held(held_text(&TaskRow::from(cur.clone()))));
         }
         let mut diffs = Vec::new();
+        let epic = e.epic.or(cur.epic_id);
+        if epic != cur.epic_id {
+            let target = super::epics::fetch_epic(&s.db, epic.unwrap()).await?;
+            if target.status != "open" {
+                return Err(format!(
+                    "cannot move {} to {}: target epic is {}",
+                    short(id),
+                    short_epic(target.tid),
+                    target.status
+                )
+                .into());
+            }
+            if let Some(parent) = cur.parent_id
+                && fetch(&s.db, parent).await?.epic_id != epic
+            {
+                return Err(format!(
+                    "cannot move {} to {}: cross-epic parent {}",
+                    short(id),
+                    short_epic(target.tid),
+                    short(parent)
+                )
+                .into());
+            }
+            let mut result = s.db.query("SELECT VALUE meta::id(id) FROM tasks WHERE parent_id=$id AND (epic_id IS NONE OR epic_id != $epic) LIMIT 1")
+                .bind(("id", id)).bind(("epic", target.tid)).await.map_err(|e| db_err(&e))?;
+            let children: Vec<i64> = result.take(0).map_err(|e| db_err(&e))?;
+            if let Some(child) = children.first() {
+                return Err(format!(
+                    "cannot move {} to {}: cross-epic child {}",
+                    short(id),
+                    short_epic(target.tid),
+                    short(*child)
+                )
+                .into());
+            }
+            diffs.push(format!(
+                "epic {}->{}",
+                cur.epic_id.map_or("none".to_owned(), short_epic),
+                short_epic(target.tid)
+            ));
+        }
         let title = value_change(&mut diffs, "title", &cur.title, e.title);
         let description = text_change(&mut diffs, "description", &cur.description, e.description);
         let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
@@ -432,6 +474,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
             (!assignee.is_empty()).then(|| assignee.into()),
         );
         assign(&mut tx, &mut sets, "priority", Some(priority.into()));
+        assign(&mut tx, &mut sets, "epic_id", epic.map(Value::from));
         assign(&mut tx, &mut sets, "updated_at", Some(now_ms().into()));
         let idp = tx.p(id);
         tx.raw(&format!(

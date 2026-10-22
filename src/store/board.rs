@@ -23,6 +23,7 @@ pub struct NewTask<'a> {
 /// New spec text for a task; `None` leaves a field alone. An empty `assignee`
 /// or `path` clears it; an empty `branch` means `HEAD`.
 pub struct TaskEdit<'a> {
+    pub epic: Option<i64>,
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
     pub goal: Option<&'a str>,
