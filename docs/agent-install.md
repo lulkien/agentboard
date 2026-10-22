@@ -25,6 +25,48 @@ agentboard path
 - The installed binary is what agents run. `target/release/agentboard` from a
   checkout build is not. Reinstall after every change to the CLI or MCP surface.
 
+### Owner cutover for an existing SurrealDB board
+
+Reinstalling a build whose client generation is newer than the live board fails
+closed on board access until this cutover is followed. The refusal names
+`agentboard board upgrade --owner`; opening a board never upgrades it. Build the
+new checkout first (`cargo build --release`). Use the same board path and server
+environment throughout the cutover.
+
+1. Stop every seat, its MCP process, and the SurrealDB server. Keep them stopped
+   throughout maintenance. Preserve a backup of the stopped data directory.
+2. Run `./target/release/agentboard --db /absolute/board/data board upgrade --owner`
+   with the board's `AGENTBOARD_SURREAL_URL`, user and password. The owner flag
+   confirms ownership and that all seats and servers are stopped. Seats report a
+   mismatch to the owner; they never run this command against a live board.
+3. Reinstall with `cargo install --path . --locked`.
+4. Restart the seats and their MCP servers using the installed build.
+5. Run `python3 scripts/check-seat-surface.py` before dispatching work.
+
+Upgrade supports SurrealDB generation 1 to 2 (and retrying an already-current
+board). It refuses an occupied endpoint or another process holding board files,
+including a server on another port. It holds the existing startup and write locks,
+uses an unadvertised temporary loopback server, kills its process group on exit,
+and gives it a parent-death signal so killing the upgrader also kills the server.
+Linux `/proc` is required for the offline-holder check. Do not start manually
+managed servers during maintenance; those do not honor agentboard's startup lock.
+
+Only additive `IF NOT EXISTS` definitions and missing-default backfills run.
+Definitions, backfills and `meta:schema`, `meta:opened`, `meta:writer` stamps commit
+in one transaction. An interruption before commit rolls everything back; retry
+finishes the upgrade, including if additive definitions already existed. After
+commit, retry is idempotent. No original task, epic, event, diff or session is
+removed or renumbered. Output names every checked definition and backfill, prints
+before/after counts for every data table, and identifies the upgrading build.
+The SurrealDB board stamp is the existing `meta` records, equivalent to SQLite's
+`board_stamp` table; no second stamp format is introduced.
+
+An upgrade is forward-only: rollback means restoring the stopped backup and the
+old binary together, with every seat stopped. There is no in-place downgrade.
+SQLite and boards older than generation 1 are outside this command's scope.
+Pre-stamp SQLite binaries ignore stamps: retire them rather than assuming that
+upgrading a stamp can fence them.
+
 ## 3. Assert the installed seat surface before wiring anything
 
 From this checkout, after installing and before starting each seat:

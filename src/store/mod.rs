@@ -330,3 +330,18 @@ pub fn dispatch(
 pub async fn wait(w: Wait<'_>) -> Result<Outcome, String> {
     BACKEND.wait(w).await
 }
+
+/// Explicit offline owner maintenance; never called by normal opens or MCP.
+pub fn board_upgrade(owner: bool) -> Result<String, String> {
+    if !owner {
+        return Err("board upgrade requires --owner: only the owner may upgrade; stop every seat and server first".into());
+    }
+    #[cfg(feature = "surreal")]
+    {
+        surreal::upgrade::run()
+    }
+    #[cfg(feature = "sqlite")]
+    {
+        Err("board upgrade supports v1 SurrealDB boards only; SQLite pre-stamp clients cannot be fenced and must be retired by the owner".into())
+    }
+}

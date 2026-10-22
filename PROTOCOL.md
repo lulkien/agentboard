@@ -138,7 +138,10 @@ Schema generation 2 also versions the tool-surface rules: bump it when those rul
 change incompatibly. SurrealDB checks `meta:schema.version` on every session before
 DDL; SQLite refuses existing unstamped or mismatched files before DDL, naming the
 file, and stamp-aware processes check on every open, even after initialization.
-There is no automatic upgrade. Refusals are CLI errors and MCP -32603 errors,
+There is no automatic upgrade. An owner can explicitly upgrade a stopped
+generation-1 SurrealDB board using `agentboard board upgrade --owner`; see the
+[cutover order](docs/agent-install.md#owner-cutover-for-an-existing-surrealdb-board).
+Seats report the refusal to the owner and never perform live maintenance. Refusals are CLI errors and MCP -32603 errors,
 naming board and client stamps. A legacy binary can only print its legacy error.
 
 The board stores the creating/opening build and last stamp-aware writer (version,

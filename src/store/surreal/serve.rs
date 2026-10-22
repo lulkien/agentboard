@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Serialises server start-up, in the state dir beside the data dir.
-const START_LOCK: &str = "surreal.start.lock";
+pub(super) const START_LOCK: &str = "surreal.start.lock";
 
 pub const INSTALL_HINT: &str = "curl -sSf https://install.surrealdb.com | sh -s -- --version 2.7.0";
 

@@ -270,6 +270,11 @@ pub enum Cmd {
     Path,
     /// Which build this is: version, derived tool count, commit, backend
     BoardBuild,
+    /// Owner maintenance (never exposed over MCP)
+    Board {
+        #[command(subcommand)]
+        verb: BoardCmd,
+    },
     /// Drive the herdr session: `manager [--herdr|--tmux] <verb>`
     Manager {
         /// herdr backend (the default)
@@ -571,5 +576,15 @@ pub enum ManagerLayoutCmd {
         root: Option<String>,
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum BoardCmd {
+    /// Upgrade a stopped v1 SurrealDB board additively, preserving its rows
+    Upgrade {
+        /// Confirm you own this board and have stopped every seat and server
+        #[arg(long)]
+        owner: bool,
     },
 }

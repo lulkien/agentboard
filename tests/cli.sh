@@ -442,6 +442,11 @@ for mode in "" "serve"; do
   check "no-arg/serve (\"$mode\") answers JSON-RPC initialize" $(has "$reply" '"result"' && has "$reply" 'protocolVersion' && ! has "$reply" Usage && echo 0 || echo 1)
 done
 
+# Owner-only maintenance refuses seats before opening or creating any board.
+run $B --db "$S/owner-refused" board upgrade
+check "board upgrade: missing --owner is one-line exit 1" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "requires --owner" && echo 0 || echo 1)
+check "board upgrade: owner refusal creates no board" $([ ! -e "$S/owner-refused" ] && echo 0 || echo 1)
+
 # the build stamp: the same one line from the CLI verb and from initialize, with the
 # tool count derived from the source markers (never written down)
 run $B board-build;                                                    check "board-build: one line naming version, tools, commit, backend" $([ $rc -eq 0 ] && [ "$(wc -l <<<"$out")" = 1 ] && has "$out" "agentboard 0.1.0 tools=" && has "$out" "commit=" && has "$out" "backend=$BACKEND" && echo 0 || echo 1)

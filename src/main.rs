@@ -84,6 +84,9 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
     match cmd {
         Cmd::Serve | Cmd::Wait { .. } | Cmd::Manager { .. } => unreachable!("handled in main"),
         Cmd::Path => store::board_path().map(|p| p.display().to_string()),
+        Cmd::Board {
+            verb: cli::BoardCmd::Upgrade { owner },
+        } => store::board_upgrade(owner),
         Cmd::BoardBuild => Ok(ident::line(server::tool_count())),
         Cmd::Add {
             title,

@@ -11,6 +11,7 @@ mod render;
 mod serve;
 mod sessions;
 mod tasks;
+pub(super) mod upgrade;
 mod wait;
 
 use serde::Deserialize;
@@ -283,8 +284,9 @@ pub fn schema_refusal(found: Option<i64>, s: &Settings) -> String {
         format!("schema version {v}")
     });
     format!(
-        "board schema mismatch: found {found}, want version {SCHEMA_VERSION}. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {1}'), move the data dir aside (mv {0} {0}.old) and retry.",
+        "board schema mismatch: found {found}, want version {SCHEMA_VERSION}. Board {} at {}. Owner cutover: stop every seat and server (pkill -f 'bind {}'); run agentboard board upgrade --owner with the same --db and AGENTBOARD_SURREAL_URL; reinstall; restart seats; run python3 scripts/check-seat-surface.py. No automatic upgrade; unsupported generations are refused.",
         s.dir.display(),
+        s.url,
         s.url
     )
 }
@@ -1295,12 +1297,11 @@ mod tests {
                 .unwrap();
         });
         let err = connect(&srv.settings).err().unwrap();
-        let dir = srv.settings.dir.display();
-        let url = &srv.settings.url;
         assert_eq!(
             err,
             format!(
-                "board schema mismatch: found schema version 99, want version {SCHEMA_VERSION}. This board was written by another version or is not an agentboard board. Stop the server (pkill -f 'bind {url}'), move the data dir aside (mv {dir} {dir}.old) and retry. board build={}; client build={}",
+                "{} board build={}; client build={}",
+                schema_refusal(Some(99), &srv.settings),
                 crate::ident::stamp(),
                 crate::ident::stamp()
             )

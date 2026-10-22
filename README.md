@@ -144,10 +144,12 @@ any version other than `surrealdb-2.7.x` is refused by name, and the Rust 3.x cr
 usable at all on this tree: its `diskann` dependency fails to compile. Stop the daemon with
 `pkill -f 'bind 127.0.0.1:18720'`.
 
-There is no migration path between backends, and no migration path between board
-versions: switching either one means a new board. Stop every agent first — each MCP
-server is a process of the binary that started it, and an old build will happily
-recreate the old schema in the new location.
+There is no migration between backends. A generation-1 SurrealDB board can be
+upgraded explicitly by its owner with `agentboard board upgrade --owner`; normal
+opens never upgrade. The command requires an offline board, preserves existing
+rows, and prints additive definitions, default backfills, row counts and stamps.
+See the [owner cutover order](docs/agent-install.md#owner-cutover-for-an-existing-surrealdb-board).
+SQLite pre-stamp binaries cannot be fenced and must be retired by the owner.
 
 ## Build and install
 
