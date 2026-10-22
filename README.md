@@ -45,26 +45,34 @@ Every task records its creation actor as immutable `reporter`. `get` shows it;
 edits and worker reassignment preserve it. Old rows use their earliest creation
 event, or show `unknown (filed before this field existed)` when no actor is known.
 
-Statuses: `ready → working → (blocking → working)* → review → done`,
-plus `needs_fix` (review found work, waiting for a fix; shown as `fix`),
-`not_done` (set by the board when a row's fourth move into `needs_fix` is refused;
-shown as `nd`) and `dropped`. `needs='input'` marks "blocked on a human", which is the only
-thing that should ever interrupt you. Input aliases `running`→`working`,
-`blocked`→`blocking`, `triage`→`ready`, `need fix`/`needs-fix`/`fix`→`needs_fix` accepted on input.
+Statuses: `ready`, `working`, `blocking`, `needs_impl` (an analyze plan is
+published), `needs_review` (an implementation is submitted), `review` (the
+reviewer has the row), `needs_fix` (the reviewer sent it back), `not_done` (the
+reviewer's abandon verdict, or the board stopping the chain at the cap), `done`
+and `dropped`. `needs='input'` marks
+"blocked on a human", which is the only thing that should ever interrupt you.
+Input aliases `running`→`working`, `blocked`→`blocking`, `triage`→`ready`,
+`need fix`/`needs-fix`/`fix`→`needs_fix` accepted on input.
 
-Reviewable work uses analyze → implement → review. The coder files the review
-child, naming the current diff and analyze plan; only the implement holder may
-file it, and creation checks the diff and publishes `needs_review` atomically.
-Reviewer rejection reopens the implement row as `needs_fix`; resubmission reuses
-the SAME review row. Legacy implement → review → fix chains remain supported.
-Moving a task to `review` needs a submission recorded since its last claim: a diff
-(`diff_add`), or an evidence-only row for a re-run round that names the newest patch of the same row.
-On a legacy parentless task the board files the review row as its child, once. A row may move
-into `needs_fix` three times; the fourth is refused (CLI exit 1) and the row lands
-`not_done`, taking an open parent with it. The rules, who moves which status and the
-reviewer's four rules are in [PROTOCOL.md](PROTOCOL.md); the diagrams are in
-[docs/workflow.md](docs/workflow.md). Closing an epic only when every row is `done` or
-`dropped` is the manager's policy, not something the board enforces.
+Reviewable work runs the three-row chain **analyze → implement → review**. The
+manager files one analyze root. The analyzer publishes the plan as `needs_impl`
+and files the implement child; the coder implements the plan, records the diff,
+and files the review child (naming the current diff and analyze plan). Only the
+implement holder may file that row, and creation checks the diff and publishes
+`needs_review` atomically. Reviewer rejection reopens the implement row as
+`needs_fix`; resubmission reuses the SAME review row. The reviewer closes all
+three rows with `done` or `not_done`; the identity that recorded the newest diff
+cannot close. The store also has a manager reopen for a closed chain, but the
+current CLI and MCP surface does not expose it. Legacy implement → review → fix
+chains remain supported. Moving a task to `review` needs a submission recorded
+since its last claim: a diff (`diff_add`), or an evidence-only row for a re-run
+round that names the newest patch of the same row. A row may move into
+`needs_fix` three times; the fourth is refused (CLI exit 1) and the chain lands
+`not_done`. The rules, who moves which status and the reviewer's five rules are
+in [PROTOCOL.md](PROTOCOL.md); the design note is
+[docs/three-task-chain.md](docs/three-task-chain.md), and the diagram is in
+[docs/workflow.md](docs/workflow.md). Closing an epic only when every row is
+`done` or `dropped` is the manager's policy, not something the board enforces.
 
 `events` is the file you used to write. Every note, question, answer, claim and
 completion is one row; nothing is mutable history.

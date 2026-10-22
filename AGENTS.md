@@ -67,10 +67,10 @@ skip into a failure. SKIP is fine on a device that builds only the sqlite binary
 - `src/cli.rs` holds argv as types (clap derive); validation stays in the store.
 - `src/store/` has one module per concern: `tasks`, `epics`, `diffs`, `sessions`, `wait`,
   `dispatch`, `proc`, `render`. Event logging and id parsing live in `mod.rs`. `diffs` is
-  the append-only diff rows (`diff_add`/`diff_get`/`diff_list`); the review gate and the
-  auto-filed review row live in `tasks::apply`, and the reopen cap and chain-depth rules in
-  `apply`, `add` and `set_parent`, once per backend. The strings every adapter prints for
-  those rules are in `text.rs`.
+  the append-only diff rows (`diff_add`/`diff_get`/`diff_list`); the coder-filed
+  review gate and the legacy auto-filed review row live in `tasks::apply`, and the
+  reopen cap and chain-depth rules in `apply`, `add` and `set_parent`, once per backend.
+  The strings every adapter prints for those rules are in `text.rs`.
 - `src/server.rs` is the MCP adapter.
 
 Dependencies point one way: `main.rs` and `server.rs` call `store`; `store` never
@@ -91,6 +91,13 @@ have both adapters call it, so a rule exists once.
   age/lease lines stripped, assert a range, or assert on events.
 - The tool count on line 1 of `src/server.rs` must equal
   `rg -c "#\[tool\(" src/server.rs`. Derive it; do not count by hand.
+- Rework in the primary chain reopens the implement row; never file a fix row
+  and never create a fourth level. The review row is the coder's to file, and
+  the board validates it at publish; the manager files only the analyze root.
+- The chain close is the reviewer's `task_update(status="done"|"not_done")` on
+  the review row, refused to the identity that recorded the newest diff. The
+  chain reopen is the manager's store operation (`chain_reopen`, no adapter door
+  yet), refused to the identity that recorded the close and after a commit.
 - Agents run `~/.cargo/bin/agentboard`; `./target/release/agentboard` is only the
   checkout, and `tests/mcp_client.py` drives the latter. After changing the CLI or
   MCP surface run `cargo install --path . --locked`, or the verbs you built are
@@ -145,4 +152,5 @@ Rule 5 of the reviewer rules in `PROTOCOL.md`.
   canonical names. The Claude/opencode command links also go through that home.
   There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: the chain, the cap, the diff verbs, who moves which status.
+- `docs/three-task-chain.md` — the design note behind the three-row chain.
 - `docs/workflow.md` — the only page with diagrams; the other pages link to it.

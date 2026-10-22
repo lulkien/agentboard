@@ -183,7 +183,7 @@ up:
 ## What to do with the result
 
 - Claim disproved: file the correction as a review round on the doc or spec that stated
-  it, with the probe output in the review task's description, and require the worker to
+  it, with the probe output in the review row's description, and require the worker to
   re-run the probe and paste real output. Do not silently rewrite the design yourself.
 - Claim verified: accept it, and put the output in the next row so nobody re-litigates
   it.

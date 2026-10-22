@@ -56,8 +56,37 @@ Dispatch distinguishes the two workflows from the chain's rows, not depth alone:
 any `needs_impl` or `needs_review` in the chain selects the new mapping. Recorded
 chain close/reopen/reject events retain that mapping after terminal statuses
 replace the published statuses. See [dispatch authority](#dispatch-authority).
-The store also has closed-chain reopen operations; dedicated adapter verbs are
-not yet exposed, so this protocol does not prescribe a CLI/MCP reopen command.
+
+### Chain close and reopen
+
+A new chain closes through `task_update(status="done"|"not_done")` on its review
+row. The store verbs are `chain_close` and `chain_reopen`; the first is exposed
+through that generic setter, and the second has no CLI or MCP door in this
+surface. The close is one transaction over all three rows and is refused unless
+the analyze row is `needs_impl`, the implement and review rows are `needs_review`
+or `review`, the review row carries a verdict (the call's `report` or `note`, or
+its previous report), and a diff is recorded on the chain. The acting identity
+must be recorded and must differ from the identity that recorded the newest diff:
+the seat that did the work cannot declare it good. Refusals keep the rows where
+they are and name the reason: `chain requires exactly analyze -> implement ->
+review, with no review children`, `cannot close T<n>: status <s> (expected
+<allowed>)`, `T<n> has no verdict`, `chain has no recorded diff identity`, or
+`chain close refused: acting identity recorded the newest diff`.
+
+The manager can reopen a closed chain before it is committed with the store
+verb `chain_reopen`. It requires a non-empty reason and an acting identity that
+differs from the identity that recorded the close, refuses a row carrying a
+`commit_ref`, and counts against the same reopen cap. It restores the same three
+rows: analyze `needs_impl`, implement `needs_impl`, review `needs_review`; the
+next diff submission refreshes the review row to `ready`. The refusal lines are
+`chain reopen requires a reason`, `cannot reopen T<n>: status <s> (expected a
+closed chain)`, `cannot reopen T<n>: already committed`, `chain reopen refused:
+acting identity recorded the close`, and `reopen cap 3 hit; reopen the implement
+row is no longer allowed`. The opener is the manager's call in practice; the
+board enforces the identity difference, not a name list. A further status change
+on a closed chain is refused with `closed chain is final; use chain reopen with a
+different identity and a reason`. Until an adapter door exists, a close cannot
+be undone through this binary's CLI or MCP surface.
 
 ### Legacy compatibility: implement, review, fix
 
@@ -87,7 +116,7 @@ A fix row reaching `done` is the reviewer's signature and its `report` must carr
 
 1. The cap is final. When a row lands `not_done` the reviewer does not re-open it or work around it; re-scoping belongs to the manager.
 2. Review the new diff only: the diff the review brief names — the newest patch of the row under review, or the patch an evidence-only submission re-runs. An older diff, or code the new diff did not touch, is not in scope.
-3. Classify every finding as **blocker**, **follow-up** or **nit**. An observation that is not classified is not a finding and does not go in the fix row.
+3. Classify every finding as **blocker**, **follow-up** or **nit**. An observation that is not classified is not a finding and does not go in the report.
 4. Never re-report a closed finding without new evidence quoted from the current diff.
 5. Never edit. The reviewer reads the newest patch plus the row's `description` and `goal`, judges logic and edge cases against that spec, and files classified findings; it writes nothing to the tree (no edit, commit, build or install), because an edit makes the verdict grade its own change and leaves an unowned write behind.
 
@@ -116,7 +145,7 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 
 ## Worker flow
 
-In the primary chain the analyzer publishes `needs_impl`, the coder records `diff_add` and publishes `needs_review`, and the reviewer records a verdict on the review child. Each starts with `task_claim` and reads `description` and `goal`. Legacy workers follow `task_claim` → work → `diff_add` → `task_update(report=..., status="review")`. A move to `review` needs the diff (see the workflow above); `done` does not. Any agent may create a child task (`parent=<id>`); a reviewer uses this to file the fix task.
+In the primary chain the analyzer publishes `needs_impl`, the coder records `diff_add` and publishes `needs_review`, and the reviewer records a verdict on the review child. Each starts with `task_claim` and reads `description` and `goal`; the reviewer also reads the analyze plan the review row names. In the primary chain only the analyzer files the implement child and only the coder files the review child; the reviewer files no row and rework reopens the existing implement row. Legacy workers follow `task_claim` → work → `diff_add` → `task_update(report=..., status="review")`. A move to `review` needs the diff (see the workflow above); `done` does not. In a legacy chain any agent may create a fix child (`parent=<id>`), and a reviewer uses that to file the fix task.
 
 ## Fields
 
@@ -126,12 +155,12 @@ In the primary chain the analyzer publishes `needs_impl`, the coder records `dif
 | title | One-line summary |
 | description | Everything the worker needs (repo, files, situation) |
 | goal | How to do it + definition of done |
-| status | ready \| working \| blocking \| not_done \| needs_fix \| review \| done \| dropped |
+| status | ready \| working \| blocking \| needs_impl \| needs_review \| needs_fix \| not_done \| review \| done \| dropped |
 | reporter | Immutable acting identity at creation; not a caller argument or editable field |
 | assignee | Profile or tmux session name |
 | priority | Lower runs first (default 100) |
 | epic | Epic id (e.g., E3) the work belongs to; inherited from `parent` when omitted |
-| parent | Parent task id (e.g., T3): a subtask link, such as a fix task under the review that found it |
+| parent | Parent task id (e.g., T3): a subtask link; in the primary chain the implement and review children, in a legacy chain a fix task under the review that found it |
 | needs | Input type the task waits for (e.g., input) |
 | reopen_count | Moves into `needs_fix` so far (0 on a new row, never reset); a refused fourth is recorded as 4, shown by `get` as `reopens: 4/3 (cap hit, stopped)` |
 | report | Worker's findings/outcome |
@@ -154,7 +183,7 @@ A diff is what a coder submitted for review: one row per submission, stored verb
 
 Exit codes: every diff verb exits 0 on success and 1 on any refusal — a bad id, an unknown task or diff, a whitespace-only body, an unreadable `--body-file`, no body source, a task id where a diff id belongs, or an evidence target that is not the newest patch of the submitting row. Over MCP the same text arrives as a tool error.
 
-`task_get` shows the newest patch of the task as one `diff:` line. Recording a diff moves no status; the only status rule that reads diffs is the gate on a move into `review` (workflow step 3). `task_wait`/`agentboard wait` accept `diff` as an event kind.
+`task_get` shows the newest patch of the task as one `diff:` line. Recording a diff moves no status. A move into `needs_review` or legacy `review`, review-child creation, and a chain close all read the submission. `task_wait`/`agentboard wait` accept `diff` as an event kind.
 
 ## Editing a spec
 
@@ -196,7 +225,7 @@ Other clips, all marked or absent:
 - `needs_review` — implementation submitted for review.
 - `needs_fix` — reviewer rejection; the primary chain reuses its implement row, while legacy chains wait for a fix child (aliases: `need fix`, `needs-fix`, `fix`)
 - `not_done` — a terminal verdict on the primary chain, or a legacy reopen-cap result: the row's fourth move into `needs_fix` was refused (see [The reopen cap](#the-reopen-cap)) and the row landed here instead, with the caller's body kept in an event; an open parent lands here too, one level only. Not claimable; the manager drops it or refiles (aliases `not-done`, `nd`). `get` shows `reopens: N/3`, and `(cap hit, stopped)` above 3.
-- `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation. A move into it needs a diff recorded since the last claim. On a legacy parentless row the board files its review row.
+- `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation. A move into it needs a submission recorded since the last claim; on a new-chain review row the gate reads the implement parent's submission. On a legacy parentless row the board files its review row.
 - `done` — verified complete
 - `dropped` — abandoned
 

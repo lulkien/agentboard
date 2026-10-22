@@ -27,9 +27,9 @@ herdr agent list             # name, agent kind, agent_status, pane_id
 
 ## Topology: manager tab, team tab
 
-Manager in own tab. Coding agents share NEW tab with exactly two panes (coder left, reviewer right). Never split manager's tab, never put workers in manager's tab.
+Manager in own tab. Coding agents share NEW tab (analyzer, coder, reviewer; `manager up` creates coder and reviewer until T287 adds the analyzer flag). Never split manager's tab, never put workers in manager's tab.
 
-`agentboard manager up --repo <repo> [--coder K] [--reviewer K]` does whole move in one verb: refuses while a `coder`/`reviewer` is live, creates fresh tab rooted in repo, splits into two panes, starts coder (default claude) and reviewer (default opencode), answers folder-trust dialog, forces the names, registers both by name. `manager down` is the reverse. This file covers only what those verbs do not.
+`agentboard manager up --repo <repo> [--coder K] [--reviewer K]` does the two-seat move in one verb: refuses while a `coder`/`reviewer` is live, creates fresh tab rooted in repo, splits into two panes, starts coder (default claude) and reviewer (default opencode), answers folder-trust dialog, forces the names, registers both by name. Start the analyzer in its own pane with `manager pane split` and `manager agent start` until T287 adds `--analyzer`; do not pretend the flag exists. `manager down` is the reverse. This file covers only what those verbs do not.
 
 Create worker panes from own pane only when user asks for something other than team tab. Don't invent workspaces.
 
@@ -74,19 +74,19 @@ Re-check `agent list` for `idle` before sending work. Startup dialog delayed rea
 
 ## Renew a pane's conversation between work cycles
 
-Cycle: task -> review -> fix -> done, then renew: next task starts in cleared context so pane doesn't carry last row's state. `agentboard manager renew [--names A,B]` sends `/clear`, waits for `idle`, and prints the prompt marker it found; it refuses a working or blocked seat and a screen with no marker. By hand only when `renew` refused and you must see why: `agentboard manager agent read <name>` shows the screen, `manager agent keys <name> esc` closes an overlay, then run `renew` again.
+Cycle: analyze -> implement -> review -> done, with a rejection reopening the implement row, then renew: next task starts in cleared context so pane doesn't carry last row's state. `agentboard manager renew [--names A,B]` sends `/clear`, waits for `idle`, and prints the prompt marker it found; it refuses a working or blocked seat and a screen with no marker. By hand only when `renew` refused and you must see why: `agentboard manager agent read <name>` shows the screen, `manager agent keys <name> esc` closes an overlay, then run `renew` again.
 
 Rules to avoid damage:
 
 - Renew only pane at its prompt. `working` pane mid-task, or one with review in flight, loses thread; renew after row closed.
 - Open overlay (usage/stats with `d to day`, recap, permission dialog) swallows text: send `escape` first, read pane, then `/clear`.
-- Coder and reviewer renewed separately, own cycles, not together.
+- Analyzer, coder and reviewer renewed separately, own cycles, not together.
 - Claude Code only. Same probe before assuming key exists in another agent's TUI: read pane, try text, read again, confirm prompt empty.
 
 ## Drive work
 
 ```bash
-herdr agent prompt coder 'Claim task T37 ..., run its goal, task_update status review. Reply one line.' --wait --timeout 900000
+herdr agent prompt coder 'Claim task T37 ..., run its goal, diff_add, set needs_review. Reply one line.' --wait --timeout 900000
 herdr agent read coder                 # or: herdr pane read <pane_id> --lines 20
 herdr agent wait coder --timeout 120000
 ```

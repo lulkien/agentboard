@@ -2,7 +2,8 @@
 
 `agentboard-manager/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`).
 `manager/` is the small shared initialization skill: register this session with
-its actual CLI kind through MCP, print the brief, and arm the 300 s watch.
+its actual CLI kind through MCP, print the brief, file one analyze root, and arm
+the 300 s watch.
 Its `claude.md` and `opencode.md` resources retain the proven command-file formats.
 There is one `SKILL.md` named `manager`, with no nested competing skills.
 
