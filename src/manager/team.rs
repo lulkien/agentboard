@@ -31,7 +31,8 @@ fn home_file(rel: &str) -> Result<PathBuf, String> {
 
 /// The argv a seat's agent starts with. claude needs its MCP config, which is what
 /// gives it its board tools and actor; opencode needs `--standalone` or its TUI
-/// prints a banner and exits. The config is checked here so a missing file refuses
+/// prints a banner and exits. Codex selects its role profile with `-p`.
+/// The config is checked here so a missing file refuses
 /// before any pane exists.
 fn seat_args(role: &str, kind: &str) -> Result<Vec<String>, String> {
     match kind {
@@ -52,8 +53,24 @@ fn seat_args(role: &str, kind: &str) -> Result<Vec<String>, String> {
             Ok(args)
         }
         "opencode" => Ok(vec!["--standalone".to_owned()]),
-        _ => Ok(Vec::new()),
+        "codex" => Ok(vec!["-p".to_owned(), actor_role(role).to_owned()]),
+        _ => Err(format!("up: no seat argv for kind {kind:?}")),
     }
+}
+
+// Claude's existing MCP config calls the coder role "coding".
+fn actor_role(role: &str) -> &str {
+    if role == "coding" { "coder" } else { role }
+}
+
+fn seat_env(env: &[(String, String)], role: &str) -> Vec<(String, String)> {
+    let mut env: Vec<_> = env
+        .iter()
+        .filter(|(k, _)| k != "AGENTBOARD_ACTOR")
+        .cloned()
+        .collect();
+    env.push(("AGENTBOARD_ACTOR".to_owned(), actor_role(role).to_owned()));
+    env
 }
 
 pub struct Up<'a> {
@@ -62,7 +79,7 @@ pub struct Up<'a> {
     pub reviewer: &'a str,
     pub label: Option<&'a str>,
     pub prefix: &'a str,
-    /// `K=V`, set in both panes.
+    /// `K=V`, shared by both panes; AGENTBOARD_ACTOR is always the seat role.
     pub env: &'a [String],
 }
 
@@ -104,11 +121,16 @@ pub fn up(c: &Client, o: &Up) -> Result<String, Failure> {
         }
     }
 
-    let tab = c.tab_create(&repo_s, Some(&label), &env)?;
+    let tab = c.tab_create(&repo_s, Some(&label), &seat_env(&env, seats[0].role))?;
     let mut panes = vec![tab.root_pane.clone()];
     let mut registered: Vec<&str> = Vec::new();
     let made = (|| -> Result<Vec<String>, String> {
-        panes.push(c.pane_split(&tab.root_pane, "right", Some(&repo_s), &env)?);
+        panes.push(c.pane_split(
+            &tab.root_pane,
+            "right",
+            Some(&repo_s),
+            &seat_env(&env, seats[1].role),
+        )?);
         let mut notes = Vec::new();
         for (i, s) in seats.iter().enumerate() {
             let pane = panes[i].clone();
@@ -383,6 +405,24 @@ pub fn renew(c: &Client, names: &[String]) -> Result<String, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seat_argv_selects_codex_role_and_refuses_unknown_kinds() {
+        for (role, profile) in [
+            ("coding", "coder"),
+            ("coder", "coder"),
+            ("reviewer", "reviewer"),
+            ("analyzer", "analyzer"),
+            ("manager", "manager"),
+        ] {
+            assert_eq!(seat_args(role, "codex").unwrap(), ["-p", profile]);
+            assert_eq!(seat_args(role, "opencode").unwrap(), ["--standalone"]);
+        }
+        for kind in ["gemini", "unknown-kind", ""] {
+            let error = seat_args("reviewer", kind).unwrap_err();
+            assert!(error.contains(&format!("{kind:?}")), "{error}");
+        }
+    }
 
     #[test]
     fn a_path_is_found_only_as_a_whole_component() {

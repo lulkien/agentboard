@@ -39,14 +39,23 @@ M up --repo "$S/repo"
 echo "up: $out"
 check "up exits 0 and prints one line naming tab, panes and agents" $([ $rc -eq 0 ] && [ "$(grep -c . <<<"$out")" = 1 ] && has "$out" "s:t1" && has "$out" "coder pane s:p1 (claude)" && has "$out" "reviewer pane s:p2 (opencode)" && echo 0 || echo 1)
 check "up sends tab, split, then each start followed by its status read" $([ "$(methods)" = "agent.list tab.create pane.split agent.start agent.list agent.start agent.list" ] && echo 0 || echo 1)
-check "tab.create is rooted in the repo and labelled by its basename" $([ "$(req tab.create)" = "{\"cwd\":\"$S/repo\",\"label\":\"repo\"}" ] && echo 0 || echo 1)
-check "the split targets the root pane, to the right, in the repo" $([ "$(req pane.split)" = "{\"cwd\":\"$S/repo\",\"direction\":\"right\",\"target_pane_id\":\"s:p1\"}" ] && echo 0 || echo 1)
+check "tab.create is rooted in the repo and labelled by its basename" $([ "$(req tab.create)" = "{\"cwd\":\"$S/repo\",\"env\":{\"AGENTBOARD_ACTOR\":\"coder\"},\"label\":\"repo\"}" ] && echo 0 || echo 1)
+check "the split targets the root pane, to the right, in the repo" $([ "$(req pane.split)" = "{\"cwd\":\"$S/repo\",\"direction\":\"right\",\"env\":{\"AGENTBOARD_ACTOR\":\"reviewer\"},\"target_pane_id\":\"s:p1\"}" ] && echo 0 || echo 1)
 starts=$(req agent.start)
 check "coder starts claude with its mcp config and a 120s timeout" $(has "$starts" "\"args\":[\"--strict-mcp-config\",\"--mcp-config=$HOME/.claude/coding-mcp.json\"]" && has "$starts" '"name":"coder"' && has "$starts" '"pane_id":"s:p1"' && has "$starts" '"timeout_ms":120000' && echo 0 || echo 1)
 check "reviewer starts opencode with --standalone and no mcp config" $(has "$starts" '"kind":"opencode"' && has "$starts" '"args":["--standalone"]' && ! has "$(sed -n 2p <<<"$starts")" mcp-config && echo 0 || echo 1)
 r=$(rows)
 check "both are registered by name with their kind, not by pane id" $(has "$r" "coder" && has "$r" "claude" && has "$r" "reviewer" && has "$r" "opencode" && ! has "$r" "s:p" && echo 0 || echo 1)
 echo "$r"
+
+stub
+M up --repo "$S/repo" --coder codex --reviewer codex --role-name-prefix cx- --env AGENTBOARD_ACTOR=wrong --env KEEP=value
+starts=$(req agent.start)
+check "codex seats select coder and reviewer profiles despite the name prefix" $([ $rc -eq 0 ] && has "$(head -1 <<<"$starts")" '"args":["-p","coder"]' && has "$(tail -1 <<<"$starts")" '"args":["-p","reviewer"]' && echo 0 || echo 1)
+check "pane env overrides a shared actor per role and preserves other variables" $(has "$(req tab.create)" '"env":{"AGENTBOARD_ACTOR":"coder","KEEP":"value"}' && has "$(req pane.split)" '"env":{"AGENTBOARD_ACTOR":"reviewer","KEEP":"value"}' && echo 0 || echo 1)
+stub
+M up --repo "$S/repo" --coder unknown-kind
+check "unknown seat argv kind refuses by name before any herdr call" $([ $rc -eq 1 ] && has "$err" 'unknown-kind' && [ -z "$(methods)" ] && echo 0 || echo 1)
 
 export STUB_BUSY=2; stub
 M up --repo "$S/repo" --role-name-prefix b-
