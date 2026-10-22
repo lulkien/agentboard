@@ -25,18 +25,95 @@ pub const BACKEND: &str = if cfg!(feature = "sqlite") {
 
 /// `agentboard 0.1.0 tools=23 commit=1a2b3c4d-dirty backend=surreal`
 pub fn line(tools: usize) -> String {
-    format!("{NAME} {VERSION} tools={tools} commit={COMMIT} backend={BACKEND}")
+    line_for(tools, COMMIT, checkout_stamp().as_deref())
 }
 
 /// Store identity without a dependency on the MCP adapter. The build derives the
 /// count from tool attributes; the server test compares it to the actual router.
+/// Pure formatting: store records must never consult git or perform I/O.
 pub fn stamp() -> String {
-    line(
-        env!("AGENTBOARD_TOOL_COUNT")
-            .parse()
-            .expect("derived tool count"),
-    )
+    let tools: usize = env!("AGENTBOARD_TOOL_COUNT")
+        .parse()
+        .expect("derived tool count");
+    format!("{NAME} {VERSION} tools={tools} commit={COMMIT} backend={BACKEND}")
 }
 
 /// Bump for incompatible schema OR tool-surface rules. Never auto-upgrade a board.
 pub const GENERATION: i64 = 2;
+
+// Resolve the build checkout, never the caller's unrelated working directory.
+// Cargo rerun hints cannot update an artifact that is already installed/running;
+// HEAD may also be a symbolic ref whose contents stay unchanged across commits.
+fn checkout_stamp() -> Option<String> {
+    let output = crate::store::proc::run(
+        std::process::Command::new("git")
+            .args(["describe", "--always", "--dirty", "--abbrev=8"])
+            .current_dir(env!("CARGO_MANIFEST_DIR")),
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn line_for(tools: usize, commit: &str, checkout: Option<&str>) -> String {
+    let freshness = match checkout {
+        Some(head) if head != commit => format!(" (stale, HEAD is {head})"),
+        Some(_) => String::new(),
+        None => " (unverified, build checkout unavailable)".to_owned(),
+    };
+    format!("{NAME} {VERSION} tools={tools} commit={commit}{freshness} backend={BACKEND}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_for;
+
+    #[test]
+    fn stale_and_unverifiable_builds_are_explicit() {
+        // Isolate PATH in a child test process; never mutate the test runner's env.
+        if std::env::var_os("AGENTBOARD_TEST_STAMP_CHILD").is_some() {
+            for _ in 0..20 {
+                assert!(!super::stamp().contains("unverified"));
+            }
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("agentboard-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = dir.join("git");
+        std::fs::write(
+            &git,
+            "#!/bin/sh\necho called >> \"$AGENTBOARD_TEST_GIT_COUNTER\"\nexit 1\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let counter = dir.join("calls");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ident::tests::stale_and_unverifiable_builds_are_explicit",
+            ])
+            .env("AGENTBOARD_TEST_STAMP_CHILD", "1")
+            .env("AGENTBOARD_TEST_GIT_COUNTER", &counter)
+            .env("PATH", &dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(!counter.exists(), "repeated stamp() must not spawn git");
+        std::fs::remove_dir_all(dir).unwrap();
+
+        assert!(
+            line_for(23, "aaaaaaaa", Some("bbbbbbbb"))
+                .contains("commit=aaaaaaaa (stale, HEAD is bbbbbbbb)")
+        );
+        assert!(
+            line_for(23, "aaaaaaaa-dirty", Some("aaaaaaaa")).contains("(stale, HEAD is aaaaaaaa)")
+        );
+        assert!(!line_for(23, "aaaaaaaa", Some("aaaaaaaa")).contains("stale"));
+        assert!(line_for(23, "aaaaaaaa", None).contains("(unverified,"));
+    }
+}

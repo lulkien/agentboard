@@ -24,8 +24,8 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 |---|---|
 | `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 49 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 42 passed`, `27 passed`, and `2 passed` (needs no `surreal` binary) |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 50 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 43 passed`, `27 passed`, and `2 passed` (needs no `surreal` binary) |
 | `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
 | `bash tests/cli.sh` | `191/191 passed (backend: surreal)` (against the sqlite binary: `198/198 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
@@ -35,6 +35,7 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
 | `rg -c '#\[tool\(' src/server.rs` | `23`, equal to the count on line 1 of `src/server.rs` (`MCP surface: 23 tools`) and to what `agentboard board-build` prints |
 | `python3 tests/sqlite-first-use.py` (after a sqlite release build) | `sqlite-first-use: 20 rounds x 8 simultaneous first adds passed` (fresh scratch files only) |
+| `AGENTBOARD_BUILD_COMMIT=00000000 cargo build --release && python3 tests/build-stamp.py target/release/agentboard` | `build-stamp: stale CLI and MCP identities explicit; seat rejects stale commit and wrong tool count; matching surface accepted`; rebuild without the override afterward |
 | `cargo fmt --check` | no output |
 | `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 

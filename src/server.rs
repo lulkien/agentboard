@@ -832,7 +832,17 @@ mod tests {
             .filter(|l| l.trim_start().starts_with(marker))
             .count();
         assert_eq!(tool_count(), markers);
-        assert_eq!(ident::stamp(), ident::line(tool_count()));
+        assert_eq!(
+            ident::stamp(),
+            format!(
+                "{} {} tools={} commit={} backend={}",
+                ident::NAME,
+                ident::VERSION,
+                tool_count(),
+                ident::COMMIT,
+                ident::BACKEND
+            )
+        );
     }
 
     #[test]

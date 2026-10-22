@@ -25,34 +25,35 @@ agentboard path
 - The installed binary is what agents run. `target/release/agentboard` from a
   checkout build is not. Reinstall after every change to the CLI or MCP surface.
 
-## 3. Prove the MCP surface before wiring anything
+## 3. Assert the installed seat surface before wiring anything
 
-Pipe a handshake into the binary. A scratch `AGENTBOARD_DB` keeps it off your board.
+From this checkout, after installing and before starting each seat:
 
 ```sh
-export AGENTBOARD_DB=$(mktemp -d)/probe.db
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-| timeout 5 agentboard 2>/dev/null \
-| python3 -c '
-import sys, json
-for line in sys.stdin:
-    m = json.loads(line)
-    if m.get("id") == 2:
-        names = [t["name"] for t in m["result"]["tools"]]
-        print(len(names)); print(" ".join(names))'
-unset AGENTBOARD_DB
+~/.cargo/bin/agentboard board-build
+python3 scripts/check-seat-surface.py
 ```
 
-Expected: `19`, then
+Expected identity: `agentboard 0.1.0 tools=23 commit=<checkout revision> backend=surreal`
+(or `backend=sqlite` for that build). Expected assertion:
+`seat surface ok: tools=23 commit=<checkout revision>`.
+The revision is exactly `git describe --always --dirty --abbrev=8`, including `-dirty`
+when tracked files are modified. The assertion compares both revision and the
+source-derived tool count; a rebuilt but unreinstalled binary is refused.
+It accepts an explicit binary path for checking a checkout build:
+`python3 scripts/check-seat-surface.py ./target/release/agentboard`.
+Neither command opens or writes a board.
 
-```
-board_brief epic_add epic_edit epic_get epic_list epic_update session_list session_register session_send session_tail task_add task_ask task_children task_claim task_edit task_get task_list task_update task_wait
-```
-
-A smaller number means the installed binary is older than the checkout: go back to step 2.
+A suspiciously fast install can mean Cargo reused an older artifact; elapsed time
+alone is not proof. An embedded revision that differs from its build checkout is
+shown as `commit=<embedded> (stale, HEAD is <checkout revision>)` in both
+`board-build` and the MCP initialize title. An unavailable build checkout is marked
+`(unverified, build checkout unavailable)`; the assertion refuses both cases.
+The embedded revision is preserved, never replaced with a claim of a newer build.
+If refused, force a rebuild (`touch build.rs`), reinstall with
+`cargo install --path . --locked`, rerun the assertion, then restart the seats.
+Cargo's `.git/HEAD` rerun hint cannot update an already installed/running artifact,
+and symbolic HEAD can stay unchanged while the referenced branch moves.
 
 ## 4. Register the server with a client
 

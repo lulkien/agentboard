@@ -81,3 +81,18 @@ Manual moves that still need plain `herdr` (attach, `/btw`, killing a TUI by pro
 - `references/worker-claim-probes.md`: reproducing a worker's "the engine cannot do this" claim.
 - `references/herdr-mechanics.md`: what the manager verbs do not cover.
 - `references/herdr-socket-api.md`: herdr socket protocol notes.
+
+## Prove the installed build before starting seats
+
+From the repo, the owner installs with `cargo install --path . --locked`, then runs
+`~/.cargo/bin/agentboard board-build` and `python3 scripts/check-seat-surface.py`.
+Expect `agentboard 0.1.0 tools=23 commit=<checkout revision> backend=surreal`
+(or sqlite), then `seat surface ok: tools=23 commit=<checkout revision>`.
+The revision is `git describe --always --dirty --abbrev=8`; the check derives the
+source tool count and refuses a mismatch in either count or revision. Run it before
+each seat start, including after a rebuild that has not yet been installed.
+A suspiciously fast install may have reused a stale artifact; prove the identity,
+not the elapsed time. `(stale, HEAD is ...)` or `(unverified, ...)` is a refusal:
+force rebuild with `touch build.rs`, have the owner reinstall, check again, then
+restart seats. See `docs/agent-install.md` for the full install proof. These checks
+are read-only and do not open a board. Coder/reviewer seats never install.

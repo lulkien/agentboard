@@ -173,7 +173,7 @@ pub fn parse_ref(raw: &str) -> Result<Ref, String> {
 
 pub mod board;
 pub mod bridge;
-mod proc;
+pub(crate) mod proc;
 pub mod text;
 pub mod waiting;
 

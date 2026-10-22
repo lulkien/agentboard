@@ -17,7 +17,9 @@ fn main() {
     println!("cargo:rerun-if-changed=src/server.rs");
     println!("cargo:rustc-env=AGENTBOARD_COMMIT={}", describe());
     // A checkout moves HEAD without touching a tracked file, and that alone owes a
-    // rebuild of the stamp.
+    // rebuild of the stamp. This is only a Cargo hint: an installed artifact
+    // cannot rerun this script, and symbolic HEAD can stay unchanged when its
+    // branch ref moves. ident::line also checks the build checkout at runtime.
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-env-changed=AGENTBOARD_BUILD_COMMIT");
 }
