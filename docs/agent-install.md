@@ -118,9 +118,11 @@ From this checkout, after installing and before starting each seat:
 python3 scripts/check-seat-surface.py
 ```
 
-Expected identity: `agentboard 0.1.0 tools=23 commit=<checkout revision> backend=surreal`
+Expected identity: `agentboard <version> tools=<n> commit=<checkout revision> backend=surreal`
 (or `backend=sqlite` for that build). Expected assertion:
-`seat surface ok: tools=23 commit=<checkout revision>`.
+`seat surface ok: tools=<n> commit=<checkout revision>`.
+`<n>` is the tool count the command derives from `src/server.rs`: read it from the
+output, never type it.
 The revision is exactly `git describe --always --dirty --abbrev=8`, including `-dirty`
 when tracked files are modified. The assertion compares both revision and the
 source-derived tool count; a rebuilt but unreinstalled binary is refused.
