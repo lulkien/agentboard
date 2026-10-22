@@ -11,6 +11,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -103,7 +104,49 @@ def probe(matching, stub, env):
         owner.close()
 
 
-def run_checks():
+def review_probe(binary, env):
+    # This client holds only the old verbs. The current binary lets the request
+    # reach apply; a 19-count binary is stopped earlier by the separate probe.
+    seat = Seat(binary, env)
+    old_tools = {
+        'board_brief', 'epic_add', 'epic_edit', 'epic_get', 'epic_list',
+        'epic_update', 'session_list', 'session_register', 'session_send',
+        'session_tail', 'task_add', 'task_ask', 'task_children', 'task_claim',
+        'task_edit', 'task_get', 'task_list', 'task_update', 'task_wait',
+    }
+    assert len(old_tools) == 19
+    assert not {'diff_add', 'diff_get', 'diff_list'} & old_tools
+
+    def call(name, **args):
+        assert name in old_tools, f'pre-E11 client cannot call {name}'
+        return seat.call(name, **args)
+
+    try:
+        parent = call('task_add', title='scratch parent')
+        assert not failed(parent), parent
+        parent_id = re.search(r'T\d+', text(parent))[0]
+        reply = call('task_add', title='scratch pre-gate submission', parent=parent_id)
+        assert not failed(reply), reply
+        task = re.search(r'T\d+', text(reply))[0]
+        reply = call('task_claim', id=task)
+        assert not failed(reply), reply
+        before = call('task_get', id=task, full=True)
+        reply = call('task_update', id=task, status='review', report='must not land')
+        diagnostic = json.dumps(reply)
+        assert failed(reply), f'no-diff review accepted: {reply}'
+        assert f'{task} cannot move to review: no diff recorded since it was last claimed' in diagnostic, reply
+        assert f'agentboard diff add {task}' in diagnostic, reply
+        assert f'diff_add id={task}' in diagnostic, reply
+        after = call('task_get', id=task, full=True)
+        # Refusal must precede all patch writes; avoid relative-age assertions.
+        assert re.findall(r'#\d+', text(before)) == re.findall(r'#\d+', text(after))
+        assert f'{task} working ' in text(after), after
+        assert 'must not land' not in text(after), after
+    finally:
+        seat.close()
+
+
+def run_checks(review_binary=None):
     with tempfile.TemporaryDirectory(prefix='agentboard-write-gate-') as directory:
         scratch = pathlib.Path(directory)
         tree = scratch / 'source'
@@ -114,16 +157,24 @@ def run_checks():
         original = {name: (tree / name).read_text() for name in
                     ['src/ident.rs', 'src/store/sqlite/mod.rs', 'src/store/surreal/mod.rs',
                      'src/store/surreal/tasks.rs']}
-        for backend in ['surreal', 'sqlite']:
+        backends = ['surreal', 'sqlite']
+        if review_binary:
+            identity = subprocess.check_output([str(review_binary), 'board-build'], text=True)
+            backends = [identity.split('backend=')[1].strip()]
+        for backend in backends:
             for name, source in original.items():
                 (tree / name).write_text(source)
             matching, stub, mutant = [scratch / f'{backend}-{n}' for n in ['matching', 'stub', 'mutant']]
-            build(tree, backend, matching)
+            if review_binary:
+                matching = review_binary
+            else:
+                build(tree, backend, matching)
             ident = re.sub(r'pub fn surface_tools\(\) -> i64 \{.*?\n\}',
                            'pub fn surface_tools() -> i64 { 19\n}', original['src/ident.rs'], flags=re.S)
             assert ident != original['src/ident.rs']
             (tree / 'src/ident.rs').write_text(ident)
-            build(tree, backend, stub)
+            if not review_binary:
+                build(tree, backend, stub)
             env = dict(os.environ, AGENTBOARD_DB=str(scratch / f'{backend}-board'),
                        AGENTBOARD_ACTOR='surface-test')
             server = None
@@ -151,6 +202,27 @@ def run_checks():
                         raise AssertionError('scratch server never became healthy')
                 else:
                     env.pop('AGENTBOARD_SURREAL_URL', None)
+                review_probe(matching, env)
+                print(f'pre-gate-client: {backend}: no-diff review refused by name; no patch writes landed', flush=True)
+                if review_binary:
+                    continue
+                # Delete only the review gate, retaining the surface guard.
+                gatepath = f'src/store/{backend}/tasks.rs'
+                gatesource = (tree / gatepath).read_text()
+                deleted = gatesource.replace('if submit && !diff_since_claim(', 'if false && !diff_since_claim(')
+                assert deleted != gatesource
+                (tree / gatepath).write_text(deleted)
+                (tree / 'src/ident.rs').write_text(original['src/ident.rs'])
+                build(tree, backend, mutant)
+                try:
+                    review_probe(mutant, env)
+                except AssertionError as error:
+                    assert 'no-diff review accepted:' in str(error), error
+                else:
+                    raise AssertionError('deleted review gate survived the negative test')
+                print(f'pre-gate-client: {backend}: deleting diff gate makes no-diff review test fail', flush=True)
+                (tree / gatepath).write_text(gatesource)
+                (tree / 'src/ident.rs').write_text(ident)
                 probe(matching, stub, env)
                 print(f'surface-write-gate: {backend}: compiled 19-tool stub refused before registration, claim, note, status, diff, task and epic writes; matching seat accepted', flush=True)
                 # Delete all count comparisons on the write path in the scratch copy.
@@ -180,16 +252,21 @@ def run_checks():
                     server.wait(timeout=5)
                 if log is not None:
                     log.close()
-    print('surface-write-gate: both backends and mutation checks passed')
+    if not review_binary:
+        print('surface-write-gate: both backends and mutation checks passed')
 
 
-try:
-    run_checks()
-finally:
-    # A cached mutant must never remain as the checkout's runnable debug binary.
-    revision = subprocess.check_output(['git', 'describe', '--always', '--dirty', '--abbrev=8'],
-                                       cwd=ROOT, text=True).strip()
-    subprocess.run(['cargo', 'build', '--locked', '--quiet'], cwd=ROOT,
-                   env=dict(os.environ, CARGO_TARGET_DIR=str(ROOT / 'target'),
-                            AGENTBOARD_BUILD_COMMIT=revision),
-                   check=True, timeout=180)
+if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--review-only':
+        run_checks(pathlib.Path(sys.argv[2]).resolve())
+    else:
+        try:
+            run_checks()
+        finally:
+            # A cached mutant must never remain as the checkout's runnable debug binary.
+            revision = subprocess.check_output(['git', 'describe', '--always', '--dirty', '--abbrev=8'],
+                                               cwd=ROOT, text=True).strip()
+            subprocess.run(['cargo', 'build', '--locked', '--quiet'], cwd=ROOT,
+                           env=dict(os.environ, CARGO_TARGET_DIR=str(ROOT / 'target'),
+                                    AGENTBOARD_BUILD_COMMIT=revision),
+                           check=True, timeout=180)

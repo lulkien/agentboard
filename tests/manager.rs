@@ -1256,3 +1256,25 @@ fn layout_apply_force_reports_guard_override_and_preserves_bytes() {
             .any(|l| l.contains(r#""root":{ "type" : "pane", "pane_id" : "w1:p2" }"#))
     );
 }
+
+/// The pre-E11 client can claim and submit, but holds no diff verbs. Exercise
+/// the MCP adapter and apply rule together, on the harness's throwaway board.
+#[test]
+fn pre_gate_mcp_client_cannot_submit_without_a_diff() {
+    let output = Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/surface-write-gate.py"
+        ))
+        .arg("--review-only")
+        .arg(env!("CARGO_BIN_EXE_agentboard"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("no-diff review refused by name"));
+}
