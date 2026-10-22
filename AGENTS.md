@@ -25,7 +25,7 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 |---|---|
 | `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 51 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 53 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
 | `cargo test --no-default-features --features sqlite` | `test result: ok. 43 passed`, `27 passed`, and `2 passed` (needs no `surreal` binary) |
 | `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
 | `bash tests/cli.sh` | `193/193 passed (backend: surreal)` (against the sqlite binary: `200/200 passed (backend: sqlite)`) |
@@ -37,7 +37,8 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | `rg -c '#\[tool\(' src/server.rs` | `23`, equal to the count on line 1 of `src/server.rs` (`MCP surface: 23 tools`) and to what `agentboard board-build` prints |
 | `python3 tests/sqlite-first-use.py` (after a sqlite release build) | `sqlite-first-use: 20 rounds x 8 simultaneous first adds passed` (fresh scratch files only) |
 | `AGENTBOARD_BUILD_COMMIT=00000000 cargo build --release && python3 tests/build-stamp.py target/release/agentboard` | `build-stamp: stale CLI and MCP identities explicit; seat rejects stale commit and wrong tool count; matching surface accepted`; rebuild without the override afterward |
-| `python3 tests/board-upgrade.py OLD_BINARY target/release/agentboard` (OLD_BINARY built at `ea016707`) | `board-upgrade: ... passed`: scratch-only preservation, interruption, owner/offline guards and version compatibility |
+| `python3 tests/board-upgrade.py OLD_BINARY target/release/agentboard` (OLD_BINARY built at `ea016707`) | `board-upgrade: ... passed`: host-runnable scratch preservation, interruption, positive-evidence guards, unreadable warnings and version compatibility; no PID namespace needed |
+| `python3 tests/server-lock.py target/release/agentboard` | `Ran 3 tests` and `OK`: host scratch managed-daemon lifetime flock, second-server/upgrade exclusion and progress after release |
 | `cargo fmt --check` | no output |
 | `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 
@@ -94,6 +95,11 @@ have both adapters call it, so a rule exists once.
   checkout, and `tests/mcp_client.py` drives the latter. After changing the CLI or
   MCP surface run `cargo install --path . --locked`, or the verbs you built are
   missing from the binary every agent executes.
+- Managed SurrealDB daemons hold `board.lock` for their lifetime; per-operation
+  writers use `board.write.lock`. Legacy/manual raw daemons do not hold the
+  lifetime lock: first cutover still needs the port/positive-fd checks and the
+  owner's stopped-all-servers confirmation. Unreadable `/proc` entries warn; they
+  are not positive holder evidence.
 - Normal opens refuse mismatched generations before DDL. Only the owner runs
   `board upgrade --owner` against an offline v1 SurrealDB board; follow the numbered
   cutover in `docs/agent-install.md`. Never install or upgrade from a coder seat.

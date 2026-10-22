@@ -20,22 +20,134 @@ impl Drop for OfflineServer {
     }
 }
 
+fn owner_uid() -> u32 {
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+    // SAFETY: geteuid has no arguments or side effects.
+    unsafe { geteuid() }
+}
+
+fn scope(uid: u32) -> String {
+    format!(
+        "checking positive holder evidence among uid {uid} processes; unreadable processes warn only; board.lock excludes managed v2 servers; legacy/manual servers rely on --owner confirming every seat and server is stopped"
+    )
+}
+
+fn process_uid(process: &Path) -> std::io::Result<u32> {
+    // /proc/<pid> ownership changes for non-dumpable processes. status keeps
+    // the real/effective/saved/fs UIDs; compare effective UID with geteuid().
+    let status = std::fs::read_to_string(process.join("status"))?;
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("Uid:"))
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|uid| uid.parse().ok())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "missing or invalid effective Uid in process status",
+            )
+        })
+}
+
+// IO seams let tests simulate a different UID with unreadable descriptors,
+// without root privileges or depending on which processes the host runs.
+fn inspect_process(
+    root: &Path,
+    process: &Path,
+    pid: u32,
+    uid: u32,
+    read_uid: impl FnOnce(&Path) -> std::io::Result<u32>,
+    read_fds: impl FnOnce(&Path) -> std::io::Result<std::fs::ReadDir>,
+    warnings: &mut Vec<String>,
+) -> Result<(), String> {
+    let mut warning = |step: &str, error: &std::io::Error| {
+        let name =
+            std::fs::read_to_string(process.join("comm")).unwrap_or_else(|_| "unknown".into());
+        let message = format!(
+            "warning: cannot inspect pid {pid} ({}): {step}: {error}; treating as not a holder; {}",
+            name.trim(),
+            scope(uid)
+        );
+        if !warnings
+            .iter()
+            .any(|existing| existing.starts_with(&format!("warning: cannot inspect pid {pid} (")))
+        {
+            warnings.push(message);
+        }
+    };
+    let process_uid = match read_uid(process) {
+        Ok(uid) => uid,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            warning("read process uid", &error);
+            return Ok(());
+        }
+    };
+    if process_uid != uid {
+        // This scope relies on owner-private board storage: other unprivileged
+        // UIDs cannot access that directory. Root can bypass those permissions;
+        // the owner's explicit stopped-all-servers confirmation covers root.
+        return Ok(());
+    }
+    let fds = match read_fds(&process.join("fd")) {
+        Ok(fds) => fds,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            warning("open fd directory", &error);
+            return Ok(());
+        }
+    };
+    for fd in fds {
+        let fd = match fd {
+            Ok(fd) => fd,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                warning("list fd entry", &error);
+                continue;
+            }
+        };
+        let path = match std::fs::read_link(fd.path()) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                warning("read fd link", &error);
+                continue;
+            }
+        };
+        if path.starts_with(root) {
+            return Err(format!(
+                "board upgrade refused: board held by pid {pid} ({}); {}; stop every seat and server first",
+                root.display(),
+                scope(uid)
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Check open descriptors, not a pid file: this includes a server bound to a
 /// different port and paths accessed through symlinks. Old servers predate our
-/// maintenance lock, so merely taking board.lock would not establish exclusion.
-fn refuse_holders(dir: &Path) -> Result<(), String> {
+/// lifetime lock. For them this scan proves only positive evidence; --owner is
+/// the transition guard for uninspectable legacy/manual servers.
+fn refuse_holders(dir: &Path, warnings: &mut Vec<String>) -> Result<(), String> {
+    let uid = owner_uid();
     let root = std::fs::canonicalize(dir).map_err(|e| e.to_string())?;
-    let procs = std::fs::read_dir("/proc").map_err(|error| {
-        format!("board upgrade refused: cannot open /proc (pid unavailable): {error}; Linux /proc is required to verify the board is offline")
-    })?;
+    let procs = match std::fs::read_dir("/proc") {
+        Ok(procs) => procs,
+        Err(error) => {
+            warnings.push(format!("warning: cannot open /proc (pid unavailable): {error}; treating as not a holder; {}", scope(uid)));
+            return Ok(());
+        }
+    };
     for entry in procs {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => {
-                return Err(format!(
-                    "board upgrade refused: cannot list /proc process entry (pid unavailable): {error}; cannot verify board is offline"
-                ));
+                warnings.push(format!("warning: cannot list /proc process entry (pid unavailable): {error}; treating as not a holder; {}", scope(uid)));
+                continue;
             }
         };
         let name = entry.file_name();
@@ -45,39 +157,33 @@ fn refuse_holders(dir: &Path) -> Result<(), String> {
         if pid == std::process::id() {
             continue;
         }
-        let refused = |step: &str, error: &std::io::Error| {
-            format!(
-                "board upgrade refused: cannot inspect pid {pid}: {step}: {error}; cannot verify board is offline"
-            )
-        };
-        let fds = match std::fs::read_dir(entry.path().join("fd")) {
-            Ok(fds) => fds,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(refused("open fd directory", &error)),
-        };
-        for fd in fds {
-            let fd = match fd {
-                Ok(fd) => fd,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(refused("list fd entry", &error)),
-            };
-            let path = match std::fs::read_link(fd.path()) {
-                Ok(path) => path,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(refused("read fd link", &error)),
-            };
-            if path.starts_with(&root) {
-                return Err(format!(
-                    "board upgrade refused: board held by pid {pid} ({}); stop every seat and server first",
-                    root.display()
-                ));
-            }
-        }
+        inspect_process(
+            &root,
+            &entry.path(),
+            pid,
+            uid,
+            process_uid,
+            |path| std::fs::read_dir(path),
+            warnings,
+        )?;
     }
     Ok(())
 }
 
 pub fn run() -> Result<String, String> {
+    let mut warnings = Vec::new();
+    let result = run_with_warnings(&mut warnings);
+    let notices = if warnings.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", warnings.join("\n"))
+    };
+    result
+        .map(|body| format!("{notices}{body}"))
+        .map_err(|error| format!("{notices}{error}"))
+}
+
+fn run_with_warnings(warnings: &mut Vec<String>) -> Result<String, String> {
     let s = Settings::from_env()?;
     let timing = serve::Timing::default();
     if !s.dir.is_dir() {
@@ -93,12 +199,17 @@ pub fn run() -> Result<String, String> {
     for address in s.url.to_socket_addrs().map_err(|e| e.to_string())? {
         if TcpStream::connect_timeout(&address, timing.probe).is_ok() {
             return Err(format!(
-                "board upgrade refused: server running at {}; stop every seat and server first",
-                s.url
+                "board upgrade refused: server running at {}; {}; stop every seat and server first",
+                s.url,
+                scope(owner_uid())
             ));
         }
     }
-    refuse_holders(&s.dir)?;
+    // V2 managed servers hold this flock for their entire lifetime. V1/raw
+    // servers do not: their one-time cutover still needs the port check and
+    // --owner confirmation; SurrealKV itself permits concurrent processes.
+    let lifetime = lock::StoreLock::acquire(&s.dir)?;
+    refuse_holders(&s.dir, warnings)?;
     let socket = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let mut private = s.clone();
     private.url = socket.local_addr().map_err(|e| e.to_string())?.to_string();
@@ -108,7 +219,7 @@ pub fn run() -> Result<String, String> {
         std::env::var("HOME").ok().as_deref(),
     )
     .ok_or_else(|| "board upgrade: surreal 2.7.x binary missing".to_owned())?;
-    let mut server = OfflineServer(spawn_offline(&bin, &private)?);
+    let mut server = OfflineServer(spawn_offline(&bin, &private, &lifetime)?);
     let start = Instant::now();
     loop {
         if let Some(status) = server.0.try_wait().map_err(|e| e.to_string())? {
@@ -134,7 +245,7 @@ pub fn run() -> Result<String, String> {
 // The temporary server must also die if the upgrading process is SIGKILLed.
 // Unlike normal auto-serve it is owned maintenance infrastructure, never detached.
 #[cfg(target_os = "linux")]
-fn spawn_offline(bin: &Path, s: &Settings) -> Result<Child, String> {
+fn spawn_offline(bin: &Path, s: &Settings, lifetime: &lock::StoreLock) -> Result<Child, String> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     unsafe extern "C" {
@@ -165,13 +276,11 @@ fn spawn_offline(bin: &Path, s: &Settings) -> Result<Child, String> {
             Ok(())
         });
     }
-    command
-        .spawn()
-        .map_err(|e| format!("board upgrade server: {e}"))
+    lifetime.spawn(&mut command)
 }
 
 #[cfg(not(target_os = "linux"))]
-fn spawn_offline(_: &Path, _: &Settings) -> Result<Child, String> {
+fn spawn_offline(_: &Path, _: &Settings, _: &lock::StoreLock) -> Result<Child, String> {
     Err("board upgrade requires Linux /proc and parent-death signaling".into())
 }
 
@@ -241,6 +350,47 @@ async fn apply(db: &Db) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn different_uid_unreadable_process_does_not_block() {
+        let mut inspected = false;
+        inspect_process(
+            Path::new("/board"),
+            Path::new("/injected/pid"),
+            7,
+            1000,
+            |_| Ok(2000),
+            |_| {
+                inspected = true;
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(
+            !inspected,
+            "another uid's unreadable descriptors must not be inspected"
+        );
+    }
+
+    #[test]
+    fn same_uid_unreadable_process_warns_and_continues() {
+        let mut warnings = Vec::new();
+        inspect_process(
+            Path::new("/board"),
+            Path::new("/injected/pid"),
+            7,
+            1000,
+            |_| Ok(1000),
+            |_| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("pid 7 (unknown): open fd directory: permission denied"));
+        assert!(warnings[0].contains("treating as not a holder"));
+        assert!(warnings[0].contains("uid 1000 processes"));
+    }
 
     #[tokio::test]
     async fn apply_timeout_names_the_upgrade_and_preserves_database_errors() {

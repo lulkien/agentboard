@@ -35,7 +35,8 @@ environment throughout the cutover.
 
 1. Stop every seat, its MCP process, and the SurrealDB server. Keep them stopped
    throughout maintenance. Preserve a backup of the stopped data directory.
-2. Run `./target/release/agentboard --db /absolute/board/data board upgrade --owner`
+2. As the board's owner, never as root or with sudo, run
+   `./target/release/agentboard --db /absolute/board/data board upgrade --owner`
    with the board's `AGENTBOARD_SURREAL_URL`, user and password. The owner flag
    confirms ownership and that all seats and servers are stopped. Seats report a
    mismatch to the owner; they never run this command against a live board.
@@ -48,8 +49,49 @@ board). It refuses an occupied endpoint or another process holding board files,
 including a server on another port. It holds the existing startup and write locks,
 uses an unadvertised temporary loopback server, kills its process group on exit,
 and gives it a parent-death signal so killing the upgrader also kills the server.
-Linux `/proc` is required for the offline-holder check. Do not start manually
-managed servers during maintenance; those do not honor agentboard's startup lock.
+Run maintenance as the owner to avoid creating root-owned storage files that
+later owner processes cannot update. Keep the storage private to the owner.
+
+Agentboard-managed v2 SurrealDB daemons hold an exclusive `flock` on
+`board.lock` for their entire process lifetime, including after the starting CLI
+exits. A second managed daemon on that directory and an upgrade both refuse a
+held lock and name its holder pid. Here “managed v2” means a daemon started by a
+build containing this lifetime-lock change; earlier generation-2 builds are
+legacy too and must be stopped/restarted. The upgrade retains the same flock
+while its private server runs. Per-operation writers use a separate `board.write.lock`.
+This lock belongs to agentboard; SurrealKV 2.7.0 itself permits two servers to
+open the same directory and provides no such exclusion.
+
+**First-upgrade limit:** v1 daemons do not hold the lifetime lock. Manually starting
+raw `surreal db start` also bypasses agentboard's lock, regardless of board
+schema generation. Stop every such daemon before cutover. For this transition,
+the configured-port check, positive fd evidence and the owner's `--owner`
+confirmation cover old/manual servers; do not claim the new flock proves their
+absence. Once all starts go through agentboard v2, `board.lock` is the exact
+cooperative server/upgrade exclusion gate.
+
+The Linux `/proc` scan checks the owner's effective UID and reports what it can
+observe. A listener on the configured port or an fd link resolving into the board
+directory is positive evidence and refuses the upgrade. Unreadable processes,
+including a same-UID non-dumpable `systemd`, print named warnings with pid, step,
+error and “treating as not a holder”; they never refuse merely for being
+unreadable. Other UIDs are outside the fd scan, and root may bypass storage
+permissions. The explicit stopped-all-servers confirmation includes root/other-UID
+and manual daemons. The scan reports; the managed-server lifetime flock decides.
+Do not start manually managed servers during maintenance; they do not honor
+agentboard's startup or lifetime locks.
+
+Host-runnable scratch proofs (no root, PID namespace, or stopped user service):
+
+```sh
+python3 tests/board-upgrade.py /tmp/agentboard-t281-old target/release/agentboard
+python3 tests/server-lock.py target/release/agentboard
+```
+
+The first binary is the pre-S2 build at `ea016707`; both proofs own random-port
+scratch storage. The first verifies v1 preservation, interruption, warnings and
+positive holder checks; the second verifies second-server refusal, locked-upgrade
+refusal and progress after release using actual daemon processes and kernel flocks.
 
 Only additive `IF NOT EXISTS` definitions and missing-default backfills run.
 Definitions, backfills and `meta:schema`, `meta:opened`, `meta:writer` stamps commit

@@ -172,6 +172,7 @@ fn spawn(bin: &Path, s: &Settings) -> Result<std::process::Child, String> {
         return Err(format!("spawn {}: no such file", bin.display()));
     }
     std::fs::create_dir_all(&s.dir).map_err(|e| format!("data dir {}: {e}", s.dir.display()))?;
+    let lifetime = super::lock::StoreLock::acquire(&s.dir)?;
     let log = log_path(s);
     let out = std::fs::OpenOptions::new()
         .create(true)
@@ -198,9 +199,8 @@ fn spawn(bin: &Path, s: &Settings) -> Result<std::process::Child, String> {
     };
     cmd.stdin(Stdio::null())
         .stdout(Stdio::from(out))
-        .stderr(Stdio::from(err))
-        .spawn()
-        .map_err(|e| format!("spawn {}: {e}", bin.display()))
+        .stderr(Stdio::from(err));
+    lifetime.spawn(&mut cmd)
 }
 
 fn find_tool(name: &str) -> Option<PathBuf> {

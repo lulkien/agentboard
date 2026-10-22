@@ -225,7 +225,7 @@ fi
 if want release; then
   echo "== (f) release binary ignores AGENTBOARD_UNSAFE_NO_WRITE_LOCK (lock held by another process)"
   new_server release; prime
-  python3 - "$DIR/data/board.lock" >"$DIR/holder.out" <<'EOF' &
+  python3 - "$DIR/data/board.write.lock" >"$DIR/holder.out" <<'EOF' &
 import fcntl, sys, time
 f = open(sys.argv[1], "a+")
 fcntl.flock(f, fcntl.LOCK_EX)
@@ -737,7 +737,7 @@ recv()
 send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 def call(i, name, **a): send({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}})
 call(2, "task_list"); recv()                      # warm: the server is up and answering
-lock = open(os.path.join(os.environ["AGENTBOARD_DB"], "board.lock"), "a+")
+lock = open(os.path.join(os.environ["AGENTBOARD_DB"], "board.write.lock"), "a+")
 fcntl.flock(lock, fcntl.LOCK_EX)
 t0 = time.time()
 for i in range(8):

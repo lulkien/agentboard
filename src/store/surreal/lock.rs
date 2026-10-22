@@ -9,7 +9,7 @@ use std::io::{Read, Seek, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-pub const LOCK_FILE: &str = "board.lock";
+pub const LOCK_FILE: &str = "board.write.lock";
 /// How long a writer waits for the lock before giving up.
 pub const DEFAULT_WAIT: Duration = Duration::from_secs(5);
 const RETRY_EVERY: Duration = Duration::from_millis(10);
@@ -27,12 +27,98 @@ impl Drop for WriteLock {
     }
 }
 
+/// Lifetime exclusion for agentboard-managed v2 daemons and owner upgrades.
+/// Unlike WriteLock, drop only closes the descriptor: a spawned daemon inherits
+/// the same flock open-file description and retains it after the caller exits.
+/// Legacy/manual raw surreal servers do NOT take this lock. The v1 cutover
+/// therefore still requires the port/positive-fd checks and --owner confirmation.
+pub struct StoreLock {
+    file: File,
+}
+
+impl StoreLock {
+    pub fn acquire(dir: &Path) -> Result<Self, String> {
+        let path = dir.join("board.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|e| format!("board store lock {}: {e}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
+                let holder = std::fs::read_to_string(&path).unwrap_or_default();
+                return Err(format!(
+                    "board store lock busy: {} held by pid {}; stop that managed server before starting another server or upgrading",
+                    path.display(),
+                    holder.trim()
+                ));
+            }
+            Err(TryLockError::Error(error)) => {
+                return Err(format!("board store lock {}: {error}", path.display()));
+            }
+        }
+        let lock = Self { file };
+        lock.stamp(std::process::id())?;
+        Ok(lock)
+    }
+
+    fn stamp(&self, pid: u32) -> Result<(), String> {
+        let mut file = &self.file;
+        file.set_len(0)
+            .and_then(|_| file.rewind())
+            .and_then(|_| write!(file, "{pid}"))
+            .and_then(|_| file.flush())
+            .map_err(|e| format!("board store lock holder stamp: {e}"))
+    }
+
+    /// Clear CLOEXEC only in the forked child. Parent close must not explicitly
+    /// unlock the shared flock, which would also release the child's lock.
+    pub fn spawn(
+        &self,
+        command: &mut std::process::Command,
+    ) -> Result<std::process::Child, String> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        unsafe extern "C" {
+            fn fcntl(fd: i32, command: i32, ...) -> i32;
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+        let fd = self.file.as_raw_fd();
+        // SAFETY: fcntl is async-signal-safe; F_SETFD=2 and flags=0 retain the
+        // existing descriptor across exec. No allocation or Rust IO in pre_exec.
+        unsafe {
+            command.pre_exec(move || {
+                if fcntl(fd, 2, 0i32) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("board server spawn: {e}"))?;
+        if let Err(error) = self.stamp(child.id()) {
+            // SAFETY: server callers create a process group/session led by child.
+            unsafe {
+                kill(-(child.id() as i32), 9);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        Ok(child)
+    }
+}
+
 #[cfg(test)]
 pub fn lock_path(dir: &Path) -> std::path::PathBuf {
     dir.join(LOCK_FILE)
 }
 
-/// Takes the exclusive lock on `<dir>/board.lock`, retrying until `wait` elapses.
+/// Takes the exclusive lock on `<dir>/board.write.lock`, retrying until `wait` elapses.
 // std's file locks need Rust 1.89, the `rust-version` in Cargo.toml.
 pub fn acquire(dir: &Path, wait: Duration) -> Result<WriteLock, String> {
     if unsafe_disabled() {

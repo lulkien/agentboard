@@ -98,29 +98,6 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         other = start(f'127.0.0.1:{port()}')
         assert 'board held by' in cli(new, 'board', 'upgrade', '--owner', ok=False)
         stop(other)
-        # An actual live holder can hide its descriptors with PR_SET_DUMPABLE.
-        # Its unrelated comm must not bypass refusal by pid/step/reason.
-        hidden = subprocess.Popen([sys.executable, '-c',
-            "import ctypes,sys,time; "
-            "f=open(sys.argv[1], 'w'); libc=ctypes.CDLL(None); "
-            "assert libc.prctl(15,b'hidden-holder',0,0,0)==0; "
-            "assert libc.prctl(4,0,0,0,0)==0; "
-            "print('ready',flush=True); time.sleep(60)", str(board / 'held-file')],
-            stdout=subprocess.PIPE, text=True, start_new_session=True)
-        try:
-            assert hidden.stdout.readline().strip() == 'ready'
-            try:
-                list(Path(f'/proc/{hidden.pid}/fd').iterdir())
-            except PermissionError:
-                pass
-            else:
-                raise AssertionError('fixture must make live holder descriptors unreadable')
-            refusal = cli(new, 'board', 'upgrade', '--owner', ok=False)
-            assert f'pid {hidden.pid}' in refusal and 'open fd directory' in refusal and 'cannot inspect' in refusal and 'Permission denied' in refusal, refusal
-        finally:
-            os.killpg(hidden.pid, signal.SIGKILL)
-            hidden.wait(timeout=5)
-
         # This external HTTP marker is reached from the actual stamp event,
         # after additive DDL/backfill inside the transaction. Hold its response
         # until the owner is killed; startup speed cannot satisfy this check.
@@ -244,6 +221,32 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         assert 'want version 1' in cli(old, 'get', 'T1', ok=False)
         assert 'preserved task' in cli(new, 'get', 'T1')
         stop(server)
+        # A non-dumpable process is unknown evidence: warn by name, then proceed.
+        # It is not a managed server and holds no lifetime flock.
+        hidden = subprocess.Popen([sys.executable, '-c',
+            "import ctypes,sys,time; "
+            "f=open(sys.argv[1], 'w'); libc=ctypes.CDLL(None); "
+            "assert libc.prctl(15,b'hidden-holder',0,0,0)==0; "
+            "assert libc.prctl(4,0,0,0,0)==0; "
+            "print('ready',flush=True); time.sleep(60)", str(board / 'held-file')],
+            stdout=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            assert hidden.stdout.readline().strip() == 'ready'
+            try:
+                list(Path(f'/proc/{hidden.pid}/fd').iterdir())
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError('fixture must make live holder descriptors unreadable')
+            warned = cli(new, 'board', 'upgrade', '--owner')
+            assert f'warning: cannot inspect pid {hidden.pid} (hidden-holder)' in warned, warned
+            assert 'open fd directory' in warned and 'Permission denied' in warned, warned
+            assert 'treating as not a holder' in warned and 'version 2 -> 2' in warned, warned
+            assert f'uid {os.geteuid()} processes' in warned, warned
+        finally:
+            os.killpg(hidden.pid, signal.SIGKILL)
+            hidden.wait(timeout=5)
+
         # A forked helper must die with the owned server on normal cleanup.
         wrapper_dir = root / 'bin'
         wrapper_dir.mkdir()
@@ -277,7 +280,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         assert sql('SELECT version FROM meta:schema;')[0]['result'][0]['version'] == 99
         assert snapshot() == before
         stop(server)
-        print('board-upgrade: owner gate, fail-closed open, both server refusals, unreadable live holder refused, pure-v1 DDL/backfill rollback and retry, output asserted, killed-owner child dead, cleanup descendant dead, all rows preserved, stamps, v1 refused, v2 accepted, idempotent retry passed')
+        print('board-upgrade: owner gate, fail-closed open, both server refusals, unreadable process warned and continued, pure-v1 DDL/backfill rollback and retry, output asserted, killed-owner child dead, cleanup descendant dead, all rows preserved, stamps, v1 refused, v2 accepted, idempotent retry passed')
     finally:
         if owner is not None and owner.poll() is None:
             owner.kill()
