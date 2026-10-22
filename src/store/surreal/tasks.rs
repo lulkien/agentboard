@@ -359,6 +359,25 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
 /// refused: that worker is reading this text. Logs one `edit` event naming each
 /// changed field with its old/new length; nothing is written when no value moved.
 pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError> {
+    let s = session(true)?;
+    block_on(async {
+        let mut tx = Txn::new();
+        let (_, fields) = edit_in_tx(&s.db, &mut tx, actor, id, e).await?;
+        let Some(fields) = fields else {
+            return Ok(format!("{} unchanged", short(id)));
+        };
+        let seq = int_of(&tx.run(&s.db, "$seq").await?, "event seq")?;
+        Ok(format!("{} edited {fields} #{seq}", short(id)))
+    })
+}
+
+async fn edit_in_tx(
+    db: &Db,
+    tx: &mut Txn,
+    actor: &str,
+    id: i64,
+    e: &TaskEdit<'_>,
+) -> Result<(Row, Option<String>), ClaimError> {
     if e.title.is_none()
         && e.description.is_none()
         && e.goal.is_none()
@@ -376,119 +395,116 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
     if e.title.is_some_and(|t| t.trim().is_empty()) {
         return Err(String::from("title cannot be empty").into());
     }
-    let s = session(true)?;
-    block_on(async {
-        let cur = fetch(&s.db, id).await?;
-        if cur.status == "working" && cur.lease_until.is_some_and(|l| l >= now_ms()) {
-            return Err(ClaimError::Held(held_text(&TaskRow::from(cur.clone()))));
+    let mut cur = fetch(db, id).await?;
+    if cur.status == "working" && cur.lease_until.is_some_and(|l| l >= now_ms()) {
+        return Err(ClaimError::Held(held_text(&TaskRow::from(cur.clone()))));
+    }
+    let mut diffs = Vec::new();
+    let epic = e.epic.or(cur.epic_id);
+    if epic != cur.epic_id {
+        let target = super::epics::fetch_epic(db, epic.unwrap()).await?;
+        if target.status != "open" {
+            return Err(format!(
+                "cannot move {} to {}: target epic is {}",
+                short(id),
+                short_epic(target.tid),
+                target.status
+            )
+            .into());
         }
-        let mut diffs = Vec::new();
-        let epic = e.epic.or(cur.epic_id);
-        if epic != cur.epic_id {
-            let target = super::epics::fetch_epic(&s.db, epic.unwrap()).await?;
-            if target.status != "open" {
-                return Err(format!(
-                    "cannot move {} to {}: target epic is {}",
-                    short(id),
-                    short_epic(target.tid),
-                    target.status
-                )
-                .into());
-            }
-            if let Some(parent) = cur.parent_id
-                && fetch(&s.db, parent).await?.epic_id != epic
-            {
-                return Err(format!(
-                    "cannot move {} to {}: cross-epic parent {}",
-                    short(id),
-                    short_epic(target.tid),
-                    short(parent)
-                )
-                .into());
-            }
-            let mut result = s.db.query("SELECT VALUE meta::id(id) FROM tasks WHERE parent_id=$id AND (epic_id IS NONE OR epic_id != $epic) LIMIT 1")
+        if let Some(parent) = cur.parent_id
+            && fetch(db, parent).await?.epic_id != epic
+        {
+            return Err(format!(
+                "cannot move {} to {}: cross-epic parent {}",
+                short(id),
+                short_epic(target.tid),
+                short(parent)
+            )
+            .into());
+        }
+        let mut result = db.query("SELECT VALUE meta::id(id) FROM tasks WHERE parent_id=$id AND (epic_id IS NONE OR epic_id != $epic) LIMIT 1")
                 .bind(("id", id)).bind(("epic", target.tid)).await.map_err(|e| db_err(&e))?;
-            let children: Vec<i64> = result.take(0).map_err(|e| db_err(&e))?;
-            if let Some(child) = children.first() {
-                return Err(format!(
-                    "cannot move {} to {}: cross-epic child {}",
-                    short(id),
-                    short_epic(target.tid),
-                    short(*child)
-                )
-                .into());
-            }
-            diffs.push(format!(
-                "epic {}->{}",
-                cur.epic_id.map_or("none".to_owned(), short_epic),
-                short_epic(target.tid)
-            ));
+        let children: Vec<i64> = result.take(0).map_err(|e| db_err(&e))?;
+        if let Some(child) = children.first() {
+            return Err(format!(
+                "cannot move {} to {}: cross-epic child {}",
+                short(id),
+                short_epic(target.tid),
+                short(*child)
+            )
+            .into());
         }
-        let title = value_change(&mut diffs, "title", &cur.title, e.title);
-        let description = text_change(&mut diffs, "description", &cur.description, e.description);
-        let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
-        let assignee = value_change(
-            &mut diffs,
-            "assignee",
-            cur.assignee.as_deref().unwrap_or(""),
-            e.assignee,
-        );
-        // A path is normalised the way an epic's is; an empty one clears it. A
-        // branch git could not check out is refused before any write.
-        let path_value = e.path.map(|raw| {
-            let cwd = std::env::current_dir().unwrap_or_default();
-            let home = std::env::var("HOME").ok();
-            normalize_path(raw, &cwd, home.as_deref())
-        });
-        let path = value_change(&mut diffs, "path", &cur.path, path_value.as_deref());
-        let branch_value = match e.branch {
-            Some(raw) => {
-                norm_branch(raw).map_err(|err| ClaimError::Other(format!("edit: {err}")))?
-            }
-            None => cur.branch.clone(),
-        };
-        let branch = value_change(
-            &mut diffs,
-            "branch",
-            &cur.branch,
-            Some(branch_value.as_str()),
-        );
-        let priority = e.priority.unwrap_or(cur.priority);
-        if priority != cur.priority {
-            diffs.push(format!("priority {}->{priority}", cur.priority));
-        }
-        if diffs.is_empty() {
-            return Ok(format!("{} unchanged", short(id)));
-        }
-        let mut tx = Txn::new();
-        let mut sets = Vec::new();
-        assign(&mut tx, &mut sets, "title", Some(title.into()));
-        assign(&mut tx, &mut sets, "description", Some(description.into()));
-        assign(&mut tx, &mut sets, "goal", Some(goal.into()));
-        assign(&mut tx, &mut sets, "path", Some(path.into()));
-        assign(&mut tx, &mut sets, "branch", Some(branch.into()));
-        assign(
-            &mut tx,
-            &mut sets,
-            "assignee",
-            (!assignee.is_empty()).then(|| assignee.into()),
-        );
-        assign(&mut tx, &mut sets, "priority", Some(priority.into()));
-        assign(&mut tx, &mut sets, "epic_id", epic.map(Value::from));
-        assign(&mut tx, &mut sets, "updated_at", Some(now_ms().into()));
-        let idp = tx.p(id);
-        tx.raw(&format!(
-            "UPDATE type::thing('tasks', {idp}) SET {};",
-            sets.join(", ")
+        diffs.push(format!(
+            "epic {}->{}",
+            cur.epic_id.map_or("none".to_owned(), short_epic),
+            short_epic(target.tid)
         ));
-        tx.event(&idp, actor, "edit", &diffs.join(", "));
-        let seq = int_of(&tx.run(&s.db, "$seq").await?, "event seq")?;
-        Ok(format!(
-            "{} edited {} #{seq}",
-            short(id),
-            field_names(&diffs)
-        ))
-    })
+    }
+    let title = value_change(&mut diffs, "title", &cur.title, e.title);
+    let description = text_change(&mut diffs, "description", &cur.description, e.description);
+    let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
+    let assignee = value_change(
+        &mut diffs,
+        "assignee",
+        cur.assignee.as_deref().unwrap_or(""),
+        e.assignee,
+    );
+    // A path is normalised the way an epic's is; an empty one clears it. A
+    // branch git could not check out is refused before any write.
+    let path_value = e.path.map(|raw| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let home = std::env::var("HOME").ok();
+        normalize_path(raw, &cwd, home.as_deref())
+    });
+    let path = value_change(&mut diffs, "path", &cur.path, path_value.as_deref());
+    let branch_value = match e.branch {
+        Some(raw) => norm_branch(raw).map_err(|err| ClaimError::Other(format!("edit: {err}")))?,
+        None => cur.branch.clone(),
+    };
+    let branch = value_change(
+        &mut diffs,
+        "branch",
+        &cur.branch,
+        Some(branch_value.as_str()),
+    );
+    let priority = e.priority.unwrap_or(cur.priority);
+    if priority != cur.priority {
+        diffs.push(format!("priority {}->{priority}", cur.priority));
+    }
+    if diffs.is_empty() {
+        return Ok((cur, None));
+    }
+    let mut sets = Vec::new();
+    assign(tx, &mut sets, "title", Some(title.into()));
+    assign(tx, &mut sets, "description", Some(description.into()));
+    assign(tx, &mut sets, "goal", Some(goal.into()));
+    assign(tx, &mut sets, "path", Some(path.into()));
+    assign(tx, &mut sets, "branch", Some(branch.into()));
+    assign(
+        tx,
+        &mut sets,
+        "assignee",
+        (!assignee.is_empty()).then(|| assignee.into()),
+    );
+    assign(tx, &mut sets, "priority", Some(priority.into()));
+    assign(tx, &mut sets, "epic_id", epic.map(Value::from));
+    assign(tx, &mut sets, "updated_at", Some(now_ms().into()));
+    let idp = tx.p(id);
+    tx.raw(&format!(
+        "UPDATE type::thing('tasks', {idp}) SET {};",
+        sets.join(", ")
+    ));
+    tx.event(&idp, actor, "edit", &diffs.join(", "));
+    cur.title = title.to_owned();
+    cur.description = description.to_owned();
+    cur.goal = goal.to_owned();
+    cur.path = path.to_owned();
+    cur.branch = branch.to_owned();
+    cur.assignee = (!assignee.is_empty()).then(|| assignee.to_owned());
+    cur.priority = priority;
+    cur.epic_id = epic;
+    Ok((cur, Some(field_names(&diffs))))
 }
 
 /// Re-parents an existing task (`None` clears it). The only write that can make
@@ -709,7 +725,15 @@ pub(super) async fn last_event_seq(db: &Db, id: i64, kind: &str) -> Result<Optio
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let s = session(true)?;
     block_on(async {
-        let cur = fetch(&s.db, id).await?;
+        let mut tx = Txn::new();
+        let cur = if let Some(edit) = p.edit {
+            edit_in_tx(&s.db, &mut tx, actor, id, edit)
+                .await
+                .map_err(|e| e.to_string())?
+                .0
+        } else {
+            fetch(&s.db, id).await?
+        };
         let now = now_ms();
         let status = match p.status {
             Some(raw) => norm(raw).ok_or_else(|| format!("bad status {raw:?} ({STATUS_LIST})"))?,
@@ -732,7 +756,6 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         let reopen = moved && status == "needs_fix";
         let capped = reopen && reopen_after(cur.reopen_count).1;
         let status = if capped { "not_done" } else { status };
-        let mut tx = Txn::new();
         let mut sets: Vec<String> = Vec::new();
         if reopen {
             sets.push("reopen_count = (reopen_count ?? 0) + 1".to_owned());
@@ -851,6 +874,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
 
 fn patch<'a>() -> Patch<'a> {
     Patch {
+        edit: None,
         status: None,
         report: None,
         note: None,
@@ -865,6 +889,7 @@ pub fn note(actor: &str, id: i64, body: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             note: Some(body),
             ..patch()
         },
@@ -877,6 +902,7 @@ pub fn report(actor: &str, id: i64, body: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             report: Some(body),
             ..patch()
         },
@@ -888,6 +914,7 @@ pub fn ask(actor: &str, id: i64, question: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some("blocking"),
             note: Some(question),
             needs: Some("input"),
@@ -902,6 +929,7 @@ pub fn answer(actor: &str, id: i64, text: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some("working"),
             note: Some(text),
             ttl_s: DEFAULT_TTL_S,
@@ -922,6 +950,7 @@ pub fn finish(
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some(status),
             report: Some(summary),
             commit,
@@ -935,6 +964,7 @@ pub fn block(actor: &str, id: i64, reason: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some("blocking"),
             note: Some(reason),
             ..patch()

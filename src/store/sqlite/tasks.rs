@@ -140,6 +140,19 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
 /// refused: that worker is reading this text. Logs one `edit` event naming each
 /// changed field with its old/new length; nothing is written when no value moved.
 pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError> {
+    let mut conn = open()?;
+    let tx = super::write_transaction(&mut conn)?;
+    let out = edit_in_tx(actor, id, e, &tx)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+fn edit_in_tx(
+    actor: &str,
+    id: i64,
+    e: &TaskEdit<'_>,
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<String, ClaimError> {
     if e.title.is_none()
         && e.description.is_none()
         && e.goal.is_none()
@@ -157,16 +170,14 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
     if e.title.is_some_and(|t| t.trim().is_empty()) {
         return Err(String::from("title cannot be empty").into());
     }
-    let mut conn = open()?;
-    let tx = super::write_transaction(&mut conn)?;
-    let cur = fetch(&tx, id)?;
+    let cur = fetch(tx, id)?;
     if cur.status == "working" && cur.lease_until.is_some_and(|l| l >= now_ms()) {
         return Err(ClaimError::Held(held_text(&cur)));
     }
     let mut diffs = Vec::new();
     let epic = e.epic.or(cur.epic_id);
     if epic != cur.epic_id {
-        let target = super::epics::fetch_epic(&tx, epic.unwrap())?;
+        let target = super::epics::fetch_epic(tx, epic.unwrap())?;
         if target.status != "open" {
             return Err(format!(
                 "cannot move {} to {}: target epic is {}",
@@ -177,7 +188,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
             .into());
         }
         if let Some(parent) = cur.parent_id
-            && fetch(&tx, parent)?.epic_id != epic
+            && fetch(tx, parent)?.epic_id != epic
         {
             return Err(format!(
                 "cannot move {} to {}: cross-epic parent {}",
@@ -256,8 +267,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         ],
     )
     .map_err(|e| e.to_string())?;
-    let seq = log_event(&tx, Subject::Task(id), actor, "edit", &diffs.join(", "))?;
-    tx.commit().map_err(|e| e.to_string())?;
+    let seq = log_event(tx, Subject::Task(id), actor, "edit", &diffs.join(", "))?;
     Ok(format!(
         "{} edited {} #{seq}",
         short(id),
@@ -449,6 +459,9 @@ fn file_review(
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let mut conn = open()?;
     let tx = super::write_transaction(&mut conn)?;
+    if let Some(edit) = p.edit {
+        edit_in_tx(actor, id, edit, &tx).map_err(|e| e.to_string())?;
+    }
     let cur = fetch(&tx, id)?;
     let now = now_ms();
     let status = match p.status {
@@ -599,6 +612,7 @@ pub fn note(actor: &str, id: i64, body: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: None,
             report: None,
             note: Some(body),
@@ -615,6 +629,7 @@ pub fn report(actor: &str, id: i64, body: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: None,
             report: Some(body),
             note: None,
@@ -630,6 +645,7 @@ pub fn ask(actor: &str, id: i64, question: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some("blocking"),
             report: None,
             note: Some(question),
@@ -646,6 +662,7 @@ pub fn answer(actor: &str, id: i64, text: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some("working"),
             report: None,
             note: Some(text),
@@ -668,6 +685,7 @@ pub fn finish(
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some(status),
             report: Some(summary),
             note: None,
@@ -683,6 +701,7 @@ pub fn block(actor: &str, id: i64, reason: &str) -> Result<String, String> {
         actor,
         id,
         &Patch {
+            edit: None,
             status: Some("blocking"),
             report: None,
             note: Some(reason),

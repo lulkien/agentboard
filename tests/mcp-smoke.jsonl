@@ -3,4 +3,3 @@
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"task_add","arguments":{"title":"mcp smoke test","description":"created over stdio","goal":"verify mcp"}}}
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"board_brief","arguments":{"since_min":60}}}
-{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"session_tail","arguments":{"name":"probe","lines":4}}}

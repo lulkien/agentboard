@@ -47,9 +47,8 @@ resulting schema, or restore the stopped backup with its old binary.
 ## 3. Restart MCP processes when needed
 
 The manager reloads each MCP process to use an installed binary. There is no
-seat-start check, commit comparison or catalog refusal. `board-build` remains
-informational and prints version, derived tool count, commit and backend without
-stale or unverified annotations. Its removal is separate from schema migration.
+seat-start check, commit comparison or catalog refusal. Initialization reports
+product name and version. Build identity commands and tools have been deleted.
 
 ## 4. Register the server with a client
 

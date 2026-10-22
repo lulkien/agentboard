@@ -87,7 +87,6 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
         Cmd::Board {
             verb: cli::BoardCmd::Upgrade { owner },
         } => store::board_upgrade(owner),
-        Cmd::BoardBuild => Ok(ident::line(server::tool_count())),
         Cmd::Add {
             title,
             description,
@@ -156,6 +155,8 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
                     description: description.as_deref(),
                     goal: goal.as_deref(),
                     path: path.as_deref(),
+                    status: None,
+                    note: None,
                 };
                 store::epic_edit(actor, n, &edit)
             }
@@ -252,6 +253,7 @@ fn dispatch(cmd: Cmd, actor: &str) -> Result<String, String> {
         Cmd::Block { id, reason } => store::block(actor, tid(&id)?, &reason),
         Cmd::Status { id, status, note } => {
             let patch = store::Patch {
+                edit: None,
                 status: Some(&status),
                 report: None,
                 note: note.as_deref(),

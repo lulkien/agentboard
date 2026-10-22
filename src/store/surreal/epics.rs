@@ -198,6 +198,12 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
     if e.title.is_some_and(|t| t.trim().is_empty()) {
         return Err("title cannot be empty".to_owned());
     }
+    let status = e
+        .status
+        .map(|raw| {
+            norm_status(raw).ok_or_else(|| format!("bad epic status {raw:?} ({EPIC_STATUS_LIST})"))
+        })
+        .transpose()?;
     let cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
     let home = std::env::var("HOME").ok();
     let path = e.path.map(|p| normalize_path(p, &cwd, home.as_deref()));
@@ -209,6 +215,14 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
         let description = text_change(&mut diffs, "description", &cur.description, e.description);
         let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
         let path = value_change(&mut diffs, "path", &cur.path, path.as_deref());
+        if let Some(want) = status
+            && want != cur.status
+        {
+            diffs.push(format!("status {}->{want}", cur.status));
+        }
+        if let Some(note) = e.note {
+            diffs.push(format!("note {note}"));
+        }
         if diffs.is_empty() {
             return Ok(format!("{} unchanged", short_epic(id)));
         }
@@ -219,6 +233,16 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
         assign(&mut tx, &mut sets, "goal", Some(goal.into()));
         assign(&mut tx, &mut sets, "path", Some(path.into()));
         assign(&mut tx, &mut sets, "updated_at", Some(now_ms().into()));
+        if let Some(want) = status {
+            assign(&mut tx, &mut sets, "status", Some(want.into()));
+            let completed = (want != "open").then(|| cur.completed_at.unwrap_or_else(now_ms));
+            assign(
+                &mut tx,
+                &mut sets,
+                "completed_at",
+                completed.map(Value::from),
+            );
+        }
         let idp = tx.p(id);
         tx.raw(&format!(
             "UPDATE type::thing('epics', {idp}) SET {};",

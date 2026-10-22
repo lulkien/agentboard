@@ -76,7 +76,7 @@ The loop, the fix-row lifecycle and the reopen cap are drawn in [workflow.md](wo
 ## Wait mechanism
 
 - **Board-level wait**: `task_wait` (MCP) or `agentboard wait` (CLI) blocks server-side until watched tasks match a status/kind filter. Returns only the delta. No polling by hand.
-- **Pane-level watch**: `agentboard tail` / `session_tail` read a herdr pane first (`herdr pane read`), and fall back to tmux; `send`/`session_send` do the same with `herdr pane send-text`. Either bridge's failure is reported with the bridge that failed.
+- **Pane-level watch**: manager CLI `agentboard tail` read a herdr pane first (`herdr pane read`), and fall back to tmux; CLI `send` do the same with `herdr pane send-text`. Either bridge's failure is reported with the bridge that failed.
 - Never read the board's storage file directly. The board and the pane are the two authoritative sources.
 
 ## Status reference

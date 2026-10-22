@@ -73,8 +73,8 @@ def build(tree, backend, dest):
 
 
 def review_probe(binary, env):
-    # This client holds only the old verbs. The current binary lets the request
-    # reach apply; a 19-count binary is stopped earlier by the separate probe.
+    # This historical client has no diff verbs. The server must enforce the
+    # submission gate regardless of the client's catalog; no count guard exists.
     seat = Seat(binary, env)
     old_tools = {
         'board_brief', 'epic_add', 'epic_edit', 'epic_get', 'epic_list',
@@ -195,7 +195,7 @@ def checks(backend, binary, mutant, env, sql):
 
         version(3)
         for tool, args in [('task_get', {'id': task, 'full': True}),
-                           ('board_build', {}), ('session_tail', {'name': 'never-contacted'})]:
+                           ('board_brief', {}), ('session_register', {'name': 'never-contacted', 'agent': 'human'})]:
             reply = seat.call(tool, **args)
             assert failed(reply) and 'binary is older than the board' in json.dumps(reply), reply
         result = cli('get', task)
@@ -225,7 +225,7 @@ def main():
         scratch = pathlib.Path(directory)
         tree = scratch / 'source'
         tree.mkdir()
-        for name in ['Cargo.toml', 'Cargo.lock', 'build.rs']:
+        for name in ['Cargo.toml', 'Cargo.lock']:
             shutil.copy2(ROOT / name, tree / name)
         shutil.copytree(ROOT / 'src', tree / 'src')
         for backend in ['surreal', 'sqlite']:

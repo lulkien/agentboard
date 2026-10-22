@@ -42,7 +42,6 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Cmd {
     /// MCP server on stdio (the default with no command)
-    #[command(alias = "mcp")]
     Serve,
     /// Create a task
     Add {
@@ -115,7 +114,6 @@ pub enum Cmd {
         parent: String,
     },
     /// List open tasks
-    #[command(alias = "list")]
     Ls {
         #[arg(long)]
         status: Option<String>,
@@ -271,8 +269,6 @@ pub enum Cmd {
     },
     /// Where the database lives
     Path,
-    /// Which build this is: version, derived tool count, commit, backend
-    BoardBuild,
     /// Owner maintenance (never exposed over MCP)
     Board {
         #[command(subcommand)]

@@ -83,6 +83,7 @@ pub fn dispatch(
             actor,
             id,
             &Patch {
+                edit: None,
                 status: Some("ready"),
                 report: None,
                 note: Some("dispatch --force"),

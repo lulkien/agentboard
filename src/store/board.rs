@@ -56,6 +56,7 @@ impl std::fmt::Display for ClaimError {
 /// One transactional edit of a task. Status moves, report, note, commit and
 /// lease all land together or not at all.
 pub struct Patch<'a> {
+    pub edit: Option<&'a TaskEdit<'a>>,
     pub status: Option<&'a str>,
     pub report: Option<&'a str>,
     pub note: Option<&'a str>,
@@ -67,6 +68,8 @@ pub struct Patch<'a> {
 /// New spec text for an epic; `None` leaves a field alone. An empty `path`
 /// clears it.
 pub struct EpicEdit<'a> {
+    pub status: Option<&'a str>,
+    pub note: Option<&'a str>,
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
     pub goal: Option<&'a str>,

@@ -43,7 +43,7 @@ Three moves into `needs_fix` per row, never reset. The fourth is refused (exit 1
 |---|---|
 | `ready` | claimable |
 | `working` | claimed, lease live |
-| `blocking` | waiting on a human (`task_ask`) |
+| `blocking` | waiting on a human (`task_update status=blocking note=<question>`) |
 | `review` | on an implement row: ready for the reviewer. On a fix row: fixed, awaiting re-check |
 | `needs_fix` | the reviewer sent it back with findings |
 | `not_done` | reopen cap hit; set by the board only |
@@ -57,7 +57,7 @@ Three moves into `needs_fix` per row, never reset. The fourth is refused (exit 1
 | Manager | `ready` (re-arm a crashed row), `dropped`, `done` on the implement row, epic status. |
 | Board | `not_done`, only through the cap. |
 
-A row arriving at `not_done` from a worker was not capped: read `reopens:` first. A worker that needs a human uses `blocking` and `task_ask`.
+A row arriving at `not_done` from a worker was not capped: read `reopens:` first. A worker that needs a human uses `task_update status=blocking note=<question>`.
 
 ## Epic boundary
 

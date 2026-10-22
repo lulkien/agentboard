@@ -1,4 +1,4 @@
-//! MCP surface: 23 tools, text-only results, short acks.
+//! MCP surface: 16 tools, text-only results, short acks.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with
 //! `ok T7 …` instead of echoing the record. Agents pay tokens per byte.
@@ -13,11 +13,10 @@ use serde::Deserialize;
 use crate::ident;
 use crate::store;
 
-/// The tool count the client is actually served, read from the registry itself: no
-/// number is written down in this crate.
-/// `the_reported_tool_count_is_the_number_of_tool_markers` pins it to the tool
-/// attribute markers in this file, so adding or dropping a tool cannot leave the
-/// build stamp lying about the surface.
+/// Verify the base count from the actual router. `scripts/sync-tool-count.py`
+/// reads tools/list to publish the header and docs; the test below binds the
+/// router, source markers and generated header together.
+#[cfg(test)]
 pub fn tool_count() -> usize {
     Board::new().tool_router.list_all().len()
 }
@@ -170,54 +169,24 @@ pub struct EpicGetArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EpicUpdateArgs {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+
     /// Epic id, E3.
     pub id: String,
     /// open|done|dropped. Closing an epic is the manager's call, never automatic.
-    pub status: String,
+    #[serde(default)]
+    pub status: Option<String>,
     #[serde(default)]
     pub note: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct EditArgs {
-    /// Task id, T7.
-    pub id: String,
-    /// Move to an open epic, E3. Refused if it would split a parent/child chain.
-    #[serde(default)]
-    pub epic: Option<String>,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub goal: Option<String>,
-    #[serde(default)]
-    pub priority: Option<i64>,
-    /// Empty string clears it.
-    #[serde(default)]
-    pub assignee: Option<String>,
-    /// Project root the work lives in. Empty string clears it. `~` expands, a relative path resolves against the server's cwd, it need not exist yet.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Git ref the worker starts on. Default HEAD leaves the pane's checkout alone; empty string means HEAD.
-    #[serde(default)]
-    pub branch: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct EpicEditArgs {
-    /// Epic id, E3.
-    pub id: String,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub goal: Option<String>,
-    /// Project root; `~` expands, a relative path resolves against the server's cwd. Empty string clears it.
-    #[serde(default)]
-    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -258,7 +227,26 @@ pub struct ClaimArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateArgs {
+    /// Target open epic, E3; cannot split a parent/child chain.
+    #[serde(default)]
+    pub epic: Option<String>,
+    #[serde(default)]
+    pub priority: Option<i64>,
+    #[serde(default)]
+    pub assignee: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+
     pub id: String,
     /// ready|working|blocking|not_done|needs_fix|review|done|dropped. Omit to keep the current one.
     #[serde(default)]
@@ -278,13 +266,6 @@ pub struct UpdateArgs {
     /// Lease minutes for heartbeat or a move to working (default 30, max 720).
     #[serde(default)]
     pub ttl_min: Option<i64>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct AskArgs {
-    pub id: String,
-    /// The question. Sets status=blocking, needs=input until someone answers.
-    pub question: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -320,22 +301,6 @@ pub struct BriefArgs {
     /// Window for the "done" list, minutes (default 120).
     #[serde(default)]
     pub since_min: Option<i64>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct TailArgs {
-    /// tmux session name.
-    pub name: String,
-    /// Lines of scrollback (default 40, max 400).
-    #[serde(default)]
-    pub lines: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SendArgs {
-    pub name: String,
-    /// Text typed into the pane, followed by Enter.
-    pub text: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -549,7 +514,7 @@ impl Board {
 
     #[tool(
         name = "epic_update",
-        description = "Set an epic open|done|dropped, with an optional note. Closing is the manager's call, never automatic.",
+        description = "Update an epic: status (open|done|dropped), note, title, description, goal, path. Only passed fields change; combined spec/status changes are atomic. Unknown fields are refused by name. Closing is the manager's call.",
         annotations(
             title = "Update epic",
             read_only_hint = false,
@@ -562,65 +527,30 @@ impl Board {
     ) -> Result<CallToolResult, ErrorData> {
         blocking(store::check_entry).await.map_err(err)?;
         let id = store::parse_epic_id(&a.id).map_err(err)?;
-        run!(blocking(move || store::epic_status(&actor(), id, &a.status, a.note.as_deref())).await)
-    }
-
-    #[tool(
-        name = "task_edit",
-        description = "Amend a task's spec: title, description, goal, priority, assignee, path, branch, epic (only the fields you pass). Epic moves require an open target and cannot split a parent/child chain; logs one edit event naming old/new epic. Refused while working with a live lease; the manager frees it with task_update status=ready. Returns changed field names; equal values are unchanged.",
-        annotations(title = "Edit task", read_only_hint = false, destructive_hint = false)
-    )]
-    async fn task_edit(
-        &self,
-        Parameters(a): Parameters<EditArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        blocking(store::check_entry).await.map_err(err)?;
-        let id = store::parse_id(&a.id).map_err(err)?;
-        let epic = a
-            .epic
-            .as_deref()
-            .map(store::parse_epic_id)
-            .transpose()
-            .map_err(err)?;
-        offload(move || {
-            let edit = store::TaskEdit {
-                epic,
-                title: a.title.as_deref(),
-                description: a.description.as_deref(),
-                goal: a.goal.as_deref(),
-                priority: a.priority,
-                assignee: a.assignee.as_deref(),
-                path: a.path.as_deref(),
-                branch: a.branch.as_deref(),
-            };
-            store::edit(&actor(), id, &edit)
-        })
-        .await
-        .map_err(err)?
-        .map(text)
-        .map_err(claim_err)
-    }
-
-    #[tool(
-        name = "epic_edit",
-        description = "Amend an epic's spec: title, description, goal, path (only the fields you pass). Logs an `edit` event with old/new lengths. Returns the changed field names.",
-        annotations(title = "Edit epic", read_only_hint = false, destructive_hint = false)
-    )]
-    async fn epic_edit(
-        &self,
-        Parameters(a): Parameters<EpicEditArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        blocking(store::check_entry).await.map_err(err)?;
-        let id = store::parse_epic_id(&a.id).map_err(err)?;
         run!(
             blocking(move || {
-                let edit = store::EpicEdit {
-                    title: a.title.as_deref(),
-                    description: a.description.as_deref(),
-                    goal: a.goal.as_deref(),
-                    path: a.path.as_deref(),
-                };
-                store::epic_edit(&actor(), id, &edit)
+                if a.title.is_some()
+                    || a.description.is_some()
+                    || a.goal.is_some()
+                    || a.path.is_some()
+                {
+                    store::epic_edit(
+                        &actor(),
+                        id,
+                        &store::EpicEdit {
+                            title: a.title.as_deref(),
+                            description: a.description.as_deref(),
+                            goal: a.goal.as_deref(),
+                            path: a.path.as_deref(),
+                            status: a.status.as_deref(),
+                            note: a.note.as_deref(),
+                        },
+                    )
+                } else if let Some(status) = a.status {
+                    store::epic_status(&actor(), id, &status, a.note.as_deref())
+                } else {
+                    Err("nothing to edit: pass status, title, description, goal or path".into())
+                }
             })
             .await
         )
@@ -650,7 +580,7 @@ impl Board {
 
     #[tool(
         name = "task_update",
-        description = "Write back to the board: status (ready|working|blocking|not_done|needs_fix|review|done|dropped), report (your findings/outcome), note (progress), commit. Use status=done when finished. Returns a short ack.",
+        description = "Update a task: status, report, note, commit, heartbeat, or spec fields title, description, goal, priority, assignee, path, branch, epic. Spec edits refuse a live worker lease; epic moves require an open target and preserve parent/child chains. Combined spec/state changes are atomic. Unknown fields are refused by name. For a human decision set status=blocking with the question in note.",
         annotations(
             title = "Update task",
             read_only_hint = false,
@@ -665,6 +595,72 @@ impl Board {
         let id = store::parse_id(&a.id).map_err(err)?;
         let who = actor();
         let ttl_s = a.ttl_min.unwrap_or(30).clamp(1, 720) * 60;
+        let has_edit = a.title.is_some()
+            || a.description.is_some()
+            || a.goal.is_some()
+            || a.path.is_some()
+            || a.branch.is_some()
+            || a.priority.is_some()
+            || a.assignee.is_some()
+            || a.epic.is_some();
+        if has_edit {
+            let epic = a
+                .epic
+                .as_deref()
+                .map(store::parse_epic_id)
+                .transpose()
+                .map_err(err)?;
+            return offload(move || {
+                let edit = store::TaskEdit {
+                    title: a.title.as_deref(),
+                    description: a.description.as_deref(),
+                    goal: a.goal.as_deref(),
+                    path: a.path.as_deref(),
+                    branch: a.branch.as_deref(),
+                    priority: a.priority,
+                    assignee: a.assignee.as_deref(),
+                    epic,
+                };
+                if a.heartbeat {
+                    return Err(store::ClaimError::Other(
+                        "spec edits cannot heartbeat a held task; send a separate execution update"
+                            .into(),
+                    ));
+                }
+                if a.status.is_none()
+                    && a.report.is_none()
+                    && a.note.is_none()
+                    && a.commit.is_none()
+                {
+                    store::edit(&who, id, &edit)
+                } else {
+                    store::apply(
+                        &who,
+                        id,
+                        &store::Patch {
+                            edit: Some(&edit),
+                            status: a.status.as_deref(),
+                            report: a.report.as_deref(),
+                            note: a.note.as_deref(),
+                            commit: a.commit.as_deref(),
+                            needs: None,
+                            ttl_s,
+                        },
+                    )
+                    .map_err(|message| {
+                        if message.starts_with(&format!("T{id} working by ")) {
+                            store::ClaimError::Held(message)
+                        } else {
+                            store::ClaimError::Other(message)
+                        }
+                    })
+                }
+            })
+            .await
+            .map_err(err)?
+            .map(text)
+            .map_err(claim_err);
+        }
         let beat = if a.heartbeat {
             let who = who.clone();
             Some(
@@ -686,6 +682,7 @@ impl Board {
         run!(
             blocking(move || {
                 let patch = store::Patch {
+                    edit: None,
                     status: a.status.as_deref(),
                     report: a.report.as_deref(),
                     note: a.note.as_deref(),
@@ -697,24 +694,6 @@ impl Board {
             })
             .await
         )
-    }
-
-    #[tool(
-        name = "task_ask",
-        description = "Block on a human decision. Sets status=blocking/needs=input; the answer arrives as an event. Follow with task_wait, passing the #seq from the ack as after_seq. Ask ONE narrow question per call: compound questions get partial answers.",
-        annotations(
-            title = "Ask and block",
-            read_only_hint = false,
-            destructive_hint = false
-        )
-    )]
-    async fn task_ask(
-        &self,
-        Parameters(a): Parameters<AskArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        blocking(store::check_entry).await.map_err(err)?;
-        let id = store::parse_id(&a.id).map_err(err)?;
-        run!(blocking(move || store::ask(&actor(), id, &a.question)).await)
     }
 
     #[tool(
@@ -763,19 +742,6 @@ impl Board {
     }
 
     #[tool(
-        name = "session_list",
-        description = "Registered agent sessions (tmux or herdr) and what task each holds.",
-        annotations(title = "List sessions", read_only_hint = true)
-    )]
-    async fn session_list(
-        &self,
-        Parameters(_): Parameters<Empty>,
-    ) -> Result<CallToolResult, ErrorData> {
-        blocking(store::check_entry).await.map_err(err)?;
-        run!(blocking(store::sessions).await)
-    }
-
-    #[tool(
         name = "session_register",
         description = "Register this session's tmux name so the board can map task -> pane.",
         annotations(
@@ -803,48 +769,7 @@ impl Board {
             .await
         )
     }
-
-    #[tool(
-        name = "session_tail",
-        description = "Last N lines of a tmux pane. Cheap way to see what an agent is actually doing.",
-        annotations(title = "Tail pane", read_only_hint = true)
-    )]
-    async fn session_tail(
-        &self,
-        Parameters(a): Parameters<TailArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        blocking(store::check_entry).await.map_err(err)?;
-        let lines = a.lines.unwrap_or(40).clamp(1, 400);
-        run!(blocking(move || store::tail(&a.name, lines)).await)
-    }
-
-    #[tool(
-        name = "session_send",
-        description = "Type a line into a tmux pane and press Enter (steer another agent).",
-        annotations(title = "Send keys", read_only_hint = false, destructive_hint = true)
-    )]
-    async fn session_send(
-        &self,
-        Parameters(a): Parameters<SendArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        blocking(store::check_entry).await.map_err(err)?;
-        run!(blocking(move || store::send(&a.name, &a.text)).await)
-    }
-
-    #[tool(
-        name = "board_build",
-        description = "Which build serves this board, in one line: version, derived tool count, commit, backend. A seat compares two servers with it instead of trusting either one's claim; the count changes when the tool surface does.",
-        annotations(title = "Build identity", read_only_hint = true)
-    )]
-    async fn board_build(&self) -> Result<CallToolResult, ErrorData> {
-        blocking(store::check_entry).await.map_err(err)?;
-        let count = self.tool_router.list_all().len();
-        run!(blocking(move || Ok(ident::line(count))).await)
-    }
 }
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct Empty {}
 
 impl Default for Board {
     fn default() -> Self {
@@ -856,12 +781,7 @@ impl Default for Board {
 impl ServerHandler for Board {
     fn get_info(&self) -> ServerConfig {
         let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
-        // The crate version stays where a client expects it; the build line rides in
-        // `title`, so one initialize shows the tool count and the commit. Two servers
-        // that answer `0.1.0` are then still distinguishable at a glance.
-        let mut me = Implementation::new(ident::NAME, ident::VERSION);
-        me.title = Some(ident::line(self.tool_router.list_all().len()));
-        info.server_info = me;
+        info.server_info = Implementation::new(ident::NAME, ident::VERSION);
         info
     }
 }
@@ -869,6 +789,24 @@ impl ServerHandler for Board {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_setter_fields_are_refused_by_name() {
+        let task = serde_json::json!({"id": "T1", "unknown_probe": true});
+        let epic = serde_json::json!({"id": "E1", "unknown_probe": true});
+        assert!(
+            serde_json::from_value::<UpdateArgs>(task)
+                .unwrap_err()
+                .to_string()
+                .contains("unknown_probe")
+        );
+        assert!(
+            serde_json::from_value::<EpicUpdateArgs>(epic)
+                .unwrap_err()
+                .to_string()
+                .contains("unknown_probe")
+        );
+    }
 
     #[test]
     fn the_reported_tool_count_is_the_number_of_tool_markers() {
@@ -882,30 +820,7 @@ mod tests {
             .filter(|l| l.trim_start().starts_with(marker))
             .count();
         assert_eq!(tool_count(), markers);
-        assert_eq!(
-            ident::line(tool_count()),
-            format!(
-                "{} {} tools={} commit={} backend={}",
-                ident::NAME,
-                ident::VERSION,
-                tool_count(),
-                ident::COMMIT,
-                ident::BACKEND
-            )
-        );
-    }
-
-    #[test]
-    fn the_build_line_separates_the_surfaces_of_one_version() {
-        // Same version, different surface: the count in the line is the whole point.
-        let a = ident::line(22);
-        let b = ident::line(23);
-        assert_ne!(a, b);
-        assert!(a.starts_with("agentboard "), "{a}");
-        assert!(a.contains("tools=22"), "{a}");
-        assert!(a.contains(ident::COMMIT), "{a}");
-        assert!(a.contains(ident::BACKEND), "{a}");
-        // One line, no newline: it is pasted into reports and log lines.
-        assert!(!a.contains('\n'), "{a}");
+        let header = include_str!("server.rs").lines().next().unwrap();
+        assert!(header.contains(&format!("MCP surface: {} tools", tool_count())));
     }
 }

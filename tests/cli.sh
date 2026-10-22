@@ -538,11 +538,13 @@ run $B --db "$S/owner-refused" board upgrade
 check "board upgrade: missing --owner is one-line exit 1" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "requires --owner" && echo 0 || echo 1)
 check "board upgrade: owner refusal creates no board" $([ ! -e "$S/owner-refused" ] && echo 0 || echo 1)
 
-# the build stamp: the same one line from the CLI verb and from initialize, with the
-# tool count derived from the source markers (never written down)
-run $B board-build;                                                    check "board-build: one line naming version, tools, commit, backend" $([ $rc -eq 0 ] && [ "$(wc -l <<<"$out")" = 1 ] && has "$out" "agentboard 0.1.0 tools=" && has "$out" "commit=" && has "$out" "backend=$BACKEND" && echo 0 || echo 1)
-markers=$(grep -c '^[[:space:]]*#\[tool(' src/server.rs)
-check "board-build: its tool count equals the #[tool( markers in src/server.rs" $(has "$out" "tools=$markers " && echo 0 || echo 1)
+# Build identity has been deleted, including the CLI entry point.
+for retired_alias in mcp list; do
+  run $B "$retired_alias"
+  check "$retired_alias alias has no usage evidence and is deleted" $([ $rc -eq 1 ] && has "$err" "unrecognized subcommand" && echo 0 || echo 1)
+done
+run $B board-build
+check "board-build is deleted, not an alias" $([ $rc -eq 1 ] && has "$err" "unrecognized subcommand" && echo 0 || echo 1)
 
 echo "$pass/$total passed (backend: $BACKEND)"
 [ "$pass" -eq "$total" ]

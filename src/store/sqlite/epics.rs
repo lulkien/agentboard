@@ -155,6 +155,12 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
     if e.title.is_some_and(|t| t.trim().is_empty()) {
         return Err("title cannot be empty".to_owned());
     }
+    let status = e
+        .status
+        .map(|raw| {
+            norm_status(raw).ok_or_else(|| format!("bad epic status {raw:?} ({EPIC_STATUS_LIST})"))
+        })
+        .transpose()?;
     let cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
     let home = std::env::var("HOME").ok();
     let path = e.path.map(|p| normalize_path(p, &cwd, home.as_deref()));
@@ -166,6 +172,14 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
     let description = text_change(&mut diffs, "description", &cur.description, e.description);
     let goal = text_change(&mut diffs, "goal", &cur.goal, e.goal);
     let path = value_change(&mut diffs, "path", &cur.path, path.as_deref());
+    if let Some(want) = status
+        && want != cur.status
+    {
+        diffs.push(format!("status {}->{want}", cur.status));
+    }
+    if let Some(note) = e.note {
+        diffs.push(format!("note {note}"));
+    }
     if diffs.is_empty() {
         return Ok(format!("{} unchanged", short_epic(id)));
     }
@@ -174,6 +188,15 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
         params![title, description, goal, path, now_ms(), id],
     )
     .map_err(|e| e.to_string())?;
+    if let Some(want) = status {
+        let now = now_ms();
+        let completed = (want != "open").then(|| cur.completed_at.unwrap_or(now));
+        tx.execute(
+            "UPDATE epics SET status=?, completed_at=? WHERE id=?",
+            params![want, completed, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     let seq = log_event(&tx, Subject::Epic(id), actor, "edit", &diffs.join(", "))?;
     tx.commit().map_err(|e| e.to_string())?;
     let mut out = format!("{} edited {} #{seq}", short_epic(id), field_names(&diffs));

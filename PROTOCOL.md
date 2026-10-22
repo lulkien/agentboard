@@ -1,8 +1,8 @@
 # Working the board (v2)
 
-The board is the only status channel. No `NOTES.md`, `STATUS.md`, or summary files — use `task_update(note=...)`. One task at a time per session is a convention, not enforced by the server: finish or block before claiming again. Long task? `task_update(heartbeat=true)` before the lease expires (30 min default). Touch only your task; `session_tail` to watch another pane.
+The board is the only status channel. No `NOTES.md`, `STATUS.md`, or summary files — use `task_update(note=...)`. One task at a time per session is a convention, not enforced by the server: finish or block before claiming again. Long task? `task_update(heartbeat=true)` before the lease expires (30 min default). Touch only your task. Pane inspection and input belong to the manager CLI.
 
-Never guess a missing requirement. `task_ask` with ONE narrow question, then `task_wait(after_seq=<#seq from ack>)`. If the answer is partial, ask again.
+Never guess a missing requirement. `task_update(status="blocking", note=<ONE narrow question>)`, then `task_wait(after_seq=<#seq from ack>)`. If the answer is partial, ask again.
 
 `done` means verified — run the check the goal names and put its output in `report`. `review` means ready for a second pair of eyes: the reviewer in the loop below, or a human when the change is an API break or an irreversible operation. It is not a finished state; `done` is. Notes are for the next reader: decisions, surprises, commands worth rerunning.
 
@@ -102,7 +102,9 @@ Exit codes: every diff verb exits 0 on success and 1 on any refusal — a bad id
 
 ## Editing a spec
 
-The manager moves one task with `edit T7 --epic E3` or `task_edit(id="T7",
+Each object has one MCP setter. `task_update` and `epic_update` accept spec and state fields together in one transaction. Unknown fields are refused by name before writing. Spec edits cannot heartbeat a held task; keep lease renewal in its own execution update.
+
+The manager moves one task with `edit T7 --epic E3` or `task_update(id="T7",
 epic="E3")`. The target must exist and be open. A live worker lease refuses the
 edit; a move that would separate the task from its parent or children refuses by
 name. The move preserves status, lease, parent, reports, diffs and existing events,
@@ -110,7 +112,7 @@ and records one `edit` event, `epic E1->E3` (`none->E3` for an ungrouped task).
 The same epic returns `T7 unchanged` without an event. There is no bulk move or
 merge command; the manager chooses rows individually.
 
-`agentboard edit T7|E3 ...` / `task_edit` / `epic_edit` amend a spec and are refused while the task is `working` with a live lease (the worker is reading it); free it with `agentboard status T7 ready` first. Each edit logs one `edit` event: short fields record the values, `title "old"->"new"` (title, assignee, path, branch; each clipped to 80 chars, so a same-length change shows and the old text survives), `priority 100->7`, and long fields only the lengths, `description 812->830` (description, goal). A worker re-reading its task sees the spec moved in the timeline.
+`agentboard edit T7|E3 ...` / `task_update` / `epic_update` amend a spec and are refused while the task is `working` with a live lease (the worker is reading it); free it with `agentboard status T7 ready` first. Each edit logs one `edit` event: short fields record the values, `title "old"->"new"` (title, assignee, path, branch; each clipped to 80 chars, so a same-length change shows and the old text survives), `priority 100->7`, and long fields only the lengths, `description 812->830` (description, goal). A worker re-reading its task sees the spec moved in the timeline.
 
 ## Long text and truncation
 
@@ -140,7 +142,7 @@ Other clips, all marked or absent:
 
 ## Cost note
 
-The full tool surface is ~1.8k tokens per request; `task_claim` returns the task so a follow-up `task_get` is never needed. Writes ack in one line on purpose.
+The MCP surface has 16 tools. Tool schemas accompany every request; `task_claim` returns the task so a follow-up `task_get` is never needed. Writes ack in one line on purpose.
 ## Board schema version
 
 Every CLI invocation and MCP tool call reads the persisted schema version
@@ -161,7 +163,7 @@ unsupported historical versions require manual inspection. No drops, type change
 or rewriting present values run automatically. Failure to acquire the write lock
 refuses; retry after the holder releases it.
 
-Build commits, dirty checkouts and tool counts do not decide board compatibility.
+The server reports its product name and version during initialization. Build commits and tool counts do not decide board compatibility.
 There is no seat-start check. The manager reloads MCP processes when needed.
 Legacy build and tool-count columns may remain as inert historical data; they are
 neither compared nor updated. Older binaries may retain their former policy:

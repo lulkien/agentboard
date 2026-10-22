@@ -28,7 +28,7 @@ Start the manager seat with `/manager` (Claude Code, opencode, Hermes) or `$mana
 - The board is the only status channel. No `NOTES.md`, `STATUS.md`, summary files.
 - The row is the prompt: `claim` returns `description` and `goal` verbatim. Do not stage prompt text in files.
 - Write to the board through the MCP tools. Do not shell out to the `agentboard` binary for board writes. One exception: a diff body too big for an inline MCP string goes in with `diff add --body-file` (`references/diff-submission.md`).
-- Never guess a missing requirement: `task_ask` one narrow question, then `task_wait`.
+- Never guess a missing requirement: `task_update(status="blocking", note=<one narrow question>)`, then `task_wait`.
 - `done` means verified. Paste the real output of the check the goal names into `report`.
 - Touch only your row. Do not run suites or installs the goal does not name.
 - A probe that touches a board uses a throwaway one: set `AGENTBOARD_DB` (and `AGENTBOARD_SURREAL_URL`) in the same command. A bare `agentboard` call hits the live board.
@@ -42,7 +42,7 @@ Start the manager seat with `/manager` (Claude Code, opencode, Hermes) or `$mana
 | keep a long lease | `task_update heartbeat=true` | `heartbeat T` |
 | record the change | `diff_add id body=` | `diff add T (--body TEXT\|--body-file PATH\|-)` |
 | outcome and status | `task_update report= status=` | `report T "..."`, `status T <s> [note]` |
-| block on a human | `task_ask` | `ask T "..."` |
+| block on a human | `task_update status=blocking note=<question>` | `ask T "..."` |
 | wait for the board | `task_wait` | `wait [T..] [--epic E] [--open] [--status csv] [--kind csv] [--timeout S]` |
 | read | `task_get`, `task_list`, `task_children`, `diff_list`, `diff_get`, `board_brief` | `get`, `ls`, `children`, `diff ls`, `diff get`, `brief` |
 

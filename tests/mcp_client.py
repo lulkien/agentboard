@@ -62,6 +62,8 @@ class Session:
 
     def call(self, name, **args):
         r = self.rpc("tools/call", {"name": name, "arguments": args})
+        if r.get("isError"):
+            raise RuntimeError(r["content"][0]["text"])
         return r["content"][0]["text"]
 
     def close(self):
@@ -141,7 +143,7 @@ def main():
     # ask must block, and wait must return on the answer without client polling.
     s.call("task_add", title="needs a decision", description="choose one", goal="decided")
     s.call("task_claim", id="T2")
-    expect("ask", s.call("task_ask", id="T2", question="nix or libc?"), "T2 blocking", "#")
+    expect("ask", s.call("task_update", id="T2", status="blocking", note="nix or libc?"), "T2 blocking", "#")
 
     answer_at = {}
 
@@ -284,7 +286,7 @@ def main():
     expect("unknown epic is refused", refusal_text(lambda: s.call("task_add", title="x", epic="E99")), "no such epic E99")
     # An epic is never leased: every task verb refuses an E id.
     for verb, args in (("task_claim", {"id": epic_id}), ("task_get", {"id": epic_id}), ("task_update", {"id": epic_id, "status": "done"}),
-                       ("task_ask", {"id": epic_id, "question": "q"}), ("task_wait", {"id": epic_id, "timeout_s": 1})):
+                       ("task_update", {"id": epic_id, "status": "blocking", "note": "q"}), ("task_wait", {"id": epic_id, "timeout_s": 1})):
         expect(f"{verb} refuses an epic id", refusal_text(lambda: s.call(verb, **args)), "is an epic id")
     expect("epic_list shows the open epic", s.call("epic_list"), f"{epic_id} open 1/4 done /tmp/agentboard-no-such-project (does not exist) epic: ship it")
     expect("epic_get refuses a task id", refusal_text(lambda: s.call("epic_get", id=child_id)), "is a task id")
@@ -415,7 +417,7 @@ def main():
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"cli timeout exits 3 after the wait :: rc={r.returncode} {r.stdout.splitlines()[:3]}")
     expect("mcp timeout marker", s.call("task_wait", ids=[wa, wb], status="done", timeout_s=1), "timeout:", "last (")
-    # --open --kind ask catches a task_ask (an ask is a `block` event).
+    # --open --kind ask catches a blocking update (an ask is a `block` event).
     asker = subprocess.Popen(["sh", "-c", f"sleep 1; {BIN} ask {wb} 'which one?'"], env=env, stdout=subprocess.DEVNULL)
     r = cli_wait("--open", "--kind", "ask", "--timeout", "10")
     asker.wait()
@@ -507,31 +509,31 @@ def main():
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + f"task created during --open wait matches :: rc={r.returncode} {r.stdout.splitlines()[:3]}")
 
-    # task_edit / epic_edit: amend a spec; the lease guard refuses a held task.
+    # task_update / epic_update: amend a spec; the lease guard refuses a held task.
     ed = s.call("task_add", title="edit me", description="v1", goal="g").split()[0]
-    expect("task_edit returns the changed field list, not the row", s.call("task_edit", id=ed, title="edited", description="version two", priority=3), f"{ed} edited title, description, priority #")
+    expect("task_edit returns the changed field list, not the row", s.call("task_update", id=ed, title="edited", description="version two", priority=3), f"{ed} edited title, description, priority #")
     expect("edit lands and logs old/new lengths", s.call("task_get", id=ed), "title: edited", "priority 3", "title \"edit me\"->\"edited\", description 2->11, priority 100->3")
-    expect("edit with equal values is a no-op", s.call("task_edit", id=ed, title="edited"), f"{ed} unchanged")
-    expect("edit with no field is refused", refusal_text(lambda: s.call("task_edit", id=ed)), "nothing to edit")
+    expect("edit with equal values is a no-op", s.call("task_update", id=ed, title="edited"), f"{ed} unchanged")
+    expect("edit with no field is refused", refusal_text(lambda: s.call("task_update", id=ed)), "nothing to do")
     s.call("task_claim", id=ed)
     before = stable(s.call("task_get", id=ed, full=True))
-    expect("edit of a held task is refused like a claim (internal_error, lease text)", refusal_text(lambda: s.call("task_edit", id=ed, goal="moved under the worker")), "-32603", f"{ed} working by claude1", "lease", f"manager: agentboard status {ed} ready")
+    expect("edit of a held task is refused like a claim (internal_error, lease text)", refusal_text(lambda: s.call("task_update", id=ed, goal="moved under the worker")), "-32603", f"{ed} working by claude1", "lease", f"manager: agentboard status {ed} ready")
     ok = stable(s.call("task_get", id=ed, full=True)) == before
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "the refused edit left the row and timeline byte-identical")
     s.call("task_update", id=ed, status="ready")
-    expect("edit lands once the manager frees the task", s.call("task_edit", id=ed, goal="moved"), f"{ed} edited goal")
+    expect("edit lands once the manager frees the task", s.call("task_update", id=ed, goal="moved"), f"{ed} edited goal")
     wd = s.call("task_add", title="workdir", path="/tmp/agentboard-wd/", branch="feat/x").split()[0]
     expect("task_add with path and branch: task_get shows both", s.call("task_get", id=wd), "path: /tmp/agentboard-wd", "branch: feat/x")
-    expect("task_edit of the branch reports it", s.call("task_edit", id=wd, branch="HEAD"), f"{wd} edited branch")
+    expect("task_edit of the branch reports it", s.call("task_update", id=wd, branch="HEAD"), f"{wd} edited branch")
     expect("the branch edit logs the old->new diff", s.call("task_get", id=wd), "branch: HEAD", "branch \"feat/x\"->\"HEAD\"")
-    expect("a bad branch is refused", refusal_text(lambda: s.call("task_edit", id=wd, branch="a b")), "bad branch")
-    expect("task_edit refuses an epic id", refusal_text(lambda: s.call("task_edit", id=epic_id, title="x")), "is an epic id")
-    expect("epic_edit returns the changed field list", s.call("epic_edit", id=epic_id, title="epic: shipped", path="/tmp/agentboard-no-such-project/sub/"), f"{epic_id} edited title, path #", "warning: path /tmp/agentboard-no-such-project/sub does not exist")
+    expect("a bad branch is refused", refusal_text(lambda: s.call("task_update", id=wd, branch="a b")), "bad branch")
+    expect("task_edit refuses an epic id", refusal_text(lambda: s.call("task_update", id=epic_id, title="x")), "is an epic id")
+    expect("epic_edit returns the changed field list", s.call("epic_update", id=epic_id, title="epic: shipped", path="/tmp/agentboard-no-such-project/sub/"), f"{epic_id} edited title, path #", "warning: path /tmp/agentboard-no-such-project/sub does not exist")
     expect("epic edit shows in the epic and its timeline", s.call("epic_get", id=epic_id), "title: epic: shipped", "path: /tmp/agentboard-no-such-project/sub", "title \"epic: ship it\"->\"epic: shipped\", path \"/tmp/agentboard-no-such-project\"->\"/tmp/agentboard-no-such-project/sub\"")
-    expect("epic_edit with no field is refused", refusal_text(lambda: s.call("epic_edit", id=epic_id)), "nothing to edit")
-    expect("epic_edit refuses a task id", refusal_text(lambda: s.call("epic_edit", id=ed, title="x")), "is a task id")
-    expect("the tools are listed", " ".join(t["name"] for t in s.rpc("tools/list", {})["tools"]), "task_edit", "epic_edit", "diff_add", "diff_get", "diff_list")
+    expect("epic_edit with no field is refused", refusal_text(lambda: s.call("epic_update", id=epic_id)), "nothing to edit")
+    expect("epic_edit refuses a task id", refusal_text(lambda: s.call("epic_update", id=ed, title="x")), "is a task id")
+    expect("the tools are listed", " ".join(t["name"] for t in s.rpc("tools/list", {})["tools"]), "task_update", "epic_update", "diff_add", "diff_get", "diff_list")
 
     # One-row epic moves use the existing setter, with no bulk or chain rewrite.
     source = s.call("epic_add", title="move source").split()[0]
@@ -540,7 +542,7 @@ def main():
     s.call("task_update", id=moving, note="before move", report="preserved report", commit="abc123")
     patch = s.call("diff_add", id=moving, body="exact preserved patch").split()[0]
     before = stable(s.call("task_get", id=moving, full=True))
-    expect("task_edit epic moves with the existing setter", s.call("task_edit", id=moving, epic=target), f"{moving} edited epic #")
+    expect("task_edit epic moves with the existing setter", s.call("task_update", id=moving, epic=target), f"{moving} edited epic #")
     after = stable(s.call("task_get", id=moving, full=True))
     expect("epic move records old and new epic", after, f"epic: {target} move target", f"epic {source}->{target}")
     def move_state(record):
@@ -551,23 +553,23 @@ def main():
     checks.append(ok)
     print(("PASS " if ok else "FAIL ") + "epic move preserves task fields and complete pre-move history, adds one event")
     expect("epic move preserves submitted diff", s.call("diff_get", id=patch, full=True), moving, "exact preserved patch")
-    expect("same epic is a no-op", s.call("task_edit", id=moving, epic=target), f"{moving} unchanged")
+    expect("same epic is a no-op", s.call("task_update", id=moving, epic=target), f"{moving} unchanged")
     unchanged = stable(s.call("task_get", id=moving, full=True))
     checks.append(move_state(unchanged) == move_state(after) and re.findall(r'#\d+', unchanged) == re.findall(r'#\d+', after))
     print(("PASS " if checks[-1] else "FAIL ") + "same-epic no-op records no event")
     s.call("epic_update", id=source, status="done")
-    expect("epic move refuses done target", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), "target epic is done")
+    expect("epic move refuses done target", refusal_text(lambda: s.call("task_update", id=moving, epic=source)), "target epic is done")
     s.call("epic_update", id=source, status="dropped")
-    expect("epic move refuses dropped target", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), "target epic is dropped")
-    expect("epic move refuses missing target", refusal_text(lambda: s.call("task_edit", id=moving, epic="E999999")), "no such epic E999999")
-    expect("epic move validates target id space", refusal_text(lambda: s.call("task_edit", id=moving, epic=moving)), "is a task id")
+    expect("epic move refuses dropped target", refusal_text(lambda: s.call("task_update", id=moving, epic=source)), "target epic is dropped")
+    expect("epic move refuses missing target", refusal_text(lambda: s.call("task_update", id=moving, epic="E999999")), "no such epic E999999")
+    expect("epic move validates target id space", refusal_text(lambda: s.call("task_update", id=moving, epic=moving)), "is a task id")
     s.call("epic_update", id=source, status="open")
     s.call("task_claim", id=moving)
-    expect("epic move refuses held row", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), "-32603", f"{moving} working by claude1")
+    expect("epic move refuses held row", refusal_text(lambda: s.call("task_update", id=moving, epic=source)), "-32603", f"{moving} working by claude1")
     s.call("task_update", id=moving, status="ready")
     child = s.call("task_add", title="move child", parent=moving).split()[0]
-    expect("epic move refuses cross-epic parent", refusal_text(lambda: s.call("task_edit", id=child, epic=source)), f"cross-epic parent {moving}")
-    expect("epic move refuses cross-epic child", refusal_text(lambda: s.call("task_edit", id=moving, epic=source)), f"cross-epic child {child}")
+    expect("epic move refuses cross-epic parent", refusal_text(lambda: s.call("task_update", id=child, epic=source)), f"cross-epic parent {moving}")
+    expect("epic move refuses cross-epic child", refusal_text(lambda: s.call("task_update", id=moving, epic=source)), f"cross-epic child {child}")
 
     # Diffs: append-only, round from the reopen count, only the newest is reviewed.
     dt = s.call("task_add", title="diffed").split()[0]
@@ -652,7 +654,32 @@ def main():
     er = moved.split("(review row ")[1].rstrip(")")
     expect("the first evidence-only brief says so and copies the evidence verbatim", s.call("task_get", id=er, full=True), f"No new diff this round: {e2} is evidence-only for {e1}", f"the diff under review is {e1}", "Evidence (verbatim):", "all green", "evidence-only this round; it is not a patch", "the evidence report")
 
-    expect("session list", s.call("session_list"), "session")
+    catalog = {t["name"] for t in s.rpc("tools/list", {})["tools"]}
+    wanted = {"task_add", "task_list", "task_get", "task_children", "task_claim", "task_update", "task_wait",
+              "epic_add", "epic_list", "epic_get", "epic_update", "diff_add", "diff_get", "diff_list", "board_brief", "session_register"}
+    checks.append(catalog == wanted)
+    print(("PASS " if checks[-1] else "FAIL ") + f"router catalog is the retained surface: {len(catalog)} tools")
+    for deleted in ["task_edit", "epic_edit", "task_ask", "session_list", "session_tail", "session_send", "board_build"]:
+        expect(f"deleted {deleted} has no callable alias", refusal_text(lambda: s.call(deleted)), "-32602")
+    for setter, obj in [("task_update", ed), ("epic_update", epic_id)]:
+        expect(f"{setter} rejects unknown field by name", refusal_text(lambda: s.call(setter, id=obj, unknown_probe="no")), "unknown_probe")
+    expect("spec update cannot request heartbeat", refusal_text(lambda: s.call("task_update", id=ed, title="must not land", heartbeat=True)), "spec edits cannot heartbeat")
+    expect("refused spec/heartbeat leaves title intact", s.call("task_get", id=ed), "title: edited")
+    combined = s.call("task_add", title="atomic before").split()[0]
+    before = stable(s.call("task_get", id=combined, full=True))
+    expect("mixed spec/state update refuses invalid status", refusal_text(lambda: s.call("task_update", id=combined, title="must roll back", status="invalid-probe")), "bad status")
+    checks.append(stable(s.call("task_get", id=combined, full=True)) == before)
+    print(("PASS " if checks[-1] else "FAIL ") + "failed combined task update preserves spec and events")
+    expect("combined task setter updates spec and state", s.call("task_update", id=combined, title="atomic after", status="blocking", note="human decides"), f"{combined} blocking")
+    expect("combined task fields survive", s.call("task_get", id=combined), "title: atomic after", "human decides")
+    both_epic = s.call("epic_add", title="atomic epic").split()[0]
+    expect("combined epic setter updates spec and state", s.call("epic_update", id=both_epic, title="renamed epic", status="done"), f"{both_epic} edited title, status")
+    expect("combined epic fields survive", s.call("epic_get", id=both_epic), "title: renamed epic", f"{both_epic} done")
+    before = stable(s.call("epic_get", id=both_epic, full=True))
+    expect("mixed epic setter refuses invalid status", refusal_text(lambda: s.call("epic_update", id=both_epic, title="bad edit", status="invalid-probe")), "bad epic status")
+    checks.append(stable(s.call("epic_get", id=both_epic, full=True)) == before)
+    print(("PASS " if checks[-1] else "FAIL ") + "failed combined epic update preserves spec and events")
+
     # Change the board stamp behind an already initialized MCP process. The
     # next write must fail, even on SQLite where initialization used to be cached.
     if BACKEND == "sqlite":

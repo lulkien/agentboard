@@ -40,7 +40,7 @@ May run: everything the goal names, and every executable step the row needs, inc
 
 Never: closes its own fix row (`done` is the reviewer's signature), closes a review row, sets `not_done`, runs a gate the goal did not name, touches the live board, leaves a prose summary where a diff belongs.
 
-Flow: `task_claim`, `task_get full=true`, work, `task_update note=` for decisions, `diff_add`, then `task_update report= status=review`. The report names the files and pastes the real last line of each gate. On a fix row, answer every finding in `report`. If a requirement is missing, `task_ask` one narrow question.
+Flow: `task_claim`, `task_get full=true`, work, `task_update note=` for decisions, `diff_add`, then `task_update report= status=review`. The report names the files and pastes the real last line of each gate. On a fix row, answer every finding in `report`. If a requirement is missing, `task_update(status="blocking", note=<one narrow question>)`.
 
 ## Reviewer
 

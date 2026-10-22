@@ -1,7 +1,7 @@
 # agentboard
 
 A task board shared by a handful of CLI coding agents (Claude Code in a herdr
-pane, Hermes, subagents) plus you. 22 MCP tools over stdio and one board, stored
+pane, Hermes, subagents) plus you. 16 MCP tools over stdio and one board, stored
 either in SurrealDB (the default build) or in a single SQLite file (opt-in). The point is to replace
 "write status to NOTES.md and hope somebody reads it" with a board that answers in
 one line and costs few tokens.
@@ -70,23 +70,17 @@ completion is one row; nothing is mutable history.
 | `epic_add` | 1-2 lines | create an epic (`title, description, goal, path`); returns `E3`, plus a warning line if `path` does not exist yet |
 | `epic_list` | 1 line/epic | epics (default open): id, status, done/total, path, title |
 | `epic_get` | ~10 lines | status, path, task counts, description, goal, last 8 events; `full=true` unclipped |
-| `epic_update` | 1 line ack | set an epic `open`/`done`/`dropped`; closing is never automatic |
-| `epic_edit` | 1 line ack | amend title, description, goal, path (only the fields passed); logs old/new lengths |
-| `task_edit` | 1 line ack | amend title, description, goal, priority, assignee, path, branch, epic; `epic=E3` (`edit T7 --epic E3`) moves one row to an open epic without splitting its parent/child chain; refused while `working` with a live lease |
+| `epic_update` | 1 line ack | status (`open`/`done`/`dropped`), note, title, description, goal, path; combined changes are atomic; closing is never automatic; unknown fields refuse by name |
 | `diff_add` | 1 line ack | record what you changed for a task, verbatim and append-only: `D12 (T7 round 2)`, round = the task's reopen count + 1; whitespace-only is refused. A re-run round with no tree change passes `reviews="D<n>"` naming the newest patch of this row and records evidence, marked not a patch. Only the newest patch is reviewed |
 | `diff_get` | header + body | one diff: task, round, age; evidence-only rows are labelled and point at the patch; the body is cut with a `[truncated ...]` marker, `full=true` returns it whole |
 | `diff_list` | 1 line/diff | a task's diffs (or an epic's, naming each task), newest first: `D12 round 2 3m 184 lines` or `D13 evidence-only -> D12`, or `(no diffs)` |
 | `task_claim` | work order | atomic claim, **returns description + goal** so no follow-up `get` |
-| `task_update` | 1 line ack | note and/or status; `report=` when finishing |
-| `task_ask` | 1 line ack | block on a human decision |
+| `task_update` | 1 line ack | status, report, note, commit, heartbeat and spec fields title, description, goal, priority, assignee, path, branch, epic; combined spec/state changes are atomic; spec edits refuse a live worker lease; unknown fields refuse by name |
 | `task_wait` | delta only | server-side long-poll over `id`/`ids`/`epic`/`open` with `status`/`kind` filters; first line `matched:` or `timeout:` |
 | `board_brief` | ~1 screen | counts + one `EPIC` line per open epic (done/non-dropped tasks, blocking/needs_fix counts, path) + open tasks that belong to no epic + recent completions |
-| `session_list` | 1 line/session | registered sessions and their task; `up` means a live tmux session of that name, or a herdr agent with that name and the registered agent type |
 | `session_register` | ack | map session → task |
-| `session_tail` | N lines | last N lines of the agent's pane, herdr first and tmux as fallback; bounded by `$AGENTBOARD_DELIVER_TIMEOUT_MS` |
-| `session_send` | ack | type a line into a pane (steer another agent) |
 
-Twenty-two tools is deliberate: every tool schema is resent on every request, so a
+The surface has 16 MCP tools: every tool schema is resent on every request, so a
 wide surface is a permanent token tax. `answer` is not a tool — it is
 `task_update(status="running", note=...)`.
 
@@ -291,14 +285,14 @@ correct, the ordering is the client's.
 ## Not in scope
 
 No web UI, sprints, story points, attachments, or multi-user auth. One board,
-one user, a few agents. If it needs more than 22 tools, it is not this tool.
+one user, a few agents. Every MCP operation must earn its place in the loop.
 
 ## Do agents need a skill for this?
 
 No for the mechanics: the tool descriptions were enough in a field test — a bare
 "you have work waiting on this machine" prompt produced `task_list` →
 `task_claim` → edit → verify → `task_update(review)` with no guidance (a move to `review` now also needs a `diff_add` first, and the refusal names it), and no
-status file was written. The surface is ~1.8k tokens.
+status file was written. Only the retained board operations enter the MCP surface.
 
 Yes for the conventions, which no schema can express: board is the only status
 channel, claim the next task, never guess a missing requirement, what counts as
