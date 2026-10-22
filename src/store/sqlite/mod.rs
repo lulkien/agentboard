@@ -25,6 +25,8 @@ fn open() -> Result<Connection, String> {
     conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         .map_err(|e| e.to_string())?;
     check_schema(&conn)?;
+    // Refuse a published mismatch before any schema or opened-stamp write.
+    check_existing_surface(&conn)?;
     // A failed init is retried on the next open instead of being cached for the
     // life of a long-running MCP server.
     let mut done = INIT
@@ -52,8 +54,9 @@ fn open() -> Result<Connection, String> {
                 Err(e) => return Err(e.to_string()),
             }
         }
-        conn.execute_batch(SCHEMA)
+        conn.execute_batch(&SCHEMA.replace("COMMIT;", ""))
             .map_err(|e| format!("schema: {e}"))?;
+        init_surface(&conn)?;
         conn.execute(
             "UPDATE board_stamp SET opened_by=? WHERE id=1",
             [crate::ident::stamp()],
@@ -62,6 +65,7 @@ fn open() -> Result<Connection, String> {
         *done = true;
     }
     drop(done);
+    check_surface(&conn, Some(crate::ident::surface_tools()))?;
     Ok(conn)
 }
 
@@ -148,6 +152,98 @@ fn check_stamp(conn: &Connection) -> Result<(), String> {
         crate::ident::stamp(),
         db_path().display()
     ))
+}
+
+fn check_existing_surface(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(board_stamp)")
+        .map_err(|e| e.to_string())?;
+    let cols = stmt
+        .query_map([], |r| r.get::<_, String>(1))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    if cols.iter().any(|c| c == "surface_tools") {
+        let count: Option<i64> = conn
+            .query_row(
+                "SELECT surface_tools FROM board_stamp WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        if count.is_some() {
+            check_surface(conn, Some(crate::ident::surface_tools()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Additive v2 field/backfill under the same lock, preserving a published count.
+fn init_surface(conn: &Connection) -> Result<(), String> {
+    if conn.is_autocommit() {
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| e.to_string())?;
+    }
+    let result = (|| {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(board_stamp)")
+            .map_err(|e| e.to_string())?;
+        let cols = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| e.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        if !cols.iter().any(|c| c == "surface_tools") {
+            conn.execute_batch("ALTER TABLE board_stamp ADD COLUMN surface_tools INTEGER")
+                .map_err(|e| e.to_string())?;
+        }
+        conn.execute(
+            "UPDATE board_stamp SET surface_tools=? WHERE id=1 AND surface_tools IS NULL",
+            [crate::ident::surface_tools()],
+        )
+        .map_err(|e| e.to_string())?;
+        check_surface(conn, Some(crate::ident::surface_tools()))
+    })();
+    if result.is_ok() {
+        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+    } else {
+        let _ = conn.execute_batch("ROLLBACK");
+    }
+    result
+}
+
+fn check_surface(conn: &Connection, client: Option<i64>) -> Result<(), String> {
+    let board: Option<i64> = conn
+        .query_row(
+            "SELECT surface_tools FROM board_stamp WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+    if client.is_none() || client != board {
+        return Err(crate::ident::surface_refusal(client, board));
+    }
+    Ok(())
+}
+
+/// All application writes start here, before their first mutation, in the transaction.
+fn write_transaction(conn: &mut Connection) -> Result<rusqlite::Transaction<'_>, String> {
+    write_transaction_as(conn, Some(crate::ident::surface_tools()))
+}
+
+fn write_transaction_as(
+    conn: &mut Connection,
+    client: Option<i64>,
+) -> Result<rusqlite::Transaction<'_>, String> {
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    check_surface(&tx, client)?;
+    Ok(tx)
 }
 
 fn stamp_writer(conn: &Connection, build: &str) -> Result<(), String> {
@@ -385,6 +481,83 @@ impl Board for SqliteBoard {
 #[cfg(test)]
 mod tests {
     use super::{Connection, SCHEMA, check_schema};
+
+    #[test]
+    fn surface_write_gate_refuses_stale_and_missing_clients_before_first_write() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        super::init_surface(&c).unwrap();
+        let expected = crate::ident::surface_tools();
+        // Stub seat writes, using the same transaction entry as register, claim,
+        // status, diff and note. No environment/CLI/MCP argument supplies the count.
+        for client in [Some(19), None] {
+            let error = match super::write_transaction_as(&mut c, client) {
+                Ok(tx) => {
+                    tx.execute(
+                        "INSERT INTO sessions(name,agent,seen) VALUES('stale','stub',0)",
+                        [],
+                    )
+                    .unwrap();
+                    tx.commit().unwrap();
+                    panic!("stale seat reached its first write");
+                }
+                Err(error) => error,
+            };
+            assert_eq!(error, crate::ident::surface_refusal(client, Some(expected)));
+            assert_eq!(
+                c.query_row("SELECT count(*) FROM sessions", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                c.query_row("SELECT last_writer FROM board_stamp", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                ""
+            );
+        }
+        let tx = super::write_transaction(&mut c).unwrap();
+        tx.execute(
+            "INSERT INTO sessions(name,agent,seen) VALUES('matching','stub',0)",
+            [],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM sessions", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        // Reuse an already-open seat after the board's expectation changes.
+        c.execute("UPDATE board_stamp SET surface_tools=surface_tools+1", [])
+            .unwrap();
+        assert!(super::write_transaction(&mut c).is_err());
+        assert!(super::check_existing_surface(&c).is_err());
+        // Additive bootstrap never overwrites a published expectation.
+        assert!(super::init_surface(&c).is_err());
+        assert_eq!(
+            c.query_row("SELECT surface_tools FROM board_stamp", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            expected + 1
+        );
+    }
+
+    #[test]
+    fn surface_write_gate_backfills_v2_without_changing_generation() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(&SCHEMA.replace("  surface_tools INTEGER,\n", ""))
+            .unwrap();
+        super::init_surface(&c).unwrap();
+        super::init_surface(&c).unwrap();
+        super::check_surface(&c, Some(crate::ident::surface_tools())).unwrap();
+        assert_eq!(
+            c.query_row("SELECT generation FROM board_stamp", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            crate::ident::GENERATION
+        );
+    }
 
     #[test]
     fn schema_generation_matches_rust() {

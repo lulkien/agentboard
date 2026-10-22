@@ -42,7 +42,7 @@ pub fn epic_add(
     let home = std::env::var("HOME").ok();
     let path = normalize_path(path.unwrap_or(""), &cwd, home.as_deref());
     let mut conn = open()?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let now = now_ms();
     tx.execute(
         "INSERT INTO epics(title,description,goal,path,created_at,updated_at) VALUES(?,?,?,?,?,?)",
@@ -130,9 +130,7 @@ pub fn epic_status(
     let want = norm_status(status)
         .ok_or_else(|| format!("bad epic status {status:?} ({EPIC_STATUS_LIST})"))?;
     let mut conn = open()?;
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let cur = fetch_epic(&tx, id)?;
     let now = now_ms();
     let completed = (want != "open").then(|| cur.completed_at.unwrap_or(now));
@@ -161,9 +159,7 @@ pub fn epic_edit(actor: &str, id: i64, e: &EpicEdit<'_>) -> Result<String, Strin
     let home = std::env::var("HOME").ok();
     let path = e.path.map(|p| normalize_path(p, &cwd, home.as_deref()));
     let mut conn = open()?;
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let cur = fetch_epic(&tx, id)?;
     let mut diffs = Vec::new();
     let title = value_change(&mut diffs, "title", &cur.title, e.title);

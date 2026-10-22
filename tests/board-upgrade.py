@@ -6,6 +6,7 @@ import base64
 import json
 import http.server
 import queue
+import re
 import signal
 import shlex
 import threading
@@ -213,11 +214,14 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
             print(f'preserved {table}: {len(rows)} -> {len(after[table])}')
         assert json.dumps(before['tasks'][0], sort_keys=True).encode() == json.dumps(after['tasks'][0], sort_keys=True).encode()
         stamps = sql('SELECT * FROM meta:schema; SELECT * FROM meta:opened; SELECT * FROM meta:writer;')
+        expected_tools = int(re.search(r'\btools=(\d+)', cli(new, 'board-build'))[1])
+        assert stamps[0]['result'][0]['surface_tools'] == expected_tools
+        print(f'upgrade surface_tools={expected_tools}: matches binary-derived router count')
         upgrading_build = output.split('generation=2 ', 1)[1].splitlines()[0]
         for stamp in stamps:
             assert stamp['result'][0]['version'] == 2
             assert stamp['result'][0]['build'] == upgrading_build
-            assert 'commit=' in upgrading_build and 'tools=23' in upgrading_build
+            assert 'commit=' in upgrading_build and f'tools={expected_tools}' in upgrading_build
         assert 'want version 1' in cli(old, 'get', 'T1', ok=False)
         assert 'preserved task' in cli(new, 'get', 'T1')
         stop(server)

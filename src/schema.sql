@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS sessions(
 CREATE TABLE IF NOT EXISTS board_stamp(
   id INTEGER PRIMARY KEY CHECK(id=1),
   generation INTEGER NOT NULL,
+  surface_tools INTEGER,
   opened_by TEXT NOT NULL DEFAULT '',
   last_writer TEXT NOT NULL DEFAULT ''
 );

@@ -322,11 +322,12 @@ async fn apply(db: &Db) -> Result<String, String> {
     // BEGIN covers definitions, backfill and stamps. A crash before COMMIT leaves
     // version 1 and its rows unchanged; IF NOT EXISTS also tolerates earlier DDL.
     let query = format!(
-        "BEGIN TRANSACTION;\n{SCHEMA}\n{}\nUPSERT meta:schema SET version=$v, build=$build;\nUPSERT meta:opened SET version=$v, build=$build;\nUPSERT meta:writer SET version=$v, build=$build;\nCOMMIT TRANSACTION;",
+        "BEGIN TRANSACTION;\n{SCHEMA}\n{}\nUPSERT meta:schema SET version=$v, build=$build, surface_tools=$tools;\nUPSERT meta:opened SET version=$v, build=$build;\nUPSERT meta:writer SET version=$v, build=$build;\nCOMMIT TRANSACTION;",
         backfill()
     );
     db.query(query)
         .bind(("v", SCHEMA_VERSION))
+        .bind(("tools", crate::ident::surface_tools()))
         .bind(("build", crate::ident::stamp()))
         .await
         .and_then(surrealdb::Response::check)

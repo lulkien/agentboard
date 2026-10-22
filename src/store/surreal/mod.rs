@@ -312,6 +312,7 @@ const SCHEMA: &str = "
 DEFINE TABLE IF NOT EXISTS meta SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS version ON meta TYPE int;
 DEFINE FIELD IF NOT EXISTS build ON meta TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS surface_tools ON meta TYPE option<int>;
 
 DEFINE TABLE IF NOT EXISTS counters SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS n ON counters TYPE int;
@@ -517,11 +518,17 @@ async fn bootstrap(db: &Db, s: &Settings) -> Result<Bootstrap, String> {
         .await
         .and_then(surrealdb::Response::check)
         .map_err(|e| db_err(&e))?;
+    db.query("UPDATE meta:schema SET surface_tools=$tools WHERE surface_tools=NONE")
+        .bind(("tools", crate::ident::surface_tools()))
+        .await
+        .and_then(surrealdb::Response::check)
+        .map_err(|e| db_err(&e))?;
     if found.is_some() {
         return Ok(Bootstrap::Already);
     }
-    db.query("CREATE meta:schema SET version = $v, build = $build")
+    db.query("CREATE meta:schema SET version = $v, build = $build, surface_tools=$tools")
         .bind(("v", SCHEMA_VERSION))
+        .bind(("tools", crate::ident::surface_tools()))
         .bind(("build", crate::ident::stamp()))
         .await
         .and_then(surrealdb::Response::check)
@@ -615,6 +622,19 @@ fn session_with(
     // WebSocket upgrade; every phase is bounded.
     let db = bounded(s, t, open_db(s))?;
     let found = bounded(s, t, marker_version(&db))?;
+    // Refuse before additive DDL, opened stamps, or any application write.
+    // Missing field is the one-time v2 additive backfill below.
+    if write && found == Some(SCHEMA_VERSION) {
+        let expected = bounded(s, t, surface_count(&db))?;
+        if let Some(board) = expected
+            && board != crate::ident::surface_tools()
+        {
+            return Err(crate::ident::surface_refusal(
+                Some(crate::ident::surface_tools()),
+                Some(board),
+            ));
+        }
+    }
     let bootstrap = match found {
         // The marker only says which schema generation the board is, not that every
         // field of this build exists on it. Every write session (the lock is already
@@ -707,6 +727,15 @@ async fn open_db(s: &Settings) -> Result<Db, String> {
         .await
         .map_err(|e| db_err(&e))?;
     Ok(db)
+}
+
+async fn surface_count(db: &Db) -> Result<Option<i64>, String> {
+    let mut r = db
+        .query("SELECT VALUE surface_tools FROM meta:schema")
+        .await
+        .map_err(|e| db_err(&e))?;
+    let values: Vec<Option<i64>> = r.take(0).map_err(|e| db_err(&e))?;
+    Ok(values.into_iter().next().flatten())
 }
 
 async fn marker_version(db: &Db) -> Result<Option<i64>, String> {
@@ -1208,6 +1237,88 @@ mod tests {
         assert_eq!(
             old[0],
             serde_json::json!({"status": "working", "board": "main", "path": "", "branch": "HEAD", "reopen_count": 0})
+        );
+    }
+
+    #[test]
+    fn surface_write_gate_refuses_stale_and_missing_clients_before_first_write() {
+        let Some(srv) = start_server("surface-write-gate") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        runtime().block_on(async {
+            let expected = crate::ident::surface_tools();
+            assert_eq!(super::surface_count(&c.db).await.unwrap(), Some(expected));
+            for client in [Some(19), None] {
+                let mut tx = tasks::Txn::new();
+                tx.raw("UPSERT sessions:stale SET agent='stub', seen=0;");
+                let error = tx
+                    .run_with_surface(&c.db, "true", "stub", client)
+                    .await
+                    .expect_err("stale seat reached first write");
+                assert!(
+                    error.contains(&crate::ident::surface_refusal(client, Some(expected))),
+                    "{error}"
+                );
+                for table in ["sessions", "events", "tasks", "diffs", "meta:writer"] {
+                    let mut r = c.db.query(format!("SELECT * FROM {table}")).await.unwrap();
+                    assert!(
+                        r.take::<Vec<serde_json::Value>>(0).unwrap().is_empty(),
+                        "{table} changed"
+                    );
+                }
+            }
+            let mut tx = tasks::Txn::new();
+            tx.raw("UPSERT sessions:matching SET agent='stub', seen=0;");
+            tx.run(&c.db, "true").await.unwrap();
+            let mut r = c.db.query("SELECT agent FROM sessions").await.unwrap();
+            assert_eq!(r.take::<Vec<serde_json::Value>>(0).unwrap().len(), 1);
+            c.db.query("UPDATE meta:schema SET surface_tools += 1")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+            let mut tx = tasks::Txn::new();
+            tx.raw("DELETE sessions:matching;");
+            assert!(
+                tx.run(&c.db, "true").await.is_err(),
+                "already-open seat bypassed gate"
+            );
+        });
+        assert!(
+            super::session_with(
+                &srv.settings,
+                &serve::Timing::default(),
+                None,
+                lock::DEFAULT_WAIT,
+                true
+            )
+            .is_err()
+        );
+        runtime().block_on(async {
+            let expected = crate::ident::surface_tools();
+            assert_eq!(
+                super::surface_count(&c.db).await.unwrap(),
+                Some(expected + 1)
+            );
+            // Simulate v2 before the additive field and verify a locked write-open backfill.
+            c.db.query("UPDATE meta:schema UNSET surface_tools")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        let _w = super::session_with(
+            &srv.settings,
+            &serve::Timing::default(),
+            None,
+            lock::DEFAULT_WAIT,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            runtime().block_on(super::surface_count(&c.db)).unwrap(),
+            Some(crate::ident::surface_tools())
         );
     }
 

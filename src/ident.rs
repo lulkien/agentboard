@@ -32,10 +32,25 @@ pub fn line(tools: usize) -> String {
 /// count from tool attributes; the server test compares it to the actual router.
 /// Pure formatting: store records must never consult git or perform I/O.
 pub fn stamp() -> String {
-    let tools: usize = env!("AGENTBOARD_TOOL_COUNT")
-        .parse()
-        .expect("derived tool count");
+    let tools = surface_tools();
     format!("{NAME} {VERSION} tools={tools} commit={COMMIT} backend={BACKEND}")
+}
+
+/// Compiled from the router; no argument or environment variable can override it.
+pub fn surface_tools() -> i64 {
+    env!("AGENTBOARD_TOOL_COUNT")
+        .parse()
+        .expect("derived tool count")
+}
+
+pub const SURFACE_REMEDY: &str = "reinstall the seat binary, then reload the seat's MCP server";
+
+pub fn surface_refusal(client: Option<i64>, board: Option<i64>) -> String {
+    format!(
+        "board surface mismatch: seat tools={}; board tools={}; {SURFACE_REMEDY}",
+        client.map_or_else(|| "none".to_owned(), |n| n.to_string()),
+        board.map_or_else(|| "none".to_owned(), |n| n.to_string())
+    )
 }
 
 /// Bump for incompatible schema OR tool-surface rules. Never auto-upgrade a board.

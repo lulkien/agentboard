@@ -114,9 +114,7 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let mut conn = open()?;
     // Read the parent/epic and insert in one write transaction: the invariant
     // must hold for the row that lands, not for the row we looked at.
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let epic = resolve_epic(&tx, epic, parent)?;
     if let Some(p) = parent {
         check_depth(&tx, p, 1).map_err(|e| format!("add: {e}"))?;
@@ -159,9 +157,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
         return Err(String::from("title cannot be empty").into());
     }
     let mut conn = open()?;
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let cur = fetch(&tx, id)?;
     if cur.status == "working" && cur.lease_until.is_some_and(|l| l >= now_ms()) {
         return Err(ClaimError::Held(held_text(&cur)));
@@ -229,9 +225,7 @@ pub fn edit(actor: &str, id: i64, e: &TaskEdit<'_>) -> Result<String, ClaimError
 /// a cycle, so the walk up the ancestors happens here, in the same transaction.
 pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, String> {
     let mut conn = open()?;
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let task = fetch(&tx, id)?;
     if let Some(p) = parent {
         if p == id {
@@ -284,9 +278,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
     let now = now_ms();
     let lease = now + ttl_s * 1000;
     for _ in 0..8 {
-        let tx = conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
+        let tx = super::write_transaction(&mut conn)?;
         let cand: Option<(i64, String)> = {
             let (sql, arg): (String, Vec<i64>) = match id {
                 Some(x) => ("SELECT id,status FROM tasks WHERE id=? AND (status='ready' OR (lease_until IS NOT NULL AND lease_until < ?))".to_string(), vec![x, now]),
@@ -425,9 +417,7 @@ fn file_review(
 
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     let mut conn = open()?;
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let cur = fetch(&tx, id)?;
     let now = now_ms();
     let status = match p.status {
@@ -663,7 +653,7 @@ pub fn block(actor: &str, id: i64, reason: &str) -> Result<String, String> {
 
 pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
     let mut db = open()?;
-    let conn = db.transaction().map_err(|e| e.to_string())?;
+    let conn = super::write_transaction(&mut db)?;
     let lease = now_ms() + ttl_s * 1000;
     // Only the holder may extend: a stale owner must not refresh a lease that
     // another agent reclaimed after expiry.

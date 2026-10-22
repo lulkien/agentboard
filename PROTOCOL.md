@@ -157,3 +157,22 @@ leave the last-writer record unchanged and cannot be attributed on the board.
 Replace/retire pre-stamp binaries and stop their processes at cutover; restarting
 a pre-stamp binary is not enough. Older SurrealDB binaries that already check the
 schema version refuse incompatible generations through that existing gate.
+
+### Per-write tool count
+
+Generation-2 boards also record `surface_tools` on SurrealDB `meta:schema` and
+SQLite `board_stamp`. Initialization, additive v2 backfill and the offline SurrealDB
+upgrade derive it from the binary's router count. Normal writes never replace a
+published count. Every guarded write transaction supplies its own compiled count
+from `ident`; no CLI argument or MCP tool parameter accepts a seat-provided count.
+A missing or mismatched count refuses before mutation, naming both counts and
+requiring the seat binary to be reinstalled and its MCP server reloaded. The
+comparison runs again for already-open clients. The friendly seat-start catalog
+and commit check remains in `roles.md`.
+
+This additive field does not change generation 2 or remove existing data. Readers
+may ignore the field. Binaries predating this write guard still need owner
+retirement, as with pre-stamp clients above: a new client-side guard cannot fence
+an old process that connects directly to the database and never executes it.
+Rolling back the binary leaves the additive field/data intact but also removes
+that binary's enforcement; restart only matching guarded seats to restore it.

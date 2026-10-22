@@ -84,7 +84,7 @@ pub fn prune(dry_run: bool) -> Result<String, String> {
             continue;
         }
         if !dry_run {
-            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            let tx = super::write_transaction(&mut conn)?;
             tx.execute("DELETE FROM sessions WHERE name=?", params![r.name])
                 .map_err(|e| e.to_string())?;
             super::stamp_writer(&tx, &crate::ident::stamp())?;
@@ -103,7 +103,7 @@ pub fn prune(dry_run: bool) -> Result<String, String> {
 
 pub fn unregister(name: &str) -> Result<String, String> {
     let mut db = open()?;
-    let conn = db.transaction().map_err(|e| e.to_string())?;
+    let conn = super::write_transaction(&mut db)?;
     let n = conn
         .execute("DELETE FROM sessions WHERE name=?", params![name])
         .map_err(|e| e.to_string())?;
@@ -122,7 +122,7 @@ pub fn register_session(
     task: Option<i64>,
 ) -> Result<String, String> {
     let mut db = open()?;
-    let conn = db.transaction().map_err(|e| e.to_string())?;
+    let conn = super::write_transaction(&mut db)?;
     if let Some(t) = task {
         fetch(&conn, t)?;
     }

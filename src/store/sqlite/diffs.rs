@@ -35,9 +35,7 @@ pub fn diff_add(actor: &str, task: i64, body: &str) -> Result<String, String> {
         return Err(text::EMPTY_DIFF.to_owned());
     }
     let mut conn = open()?;
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
+    let tx = super::write_transaction(&mut conn)?;
     let out = record(&tx, actor, task, body)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(out)

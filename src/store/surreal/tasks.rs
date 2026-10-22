@@ -146,7 +146,31 @@ impl Txn {
         self.run_as(db, ret, &crate::ident::stamp()).await
     }
 
-    pub(super) async fn run_as(mut self, db: &Db, ret: &str, build: &str) -> Result<Value, String> {
+    pub(super) async fn run_as(self, db: &Db, ret: &str, build: &str) -> Result<Value, String> {
+        self.run_with_surface(db, ret, build, Some(crate::ident::surface_tools()))
+            .await
+    }
+
+    pub(super) async fn run_with_surface(
+        mut self,
+        db: &Db,
+        ret: &str,
+        build: &str,
+        client: Option<i64>,
+    ) -> Result<Value, String> {
+        let count = self.p(client.map_or(Value::Null, |n| json!(n)));
+        let client_label = self.p(client.map_or_else(|| "none".to_owned(), |n| n.to_string()));
+        let remedy = self.p(crate::ident::SURFACE_REMEDY);
+        // Prepend inside BEGIN: a mismatch rolls back before any queued statement.
+        let guard = format!(
+            "LET $surface = (SELECT VALUE surface_tools FROM meta:schema)[0];
+            IF {count} = NULL OR $surface = NONE OR $surface != {count} {{
+                THROW string::concat('board surface mismatch: seat tools=', {client_label},
+                '; board tools=', <string>($surface ?? 'none'),
+                '; ', {remedy});
+            }};\n"
+        );
+        self.sql.insert_str("BEGIN TRANSACTION;\n".len(), &guard);
         let build = self.p(build);
         self.raw(&format!(
             "UPSERT meta:writer SET version = {}, build = {build};",
@@ -158,7 +182,15 @@ impl Txn {
             .bind(Value::Object(self.binds))
             .await
             .map_err(|e| db_err(&e))?;
-        if let Some((_, e)) = res.take_errors().into_iter().min_by_key(|(i, _)| *i) {
+        if let Some((_, e)) = res.take_errors().into_iter().min_by_key(|(i, e)| {
+            // A THROW marks earlier statements as rolled back. Preserve the
+            // named refusal rather than the generic transaction-failed wrapper.
+            (
+                e.to_string()
+                    .contains("The query was not executed due to a failed transaction"),
+                *i,
+            )
+        }) {
             return Err(db_err(&e));
         }
         let last = res.num_statements().saturating_sub(1);

@@ -25,8 +25,8 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 |---|---|
 | `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 53 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 43 passed`, `27 passed`, and `2 passed` (needs no `surreal` binary) |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 54 passed` (unit), `27 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 45 passed`, `27 passed`, and `2 passed` (needs no `surreal` binary) |
 | `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
 | `bash tests/cli.sh` | `193/193 passed (backend: surreal)` (against the sqlite binary: `200/200 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
@@ -39,6 +39,8 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 | `AGENTBOARD_BUILD_COMMIT=00000000 cargo build --release && python3 tests/build-stamp.py target/release/agentboard` | `build-stamp: stale CLI and MCP identities explicit; seat rejects stale commit and wrong tool count; matching surface accepted`; rebuild without the override afterward |
 | `python3 tests/board-upgrade.py OLD_BINARY target/release/agentboard` (OLD_BINARY built at `ea016707`) | `board-upgrade: ... passed`: host-runnable scratch preservation, interruption, positive-evidence guards, unreadable warnings and version compatibility; no PID namespace needed |
 | `python3 tests/server-lock.py target/release/agentboard` | `Ran 3 tests` and `OK`: host scratch managed-daemon lifetime flock, second-server/upgrade exclusion and progress after release |
+| `python3 tests/seat-surface.py` | published counts use derived output; stale catalog/commit rejected; checker mutation proofs pass |
+| `python3 tests/surface-write-gate.py` | `surface-write-gate: both backends and mutation checks passed` (compiled stub MCP clients, scratch boards only) |
 | `cargo fmt --check` | no output |
 | `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
 
