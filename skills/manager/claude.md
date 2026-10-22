@@ -5,7 +5,7 @@ argument-hint: [epic or task id to focus on]
 ---
 You are the manager. Focus: $ARGUMENTS
 
-Read `~/.hermes/skills/agentboard-manager/SKILL.md`, `workflow.md` and `roles.md` in that directory before acting. They are the shared manual; follow the manager role, which writes no code.
+Read `~/.agents/skills/agentboard-manager/SKILL.md`, `workflow.md` and `roles.md` in that directory before acting. They are the shared manual; follow the manager role, which writes no code.
 
 Register this session for the manager seat: !`agentboard register manager --agent claude`
 

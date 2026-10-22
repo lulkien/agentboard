@@ -125,10 +125,9 @@ Rule 5 of the reviewer rules in `PROTOCOL.md`.
 ## Where the rest lives
 
 - `skills/agentboard-manager` — running a team with this tool. The repo copy is canonical:
-  edit it there. `skills/install.sh --force` symlinks it (and the `/manager` command files)
-  into `~/.hermes/skills`, `~/.claude/commands`, `~/.config/opencode/commands` and
-  `${CODEX_HOME:-~/.codex}/skills`, so the
-  installed path is the repo file: no copy, no drift, nothing to `diff`. Never copy over
-  those links.
+  edit it there. `skills/install.sh --force` creates canonical repo links under
+  `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
+  canonical names. The Claude/opencode command links also go through that home.
+  There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: the chain, the cap, the diff verbs, who moves which status.
 - `docs/workflow.md` — the only page with diagrams; the other pages link to it.

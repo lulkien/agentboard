@@ -1,9 +1,7 @@
 #!/bin/sh
-# Link every skills/<name>/ into a skills dir and the manager entry points for all four CLIs.
-# One file, not a copy: the installed path IS the repo file, so there is no drift to prove.
-# usage: install.sh [--force] [target-dir]   (default target: $HOME/.hermes/skills)
+# Canonical repo links in ~/.agents/skills, then agent aliases through that home.
+# usage: install.sh [--force] [canonical-dir]
 set -eu
-
 force=0
 target=
 for arg in "$@"; do
@@ -12,42 +10,50 @@ for arg in "$@"; do
     *) target=$arg ;;
   esac
 done
-target=${target:-$HOME/.hermes/skills}
+target=${target:-$HOME/.agents/skills}
+case $target in /*) ;; *) target=$PWD/$target ;; esac
 src=$(cd "$(dirname "$0")" && pwd)
-cmd_src=$src/commands
-claude_dir=${AGENTBOARD_CLAUDE_COMMANDS:-$HOME/.claude/commands}
-opencode_dir=${AGENTBOARD_OPENCODE_COMMANDS:-$HOME/.config/opencode/commands}
-codex_dir=${CODEX_HOME:-$HOME/.codex}/skills
-hermes_dir=$HOME/.hermes/skills
+claude_skills=$HOME/.claude/skills
+codex_skills=${CODEX_HOME:-$HOME/.codex}/skills
+opencode_skills=$HOME/.config/opencode/skills
+hermes_skills=$HOME/.hermes/skills
+claude_commands=${AGENTBOARD_CLAUDE_COMMANDS:-$HOME/.claude/commands}
+opencode_commands=${AGENTBOARD_OPENCODE_COMMANDS:-$HOME/.config/opencode/commands}
 
-# Check every destination first, so a refusal touches nothing.
+# Enumerate the entire write set before touching any parent or destination.
 refuse=0
+check() {
+  if { [ -e "$1" ] || [ -L "$1" ]; } && [ "$force" -eq 0 ]; then
+    echo "exists: $1 (use --force)" >&2
+    refuse=1
+  fi
+}
 for dir in "$src"/*/; do
   [ -f "$dir/SKILL.md" ] || continue
-  p=$target/$(basename "$dir")
-  if { [ -e "$p" ] || [ -L "$p" ]; } && [ "$force" -eq 0 ]; then
-    echo "exists: $p (use --force)" >&2; refuse=1
-  fi
+  name=$(basename "$dir")
+  check "$target/$name"
+  for agent_dir in "$claude_skills" "$codex_skills" "$opencode_skills" "$hermes_skills"; do
+    # A caller may explicitly choose an agent's directory as the canonical home.
+    [ "$agent_dir" = "$target" ] || check "$agent_dir/$name"
+  done
 done
-for p in "$claude_dir/manager.md" "$opencode_dir/manager.md" "$codex_dir/manager" "$hermes_dir/manager"; do
-  if { [ -e "$p" ] || [ -L "$p" ]; } && [ "$force" -eq 0 ]; then
-    echo "exists: $p (use --force)" >&2; refuse=1
-  fi
-done
+check "$claude_commands/manager.md"
+check "$opencode_commands/manager.md"
 [ "$refuse" -eq 0 ] || exit 1
 
-link() { # link <repo path> <dest>
+link() {
+  mkdir -p "$(dirname "$2")"
   rm -rf "${2:?}"
   ln -s "$1" "$2"
   echo "linked: $2 -> $1"
 }
-
-mkdir -p "$target" "$claude_dir" "$opencode_dir" "$codex_dir" "$hermes_dir"
 for dir in "$src"/*/; do
   [ -f "$dir/SKILL.md" ] || continue
-  link "${dir%/}" "$target/$(basename "$dir")"
+  name=$(basename "$dir")
+  link "${dir%/}" "$target/$name"
+  for agent_dir in "$claude_skills" "$codex_skills" "$opencode_skills" "$hermes_skills"; do
+    [ "$agent_dir" = "$target" ] || link "$target/$name" "$agent_dir/$name"
+  done
 done
-link "$cmd_src/claude/manager.md" "$claude_dir/manager.md"
-link "$cmd_src/opencode/manager.md" "$opencode_dir/manager.md"
-link "$cmd_src/codex/manager" "$codex_dir/manager"
-link "$cmd_src/hermes/manager" "$hermes_dir/manager"
+link "$target/manager/claude.md" "$claude_commands/manager.md"
+link "$target/manager/opencode.md" "$opencode_commands/manager.md"

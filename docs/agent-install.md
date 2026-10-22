@@ -117,17 +117,18 @@ used. Set it identically for every agent that should share a board.
 ## 5. Install the skills
 
 ```sh
-./skills/install.sh [target-dir]       # default ~/.hermes/skills
+./skills/install.sh [canonical-dir]    # default ~/.agents/skills
 ./skills/install.sh --force            # replace an existing install
 ```
 
-Expected: `linked: <target>/agentboard-manager -> <repo>/skills/agentboard-manager`, plus
-one `linked:` line each for `~/.claude/commands/manager.md` and
-`~/.config/opencode/commands/manager.md`. An existing path is refused
-(`exists: <path> (use --force)`, exit 1) and nothing is touched.
+Expected: twelve `linked:` lines: two canonical links in `~/.agents/skills`,
+eight aliases in the four agents' skills directories, and the existing Claude and
+opencode command links. Every agent alias points through the canonical name;
+only the canonical names point to the repo. Existing destinations are all refused
+without `--force` (exit 1, no changes). See [the skill layout](../skills/README.md).
 
-- The install is a symlink into the repo: there is one file, no snapshot, and nothing
-  to refresh after pulling.
+- There is one physical repo directory per skill, so edits are visible immediately
+  through all four agents without reinstalling. No installed copies can drift.
 - `agentboard-manager` lists `claude-code` and `opencode` as related skills. They live
   outside this repo.
 - `skills/agentboard-manager` is the playbook for running a team with this tool.
