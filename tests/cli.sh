@@ -42,6 +42,20 @@ check "reporter: add rejects caller-supplied identity" $([ $rc -eq 1 ] && has "$
 run $B --db "$R" edit T1 --reporter fake
 check "reporter: edit rejects caller-supplied identity" $([ $rc -eq 1 ] && has "$err" '--reporter' && echo 0 || echo 1)
 
+# New-loop review creation uses the same store refusals through the CLI.
+use review_gate; G=$BOARD
+$B --db "$G" add analyze >/dev/null
+$B --db "$G" status T1 needs_impl >/dev/null
+$B --db "$G" add implement --parent T1 >/dev/null
+$B --db "$G" --actor coder claim T2 >/dev/null
+run $B --db "$G" --actor coder add review --parent T2 --description 'Read D1 against T1'
+check "review creation without diff exits 1 on stderr" $([ $rc -eq 1 ] && [ -z "$out" ] && has "$err" 'agentboard: T2 cannot move to review: no diff' && echo 0 || echo 1)
+$B --db "$G" --actor coder diff add T2 --body patch >/dev/null
+run $B --db "$G" --actor coder add review --parent T2 --description 'Read D1'
+check "review creation without plan exits 1 on stderr" $([ $rc -eq 1 ] && [ -z "$out" ] && has "$err" 'agentboard: review description must name diff D1 and analyze plan T1' && echo 0 || echo 1)
+run $B --db "$G" --actor reviewer add review --parent T2 --description 'Read D1 against T1'
+check "review creation by another identity exits 1 on stderr" $([ $rc -eq 1 ] && [ -z "$out" ] && has "$err" 'agentboard: review creation refused: reporter' && echo 0 || echo 1)
+
 use a; D=$BOARD
 # --flag=value equivalence for --db, --actor, --description
 run $B --db="$D" add one --description="d=1" --assignee=zed;           check "--db=PATH accepted" $rc

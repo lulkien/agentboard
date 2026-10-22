@@ -22,8 +22,15 @@ row rather than adding a fourth level.
    `task_update(report=<plan>, status="needs_impl")`. It creates the implement
    child and uses `task_dispatch(id=<implement>, to="coder")` to hand it off.
 3. The coder claims the implement row, does the work, and records a complete
-   `diff_add` submission. It reports the evidence and publishes `needs_review`,
-   creates the review child, and calls `task_dispatch(id=<review>, to="reviewer")`.
+   `diff_add` submission. It reports the evidence and creates the review child
+   (`parent=<implement>`). The description must name the current patch (`D<n>`)
+   and analyze plan (`T<n>`). The immutable review reporter must match the
+   implement assignee/holder; a manager or reviewer cannot file it instead.
+   Creation refuses without a submission since the implement row's latest claim,
+   and atomically publishes the implement row as `needs_review`. Publishing
+   `needs_review` before creation remains supported. The coder then calls
+   `task_dispatch(id=<review>, to="reviewer")`. The board never auto-files a
+   review row in this loop.
 4. The reviewer claims that row and reads the newest implementation patch and
    evidence. It records its verdict with `status="review"`; this gate checks the
    implement parent's submission, rather than requiring a patch on the review row.
@@ -31,9 +38,19 @@ row rather than adding a fourth level.
    rows atomically. A `not_done` verdict also closes the chain atomically. The
    identity that recorded the newest diff cannot close its own chain.
 5. A reviewer rejection through `status="needs_fix"` with a reason reopens the
-   existing implement row as `needs_impl`; the analyze plan remains `needs_impl`.
-   Reuse the same implement and review rows for the next round. The implement row
-   carries the reopen count; exceeding three reopens stops the entire chain.
+   existing implement row as `needs_fix`; the analyze plan remains `needs_impl`.
+   Reclaim the implement row, append the next round's diff, then publish
+   `needs_review` to hand over in one step. This refreshes the SAME review row
+   to `ready` with the new diff and plan, and clears its previous verdict and lease.
+   Publication through `needs_review` or legacy `review` rechecks the persisted
+   review reporter and plan before refreshing the round's diff reference. A row
+   filed by someone other than the implement assignee/holder is refused; refresh
+   never rewrites its immutable reporter. A missing plan is refused rather than
+   silently repaired. The reviewer transition rechecks the current diff and plan
+   references as well. These checks also cover prebuilt subtrees attached later.
+   Never create a second review row per round. Diff history stays append-only.
+   The implement row carries the reopen count; exceeding three reopens stops the
+   entire chain.
 
 Dispatch distinguishes the two workflows from the chain's rows, not depth alone:
 any `needs_impl` or `needs_review` in the chain selects the new mapping. Recorded
@@ -179,7 +196,7 @@ Other clips, all marked or absent:
 - `needs_review` — implementation submitted for review.
 - `needs_fix` — reviewer rejection; the primary chain reuses its implement row, while legacy chains wait for a fix child (aliases: `need fix`, `needs-fix`, `fix`)
 - `not_done` — a terminal verdict on the primary chain, or a legacy reopen-cap result: the row's fourth move into `needs_fix` was refused (see [The reopen cap](#the-reopen-cap)) and the row landed here instead, with the caller's body kept in an event; an open parent lands here too, one level only. Not claimable; the manager drops it or refiles (aliases `not-done`, `nd`). `get` shows `reopens: N/3`, and `(cap hit, stopped)` above 3.
-- `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation. A move into it needs a diff recorded since the last claim. On a parentless row the board files its review row.
+- `review` — ready for a second pair of eyes: the reviewer, or a human for an API break or an irreversible operation. A move into it needs a diff recorded since the last claim. On a legacy parentless row the board files its review row.
 - `done` — verified complete
 - `dropped` — abandoned
 

@@ -259,7 +259,7 @@ check "root reporter retains manager override" $([ $rc -eq 0 ] && has "$out" 'di
 $B --actor implementer-a claim T2 >/dev/null
 $B --actor implementer-a diff add T2 --body 'patch' >/dev/null
 $B --actor implementer-a status T2 needs_review >/dev/null
-$B --actor implementer-a add review --parent T2 --assignee reviewer >/dev/null
+$B --actor implementer-a add review --parent T2 --assignee reviewer --description "Read D1 against analyze plan T1" >/dev/null
 : >"$LOG"
 run $B --actor analyst-a dispatch T3 --to reviewer
 check "analyze claimant cannot skip implement claimant" $([ $rc -eq 1 ] && has "$err" 'did not claim the parent' && echo 0 || echo 1)

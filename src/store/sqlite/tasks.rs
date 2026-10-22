@@ -126,6 +126,20 @@ fn check_linear(conn: &rusqlite::Connection, root: i64) -> Result<(), String> {
     Ok(())
 }
 
+fn check_review_brief(
+    conn: &rusqlite::Connection,
+    reporter: &str,
+    parent: i64,
+    description: &str,
+) -> Result<(), String> {
+    if new_chain_root(conn, parent)?.is_some() && chain_level(conn, parent)? == 2 {
+        let implement = fetch(conn, parent)?;
+        let submission = super::diffs::submission_since_claim(conn, parent)?;
+        crate::store::chain::review_brief(reporter, &implement, description, submission.as_ref())?;
+    }
+    Ok(())
+}
+
 pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let NewTask {
         title,
@@ -153,6 +167,7 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         check_depth(&tx, p, 1).map_err(|e| format!("add: {e}"))?;
         if new_chain_root(&tx, p)?.is_some() {
             check_single_child(&tx, p, Some(-1))?;
+            check_review_brief(&tx, actor, p, description)?;
         }
     }
     // A task created already `working` belongs to its creator unless named.
@@ -167,6 +182,24 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     )
     .map_err(|e| format!("add: {e}"))?;
     let id = tx.last_insert_rowid();
+    if let Some(p) = parent
+        && new_chain_root(&tx, p)?.is_some()
+        && chain_level(&tx, p)? == 2
+    {
+        tx.execute(
+            "UPDATE tasks SET status='needs_review', lease_until=NULL, updated_at=? WHERE id=?",
+            params![now, p],
+        )
+        .map_err(|e| e.to_string())?;
+        log_event(
+            &tx,
+            Subject::Task(p),
+            actor,
+            "review",
+            "coder filed review row",
+        )?;
+    }
+
     log_event(&tx, Subject::Task(id), actor, "add", title)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("{} {status}", short(id)))
@@ -344,6 +377,10 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
         if new_chain_root(&tx, p)?.is_some() {
             check_single_child(&tx, p, Some(id))?;
             check_linear(&tx, id)?;
+            let row = fetch(&tx, id)?;
+            if row.parent_id != Some(p) {
+                check_review_brief(&tx, &row.reporter, p, &row.description)?;
+            }
         }
     }
     tx.execute(
@@ -370,8 +407,8 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
         let tx = super::write_transaction(&mut conn)?;
         let cand: Option<(i64, String)> = {
             let (sql, arg): (String, Vec<i64>) = match id {
-                Some(x) => ("SELECT id,status FROM tasks WHERE id=? AND (status='ready' OR (status='needs_impl' AND parent_id IS NOT NULL) OR (lease_until IS NOT NULL AND lease_until < ?))".to_string(), vec![x, now]),
-                None => ("SELECT id,status FROM tasks WHERE status='ready' OR (status='needs_impl' AND parent_id IS NOT NULL) ORDER BY priority, id LIMIT 1".to_owned(), vec![]),
+                Some(x) => ("SELECT id,status FROM tasks WHERE id=? AND (status='ready' OR ((status='needs_impl' AND parent_id IS NOT NULL) OR (status='needs_fix' AND parent_id IN (SELECT id FROM tasks WHERE status='needs_impl'))) OR (lease_until IS NOT NULL AND lease_until < ?))".to_string(), vec![x, now]),
+                None => ("SELECT id,status FROM tasks WHERE status='ready' OR ((status='needs_impl' AND parent_id IS NOT NULL) OR (status='needs_fix' AND parent_id IN (SELECT id FROM tasks WHERE status='needs_impl'))) ORDER BY priority, id LIMIT 1".to_owned(), vec![]),
             };
             let mut stmt = tx.prepare(&sql).map_err(|e| e.to_string())?;
 
@@ -401,7 +438,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
         // the new lease would let a live claim be stolen.
         let changed = tx
             .execute(
-                "UPDATE tasks SET status='working', assignee=?, lease_until=?, updated_at=?, started_at=COALESCE(started_at,?) WHERE id=? AND (status='ready' OR (status='needs_impl' AND parent_id IS NOT NULL) OR (lease_until IS NOT NULL AND lease_until < ?))",
+                "UPDATE tasks SET status='working', assignee=?, lease_until=?, updated_at=?, started_at=COALESCE(started_at,?) WHERE id=? AND (status='ready' OR ((status='needs_impl' AND parent_id IS NOT NULL) OR (status='needs_fix' AND parent_id IN (SELECT id FROM tasks WHERE status='needs_impl'))) OR (lease_until IS NOT NULL AND lease_until < ?))",
                 params![actor, lease, now, now, task, now],
             )
             .map_err(|e| e.to_string())?;
@@ -515,7 +552,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         return Err("analyze plan is not needs_impl; cannot skip to needs_review".into());
     }
     if let Some(root) = root {
-        if status == "needs_fix" && chain_level(&tx, id)? != 3 {
+        if p.status.is_some() && status == "needs_fix" && chain_level(&tx, id)? != 3 {
             return Err("only the review row may reject a new chain with needs_fix".into());
         }
         if matches!(fetch(&tx, root)?.status.as_str(), "done" | "not_done")
@@ -569,6 +606,15 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     };
     if submit && submission.is_none() {
         return Err(gate_refusal(id));
+    }
+    if submit && root.is_some() && chain_level(&tx, id)? == 3 {
+        let implement = fetch(&tx, cur.parent_id.unwrap())?;
+        crate::store::chain::review_brief(
+            &cur.reporter,
+            &implement,
+            &cur.description,
+            submission.as_ref(),
+        )?;
     }
     // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
     let reopen = moved && status == "needs_fix";
@@ -679,8 +725,37 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         return Err(cap_refusal(id));
     }
     let seq = log_event(&tx, Subject::Task(id), actor, kind, body)?;
+    // New-loop resubmissions refresh the SAME review row; never fork a round.
+    if submit
+        && root.is_some()
+        && chain_level(&tx, id)? == 2
+        && let (Some(review), Some(submission)) = (
+            tx.query_row(
+                "SELECT id FROM tasks WHERE parent_id=? ORDER BY id LIMIT 1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .as_ref(),
+            submission.as_ref(),
+        )
+    {
+        let persisted = fetch(&tx, *review)?;
+        let description =
+            crate::store::chain::refresh_review(&persisted, &cur, p.report, submission)?;
+        tx.execute("UPDATE tasks SET status='ready', assignee=NULL, lease_until=NULL, report=NULL, description=?, updated_at=? WHERE id=?", params![description, now, review]).map_err(|e| e.to_string())?;
+        log_event(
+            &tx,
+            Subject::Task(*review),
+            actor,
+            "note",
+            &review_resubmitted_note(id, submission),
+        )?;
+    }
+
     // Only a parentless row files a review row: a fix row or a review row never does.
-    let review = if submit && cur.parent_id.is_none() {
+    let review = if submit && root.is_none() && cur.parent_id.is_none() {
         let report = p.report.or(cur.report.as_deref());
         match submission.as_ref() {
             Some(submission) => Some(file_review(&tx, actor, &cur, report, submission)?),

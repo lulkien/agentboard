@@ -52,10 +52,14 @@ shown as `nd`) and `dropped`. `needs='input'` marks "blocked on a human", which 
 thing that should ever interrupt you. Input aliases `running`→`working`,
 `blocked`→`blocking`, `triage`→`ready`, `need fix`/`needs-fix`/`fix`→`needs_fix` accepted on input.
 
-Reviewable work is a chain of three levels, implement → review → fix, and no fourth.
+Reviewable work uses analyze → implement → review. The coder files the review
+child, naming the current diff and analyze plan; only the implement holder may
+file it, and creation checks the diff and publishes `needs_review` atomically.
+Reviewer rejection reopens the implement row as `needs_fix`; resubmission reuses
+the SAME review row. Legacy implement → review → fix chains remain supported.
 Moving a task to `review` needs a submission recorded since its last claim: a diff
 (`diff_add`), or an evidence-only row for a re-run round that names the newest patch of the same row.
-On a parentless task the board files the review row as its child, once. A row may move
+On a legacy parentless task the board files the review row as its child, once. A row may move
 into `needs_fix` three times; the fourth is refused (CLI exit 1) and the row lands
 `not_done`, taking an open parent with it. The rules, who moves which status and the
 reviewer's four rules are in [PROTOCOL.md](PROTOCOL.md); the diagrams are in

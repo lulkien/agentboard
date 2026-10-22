@@ -724,6 +724,37 @@ def main():
         analyzer.close()
         coder.close()
 
+    # The coder files one review child, guarded by identity, current diff and plan.
+    coder = Session("gate-coder")
+    reviewer = Session("gate-reviewer")
+    try:
+        plan = s.call("task_add", title="gate analyze").split()[0]
+        s.call("task_update", id=plan, status="needs_impl", report="the agreed plan")
+        impl = s.call("task_add", title="gate implement", parent=plan).split()[0]
+        coder.call("task_claim", id=impl)
+        expect("review creation refuses absent diff", refusal_text(lambda: coder.call("task_add", title="review", parent=impl, description=f"D1 {plan}")), "no diff", "since it was last claimed")
+        patch = coder.call("diff_add", id=impl, body="complete patch one").split()[0]
+        expect("review creation refuses absent plan", refusal_text(lambda: coder.call("task_add", title="review", parent=impl, description=f"Read {patch}")), "description must name diff", f"analyze plan {plan}")
+        expect("review creation refuses absent diff reference", refusal_text(lambda: coder.call("task_add", title="review", parent=impl, description=f"Read {plan}")), f"diff {patch}")
+        for other in [s, reviewer]:
+            expect("only implement holder files review", refusal_text(lambda: other.call("task_add", title="review", parent=impl, description=f"Read {patch} against {plan}")), "reporter", impl)
+        review = coder.call("task_add", title="review", parent=impl, description=f"Read {patch} against {plan}").split()[0]
+        expect("filing review publishes implement atomically", s.call("task_get", id=impl), f"{impl} needs_review")
+        expect("review records coder as reporter", s.call("task_get", id=review), "reporter: gate-coder")
+        reviewer.call("task_claim", id=review)
+        reviewer.call("task_update", id=review, status="needs_fix", report="blocker: correct the patch")
+        expect("review rejection reopens implement in one step", s.call("task_get", id=impl), f"{impl} needs_fix", "reopens: 1/3")
+        coder.call("task_claim", id=impl)
+        expect("review gate refuses old round diff", refusal_text(lambda: coder.call("task_update", id=impl, status="needs_review")), "no diff")
+        patch2 = coder.call("diff_add", id=impl, body="complete patch two").split()[0]
+        coder.call("task_update", id=impl, status="needs_review", report="corrected")
+        expect("resubmission refreshes same review brief", s.call("task_get", id=review, full=True), f"{review} ready", patch2, f"Analyze plan {plan}")
+        expect("diff history preserves both rounds", s.call("diff_list", id=impl), patch, patch2, "round 1", "round 2")
+        expect("resubmission refuses a second review row", refusal_text(lambda: coder.call("task_add", title="review again", parent=impl, description=f"{patch2} {plan}")), "only one child")
+    finally:
+        coder.close()
+        reviewer.close()
+
     # Change the board stamp behind an already initialized MCP process. The
     # next write must fail, even on SQLite where initialization used to be cached.
     if BACKEND == "sqlite":

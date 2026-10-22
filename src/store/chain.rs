@@ -59,6 +59,77 @@ pub fn depth_refusal(parent: i64, level: usize, height: usize) -> String {
     )
 }
 
+/// Validate the coder-filed review brief against the persisted parent and submission.
+pub fn review_brief(
+    reporter: &str,
+    implement: &TaskRow,
+    description: &str,
+    submission: Option<&super::text::Submission>,
+) -> Result<(), String> {
+    if reporter.trim().is_empty() || implement.assignee.as_deref() != Some(reporter) {
+        return Err(format!(
+            "review creation refused: reporter {reporter:?} must be the assignee or holder of {}",
+            short(implement.id)
+        ));
+    }
+    let submission = submission.ok_or_else(|| super::text::gate_refusal(implement.id))?;
+    let names: Vec<&str> = description
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .collect();
+    let plan = short(
+        implement
+            .parent_id
+            .ok_or("review parent has no analyze plan")?,
+    );
+    let diff = super::short_diff(submission.diff.id);
+    if !names.contains(&plan.as_str()) || !names.contains(&diff.as_str()) {
+        return Err(format!(
+            "review description must name diff {diff} and analyze plan {plan}"
+        ));
+    }
+    if !matches!(
+        implement.status.as_str(),
+        "working" | "needs_review" | "review"
+    ) {
+        return Err(format!(
+            "{} is not ready to hand over for review",
+            short(implement.id)
+        ));
+    }
+    Ok(())
+}
+
+/// Refresh only an admissible persisted review: its reporter is immutable and
+/// its plan reference must already be present. Only the round's diff may change.
+pub fn refresh_review(
+    review: &TaskRow,
+    implement: &TaskRow,
+    report: Option<&str>,
+    submission: &super::text::Submission,
+) -> Result<String, String> {
+    let plan = short(
+        implement
+            .parent_id
+            .ok_or("review parent has no analyze plan")?,
+    );
+    let description = format!(
+        "Analyze plan {plan}.\n{}",
+        super::text::review_description(implement, report, submission)
+    );
+    review_brief(&review.reporter, implement, &description, Some(submission))?;
+    if !review
+        .description
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|name| name == plan)
+    {
+        return Err(format!(
+            "review description must name diff {} and analyze plan {plan}",
+            super::short_diff(submission.diff.id)
+        ));
+    }
+    Ok(description)
+}
+
 pub struct Snapshot {
     pub rows: Vec<TaskRow>,
     pub diff_actor: Option<String>,
@@ -210,7 +281,7 @@ pub fn plan(actor: &str, snapshot: &Snapshot, action: Action<'_>) -> Result<Vec<
             } else {
                 (
                     "chain_reject",
-                    vec!["needs_impl", "needs_impl", "needs_fix"],
+                    vec!["needs_impl", "needs_fix", "needs_fix"],
                     count,
                     reason.to_owned(),
                 )
@@ -271,11 +342,31 @@ pub(crate) mod tests {
     }
 
     fn add(title: &str, parent: Option<i64>, status: &str) -> Result<i64, String> {
+        let review = parent.is_some_and(|p| store::get(p, true).unwrap().contains("parent: T1"));
+        add_as(
+            if review { "coder" } else { "manager" },
+            title,
+            parent,
+            status,
+            if review {
+                "Read D1 against analyze plan T1"
+            } else {
+                ""
+            },
+        )
+    }
+    fn add_as(
+        actor: &str,
+        title: &str,
+        parent: Option<i64>,
+        status: &str,
+        description: &str,
+    ) -> Result<i64, String> {
         store::add(
-            "manager",
+            actor,
             &NewTask {
                 title,
-                description: "",
+                description,
                 goal: "",
                 status,
                 assignee: None,
@@ -291,6 +382,23 @@ pub(crate) mod tests {
                 .parse()
                 .unwrap()
         })
+    }
+    fn edit_description(id: i64, description: &str) {
+        store::edit(
+            "manager",
+            id,
+            &crate::store::TaskEdit {
+                description: Some(description),
+                epic: None,
+                title: None,
+                goal: None,
+                priority: None,
+                assignee: None,
+                path: None,
+                branch: None,
+            },
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
     }
     fn change(actor: &str, id: i64, status: &str, report: Option<&str>) -> Result<String, String> {
         store::apply(
@@ -313,6 +421,8 @@ pub(crate) mod tests {
             .lines()
             .filter(|line| {
                 !line.starts_with("created:")
+                    && !line.starts_with("started:")
+                    && !line.starts_with("completed:")
                     && !line.starts_with("lease:")
                     && !line.starts_with("diff:")
                     && !line.trim_start().starts_with('#')
@@ -324,9 +434,10 @@ pub(crate) mod tests {
         assert!(
             change(actor, id, "needs_review", None)
                 .unwrap_err()
-                .contains("cannot move from needs_impl")
+                .contains("cannot move from")
         );
-        store::claim(actor, Some(id), 60).unwrap_or_else(|e| panic!("{e}"));
+        let claim = store::claim(actor, None, 60).unwrap_or_else(|e| panic!("{e}"));
+        assert!(claim.starts_with(&format!("T{id} working")), "{claim}");
         assert!(
             change(actor, id, "needs_review", None)
                 .unwrap_err()
@@ -361,9 +472,30 @@ pub(crate) mod tests {
                 .unwrap_err()
                 .contains("no diff")
         );
+        store::claim("coder", Some(2), 60).unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            add_as("coder", "review", Some(2), "ready", "D1 T1")
+                .unwrap_err()
+                .contains("no diff")
+        );
         store::diff_add("coder", 2, "patch one", None).unwrap();
-        change("coder", 2, "needs_review", Some("implementation")).unwrap();
+        store::report("coder", 2, "implementation").unwrap();
+        for actor in ["manager", "reviewer", "wanderer"] {
+            assert!(
+                add_as(actor, "review", Some(2), "ready", "D1 T1")
+                    .unwrap_err()
+                    .contains("reporter")
+            );
+        }
+        for description in ["", "Read D1", "Read T1", "Read D10 T10"] {
+            assert!(
+                add_as("coder", "review", Some(2), "ready", description)
+                    .unwrap_err()
+                    .contains("analyze plan")
+            );
+        }
         assert_eq!(add("review", Some(2), "ready").unwrap(), 3);
+        statuses(&[1, 2, 3], &["needs_impl", "needs_review", "ready"]);
         let close_error = store::chain_close("reviewer", 1, "done", "pass").unwrap_err();
         assert!(close_error.contains("T3"), "{close_error}");
         change("reviewer", 3, "review", Some("pass")).unwrap();
@@ -438,6 +570,81 @@ pub(crate) mod tests {
                         .unwrap_err()
                         .contains("closed chain is final")
                 );
+            }
+            "publish" => {
+                for status in ["needs_review", "review"] {
+                    for reporter in ["manager", "reviewer", "coder"] {
+                        let root = add_as("manager", "analyze", None, "ready", "").unwrap();
+                        change("analyzer", root, "needs_impl", Some("plan")).unwrap();
+                        let implementation =
+                            add_as("manager", "implement", None, "ready", "").unwrap();
+                        store::claim("coder", Some(implementation), 60)
+                            .unwrap_or_else(|e| panic!("{e}"));
+                        let brief =
+                            format!("Read the forthcoming diff against analyze plan T{root}");
+                        let review = add_as(
+                            reporter,
+                            "prebuilt review",
+                            Some(implementation),
+                            "ready",
+                            &brief,
+                        )
+                        .unwrap();
+                        store::set_parent("manager", implementation, Some(root)).unwrap();
+                        store::diff_add("coder", implementation, "patch", None).unwrap();
+                        let before = stable_record(review);
+                        let result = change("coder", implementation, status, Some("publish"));
+                        if reporter != "coder" {
+                            let error = result.unwrap_err();
+                            assert!(
+                                error.contains("review creation refused: reporter")
+                                    && error.contains(reporter),
+                                "{error}"
+                            );
+                            assert_eq!(stable_record(review), before);
+                            statuses(&[implementation, review], &["working", "ready"]);
+                        } else {
+                            result.unwrap();
+                            let record = store::get(review, true).unwrap();
+                            assert!(record.contains("reporter: coder"));
+                            // A missing plan cannot be silently repaired by publication.
+                            edit_description(review, "no plan");
+                            change("coder", implementation, "working", None).unwrap();
+                            store::diff_add("coder", implementation, "next patch", None).unwrap();
+                            assert!(
+                                change("coder", implementation, status, None)
+                                    .unwrap_err()
+                                    .contains("analyze plan")
+                            );
+                            edit_description(review, &brief);
+                            change("coder", implementation, status, None).unwrap();
+                            let record = store::get(review, true).unwrap();
+                            assert!(
+                                record.contains(&format!("Analyze plan T{root}"))
+                                    && record.contains("reporter: coder")
+                            );
+                            assert_eq!(
+                                store::children(crate::store::Ref::Task(implementation))
+                                    .unwrap()
+                                    .lines()
+                                    .count(),
+                                1
+                            );
+                            assert!(
+                                add_as("coder", "duplicate", Some(implementation), "ready", &brief)
+                                    .unwrap_err()
+                                    .contains("only one child")
+                            );
+                            // Reviewer use must also reject a subsequently damaged brief.
+                            edit_description(review, "no plan");
+                            assert!(
+                                change("reviewer", review, "review", None)
+                                    .unwrap_err()
+                                    .contains("analyze plan")
+                            );
+                        }
+                    }
+                }
             }
             "guards" => {
                 seed();
@@ -535,13 +742,27 @@ pub(crate) mod tests {
                         );
                     } else {
                         result.unwrap();
-                        statuses(&[1, 2, 3], &["needs_impl", "needs_impl", "needs_fix"]);
+                        statuses(&[1, 2, 3], &["needs_impl", "needs_fix", "needs_fix"]);
                         assert!(
                             store::get(2, true)
                                 .unwrap()
                                 .contains(&format!("reopens: {}/3", index + 1))
                         );
                         resubmit("coder", 2, "rework patch");
+                        let diffs = store::diff_list(crate::store::Ref::Task(2)).unwrap();
+                        assert!(
+                            diffs.contains("round 1") && diffs.contains("round 2"),
+                            "{diffs}"
+                        );
+                        let children = store::children(crate::store::Ref::Task(2)).unwrap();
+                        assert_eq!(children.lines().count(), 1, "{children}");
+                        assert!(
+                            add("second review", Some(2), "ready")
+                                .unwrap_err()
+                                .contains("only one child")
+                        );
+                        let review = store::get(3, true).unwrap();
+                        assert!(review.contains("Analyze plan T1"));
                     }
                 }
             }
@@ -593,9 +814,9 @@ pub(crate) mod tests {
                 assert!(
                     change("second-coder", 2, "needs_review", None)
                         .unwrap_err()
-                        .contains("cannot move from needs_impl")
+                        .contains("cannot move from")
                 );
-                store::claim("second-coder", Some(2), 60).unwrap_or_else(|e| panic!("{e}"));
+                store::claim("coder", Some(2), 60).unwrap_or_else(|e| panic!("{e}"));
                 assert!(
                     change("second-coder", 2, "needs_review", None)
                         .unwrap_err()
@@ -606,6 +827,7 @@ pub(crate) mod tests {
                 // An independent newest author, not a named role, determines close authority.
                 store::diff_add("second-coder", 2, "patch two", None).unwrap();
                 change("second-coder", 2, "needs_review", None).unwrap();
+                change("reviewer", 3, "review", None).unwrap();
                 assert!(
                     store::chain_close("manager", 1, "done", "")
                         .unwrap_err()
@@ -615,16 +837,17 @@ pub(crate) mod tests {
                 store::chain_close("coder", 1, "not_done", "failed").unwrap();
                 statuses(&[1, 2, 3], &["not_done"; 3]);
                 store::chain_reopen("manager", 1, "retry").unwrap();
-                resubmit("second-coder", 2, "patch three");
+                resubmit("coder", 2, "patch three");
+                change("reviewer", 3, "review", None).unwrap();
                 assert!(
                     store::chain_close("manager", 1, "done", "")
                         .unwrap_err()
                         .contains("no verdict")
                 );
                 change("reviewer", 3, "needs_fix", Some("bug")).unwrap();
-                statuses(&[1, 2, 3], &["needs_impl", "needs_impl", "needs_fix"]);
+                statuses(&[1, 2, 3], &["needs_impl", "needs_fix", "needs_fix"]);
                 assert!(store::get(2, true).unwrap().contains("reopens: 3/3"));
-                resubmit("second-coder", 2, "patch four");
+                resubmit("coder", 2, "patch four");
                 change("reviewer", 3, "review", Some("pass")).unwrap();
                 store::chain_close("reviewer", 1, "done", "pass").unwrap();
                 assert!(
@@ -753,6 +976,13 @@ pub(crate) mod tests {
             return;
         };
         fixture.run("workflow");
+    }
+    #[test]
+    fn publishing_prebuilt_review_validates_persisted_reporter_and_plan() {
+        let Some(fixture) = Fixture::new("publish") else {
+            return;
+        };
+        fixture.run("publish");
     }
     #[test]
     fn new_chain_shape_and_status_guards() {

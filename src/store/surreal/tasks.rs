@@ -318,6 +318,20 @@ async fn check_linear(db: &Db, root: i64) -> Result<(), String> {
     Ok(())
 }
 
+async fn check_review_brief(
+    db: &Db,
+    reporter: &str,
+    parent: i64,
+    description: &str,
+) -> Result<(), String> {
+    if new_chain_root(db, parent).await?.is_some() && chain_level(db, parent).await? == 2 {
+        let implement = TaskRow::from(fetch(db, parent).await?);
+        let submission = super::diffs::submission_since_claim(db, parent).await?;
+        crate::store::chain::review_brief(reporter, &implement, description, submission.as_ref())?;
+    }
+    Ok(())
+}
+
 pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let NewTask {
         title,
@@ -345,6 +359,7 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
                 .map_err(|e| super::with_context("add", &e))?;
             if new_chain_root(&s.db, p).await?.is_some() {
                 check_single_child(&s.db, p, Some(-1)).await?;
+                check_review_brief(&s.db, actor, p, description).await?;
             }
         }
         // A task created already `working` belongs to its creator unless named.
@@ -375,6 +390,16 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         tx.raw("LET $id = (UPSERT counters:task SET n = (n ?? 0) + 1 RETURN VALUE n)[0];");
         let c = tx.p(content);
         tx.raw(&format!("CREATE type::thing('tasks', $id) CONTENT {c};"));
+        if let Some(p) = parent
+            && new_chain_root(&s.db, p).await?.is_some()
+            && chain_level(&s.db, p).await? == 2
+        {
+            let pp = tx.p(p);
+            let n = tx.p(now);
+            tx.raw(&format!("UPDATE type::thing('tasks', {pp}) SET status='needs_review', lease_until=NONE, updated_at={n};"));
+            tx.event(&pp, actor, "review", "coder filed review row");
+        }
+
         tx.event("$id", actor, "add", title);
         let id = tx
             .run(&s.db, "$id")
@@ -566,6 +591,9 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
             if new_chain_root(&s.db, p).await?.is_some() {
                 check_single_child(&s.db, p, Some(id)).await?;
                 check_linear(&s.db, id).await?;
+                if task.parent_id != Some(p) {
+                    check_review_brief(&s.db, &task.reporter, p, &task.description).await?;
+                }
             }
         }
         let mut tx = Txn::new();
@@ -605,6 +633,9 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
                         let stale = r.lease_until.is_some_and(|l| l < now);
                         if r.status == "ready"
                             || (r.status == "needs_impl" && r.parent_id.is_some())
+                            || (r.status == "needs_fix"
+                                && new_chain_root(&s.db, x).await?.is_some()
+                                && chain_level(&s.db, x).await? == 2)
                             || stale
                         {
                             Some(x)
@@ -618,7 +649,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
                 None => {
                     let mut r = s
                         .db
-                        .query("SELECT meta::id(id) AS tid, priority FROM tasks WHERE status = 'ready' OR (status = 'needs_impl' AND parent_id != NONE) ORDER BY priority, tid LIMIT 1")
+                        .query("SELECT meta::id(id) AS tid, priority FROM tasks WHERE status = 'ready' OR ((status = 'needs_impl' AND parent_id != NONE) OR (status = 'needs_fix' AND parent_id IN (SELECT VALUE meta::id(id) FROM tasks WHERE status='needs_impl'))) ORDER BY priority, tid LIMIT 1")
                         .await
                         .map_err(|e| db_err(&e))?;
                     #[derive(Deserialize)]
@@ -637,7 +668,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
             let mut tx = Txn::new();
             let (idp, a, l, n) = (tx.p(task), tx.p(actor), tx.p(lease), tx.p(now));
             tx.raw(&format!(
-                "LET $won = (UPDATE type::thing('tasks', {idp}) SET status = 'working', assignee = {a}, lease_until = {l}, updated_at = {n}, started_at = started_at ?? {n} WHERE status = 'ready' OR (status = 'needs_impl' AND parent_id != NONE) OR (lease_until != NONE AND lease_until < {n}) RETURN VALUE meta::id(id));"
+                "LET $won = (UPDATE type::thing('tasks', {idp}) SET status = 'working', assignee = {a}, lease_until = {l}, updated_at = {n}, started_at = started_at ?? {n} WHERE status = 'ready' OR ((status = 'needs_impl' AND parent_id != NONE) OR (status = 'needs_fix' AND parent_id IN (SELECT VALUE meta::id(id) FROM tasks WHERE status='needs_impl'))) OR (lease_until != NONE AND lease_until < {n}) RETURN VALUE meta::id(id));"
             ));
             tx.raw("IF array::len($won) = 1 {");
             tx.event(&idp, actor, "claim", "");
@@ -779,7 +810,7 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             return Err("analyze plan is not needs_impl; cannot skip to needs_review".into());
         }
         if let Some(root) = root {
-            if status == "needs_fix" && chain_level(&s.db, id).await? != 3 {
+            if p.status.is_some() && status == "needs_fix" && chain_level(&s.db, id).await? != 3 {
                 return Err("only the review row may reject a new chain with needs_fix".into());
             }
             if matches!(
@@ -835,6 +866,15 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         };
         if submit && submission.is_none() {
             return Err(gate_refusal(id));
+        }
+        if submit && root.is_some() && chain_level(&s.db, id).await? == 3 {
+            let implement = TaskRow::from(fetch(&s.db, cur.parent_id.unwrap()).await?);
+            crate::store::chain::review_brief(
+                &cur.reporter,
+                &implement,
+                &cur.description,
+                submission.as_ref(),
+            )?;
         }
         // A move into needs_fix is a reopen; the one over the cap lands not_done instead.
         let reopen = moved && status == "needs_fix";
@@ -940,9 +980,30 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         }
         tx.event(&idp, actor, kind, body);
         tx.raw("LET $main = $seq;");
+        // New-loop resubmissions refresh the SAME review row; never fork a round.
+        if submit
+            && root.is_some()
+            && chain_level(&s.db, id).await? == 2
+            && let (Some(review), Some(submission)) =
+                (child_ids(&s.db, id).await?.first(), submission.as_ref())
+        {
+            let persisted = TaskRow::from(fetch(&s.db, *review).await?);
+            let description = crate::store::chain::refresh_review(
+                &persisted,
+                &TaskRow::from(cur.clone()),
+                p.report,
+                submission,
+            )?;
+            let rp = tx.p(*review);
+            let d = tx.p(description);
+            let n = tx.p(now);
+            tx.raw(&format!("UPDATE type::thing('tasks', {rp}) SET status='ready', assignee=NONE, lease_until=NONE, report=NONE, description={d}, updated_at={n};"));
+            tx.event(&rp, actor, "note", &review_resubmitted_note(id, submission));
+        }
+
         // Only a parentless row files a review row: a fix row or a review row never does.
         let mut review = None;
-        if submit && cur.parent_id.is_none() {
+        if submit && root.is_none() && cur.parent_id.is_none() {
             // The gate refused above; keeping the None case means deleting the gate
             // still lets the status move, which the mutation proof checks.
             if let Some(submission) = submission.as_ref() {
