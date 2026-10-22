@@ -28,7 +28,7 @@ agentboard path
 ### Schema compatibility
 
 Every CLI invocation and MCP tool call checks the board's schema version.
-Version 1 migrates additively to version 2 in the same call. Definitions,
+Versions 1 and 2 migrate additively to version 3 in the same call. Definitions,
 missing-default backfills and the version bump commit together under the board
 write lock. The caller prints one migration line on stderr. Concurrent callers
 wait and recheck, so only one migrates. Newer boards refuse an older binary by

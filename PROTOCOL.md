@@ -72,6 +72,7 @@ Create the task with `task_add(title, description, goal, priority, assignee, epi
 | description | Everything the worker needs (repo, files, situation) |
 | goal | How to do it + definition of done |
 | status | ready \| working \| blocking \| not_done \| needs_fix \| review \| done \| dropped |
+| reporter | Immutable acting identity at creation; not a caller argument or editable field |
 | assignee | Profile or tmux session name |
 | priority | Lower runs first (default 100) |
 | epic | Epic id (e.g., E3) the work belongs to; inherited from `parent` when omitted |
@@ -149,7 +150,7 @@ The MCP surface has 16 tools. Tool schemas accompany every request; `task_claim`
 
 Every CLI invocation and MCP tool call reads the persisted schema version
 (`meta:schema.version` on SurrealDB, `board_stamp.generation` on SQLite).
-The current version is 2. Equal serves immediately. An older version migrates
+The current version is 3. Equal serves immediately. An older version migrates
 additively in that call, then serves the request. A newer version refuses by name:
 `binary is older than the board`, with the board and supported versions.
 
@@ -159,8 +160,13 @@ rechecks under the lock; it cannot see a partially migrated schema. One line is
 printed to stderr by the call that migrated:
 `migrated vN -> vM: <x> definitions, <y> rows backfilled`.
 Existing values and record IDs are preserved. Definitions use `IF NOT EXISTS`;
-backfills affect only missing fields. Type conflicts and fields requiring a value
-without a default refuse with a named manual step. Unstamped nonempty boards and
+backfills affect only missing fields. Version 3 adds `tasks.reporter` and
+backfills unknown reporter values from each task's earliest `add` event. A missing
+or empty actor renders as `unknown (filed before this field existed)`. A known
+reporter is preserved. A current-version board missing this field refuses by name.
+Version-2 binaries refuse version-3 boards; rollback must retain a compatible
+version-3 reader and the expanded schema rather than downgrade the version stamp.
+Type conflicts and fields requiring a value without a default refuse with a named manual step. Unstamped nonempty boards and
 unsupported historical versions require manual inspection. No drops, type changes
 or rewriting present values run automatically. Failure to acquire the write lock
 refuses; retry after the holder releases it.

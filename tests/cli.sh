@@ -21,6 +21,27 @@ check() { # check <name> <condition-result: 0 = ok>
 }
 has() { [[ "$1" == *"$2"* ]]; }
 
+# Creation identity is separate from the current assignee and is immutable.
+use reporter; R=$BOARD
+$B --db "$R" --actor analyzer add analyzed >/dev/null
+$B --db "$R" --actor coder add implemented >/dev/null
+run $B --db "$R" get T1 --full
+check "reporter: analyzer filed first row" $(has "$out" 'reporter: analyzer' && echo 0 || echo 1)
+run $B --db "$R" get T2 --full
+check "reporter: coder filed second row" $(has "$out" 'reporter: coder' && echo 0 || echo 1)
+$B --db "$R" --actor other edit T1 --title renamed >/dev/null
+$B --db "$R" --actor coder claim T1 >/dev/null
+$B --db "$R" --actor coder diff add T1 --body 'submitted patch' >/dev/null
+$B --db "$R" --actor coder status T1 review >/dev/null
+run $B --db "$R" get T1 --full
+check "reporter: edits and worker reassignment preserve creator" $(has "$out" 'reporter: analyzer' && has "$out" 'title: renamed' && echo 0 || echo 1)
+run $B --db "$R" get T3 --full
+check "reporter: auto-filed review records acting identity" $(has "$out" 'reporter: coder' && echo 0 || echo 1)
+run $B --db "$R" add forged --reporter fake
+check "reporter: add rejects caller-supplied identity" $([ $rc -eq 1 ] && has "$err" '--reporter' && echo 0 || echo 1)
+run $B --db "$R" edit T1 --reporter fake
+check "reporter: edit rejects caller-supplied identity" $([ $rc -eq 1 ] && has "$err" '--reporter' && echo 0 || echo 1)
+
 use a; D=$BOARD
 # --flag=value equivalence for --db, --actor, --description
 run $B --db="$D" add one --description="d=1" --assignee=zed;           check "--db=PATH accepted" $rc
@@ -534,7 +555,7 @@ with sqlite3.connect(sys.argv[1]) as c:
     c.execute("UPDATE board_stamp SET generation=99")
 PYDB
 run $B --db "$P" add refused
-check "future schema: exit 1, one line names versions" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "schema version 99" && has "$err" "understands version 2" && has "$err" "binary is older than the board" && echo 0 || echo 1)
+check "future schema: exit 1, one line names versions" $([ $rc -eq 1 ] && [ "$(wc -l <<<"$err")" = 1 ] && has "$err" "schema version 99" && has "$err" "understands version 3" && has "$err" "binary is older than the board" && echo 0 || echo 1)
 python3 - "$P" <<'PYDB'
 import sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as c:

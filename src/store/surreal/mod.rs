@@ -345,6 +345,7 @@ DEFINE FIELD IF NOT EXISTS completed_at ON epics TYPE option<int>;
 
 DEFINE TABLE IF NOT EXISTS tasks SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS board ON tasks TYPE string DEFAULT 'main';
+DEFINE FIELD IF NOT EXISTS reporter ON tasks TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS title ON tasks TYPE string;
 DEFINE FIELD IF NOT EXISTS description ON tasks TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS goal ON tasks TYPE string DEFAULT '';
@@ -430,14 +431,19 @@ fn backfill() -> String {
             None => tables.push((table, vec![(field, default)])),
         }
     }
+    let reporter = "((SELECT actor, meta::id(id) AS seq FROM events WHERE task_id=meta::id($parent.id) AND kind='add' ORDER BY seq ASC LIMIT 1)[0].actor ?? '')";
     tables
         .iter()
         .map(|(table, fields)| {
             let set: Vec<_> = fields
                 .iter()
-                .map(|(f, d)| format!("{f} = IF {f} IS NONE {{ {d} }} ELSE {{ {f} }}"))
+                .map(|(f, d)| if *table == "tasks" && *f == "reporter" {
+                    format!("reporter = IF reporter IS NONE OR reporter = '' {{ {reporter} }} ELSE {{ reporter }}")
+                } else { format!("{f} = IF {f} IS NONE {{ {d} }} ELSE {{ {f} }}") })
                 .collect();
-            let missing: Vec<_> = fields.iter().map(|(f, _)| format!("{f} IS NONE")).collect();
+            let missing: Vec<_> = fields.iter().map(|(f, _)| if *table == "tasks" && *f == "reporter" {
+                format!("reporter IS NONE OR (reporter = '' AND {reporter} != '')")
+            } else { format!("{f} IS NONE") }).collect();
             format!(
                 "UPDATE {table} SET {} WHERE {} RETURN VALUE 1;\n",
                 set.join(", "),
@@ -523,11 +529,28 @@ fn validate_plan(sql: &str) -> Result<(), String> {
     Ok(())
 }
 
+async fn reporter_schema(db: &Db) -> Result<(), String> {
+    let mut result = db
+        .query("INFO FOR TABLE tasks")
+        .await
+        .map_err(|e| db_err(&e))?;
+    let info: Option<serde_json::Value> = result.take(0).map_err(|e| db_err(&e))?;
+    if info
+        .as_ref()
+        .and_then(|i| i["fields"].get("reporter"))
+        .is_none()
+    {
+        return Err("board schema mismatch: current-version board is missing tasks.reporter; manual step: inspect and repair the schema before retrying".into());
+    }
+    Ok(())
+}
+
 /// Brings the database to the current schema, or refuses it. The caller holds
 /// the write lock, so two processes never bootstrap at once.
 async fn bootstrap(db: &Db, s: &Settings) -> Result<Bootstrap, String> {
     let found = marker_version(db).await?;
     if found == Some(SCHEMA_VERSION) {
+        reporter_schema(db).await?;
         return Ok(Bootstrap::Already);
     }
     if found.is_some_and(|v| !(1..=SCHEMA_VERSION).contains(&v)) {
@@ -711,6 +734,7 @@ fn session_with(
     // Current readers need no writer lock. Only migration and writes acquire
     // it; migration rechecks the version after waiting for another caller.
     if !write && bounded(s, t, marker_version(&db))? == Some(SCHEMA_VERSION) {
+        bounded(s, t, reporter_schema(&db))?;
         return Ok(Session {
             db,
             bootstrap: Bootstrap::Already,
@@ -1245,6 +1269,78 @@ mod tests {
     }
 
     #[test]
+    fn reporter_backfill_uses_first_add_and_preserves_known_identity() {
+        let Some(srv) = start_server("reporter-backfill") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        block_on(async {
+            c.db.query("REMOVE FIELD reporter ON tasks; CREATE tasks:1 SET title='one', created_at=1, updated_at=1; CREATE tasks:2 SET title='two', created_at=1, updated_at=1; CREATE tasks:3 SET title='unknown', created_at=1, updated_at=1; CREATE tasks:4 SET title='blank-first', created_at=1, updated_at=1; CREATE events:1 SET task_id=1, actor='analyzer', kind='add', body='first', ts=1; CREATE events:2 SET task_id=1, actor='imposter', kind='add', body='later', ts=2; CREATE events:3 SET task_id=2, actor='coder', kind='add', body='first', ts=1; CREATE events:4 SET task_id=3, actor='observer', kind='note', body='not creation', ts=1; CREATE events:5 SET task_id=4, actor='', kind='add', body='blank first', ts=1; CREATE events:6 SET task_id=4, actor='guesser', kind='add', body='later', ts=2; UPDATE meta:schema SET version=2;")
+                .await.unwrap().check().unwrap();
+        });
+        let migrated = connect(&srv.settings).unwrap();
+        block_on(async {
+            let mut values = Vec::new();
+            for id in 1..=4 {
+                values.push(tasks::fetch(&migrated.db, id).await.unwrap().reporter);
+            }
+            assert_eq!(values, ["analyzer", "coder", "", ""]);
+            migrated
+                .db
+                .query("UPDATE tasks:1 SET reporter='original'; UPDATE meta:schema SET version=2;")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        let again = connect(&srv.settings).unwrap();
+        assert_eq!(
+            block_on(tasks::fetch(&again.db, 1)).unwrap().reporter,
+            "original"
+        );
+    }
+
+    #[test]
+    fn reporter_migration_is_atomic_and_missing_current_field_is_named() {
+        let Some(srv) = start_server("reporter-atomic") else {
+            return;
+        };
+        let c = connect(&srv.settings).unwrap();
+        block_on(async {
+            c.db.query("REMOVE FIELD reporter ON tasks; CREATE tasks:1 SET title='preserve', created_at=1, updated_at=1; CREATE events:1 SET task_id=1, actor='analyzer', kind='add', body='preserve', ts=1; UPDATE meta:schema SET version=2; DEFINE EVENT interrupt ON meta WHEN $before.version=2 AND $after.version=3 THEN { THROW 'interrupt reporter migration'; };").await.unwrap().check().unwrap();
+        });
+        assert!(connect(&srv.settings).is_err());
+        block_on(async {
+            assert_eq!(marker_version(&c.db).await.unwrap(), Some(2));
+            let mut result = c.db.query("INFO FOR TABLE tasks").await.unwrap();
+            let info: Option<serde_json::Value> = result.take(0).unwrap();
+            assert!(info.unwrap()["fields"].get("reporter").is_none());
+            c.db.query("REMOVE EVENT interrupt ON meta")
+                .await
+                .unwrap()
+                .check()
+                .unwrap();
+        });
+        let migrated = connect(&srv.settings).unwrap();
+        assert_eq!(
+            block_on(tasks::fetch(&migrated.db, 1)).unwrap().reporter,
+            "analyzer"
+        );
+        block_on(async { migrated.db.query("REMOVE FIELD reporter ON tasks").await })
+            .unwrap()
+            .check()
+            .unwrap();
+        let error = match connect(&srv.settings) {
+            Ok(_) => panic!("missing field accepted"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("missing tasks.reporter") && error.contains("manual step"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn first_read_migrates_older_schema_and_preserves_rows() {
         let Some(srv) = start_server("schema-migrate") else {
             return;
@@ -1287,7 +1383,7 @@ mod tests {
         };
         let c = connect(&srv.settings).unwrap();
         block_on(async {
-            c.db.query("REMOVE FIELD reviews ON diffs; UPDATE meta:schema SET version=1; DEFINE EVENT fail_version ON meta WHEN $before.version=1 AND $after.version=2 THEN { THROW 'simulated interruption'; };")
+            c.db.query("REMOVE FIELD reviews ON diffs; UPDATE meta:schema SET version=1; DEFINE EVENT fail_version ON meta WHEN $before.version=1 AND $after.version=3 THEN { THROW 'simulated interruption'; };")
                 .await.unwrap().check().unwrap();
         });
         assert!(connect(&srv.settings).is_err());
@@ -1303,7 +1399,10 @@ mod tests {
                 .unwrap();
         });
         connect(&srv.settings).unwrap();
-        assert_eq!(block_on(marker_version(&c.db)).unwrap(), Some(2));
+        assert_eq!(
+            block_on(marker_version(&c.db)).unwrap(),
+            Some(SCHEMA_VERSION)
+        );
     }
 
     #[test]
@@ -1313,7 +1412,7 @@ mod tests {
         };
         let c = connect(&srv.settings).unwrap();
         block_on(async {
-            c.db.query("UPDATE meta:schema SET version=3")
+            c.db.query("UPDATE meta:schema SET version=99")
                 .await
                 .unwrap()
                 .check()

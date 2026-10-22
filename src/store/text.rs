@@ -32,6 +32,7 @@ pub fn epic_gap(members: &[(i64, Option<i64>)]) -> Option<String> {
 /// One task as stored.
 #[derive(Clone, Debug)]
 pub struct TaskRow {
+    pub reporter: String,
     pub id: i64,
     pub status: String,
     pub assignee: Option<String>,
@@ -744,6 +745,14 @@ pub fn get_text(
         r.assignee.as_deref().unwrap_or("-"),
         r.priority
     );
+    out.push_str(&format!(
+        "reporter: {}\n",
+        if r.reporter.trim().is_empty() {
+            "unknown (filed before this field existed)"
+        } else {
+            &r.reporter
+        }
+    ));
     out.push_str(&format!("title: {}\n", r.title));
     if r.path.is_empty() {
         out.push_str("path: -\n");

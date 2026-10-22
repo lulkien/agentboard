@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
     root = Path(scratch)
     board = root / 'data'
     endpoint = f'127.0.0.1:{port()}'
-    env = dict(os.environ, AGENTBOARD_DB=str(board), AGENTBOARD_SURREAL_URL=endpoint)
+    env = dict(os.environ, AGENTBOARD_DB=str(board), AGENTBOARD_SURREAL_URL=endpoint, AGENTBOARD_ACTOR='upgrade-test')
     processes = []
     owner = None
 
@@ -76,8 +76,13 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         return result
 
     def snapshot():
-        return {t: sql(f'SELECT * FROM {t} ORDER BY id;')[0]['result']
-                for t in ('tasks', 'epics', 'events', 'diffs', 'sessions', 'counters')}
+        result = {t: sql(f'SELECT * FROM {t} ORDER BY id;')[0]['result']
+                  for t in ('tasks', 'epics', 'events', 'diffs', 'sessions', 'counters')}
+        # The additive reporter column is checked separately; old fields must
+        # remain byte-identical across the version transition.
+        for row in result['tasks']:
+            row.pop('reporter', None)
+        return result
 
     try:
         assert 'requires --owner' in cli(new, 'board', 'upgrade', ok=False)
@@ -91,10 +96,10 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         before = snapshot()
         assert len(before['tasks']) == 1 and len(before['epics']) == 1 and len(before['events']) == 4
         first = cli(new, 'get', 'T1')
-        assert 'preserved task' in first
-        assert 'migrated v1 -> v2:' in first
+        assert 'preserved task' in first and 'reporter: upgrade-test' in first
+        assert 'migrated v1 -> v3:' in first
         assert snapshot() == before, 'additive migration must preserve all stored rows'
-        assert sql('SELECT version FROM meta:schema;')[0]['result'][0]['version'] == 2
+        assert sql('SELECT version FROM meta:schema;')[0]['result'][0]['version'] == 3
         # Reset a scratch v1 fixture to exercise offline interruption/exclusion.
         sql('REMOVE FIELD reviews ON diffs; UPDATE meta:schema SET version=1;')
         assert 'server running at' in cli(new, 'board', 'upgrade', '--owner', ok=False)
@@ -125,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         sql('CREATE meta:legacy SET version=1;')
         meta_before = sql('SELECT * FROM meta ORDER BY id;')[0]['result']
         marker_url = f'http://127.0.0.1:{marker.server_port}/stamp?before='
-        sql("DEFINE EVENT pause_upgrade ON TABLE meta WHEN $after.version = 2 AND $before.version = 1 "
+        sql("DEFINE EVENT pause_upgrade ON TABLE meta WHEN $after.version = 3 AND $before.version = 1 "
             f"THEN http::get('{marker_url}' + <string>$before.version);")
         stop(server)
         # Permit only this loopback marker in the test server; production
@@ -217,9 +222,9 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         for table, rows in before.items():
             print(f'preserved {table}: {len(rows)} -> {len(after[table])}')
         assert json.dumps(before['tasks'][0], sort_keys=True).encode() == json.dumps(after['tasks'][0], sort_keys=True).encode()
-        assert sql('SELECT version FROM meta:schema;')[0]['result'] == [{'version': 2}]
+        assert sql('SELECT version FROM meta:schema;')[0]['result'] == [{'version': 3}]
         assert sql('SELECT * FROM meta:opened; SELECT * FROM meta:writer;')[0]['result'] == []
-        assert 'schema version=2' in output
+        assert 'schema version=3' in output
         assert 'want version 1' in cli(old, 'get', 'T1', ok=False)
         assert 'preserved task' in cli(new, 'get', 'T1')
         stop(server)
@@ -243,7 +248,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
             warned = cli(new, 'board', 'upgrade', '--owner')
             assert f'warning: cannot inspect pid {hidden.pid} (hidden-holder)' in warned, warned
             assert 'open fd directory' in warned and 'Permission denied' in warned, warned
-            assert 'treating as not a holder' in warned and 'version 2 -> 2' in warned, warned
+            assert 'treating as not a holder' in warned and 'version 3 -> 3' in warned, warned
             assert f'uid {os.geteuid()} processes' in warned, warned
         finally:
             os.killpg(hidden.pid, signal.SIGKILL)
@@ -272,17 +277,17 @@ with tempfile.TemporaryDirectory(prefix='agentboard-upgrade-') as scratch:
         else:
             os.kill(helper_pid, 9)
             raise AssertionError('server descendant survived group cleanup')
-        assert 'version 2 -> 2' in again
+        assert 'version 3 -> 3' in again
         server = start()
         assert snapshot() == before
         sql('UPDATE meta:schema SET version=99;')
         stop(server)
-        assert 'supports only version 1' in cli(new, 'board', 'upgrade', '--owner', ok=False)
+        assert 'supports versions 1..=3' in cli(new, 'board', 'upgrade', '--owner', ok=False)
         server = start()
         assert sql('SELECT version FROM meta:schema;')[0]['result'][0]['version'] == 99
         assert snapshot() == before
         stop(server)
-        print('board-upgrade: owner gate, first-call additive migration, both server refusals, unreadable process warned and continued, pure-v1 DDL/backfill rollback and retry, output asserted, killed-owner child dead, cleanup descendant dead, all rows preserved, schema version, v1 refused, v2 accepted, idempotent retry passed')
+        print('board-upgrade: owner gate, first-call additive migration, both server refusals, unreadable process warned and continued, pure-v1 DDL/backfill rollback and retry, output asserted, killed-owner child dead, cleanup descendant dead, all rows preserved, schema version, v1 refused, current accepted, idempotent retry passed')
     finally:
         if owner is not None and owner.poll() is None:
             owner.kill()

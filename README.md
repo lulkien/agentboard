@@ -13,7 +13,7 @@ SurrealDB (`src/store/surreal/`):
 
     epics     id, title, description, goal, status, path, created_at, updated_at,
               completed_at                               -- E1, E2...; never leased
-    tasks     id, board, title, description, goal, path, branch, status, assignee, priority, epic_id,
+    tasks     id, board, reporter, title, description, goal, path, branch, status, assignee, priority, epic_id,
               parent_id, needs, report, commit_ref, lease_until, created_at, updated_at,
               started_at, completed_at, reopen_count     -- moves into needs_fix; 4 = capped
     events    seq, task_id | epic_id, actor, kind, body, ts  -- append-only, one timeline
@@ -40,6 +40,10 @@ re-parenting also refuse cross-epic parents. A move may split a family and recor
 a note event naming immediate relatives outside the destination, including
 ungrouped relatives. A board file without a schema version is refused with the
 manual step to inspect and stamp the legacy board offline.
+
+Every task records its creation actor as immutable `reporter`. `get` shows it;
+edits and worker reassignment preserve it. Old rows use their earliest creation
+event, or show `unknown (filed before this field existed)` when no actor is known.
 
 Statuses: `ready → working → (blocking → working)* → review → done`,
 plus `needs_fix` (review found work, waiting for a fix; shown as `fix`),
@@ -145,8 +149,8 @@ any version other than `surrealdb-2.7.x` is refused by name, and the Rust 3.x cr
 usable at all on this tree: its `diskann` dependency fails to compile. Stop the daemon with
 `pkill -f 'bind 127.0.0.1:18720'`.
 
-There is no migration between backends. Schema version 1 migrates additively to
-version 2 on the first CLI or MCP call, under the write lock in one transaction.
+There is no migration between backends. Schema versions 1 and 2 migrate additively to
+version 3 on the first CLI or MCP call, under the write lock in one transaction.
 Newer boards refuse an older binary by name. See the
 [schema version protocol](PROTOCOL.md#board-schema-version).
 The owner-only offline `board upgrade --owner` command remains available for

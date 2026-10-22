@@ -2,6 +2,8 @@
 //! answering scripted NDJSON. Each case runs the real binary with
 //! `AGENTBOARD_HERDR_SOCK` pointing at the stub, and HOME/XDG_CONFIG_HOME/
 //! HERDR_SOCKET pointed away, so no test can reach the live herdr session.
+//! Every binary entry also needs an explicit scratch board URL: changing HOME
+//! alone does not isolate the default SurrealDB server on port 18720.
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
@@ -336,7 +338,13 @@ fn no_socket_anywhere_names_all_four_paths() {
     std::fs::create_dir_all(&home).unwrap();
     // `manager_env` points HERDR_SOCKET at home/none, which does not exist, so the
     // variable is removed here to reach the all-paths message.
+    #[cfg(feature = "surreal")]
+    let board_server = ScratchBoard::start(&home);
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_agentboard"));
+    cmd.env_remove("AGENTBOARD_SURREAL_URL")
+        .env("AGENTBOARD_DB", home.join("board"));
+    #[cfg(feature = "surreal")]
+    cmd.env("AGENTBOARD_SURREAL_URL", &board_server.url);
     let o = cmd
         .args(["manager", "agent", "list"])
         .env_remove("AGENTBOARD_HERDR_SOCK")
@@ -1117,17 +1125,22 @@ fn layout_export_round_trip_and_apply_exact_bytes() {
         &[],
     );
     assert!(o.status.success(), "{}", text(&o.stderr));
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agentboard"))
+    #[cfg(feature = "surreal")]
+    let stdin_board = ScratchBoard::start(&s.dir);
+    let mut stdin_command = Command::new(env!("CARGO_BIN_EXE_agentboard"));
+    stdin_command
         .args([
             "manager", "layout", "apply", "--tab", "w1:t1", "--root", "-",
         ])
         .env("AGENTBOARD_HERDR_SOCK", &s.sock)
         .env("AGENTBOARD_DB", s.dir.join("stdin-board"))
+        .env_remove("AGENTBOARD_SURREAL_URL")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stderr(std::process::Stdio::piped());
+    #[cfg(feature = "surreal")]
+    stdin_command.env("AGENTBOARD_SURREAL_URL", &stdin_board.url);
+    let mut child = stdin_command.spawn().unwrap();
     child
         .stdin
         .take()

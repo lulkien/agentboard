@@ -113,6 +113,12 @@ fn check_schema(conn: &Connection) -> Result<(), String> {
     let found = version(conn)?;
     compatible(found)?;
     if found == Some(crate::ident::GENERATION) {
+        if !columns(conn, "tasks")?
+            .iter()
+            .any(|column| column.name == "reporter")
+        {
+            return Err("board schema mismatch: current-version board is missing tasks.reporter; manual step: inspect and repair the schema before retrying".into());
+        }
         return Ok(());
     }
     conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| {
@@ -265,6 +271,9 @@ fn migrate_locked(conn: &Connection) -> Result<Option<(i64, usize, usize)>, Stri
         conn.execute(&fill, [])
             .map_err(|e| format!("schema backfill: {e}"))?;
     }
+    backfilled += conn.execute(
+        "UPDATE tasks SET reporter=COALESCE((SELECT actor FROM events WHERE task_id=tasks.id AND kind='add' ORDER BY seq LIMIT 1),'') WHERE reporter='' AND COALESCE((SELECT actor FROM events WHERE task_id=tasks.id AND kind='add' ORDER BY seq LIMIT 1),'') != ''", []
+    ).map_err(|e| format!("reporter backfill: {e}"))?;
     conn.execute(
         "UPDATE board_stamp SET generation=? WHERE id=1",
         [crate::ident::GENERATION],
@@ -323,7 +332,7 @@ fn log_event(
 
 pub(super) use super::text::{TaskRow as Row, field_names, text_change, value_change};
 
-const COLS: &str = "id,status,assignee,needs,title,description,goal,path,branch,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id,reopen_count";
+const COLS: &str = "id,status,assignee,needs,title,description,goal,path,branch,lease_until,updated_at,created_at,started_at,completed_at,report,note,commit_ref,priority,epic_id,parent_id,reopen_count,reporter";
 
 fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
     Ok(Row {
@@ -348,6 +357,7 @@ fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         epic_id: r.get(18)?,
         parent_id: r.get(19)?,
         reopen_count: r.get(20)?,
+        reporter: r.get(21)?,
     })
 }
 
@@ -533,6 +543,77 @@ impl Board for SqliteBoard {
 mod tests {
     use super::{Connection, SCHEMA, check_schema};
 
+    fn pre_reporter_schema() -> String {
+        SCHEMA
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("reporter "))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("VALUES(1,3)", "VALUES(1,2)")
+    }
+
+    #[test]
+    fn reporter_backfill_uses_first_add_and_preserves_known_identity() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(&pre_reporter_schema()).unwrap();
+        c.execute_batch("INSERT INTO tasks(id,title,created_at,updated_at) VALUES(1,'one',1,1),(2,'two',1,1),(3,'unknown',1,1),(4,'blank-first',1,1); INSERT INTO events(task_id,actor,kind,body,ts) VALUES(1,'analyzer','add','first',1),(1,'imposter','add','later',2),(2,'coder','add','first',1),(3,'observer','note','not creation',1),(4,'','add','blank first',1),(4,'guesser','add','later',2);").unwrap();
+        check_schema(&c).unwrap();
+        let values: Vec<String> = c
+            .prepare("SELECT reporter FROM tasks ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(values, ["analyzer", "coder", "", ""]);
+        c.execute_batch(
+            "UPDATE tasks SET reporter='original' WHERE id=1; UPDATE board_stamp SET generation=2;",
+        )
+        .unwrap();
+        check_schema(&c).unwrap();
+        assert_eq!(
+            c.query_row("SELECT reporter FROM tasks WHERE id=1", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "original"
+        );
+    }
+
+    #[test]
+    fn reporter_migration_is_atomic_and_missing_current_column_is_named() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(&pre_reporter_schema()).unwrap();
+        c.execute_batch("INSERT INTO tasks(title,created_at,updated_at) VALUES('preserve',1,1); INSERT INTO events(task_id,actor,kind,body,ts) VALUES(1,'analyzer','add','preserve',1); CREATE TRIGGER interrupt BEFORE UPDATE OF generation ON board_stamp BEGIN SELECT RAISE(ABORT,'interrupt reporter migration'); END;").unwrap();
+        assert!(check_schema(&c).is_err());
+        assert_eq!(super::version(&c).unwrap(), Some(2));
+        assert!(
+            !super::columns(&c, "tasks")
+                .unwrap()
+                .iter()
+                .any(|column| column.name == "reporter")
+        );
+        c.execute_batch("DROP TRIGGER interrupt").unwrap();
+        check_schema(&c).unwrap();
+        assert_eq!(
+            c.query_row("SELECT reporter FROM tasks", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "analyzer"
+        );
+        let malformed = Connection::open_in_memory().unwrap();
+        malformed.execute_batch(&pre_reporter_schema()).unwrap();
+        malformed
+            .execute(
+                "UPDATE board_stamp SET generation=?",
+                [crate::ident::GENERATION],
+            )
+            .unwrap();
+        let error = check_schema(&malformed).unwrap_err();
+        assert!(
+            error.contains("missing tasks.reporter") && error.contains("manual step"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn schema_generation_matches_rust() {
         let c = Connection::open_in_memory().unwrap();
@@ -626,21 +707,21 @@ mod tests {
         );
         c.execute_batch("DROP TRIGGER fail_version").unwrap();
         check_schema(&c).unwrap();
-        assert_eq!(super::version(&c).unwrap(), Some(2));
+        assert_eq!(super::version(&c).unwrap(), Some(crate::ident::GENERATION));
     }
 
     #[test]
     fn future_version_is_refused_on_the_next_call() {
         let c = Connection::open_in_memory().unwrap();
         check_schema(&c).unwrap();
-        c.execute("UPDATE board_stamp SET generation=3", [])
+        c.execute("UPDATE board_stamp SET generation=99", [])
             .unwrap();
         assert!(
             check_schema(&c)
                 .unwrap_err()
                 .contains("binary is older than the board")
         );
-        assert_eq!(super::version(&c).unwrap(), Some(3));
+        assert_eq!(super::version(&c).unwrap(), Some(99));
     }
 
     #[test]

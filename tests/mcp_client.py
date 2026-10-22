@@ -706,6 +706,24 @@ def main():
     checks.append(stable(s.call("epic_get", id=both_epic, full=True)) == before)
     print(("PASS " if checks[-1] else "FAIL ") + "failed combined epic update preserves spec and events")
 
+    # Creation actor is immutable, shared by CLI/MCP rendering, never an argument.
+    analyzer = Session("analyzer")
+    coder = Session("coder")
+    try:
+        analyzed = analyzer.call("task_add", title="analyzed").split()[0]
+        implemented = coder.call("task_add", title="implemented").split()[0]
+        expect("reporter tracks analyzer creation", s.call("task_get", id=analyzed), "reporter: analyzer")
+        expect("reporter tracks coder creation", s.call("task_get", id=implemented), "reporter: coder")
+        coder.call("task_update", id=analyzed, title="renamed analyzed")
+        expect("reporter survives another actor's edit", s.call("task_get", id=analyzed), "reporter: analyzer", "title: renamed analyzed")
+        expect("MCP add refuses reporter spoof", refusal_text(lambda: coder.call("task_add", title="forged", reporter="fake")), "reporter")
+        expect("MCP setter refuses reporter overwrite", refusal_text(lambda: coder.call("task_update", id=analyzed, reporter="fake")), "reporter")
+        result = subprocess.run([BIN, "--db", DB, "get", analyzed, "--full"], capture_output=True, text=True, timeout=20)
+        expect("CLI and MCP show identical reporter", result.stdout if result.returncode == 0 else result.stderr, "reporter: analyzer")
+    finally:
+        analyzer.close()
+        coder.close()
+
     # Change the board stamp behind an already initialized MCP process. The
     # next write must fail, even on SQLite where initialization used to be cached.
     if BACKEND == "sqlite":
@@ -724,7 +742,7 @@ def main():
     expect("future schema refusal has MCP -32603 and named remedy", refused,
            "-32603", "binary is older than the board", "use a newer binary")
     expect("schema refusal names board and binary versions", refused,
-           "schema version 99", "understands version 2")
+           "schema version 99", "understands version 3")
     s.close()
     print(f"\n{sum(checks)}/{len(checks)} checks passed (backend: {BACKEND})")
     return 0 if all(checks) else 1

@@ -1,4 +1,4 @@
-//! Offline v1 -> v2 only. The startup lock excludes old and new auto-starters;
+//! Offline additive upgrades to the current persisted schema version. The startup lock excludes old and new auto-starters;
 //! the private server is never advertised at the board's configured endpoint.
 use super::*;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
@@ -313,9 +313,9 @@ async fn counts(db: &Db) -> Result<Vec<(String, usize)>, String> {
 
 async fn apply(db: &Db) -> Result<String, String> {
     let found = marker_version(db).await?;
-    if !matches!(found, Some(1 | SCHEMA_VERSION)) {
+    if !found.is_some_and(|v| (1..=SCHEMA_VERSION).contains(&v)) {
         return Err(format!(
-            "board upgrade supports only version 1 -> {SCHEMA_VERSION} (or an already-current board); found {found:?}; no changes made"
+            "board upgrade supports versions 1..={SCHEMA_VERSION} (or an already-current board); found {found:?}; no changes made"
         ));
     }
     let before = counts(db).await?;

@@ -2,7 +2,9 @@
 """Scratch-only CLI/MCP schema migrations, concurrency and deleted-guard proofs.
 
 Set AGENTBOARD_SCHEMA_OLD_SQLITE to a d3b18e9 SQLite binary to also prove
-new-board -> previous-v2 read/write -> new-reader compatibility.
+new-board -> previous-v2 named refusal without writes.
+AGENTBOARD_REPORTER_OLD_SQLITE/SURREAL optionally prove reporter attribution
+against actual v2 binaries; all probes use this script's scratch boards.
 """
 import base64
 import concurrent.futures
@@ -21,6 +23,8 @@ import time
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+CURRENT = int(re.search(r'GENERATION: i64 = (\d+)', (ROOT / 'src/ident.rs').read_text()).group(1))
 
 class Seat:
     def __init__(self, binary, env):
@@ -66,10 +70,18 @@ def build(tree, backend, dest):
     args = ['cargo', 'build', '--locked', '--quiet']
     if backend == 'sqlite':
         args += ['--no-default-features', '--features', 'sqlite']
-    env = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / 'target'))
-    result = subprocess.run(args, cwd=tree, env=env, capture_output=True, text=True, timeout=180)
+    # Keep matching/mutant artifacts private to this temporary run. In particular,
+    # never copy a previous run's mutant out of the checkout's shared target.
+    target = tree.parent / 'target'
+    executable = target / 'debug/agentboard'
+    # A successful build must produce this executable again, even when Cargo
+    # would otherwise consider a previous matching/mutant build up to date.
+    executable.unlink(missing_ok=True)
+    env = dict(os.environ, CARGO_TARGET_DIR=str(target))
+    result = subprocess.run(args, cwd=tree, env=env, capture_output=True, text=True, timeout=600)
     assert result.returncode == 0, result.stderr
-    shutil.copy2(ROOT / 'target/debug/agentboard', dest)
+    assert executable.is_file(), f'build did not produce a fresh executable: {executable}'
+    shutil.copy2(executable, dest)
 
 
 def review_probe(binary, env):
@@ -128,22 +140,21 @@ def sqlite_rollback_probe(binary, old):
             assert result.returncode == 0, result
             return result.stdout
 
-        run('new v2 creates fresh board', binary, 'add', 'old-read-probe')
+        run('new writer creates fresh board', binary, 'add', 'old-read-probe')
         with sqlite3.connect(board) as conn:
             columns = {row[1] for row in conn.execute('PRAGMA table_info(board_stamp)')}
             assert {'surface_tools', 'opened_by', 'last_writer'} <= columns, columns
             stamp = conn.execute('SELECT generation,surface_tools,opened_by,last_writer FROM board_stamp').fetchone()
-            assert stamp == (2, None, '', ''), stamp
-        print(f'fresh board_stamp: columns={sorted(columns)}; values={stamp}', flush=True)
-        assert 'old-read-probe' in run('previous v2 reads fresh board', old, 'ls')
-        run('previous v2 writes fresh board', old, 'add', 'old-write-probe')
+            assert stamp == (CURRENT, None, '', ''), stamp
+            before = conn.execute('SELECT * FROM tasks').fetchall()
+        for command in [('ls',), ('add', 'must-not-land')]:
+            result = subprocess.run([str(old), *command], env=env, capture_output=True, text=True, timeout=20)
+            assert result.returncode == 1 and 'binary is older than the board' in result.stderr, result
         with sqlite3.connect(board) as conn:
-            before = conn.execute('SELECT * FROM board_stamp').fetchall()
-        assert 'old-write-probe' in run('new v2 reads previous-v2 row', binary, 'get', 'T2', '--full')
-        with sqlite3.connect(board) as conn:
-            assert conn.execute('SELECT * FROM board_stamp').fetchall() == before
-            assert conn.execute('SELECT generation FROM board_stamp').fetchone() == (2,)
-        print('sqlite rollback: previous v2 reads/writes fresh new-v2 board; new reader preserves legacy stamp; generation=2', flush=True)
+            assert conn.execute('SELECT * FROM tasks').fetchall() == before
+            assert conn.execute('SELECT generation FROM board_stamp').fetchone() == (CURRENT,)
+        print('sqlite rollback: old v2 refuses new board reads/writes without changing data', flush=True)
+
 
 
 def checks(backend, binary, mutant, env, sql):
@@ -166,9 +177,10 @@ def checks(backend, binary, mutant, env, sql):
         version(1)
         reply = seat.call('task_get', id=task, full=True)
         assert not failed(reply) and 'exact original text' in text(reply), reply
-        assert read_version() == 2
+        assert read_version() == CURRENT
         # Missing fields are populated on the very first read, while present
         # values survive. This models the actual historical branch addition.
+        expected_fills = 1 if backend == 'surreal' else sql('SELECT count(*) FROM tasks')[0][0]
         if backend == 'surreal':
             sql(f"REMOVE FIELD branch ON tasks; UPDATE tasks:{task[1:]} UNSET branch; UPDATE meta:schema SET version=1")
         else:
@@ -176,8 +188,8 @@ def checks(backend, binary, mutant, env, sql):
             version(1)
         result = cli('get', task, '--full')
         assert result.returncode == 0 and 'branch: HEAD' in result.stdout, result
-        assert re.search(rf"migrated v1 -> v2: \d+ definitions, {1 if backend == 'surreal' else 3} rows backfilled", result.stderr), result
-        assert read_version() == 2
+        assert re.search(rf"migrated v1 -> v{CURRENT}: \d+ definitions, {expected_fills} rows backfilled", result.stderr), result
+        assert read_version() == CURRENT
 
         # Independent cold processes contend for the same migration lock.
         print(f'{backend}: {result.stderr.strip()}', flush=True)
@@ -187,13 +199,13 @@ def checks(backend, binary, mutant, env, sql):
             barrier.wait()
             result = cli('get', task, '--full')
             assert result.returncode == 0 and 'exact original text' in result.stdout, result
-            return result.stderr.count('migrated v1 -> v2:')
+            return result.stderr.count(f'migrated v1 -> v{CURRENT}:')
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             assert sum(pool.map(read, range(2))) == 1
-        assert read_version() == 2
+        assert read_version() == CURRENT
         print(f'{backend}: concurrent first calls=2 succeeded; migrations=1; preserved rows verified', flush=True)
 
-        version(3)
+        version(CURRENT + 1)
         for tool, args in [('task_get', {'id': task, 'full': True}),
                            ('board_brief', {}), ('session_register', {'name': 'never-contacted', 'agent': 'human'})]:
             reply = seat.call(tool, **args)
@@ -205,7 +217,7 @@ def checks(backend, binary, mutant, env, sql):
         # mutant would actually serve this future board, so the test detects it.
         result = subprocess.run([str(mutant), 'get', task], env=env, capture_output=True, text=True, timeout=20)
         assert result.returncode == 0 and 'binary is older than the board' not in result.stderr, result
-        assert read_version() == 3
+        assert read_version() == CURRENT + 1
         version(1)
         if backend == 'surreal':
             sql("DEFINE FIELD OVERWRITE title ON tasks TYPE int")
@@ -218,6 +230,61 @@ def checks(backend, binary, mutant, env, sql):
     finally:
         seat.close()
     print(f'schema-version: {backend}: first CLI/MCP read preserves rows; concurrent calls migrate once; running MCP refuses future version; type change refuses; deleted comparison detected', flush=True)
+
+
+def reporter_upgrade_probe(backend, binary, env, sql):
+    """Use actual pre-reporter binaries when supplied; unit tests cover the same old shapes."""
+    old = os.environ.get('AGENTBOARD_REPORTER_OLD_' + backend.upper())
+    if not old:
+        return
+    def cli(executable, *args, ok=True):
+        result = subprocess.run([str(executable), *args], env=env, capture_output=True, text=True, timeout=20)
+        assert (result.returncode == 0) == ok, result
+        return result
+    for actor, title in [('analyzer', 'first'), ('coder', 'second'), ('unknown', 'no-history')]:
+        cli(old, '--actor', actor, 'add', title, '--description', 'preserve exact original bytes')
+    if backend == 'sqlite':
+        sql("DELETE FROM events WHERE task_id=3 AND kind='add'")
+        sql("INSERT INTO events(task_id,actor,kind,body,ts) VALUES(1,'imposter','add','later add',1)")
+    else:
+        sql("DELETE events WHERE task_id=3 AND kind='add'; CREATE events:999999 SET task_id=1, actor='imposter', kind='add', body='later add', ts=1")
+    def preserved():
+        if backend == 'sqlite':
+            return sql('SELECT id,title,description,goal,status,assignee,parent_id,created_at,updated_at,report,note,priority FROM tasks ORDER BY id')
+        return sql('SELECT id,title,description,goal,status,assignee,parent_id,created_at,updated_at,report,note,priority FROM tasks ORDER BY id')[0]['result']
+    before = preserved()
+    seat = Seat(binary, env)
+    try:
+        for task, reporter in [('T1', 'analyzer'), ('T2', 'coder'), ('T3', 'unknown (filed before this field existed)')]:
+            reply = seat.call('task_get', id=task, full=True)
+            assert not failed(reply) and f'reporter: {reporter}' in text(reply), reply
+            result = cli(binary, 'get', task, '--full')
+            assert f'reporter: {reporter}' in result.stdout, result
+        assert preserved() == before
+        for command in [('get', 'T1'), ('add', 'must-not-land')]:
+            result = cli(old, *command, ok=False)
+            assert 'binary is older than the board' in result.stderr, result
+        # No public override exists, through either front door.
+        assert failed(seat.call('task_update', id='T1', reporter='fake'))
+        result = cli(binary, 'edit', 'T1', '--reporter', 'fake', ok=False)
+        assert 'reporter' in result.stderr
+        cli(binary, '--actor', 'other', 'edit', 'T1', '--title', 'renamed')
+        assert 'reporter: analyzer' in cli(binary, 'get', 'T1').stdout
+        # A stamped-current but missing field is a named refusal, also for an
+        # already-running MCP process. Repair is modeled by a proper old stamp.
+        if backend == 'sqlite':
+            sql('ALTER TABLE tasks DROP COLUMN reporter')
+        else:
+            sql('REMOVE FIELD reporter ON tasks')
+        reply = seat.call('task_get', id='T1')
+        assert failed(reply) and 'missing tasks.reporter' in json.dumps(reply), reply
+        result = cli(binary, 'get', 'T1', ok=False)
+        assert 'missing tasks.reporter' in result.stderr and 'manual step' in result.stderr, result
+        sql('UPDATE board_stamp SET generation=2' if backend == 'sqlite' else 'UPDATE meta:schema SET version=2')
+        assert 'reporter: analyzer' in cli(binary, 'get', 'T1').stdout
+    finally:
+        seat.close()
+    print(f'reporter-upgrade: {backend}: actual v2 fixture, earliest add, unknown, byte preservation, CLI/MCP equality, immutable identity and named missing-field refusal passed', flush=True)
 
 
 def main():
@@ -274,6 +341,7 @@ def main():
                     def sql(query):
                         with sqlite3.connect(env['AGENTBOARD_DB']) as conn:
                             return conn.execute(query).fetchall()
+                reporter_upgrade_probe(backend, matching, env, sql)
                 review_probe(matching, env)
                 checks(backend, matching, mutant, env, sql)
             finally:

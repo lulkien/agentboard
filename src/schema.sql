@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS epics(
 CREATE TABLE IF NOT EXISTS tasks(
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   board        TEXT NOT NULL DEFAULT 'main',
+  reporter     TEXT NOT NULL DEFAULT '',      -- immutable creation actor; empty = unknown
   title        TEXT NOT NULL,
   description  TEXT NOT NULL DEFAULT '',      -- context: repo, files, situation
   goal         TEXT NOT NULL DEFAULT '',      -- how to do it + definition of done
@@ -93,6 +94,6 @@ CREATE TABLE IF NOT EXISTS board_stamp(
   opened_by TEXT NOT NULL DEFAULT '',
   last_writer TEXT NOT NULL DEFAULT ''
 );
-INSERT OR IGNORE INTO board_stamp(id,generation) VALUES(1,2);
+INSERT OR IGNORE INTO board_stamp(id,generation) VALUES(1,3);
 
 COMMIT;

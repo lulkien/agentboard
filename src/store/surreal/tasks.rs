@@ -28,6 +28,7 @@ use serde_json::{Map, Value, json};
 /// A task row. `tid` is the integer record key (`meta::id(id)`).
 #[derive(Deserialize, Clone, Debug)]
 pub(super) struct Row {
+    pub(super) reporter: String,
     pub(super) tid: i64,
     pub(super) status: String,
     pub(super) assignee: Option<String>,
@@ -192,6 +193,7 @@ impl From<Row> for TaskRow {
     /// Normalised at the store boundary: the renderer sees plain values.
     fn from(r: Row) -> Self {
         Self {
+            reporter: r.reporter,
             id: r.tid,
             status: r.status,
             assignee: r.assignee,
@@ -352,7 +354,7 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
         let lease = (status == "working").then(|| now + DEFAULT_TTL_S * 1000);
         let started = (status == "working").then_some(now);
         let mut content = json!({
-            "title": title, "description": description, "goal": goal,
+            "title": title, "description": description, "goal": goal, "reporter": actor,
             "path": path, "branch": branch, "status": status,
             "priority": priority, "created_at": now, "updated_at": now,
         });
@@ -713,6 +715,7 @@ pub(super) async fn file_review(
     let report = report.or(implement.report.as_deref());
     let mut content = json!({
         "title": title,
+        "reporter": actor,
         "description": review_description(&as_row, report, submission),
         "goal": review_goal(implement.tid, submission),
         "path": implement.path, "branch": implement.branch, "status": "ready",

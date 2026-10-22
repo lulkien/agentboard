@@ -77,6 +77,7 @@ pub struct Board {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AddArgs {
     /// One-line task title.
     pub title: String,

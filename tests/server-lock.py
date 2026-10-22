@@ -104,7 +104,7 @@ class ServerLockTests(unittest.TestCase):
         self.stop()
         result = self.cli('board', 'upgrade', '--owner')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('board upgrade: version 2 -> 2', result.stdout)
+        self.assertIn('board upgrade: version 3 -> 3', result.stdout)
         self.assertIn('committed atomically', result.stdout)
         with open(self.board / 'board.lock', 'r+') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

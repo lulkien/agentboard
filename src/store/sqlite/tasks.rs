@@ -162,8 +162,8 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let lease = (status == "working").then(|| now + DEFAULT_TTL_S * 1000);
     let started = (status == "working").then_some(now);
     tx.execute(
-        "INSERT INTO tasks(title,description,goal,path,branch,status,assignee,priority,epic_id,parent_id,created_at,updated_at,lease_until,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        params![title, description, goal, path, branch, status, assignee, priority, epic, parent, now, now, lease, started],
+        "INSERT INTO tasks(title,description,goal,path,branch,status,assignee,priority,epic_id,parent_id,created_at,updated_at,lease_until,started_at,reporter) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        params![title, description, goal, path, branch, status, assignee, priority, epic, parent, now, now, lease, started, actor],
     )
     .map_err(|e| format!("add: {e}"))?;
     let id = tx.last_insert_rowid();
@@ -464,7 +464,7 @@ fn file_review(
     }
     let now = now_ms();
     conn.execute(
-        "INSERT INTO tasks(title,description,goal,path,branch,status,priority,epic_id,parent_id,created_at,updated_at) VALUES(?,?,?,?,?,'ready',?,?,?,?,?)",
+        "INSERT INTO tasks(title,description,goal,path,branch,status,priority,epic_id,parent_id,created_at,updated_at,reporter) VALUES(?,?,?,?,?,'ready',?,?,?,?,?,?)",
         params![
             title,
             review_description(implement, report, submission),
@@ -475,7 +475,8 @@ fn file_review(
             implement.epic_id,
             implement.id,
             now,
-            now
+            now,
+            actor
         ],
     )
     .map_err(|e| format!("review row: {e}"))?;
