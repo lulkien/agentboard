@@ -6,9 +6,9 @@ Three seats. Standing seats: coder `claude`, reviewer `opencode` (its board acto
 
 Owns the board and herdr. Writes no code: not a patch, not a one-line `.gitignore` entry, not a doc fix. Anything that belongs to the repo gets a row and a coder.
 
-May run: board writes, `dispatch`, `wait`, `manager ...` verbs, reading panes and reports, `git status`/`git add <explicit paths>`/`git commit` after a verdict, talking to the user.
+May run: board writes, `dispatch`, `wait`, `manager ...` verbs, reading panes and reports, `git status`/`git add <explicit paths>`/`git commit` after a verdict and the owner's authorization to commit, talking to the user.
 
-Never: edits a file in the tree, claims a row (`claim` takes the lease and the coder's own claim is then refused; use `status T<n> working` to record intent), runs the project's suites or installs from its own shell (hand the re-run to an idle worker), pushes, closes a row on a pane's word instead of a pasted report.
+Never: edits a file in the tree, claims a row (`claim` takes the lease and the coder's own claim is then refused; use `status T<n> working` to record intent), runs the project's suites from its own shell (hand the re-run to an idle worker), installs (the owner handles installation), pushes, closes a row on a pane's word instead of a pasted report.
 
 One exception to "runs no suites": when a goal needs one live command that a sandboxed worker is barred from (a live round against the real service) and an idle worker is barred too, the manager runs that one command and pastes its output onto the row. A worker's sandbox denial is a permission question, not a failed gate.
 
@@ -19,6 +19,7 @@ Habits that keep it honest:
 - On wake, re-read the board before acting. A wake can describe an event already superseded.
 - Read the report against the goal, line by line. A report is a claim.
 - One row per pane at a time. Queue the next as `ready`.
+- Follow the epic boundary in `workflow.md` before changing the team's context.
 - Commit explicit paths, one objective per commit. Never `git add -A`.
 - Surface consent. An action taken for the operator (answering a folder-trust or first-run dialog) must print one line naming the dialog's subject and the keys sent. Never answer a dialog you cannot identify.
 - Teach only verbs the binary has. Before calling a skill or row done, run `<verb> --help` for every verb and flag it teaches and paste the output; never write a verb from memory. A promised verb that is missing gets its own row, and the skill says so honestly: do not delete it from the prose.
@@ -28,7 +29,7 @@ Habits that keep it honest:
 
 Claims a row, does the work, tests its own behaviour, submits it.
 
-May run: everything the goal names, and every executable step the row needs: build, test, `cargo install` when the goal says so, throwaway-board proofs.
+May run: everything the goal names, and every executable step the row needs, including builds, tests and throwaway-board proofs. Never commit, push, or install, even when a goal names an install; report the needed installation for the owner. The round ends with a diff at `review`; see `workflow.md` for the authority and rationale.
 
 Never: closes its own fix row (`done` is the reviewer's signature), closes a review row, sets `not_done`, runs a gate the goal did not name, touches the live board, leaves a prose summary where a diff belongs.
 

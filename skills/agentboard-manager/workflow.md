@@ -18,7 +18,9 @@ Exactly three levels: **implement -> review -> fix**.
 4. Reviewer reads the newest diff. Clean: review row `done`. Findings: it files the fix row (`--parent` = review row) and sets the review row `needs_fix`.
 5. Coder fixes only the listed findings, `diff_add` on the fix row, answers each finding in `report`, sets the fix row `review`.
 6. Reviewer re-checks its own findings. All closed: fix row `done`, then review row `done`. Any open: `note` naming it, fix row `needs_fix`, back to 5.
-7. Manager reads the report against the goal, closes the implement row `done`, commits explicit paths, never pushes.
+7. Manager reads the report against the goal, closes the implement row `done`, and commits explicit paths only after the owner authorizes it; never pushes.
+
+The coder's round ends at `review`, with a diff; it never ends at a commit. Coder and reviewer seats never commit, push, or install. The reviewer reads the diff, not the history: a commit buys the round nothing and costs the team a history it did not agree to. Committing belongs to the manager, with the owner's authorization.
 
 ## The diff gate
 
@@ -55,6 +57,8 @@ A row arriving at `not_done` from a worker was not capped: read `reopens:` first
 ## Epic boundary
 
 Close the epic when every row is `done` or `dropped`; a `not_done` row blocks closure. This is policy, not a board check. Then commit, then `manager renew`. A fix row is the same cycle: not a renewal point. `renew` does not reload MCP config or start flags: a changed config needs `manager down` and `manager up`.
+
+One epic in flight (owner rule, 2026-10-22): the manager finishes every row of the current epic (`done` or `dropped`) and commits its work before filing or dispatching the next epic's first implementation row. A defect belonging to a later epic may be filed there and left `ready`: filing is not starting. Only a defect that blocks the current epic's remaining rows joins the current epic for work now; its own epic keeps waiting. Renewal clears the panes; this boundary clears the queue before the team changes context.
 
 ## Watching and gating
 
