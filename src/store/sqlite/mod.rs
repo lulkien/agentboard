@@ -387,6 +387,14 @@ impl Board for SqliteBoard {
     fn apply(&self, actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         tasks::apply(actor, id, p)
     }
+    fn chain_action(
+        &self,
+        actor: &str,
+        root: i64,
+        action: super::chain::Action<'_>,
+    ) -> Result<String, String> {
+        tasks::chain_action(actor, root, action)
+    }
     fn note(&self, actor: &str, id: i64, body: &str) -> Result<String, String> {
         tasks::note(actor, id, body)
     }

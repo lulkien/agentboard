@@ -89,7 +89,39 @@ fn subtree_height(conn: &rusqlite::Connection, id: i64) -> Result<usize, String>
 fn check_depth(conn: &rusqlite::Connection, parent: i64, height: usize) -> Result<(), String> {
     let level = chain_level(conn, parent)?;
     if level + height > MAX_CHAIN {
+        if new_chain_root(conn, parent)?.is_some() {
+            return Err(crate::store::chain::depth_refusal(parent, level, height));
+        }
         return Err(chain_refusal(parent, level, height));
+    }
+    Ok(())
+}
+
+fn check_single_child(
+    conn: &rusqlite::Connection,
+    parent: i64,
+    moving: Option<i64>,
+) -> Result<(), String> {
+    let mut statement = conn
+        .prepare("SELECT id FROM tasks WHERE parent_id=? ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let children = statement
+        .query_map(params![parent], |r| r.get::<_, i64>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    crate::store::chain::single_child(parent, &children, moving)
+}
+fn check_linear(conn: &rusqlite::Connection, root: i64) -> Result<(), String> {
+    check_single_child(conn, root, None)?;
+    let mut statement = conn
+        .prepare("SELECT id FROM tasks WHERE parent_id=?")
+        .map_err(|e| e.to_string())?;
+    let children = statement
+        .query_map(params![root], |r| r.get::<_, i64>(0))
+        .map_err(|e| e.to_string())?;
+    for child in children {
+        check_linear(conn, child.map_err(|e| e.to_string())?)?;
     }
     Ok(())
 }
@@ -116,8 +148,12 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     // must hold for the row that lands, not for the row we looked at.
     let tx = super::write_transaction(&mut conn)?;
     let epic = resolve_epic(&tx, epic, parent)?;
+    crate::store::chain::initial_status(status)?;
     if let Some(p) = parent {
         check_depth(&tx, p, 1).map_err(|e| format!("add: {e}"))?;
+        if new_chain_root(&tx, p)?.is_some() {
+            check_single_child(&tx, p, Some(-1))?;
+        }
     }
     // A task created already `working` belongs to its creator unless named.
     let assignee = assignee.or_else(|| (status == "working").then_some(actor));
@@ -305,6 +341,10 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
             steps += 1;
         }
         check_depth(&tx, p, subtree_height(&tx, id)?)?;
+        if new_chain_root(&tx, p)?.is_some() {
+            check_single_child(&tx, p, Some(id))?;
+            check_linear(&tx, id)?;
+        }
     }
     tx.execute(
         "UPDATE tasks SET parent_id=?, updated_at=? WHERE id=?",
@@ -330,8 +370,8 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
         let tx = super::write_transaction(&mut conn)?;
         let cand: Option<(i64, String)> = {
             let (sql, arg): (String, Vec<i64>) = match id {
-                Some(x) => ("SELECT id,status FROM tasks WHERE id=? AND (status='ready' OR (lease_until IS NOT NULL AND lease_until < ?))".to_string(), vec![x, now]),
-                None => ("SELECT id,status FROM tasks WHERE status='ready' ORDER BY priority, id LIMIT 1".to_owned(), vec![]),
+                Some(x) => ("SELECT id,status FROM tasks WHERE id=? AND (status='ready' OR (status='needs_impl' AND parent_id IS NOT NULL) OR (lease_until IS NOT NULL AND lease_until < ?))".to_string(), vec![x, now]),
+                None => ("SELECT id,status FROM tasks WHERE status='ready' OR (status='needs_impl' AND parent_id IS NOT NULL) ORDER BY priority, id LIMIT 1".to_owned(), vec![]),
             };
             let mut stmt = tx.prepare(&sql).map_err(|e| e.to_string())?;
 
@@ -361,7 +401,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
         // the new lease would let a live claim be stolen.
         let changed = tx
             .execute(
-                "UPDATE tasks SET status='working', assignee=?, lease_until=?, updated_at=?, started_at=COALESCE(started_at,?) WHERE id=? AND (status='ready' OR (lease_until IS NOT NULL AND lease_until < ?))",
+                "UPDATE tasks SET status='working', assignee=?, lease_until=?, updated_at=?, started_at=COALESCE(started_at,?) WHERE id=? AND (status='ready' OR (status='needs_impl' AND parent_id IS NOT NULL) OR (lease_until IS NOT NULL AND lease_until < ?))",
                 params![actor, lease, now, now, task, now],
             )
             .map_err(|e| e.to_string())?;
@@ -463,13 +503,66 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
         Some(raw) => norm(raw).ok_or_else(|| format!("bad status {raw:?} ({STATUS_LIST})"))?,
         None => cur.status.as_str(),
     };
+    let root = new_chain_root(&tx, id)?;
+    if matches!(status, "needs_impl" | "needs_review") {
+        crate::store::chain::transition(chain_level(&tx, id)?, &cur.status, status)?;
+        if status == "needs_impl" && cur.parent_id.is_none() {
+            check_linear(&tx, id)?;
+        }
+    }
+    if status == "needs_review" && root.is_none() {
+        return Err("analyze plan is not needs_impl; cannot skip to needs_review".into());
+    }
+    if let Some(root) = root {
+        if status == "needs_fix" && chain_level(&tx, id)? != 3 {
+            return Err("only the review row may reject a new chain with needs_fix".into());
+        }
+        if matches!(fetch(&tx, root)?.status.as_str(), "done" | "not_done")
+            && p.status.is_some_and(|s| s != cur.status)
+        {
+            return Err(
+                "closed chain is final; use chain reopen with a different identity and a reason"
+                    .into(),
+            );
+        }
+        let action = match status {
+            "done" | "not_done" if p.status.is_some() => Some(crate::store::chain::Action::Close {
+                status,
+                verdict: p.report.or(p.note).unwrap_or(""),
+            }),
+            "needs_fix" if chain_level(&tx, id)? == 3 && p.status.is_some() => {
+                Some(crate::store::chain::Action::Reject {
+                    reason: p.note.or(p.report).unwrap_or(""),
+                })
+            }
+            _ => None,
+        };
+        if let Some(action) = action {
+            if p.commit.is_some() || p.needs.is_some() {
+                return Err(
+                    "chain operation cannot combine commit or needs; record those separately"
+                        .into(),
+                );
+            }
+            let result = chain_in_tx(&tx, actor, root, action)?;
+            tx.commit().map_err(|e| e.to_string())?;
+            return crate::store::chain::finish(result);
+        }
+    }
     let moved = status != cur.status;
     // A move into review needs a submission recorded since the last claim (a diff, or
     // evidence for a re-run round): refused before anything is written, so a reviewer
     // never gets an empty review.
-    let submit = moved && status == "review";
+    let submit = moved && matches!(status, "review" | "needs_review");
     let submission = if submit {
-        super::diffs::submission_since_claim(&tx, id)?
+        super::diffs::submission_since_claim(
+            &tx,
+            if root.is_some() && chain_level(&tx, id)? == 3 {
+                cur.parent_id.unwrap()
+            } else {
+                id
+            },
+        )?
     } else {
         None
     };
@@ -725,6 +818,113 @@ pub fn heartbeat(actor: &str, id: i64, ttl_s: i64) -> Result<String, String> {
 
     conn.commit().map_err(|e| e.to_string())?;
     Ok(format!("ok {} lease {}m", short(id), ttl_s / 60))
+}
+
+fn chain_snapshot(
+    tx: &rusqlite::Transaction<'_>,
+    root: i64,
+) -> Result<crate::store::chain::Snapshot, String> {
+    let mut rows = vec![fetch(tx, root)?];
+    let mut index = 0;
+    while index < rows.len() {
+        if rows.len() > 3 {
+            return Err(
+                "chain requires exactly analyze -> implement -> review, with no review children"
+                    .into(),
+            );
+        }
+        let mut statement = tx
+            .prepare("SELECT id FROM tasks WHERE parent_id=? ORDER BY id")
+            .map_err(|e| e.to_string())?;
+        let ids = statement
+            .query_map(params![rows[index].id], |r| r.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?;
+        for id in ids {
+            rows.push(fetch(tx, id.map_err(|e| e.to_string())?)?);
+        }
+        index += 1;
+    }
+    let ids = rows
+        .iter()
+        .map(|r| r.id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let diff_actor = tx.query_row(&format!("SELECT actor FROM events WHERE kind='diff' AND task_id IN ({ids}) ORDER BY seq DESC LIMIT 1"), [], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+    let close_actor = tx.query_row("SELECT actor FROM events WHERE kind='chain_close' AND task_id=? ORDER BY seq DESC LIMIT 1", params![root], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+    Ok(crate::store::chain::Snapshot {
+        rows,
+        diff_actor,
+        close_actor,
+    })
+}
+
+fn chain_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    actor: &str,
+    root: i64,
+    action: crate::store::chain::Action<'_>,
+) -> Result<(String, bool), String> {
+    let snapshot = chain_snapshot(tx, root)?;
+    let changes = crate::store::chain::plan(actor, &snapshot, action)?;
+    for (index, change) in changes.iter().enumerate() {
+        let closed = matches!(change.status.as_str(), "done" | "not_done");
+        tx.execute("UPDATE tasks SET status=?, reopen_count=?, lease_until=NULL, completed_at=?, updated_at=?, note=? WHERE id=?", params![change.status, change.count, closed.then(now_ms), now_ms(), change.body, change.id]).map_err(|e| e.to_string())?;
+        if index == 2 && matches!(change.kind, "chain_reopen" | "chain_reject") {
+            tx.execute(
+                "UPDATE tasks SET report=NULL WHERE id=?",
+                params![change.id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if index == 2 && change.kind == "chain_close" {
+            tx.execute(
+                "UPDATE tasks SET report=? WHERE id=?",
+                params![change.body, change.id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        log_event(
+            tx,
+            Subject::Task(change.id),
+            actor,
+            change.kind,
+            &change.body,
+        )?;
+        #[cfg(test)]
+        if index == 0 {
+            crate::store::chain::tests::pause_close();
+        }
+    }
+    Ok((
+        crate::store::chain::summary(&changes),
+        changes[1].count > crate::store::text::MAX_REOPENS,
+    ))
+}
+
+pub fn chain_action(
+    actor: &str,
+    root: i64,
+    action: crate::store::chain::Action<'_>,
+) -> Result<String, String> {
+    let mut conn = open()?;
+    let tx = super::write_transaction(&mut conn)?;
+    let result = chain_in_tx(&tx, actor, root, action)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    crate::store::chain::finish(result)
+}
+
+fn new_chain_root(tx: &rusqlite::Connection, id: i64) -> Result<Option<i64>, String> {
+    let mut row = fetch(tx, id)?;
+    for _ in 0..MAX_CHAIN {
+        match row.parent_id {
+            Some(parent) => row = fetch(tx, parent)?,
+            None => {
+                let closed: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE task_id=? AND kind IN ('chain_close','chain_reject'))", params![row.id], |r| r.get(0)).map_err(|e| e.to_string())?;
+                return Ok((row.status == "needs_impl" || closed).then_some(row.id));
+            }
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

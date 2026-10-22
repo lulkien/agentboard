@@ -103,6 +103,12 @@ pub trait Board {
     fn set_parent(&self, actor: &str, id: i64, parent: Option<i64>) -> Result<String, String>;
     fn claim(&self, actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimError>;
     fn apply(&self, actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String>;
+    fn chain_action(
+        &self,
+        actor: &str,
+        root: i64,
+        action: super::chain::Action<'_>,
+    ) -> Result<String, String>;
     fn note(&self, actor: &str, id: i64, body: &str) -> Result<String, String>;
     fn report(&self, actor: &str, id: i64, body: &str) -> Result<String, String>;
     fn ask(&self, actor: &str, id: i64, question: &str) -> Result<String, String>;

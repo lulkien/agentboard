@@ -287,7 +287,31 @@ async fn subtree_height(db: &Db, id: i64) -> Result<usize, String> {
 async fn check_depth(db: &Db, parent: i64, height: usize) -> Result<(), String> {
     let level = chain_level(db, parent).await?;
     if level + height > MAX_CHAIN {
+        if new_chain_root(db, parent).await?.is_some() {
+            return Err(crate::store::chain::depth_refusal(parent, level, height));
+        }
         return Err(chain_refusal(parent, level, height));
+    }
+    Ok(())
+}
+
+async fn child_ids(db: &Db, parent: i64) -> Result<Vec<i64>, String> {
+    let mut result = db
+        .query("SELECT VALUE meta::id(id) FROM tasks WHERE parent_id=$parent")
+        .bind(("parent", parent))
+        .await
+        .map_err(|e| db_err(&e))?;
+    result.take(0).map_err(|e| db_err(&e))
+}
+async fn check_single_child(db: &Db, parent: i64, moving: Option<i64>) -> Result<(), String> {
+    crate::store::chain::single_child(parent, &child_ids(db, parent).await?, moving)
+}
+async fn check_linear(db: &Db, root: i64) -> Result<(), String> {
+    let mut pending = vec![root];
+    while let Some(parent) = pending.pop() {
+        let children = child_ids(db, parent).await?;
+        crate::store::chain::single_child(parent, &children, None)?;
+        pending.extend(children);
     }
     Ok(())
 }
@@ -312,10 +336,14 @@ pub fn add(actor: &str, task: &NewTask<'_>) -> Result<String, String> {
     let s = session(true)?;
     block_on(async {
         let epic = resolve_epic(&s.db, epic, parent).await?;
+        crate::store::chain::initial_status(status)?;
         if let Some(p) = parent {
             check_depth(&s.db, p, 1)
                 .await
                 .map_err(|e| super::with_context("add", &e))?;
+            if new_chain_root(&s.db, p).await?.is_some() {
+                check_single_child(&s.db, p, Some(-1)).await?;
+            }
         }
         // A task created already `working` belongs to its creator unless named.
         let assignee = assignee.or_else(|| (status == "working").then_some(actor));
@@ -533,6 +561,10 @@ pub fn set_parent(actor: &str, id: i64, parent: Option<i64>) -> Result<String, S
                 steps += 1;
             }
             check_depth(&s.db, p, subtree_height(&s.db, id).await?).await?;
+            if new_chain_root(&s.db, p).await?.is_some() {
+                check_single_child(&s.db, p, Some(id)).await?;
+                check_linear(&s.db, id).await?;
+            }
         }
         let mut tx = Txn::new();
         let mut sets = Vec::new();
@@ -569,7 +601,10 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
                     None => return Err(format!("no such task {}", short(x)).into()),
                     Some(r) => {
                         let stale = r.lease_until.is_some_and(|l| l < now);
-                        if r.status == "ready" || stale {
+                        if r.status == "ready"
+                            || (r.status == "needs_impl" && r.parent_id.is_some())
+                            || stale
+                        {
                             Some(x)
                         } else {
                             // A refusal is an error: `agentboard claim T7 && ...` must not
@@ -581,7 +616,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
                 None => {
                     let mut r = s
                         .db
-                        .query("SELECT meta::id(id) AS tid, priority FROM tasks WHERE status = 'ready' ORDER BY priority, tid LIMIT 1")
+                        .query("SELECT meta::id(id) AS tid, priority FROM tasks WHERE status = 'ready' OR (status = 'needs_impl' AND parent_id != NONE) ORDER BY priority, tid LIMIT 1")
                         .await
                         .map_err(|e| db_err(&e))?;
                     #[derive(Deserialize)]
@@ -600,7 +635,7 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
             let mut tx = Txn::new();
             let (idp, a, l, n) = (tx.p(task), tx.p(actor), tx.p(lease), tx.p(now));
             tx.raw(&format!(
-                "LET $won = (UPDATE type::thing('tasks', {idp}) SET status = 'working', assignee = {a}, lease_until = {l}, updated_at = {n}, started_at = started_at ?? {n} WHERE status = 'ready' OR (lease_until != NONE AND lease_until < {n}) RETURN VALUE meta::id(id));"
+                "LET $won = (UPDATE type::thing('tasks', {idp}) SET status = 'working', assignee = {a}, lease_until = {l}, updated_at = {n}, started_at = started_at ?? {n} WHERE status = 'ready' OR (status = 'needs_impl' AND parent_id != NONE) OR (lease_until != NONE AND lease_until < {n}) RETURN VALUE meta::id(id));"
             ));
             tx.raw("IF array::len($won) = 1 {");
             tx.event(&idp, actor, "claim", "");
@@ -730,13 +765,68 @@ pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
             Some(raw) => norm(raw).ok_or_else(|| format!("bad status {raw:?} ({STATUS_LIST})"))?,
             None => cur.status.as_str(),
         };
+        let root = new_chain_root(&s.db, id).await?;
+        if matches!(status, "needs_impl" | "needs_review") {
+            crate::store::chain::transition(chain_level(&s.db, id).await?, &cur.status, status)?;
+            if status == "needs_impl" && cur.parent_id.is_none() {
+                check_linear(&s.db, id).await?;
+            }
+        }
+        if status == "needs_review" && root.is_none() {
+            return Err("analyze plan is not needs_impl; cannot skip to needs_review".into());
+        }
+        if let Some(root) = root {
+            if status == "needs_fix" && chain_level(&s.db, id).await? != 3 {
+                return Err("only the review row may reject a new chain with needs_fix".into());
+            }
+            if matches!(
+                fetch(&s.db, root).await?.status.as_str(),
+                "done" | "not_done"
+            ) && p.status.is_some_and(|s| s != cur.status)
+            {
+                return Err("closed chain is final; use chain reopen with a different identity and a reason".into());
+            }
+            let action = match status {
+                "done" | "not_done" if p.status.is_some() => {
+                    Some(crate::store::chain::Action::Close {
+                        status,
+                        verdict: p.report.or(p.note).unwrap_or(""),
+                    })
+                }
+                "needs_fix" if chain_level(&s.db, id).await? == 3 && p.status.is_some() => {
+                    Some(crate::store::chain::Action::Reject {
+                        reason: p.note.or(p.report).unwrap_or(""),
+                    })
+                }
+                _ => None,
+            };
+            if let Some(action) = action {
+                if p.commit.is_some() || p.needs.is_some() {
+                    return Err(
+                        "chain operation cannot combine commit or needs; record those separately"
+                            .into(),
+                    );
+                }
+                let result = chain_in_tx(&s.db, &mut tx, actor, root, action).await?;
+                tx.run(&s.db, "NONE").await?;
+                return crate::store::chain::finish(result);
+            }
+        }
         let moved = status != cur.status;
         // A move into review needs a submission recorded since the last claim (a diff,
         // or evidence for a re-run round): refused before anything is written, so a
         // reviewer never gets an empty review.
-        let submit = moved && status == "review";
+        let submit = moved && matches!(status, "review" | "needs_review");
         let submission = if submit {
-            super::diffs::submission_since_claim(&s.db, id).await?
+            super::diffs::submission_since_claim(
+                &s.db,
+                if root.is_some() && chain_level(&s.db, id).await? == 3 {
+                    cur.parent_id.unwrap()
+                } else {
+                    id
+                },
+            )
+            .await?
         } else {
             None
         };
@@ -1119,4 +1209,115 @@ pub fn children(of: Ref) -> Result<String, String> {
         let rows: Vec<TaskRow> = rows.into_iter().map(TaskRow::from).collect();
         Ok(text::children_text(&label, &rows))
     })
+}
+
+async fn chain_snapshot(db: &Db, root: i64) -> Result<crate::store::chain::Snapshot, String> {
+    let mut rows = vec![fetch(db, root).await?];
+    let mut index = 0;
+    while index < rows.len() {
+        if rows.len() > 3 {
+            return Err(
+                "chain requires exactly analyze -> implement -> review, with no review children"
+                    .into(),
+            );
+        }
+        rows.extend(
+            select_rows(
+                db,
+                "WHERE parent_id=$id ORDER BY tid",
+                json!({"id": rows[index].tid}),
+            )
+            .await?,
+        );
+        index += 1;
+    }
+    let ids: Vec<i64> = rows.iter().map(|r| r.tid).collect();
+    let mut result = db.query("SELECT VALUE actor FROM (SELECT actor, meta::id(id) AS seq FROM events WHERE kind='diff' AND task_id IN $ids ORDER BY seq DESC LIMIT 1)").bind(("ids", ids)).await.map_err(|e| db_err(&e))?;
+    let diff_actor: Vec<String> = result.take(0).map_err(|e| db_err(&e))?;
+    let mut result = db.query("SELECT VALUE actor FROM (SELECT actor, meta::id(id) AS seq FROM events WHERE kind='chain_close' AND task_id=$root ORDER BY seq DESC LIMIT 1)").bind(("root", root)).await.map_err(|e| db_err(&e))?;
+    let close_actor: Vec<String> = result.take(0).map_err(|e| db_err(&e))?;
+    Ok(crate::store::chain::Snapshot {
+        rows: rows.into_iter().map(TaskRow::from).collect(),
+        diff_actor: diff_actor.into_iter().next(),
+        close_actor: close_actor.into_iter().next(),
+    })
+}
+
+async fn chain_in_tx(
+    db: &Db,
+    tx: &mut Txn,
+    actor: &str,
+    root: i64,
+    action: crate::store::chain::Action<'_>,
+) -> Result<(String, bool), String> {
+    let snapshot = chain_snapshot(db, root).await?;
+    let changes = crate::store::chain::plan(actor, &snapshot, action)?;
+    for (index, change) in changes.iter().enumerate() {
+        let mut sets = Vec::new();
+        assign(tx, &mut sets, "status", Some(change.status.clone().into()));
+        assign(tx, &mut sets, "reopen_count", Some(change.count.into()));
+        assign(tx, &mut sets, "lease_until", None);
+        assign(
+            tx,
+            &mut sets,
+            "completed_at",
+            matches!(change.status.as_str(), "done" | "not_done").then(|| now_ms().into()),
+        );
+        assign(tx, &mut sets, "updated_at", Some(now_ms().into()));
+        assign(tx, &mut sets, "note", Some(change.body.clone().into()));
+        if index == 2 && matches!(change.kind, "chain_reopen" | "chain_reject") {
+            assign(tx, &mut sets, "report", None);
+        }
+        if index == 2 && change.kind == "chain_close" {
+            assign(tx, &mut sets, "report", Some(change.body.clone().into()));
+        }
+        let id = tx.p(change.id);
+        tx.raw(&format!(
+            "UPDATE type::thing('tasks', {id}) SET {};",
+            sets.join(", ")
+        ));
+        tx.event(&id, actor, change.kind, &change.body);
+        #[cfg(test)]
+        if index == 0 && std::env::var_os("AGENTBOARD_CHAIN_PAUSE").is_some() {
+            tx.raw("SLEEP 30s;");
+        }
+    }
+    Ok((
+        crate::store::chain::summary(&changes),
+        changes[1].count > crate::store::text::MAX_REOPENS,
+    ))
+}
+
+pub fn chain_action(
+    actor: &str,
+    root: i64,
+    action: crate::store::chain::Action<'_>,
+) -> Result<String, String> {
+    let s = session(true)?;
+    block_on(async {
+        let mut tx = Txn::new();
+        let result = chain_in_tx(&s.db, &mut tx, actor, root, action).await?;
+        #[cfg(test)]
+        if let Ok(path) = std::env::var("AGENTBOARD_CHAIN_PAUSE") {
+            std::fs::write(path, "sending transaction with pause after first update").unwrap();
+        }
+        tx.run(&s.db, "NONE").await?;
+        crate::store::chain::finish(result)
+    })
+}
+
+async fn new_chain_root(db: &Db, id: i64) -> Result<Option<i64>, String> {
+    let mut row = fetch(db, id).await?;
+    for _ in 0..MAX_CHAIN {
+        match row.parent_id {
+            Some(parent) => row = fetch(db, parent).await?,
+            None => {
+                return Ok((row.status == "needs_impl"
+                    || last_event_seq(db, row.tid, "chain_close").await?.is_some()
+                    || last_event_seq(db, row.tid, "chain_reject").await?.is_some())
+                .then_some(row.tid));
+            }
+        }
+    }
+    Ok(None)
 }

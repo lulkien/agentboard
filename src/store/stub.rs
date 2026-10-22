@@ -32,6 +32,14 @@ impl Board for StubBoard {
     fn apply(&self, _actor: &str, _id: i64, _p: &Patch<'_>) -> Result<String, String> {
         stub()
     }
+    fn chain_action(
+        &self,
+        _actor: &str,
+        _root: i64,
+        _action: super::chain::Action<'_>,
+    ) -> Result<String, String> {
+        stub()
+    }
     fn note(&self, _actor: &str, _id: i64, _body: &str) -> Result<String, String> {
         stub()
     }

@@ -8,18 +8,18 @@ const EXIT_CODES: &str = "Exit codes: 0 success or wait matched, 3 wait timed ou
 With no command, agentboard serves MCP on stdio.\n\
 Free-text values that begin with '-' are taken literally (`note T1 --bogus` stores \"--bogus\"); prefer --flag=value when unsure.";
 
-const WAIT_HELP: &str = "Block until a watched task matches.
+const WAIT_HELP: &str = concat!("Block until a watched task matches.
 
 Selectors (union, at least one; ids need no flag):
   T1 T2...   those tasks
   --epic E1  every task in that epic
   --open     every task not done/dropped, re-evaluated while waiting (new tasks count)
 
---status CSV  current status in CSV (ready|working|blocking|not_done|needs_fix|review|done|dropped); already true => returns at once
+--status CSV  current status in CSV (", crate::task_statuses!(), "); already true => returns at once
 --kind CSV    new event kind in CSV (add|claim|report|note|block|answer|review|done|needs_fix|edit|dispatch|diff; `ask` is an alias of `block`)
 Both filters => both must hold; neither => any new event. --after: only events with seq > SEQ.
 
-Exit 0 and first line `matched:`; exit 3 and first line `timeout:`.";
+Exit 0 and first line `matched:`; exit 3 and first line `timeout:`.");
 
 /// `--db` means a different thing in each build, so each build says its own.
 #[cfg(not(feature = "surreal"))]
@@ -184,7 +184,8 @@ pub enum Cmd {
         #[arg(long)]
         commit: Option<String>,
     },
-    /// Set a status (ready|working|blocking|not_done|needs_fix|review|done|dropped)
+    /// Set a task status.
+    #[command(about = concat!("Set a status (", crate::task_statuses!(), ")"))]
     Status {
         id: String,
         status: String,

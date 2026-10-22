@@ -81,6 +81,8 @@ pub fn norm(raw: &str) -> Option<&'static str> {
             Some("needs_fix")
         }
         "not_done" | "not-done" | "not done" | "nd" => Some("not_done"),
+        "needs_impl" => Some("needs_impl"),
+        "needs_review" => Some("needs_review"),
         "review" => Some("review"),
         "done" => Some("done"),
         "dropped" => Some("dropped"),
@@ -89,7 +91,13 @@ pub fn norm(raw: &str) -> Option<&'static str> {
 }
 
 /// Canonical task status names, for error messages.
-pub const STATUS_LIST: &str = "ready|working|blocking|not_done|needs_fix|review|done|dropped";
+#[macro_export]
+macro_rules! task_statuses {
+    () => {
+        "ready|working|blocking|not_done|needs_fix|needs_impl|needs_review|review|done|dropped"
+    };
+}
+pub const STATUS_LIST: &str = crate::task_statuses!();
 
 /// Canonical epic status names, for error messages.
 pub const EPIC_STATUS_LIST: &str = "open|done|dropped";
@@ -173,6 +181,7 @@ pub fn parse_ref(raw: &str) -> Result<Ref, String> {
 
 pub mod board;
 pub mod bridge;
+pub mod chain;
 pub(crate) mod proc;
 pub mod text;
 pub mod waiting;
@@ -217,6 +226,15 @@ pub fn claim(actor: &str, id: Option<i64>, ttl_s: i64) -> Result<String, ClaimEr
 }
 pub fn apply(actor: &str, id: i64, p: &Patch<'_>) -> Result<String, String> {
     BACKEND.apply(actor, id, p)
+}
+/// Store-level workflow verbs; adapters for them belong to the next workflow slice.
+#[allow(dead_code)]
+pub fn chain_close(actor: &str, root: i64, status: &str, verdict: &str) -> Result<String, String> {
+    BACKEND.chain_action(actor, root, chain::Action::Close { status, verdict })
+}
+#[allow(dead_code)]
+pub fn chain_reopen(actor: &str, root: i64, reason: &str) -> Result<String, String> {
+    BACKEND.chain_action(actor, root, chain::Action::Reopen { reason })
 }
 pub fn note(actor: &str, id: i64, body: &str) -> Result<String, String> {
     BACKEND.note(actor, id, body)
