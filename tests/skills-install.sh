@@ -27,10 +27,10 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     assert p.returncode==0,p.stderr
     expected={
       '.hermes/skills/agentboard-manager':'agentboard-manager',
-      '.claude/commands/manager.md':'agentboard-manager/commands/claude/manager.md',
-      '.config/opencode/commands/manager.md':'agentboard-manager/commands/opencode/manager.md',
-      '.codex/skills/manager':'agentboard-manager/commands/codex/manager',
-      '.hermes/skills/manager':'agentboard-manager/commands/hermes/manager',
+      '.claude/commands/manager.md':'commands/claude/manager.md',
+      '.config/opencode/commands/manager.md':'commands/opencode/manager.md',
+      '.codex/skills/manager':'commands/codex/manager',
+      '.hermes/skills/manager':'commands/hermes/manager',
     }
     for dest,src in expected.items():
         path=home/dest
@@ -39,6 +39,15 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     assert (home/'.hermes/skills/manager/SKILL.md').is_file()
     assert not (home/'.codex/prompts/manager.md').exists()
     assert p.stdout.count('linked: ')==5,p.stdout
+    # Follow installed symlinks as Hermes does: only its own manager is visible.
+    managers=[]
+    for directory, _, files in os.walk(home/'.hermes/skills', followlinks=True):
+        if 'SKILL.md' in files:
+            skill=pathlib.Path(directory)/'SKILL.md'
+            if 'name: manager' in skill.read_text().split('---',2)[1].splitlines():
+                managers.append(skill)
+    assert managers==[home/'.hermes/skills/manager/SKILL.md'],managers
+    assert not (home/'.hermes/skills/commands').exists()
     check('fresh install creates five repo links, with Codex and Hermes skill directories')
 
     p=run(home)
@@ -79,10 +88,14 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     target=root/'manual target'
     claude=root/'claude commands'
     opencode=root/'opencode commands'
+    # An unrelated non-skill directory is not a destination or a conflict.
+    (target/'commands').mkdir(parents=True)
+    (target/'commands/keep').write_text('untouched')
     p=run(custom,target,CODEX_HOME=codehome,AGENTBOARD_CLAUDE_COMMANDS=claude,AGENTBOARD_OPENCODE_COMMANDS=opencode)
     assert p.returncode==0,p.stderr
     assert (codehome/'skills/manager/SKILL.md').is_file()
     assert (target/'agentboard-manager').is_symlink()
+    assert (target/'commands/keep').read_text()=='untouched'
     assert (claude/'manager.md').is_file() and (opencode/'manager.md').is_file()
     assert (custom/'.hermes/skills/manager/SKILL.md').is_file()
     assert not (custom/'.codex').exists()

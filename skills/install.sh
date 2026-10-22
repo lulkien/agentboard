@@ -14,7 +14,7 @@ for arg in "$@"; do
 done
 target=${target:-$HOME/.hermes/skills}
 src=$(cd "$(dirname "$0")" && pwd)
-cmd_src=$src/agentboard-manager/commands
+cmd_src=$src/commands
 claude_dir=${AGENTBOARD_CLAUDE_COMMANDS:-$HOME/.claude/commands}
 opencode_dir=${AGENTBOARD_OPENCODE_COMMANDS:-$HOME/.config/opencode/commands}
 codex_dir=${CODEX_HOME:-$HOME/.codex}/skills
@@ -23,6 +23,7 @@ hermes_dir=$HOME/.hermes/skills
 # Check every destination first, so a refusal touches nothing.
 refuse=0
 for dir in "$src"/*/; do
+  [ -f "$dir/SKILL.md" ] || continue
   p=$target/$(basename "$dir")
   if { [ -e "$p" ] || [ -L "$p" ]; } && [ "$force" -eq 0 ]; then
     echo "exists: $p (use --force)" >&2; refuse=1
@@ -43,6 +44,7 @@ link() { # link <repo path> <dest>
 
 mkdir -p "$target" "$claude_dir" "$opencode_dir" "$codex_dir" "$hermes_dir"
 for dir in "$src"/*/; do
+  [ -f "$dir/SKILL.md" ] || continue
   link "${dir%/}" "$target/$(basename "$dir")"
 done
 link "$cmd_src/claude/manager.md" "$claude_dir/manager.md"

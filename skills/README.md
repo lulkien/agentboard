@@ -5,7 +5,9 @@
 entry points below only initialize the manager seat: register this session, print
 the brief, and arm the 300 s watch. Read the pages for everything else.
 
-All file paths in the table are relative to `agentboard-manager/`.
+All file paths in the table are relative to `skills/`. The `commands/` directory
+is outside the manual skill tree and is not installed as a skill: recursive
+loaders must see only their own manager entry point.
 
 | CLI | File | Install target | Invocation |
 |---|---|---|---|
