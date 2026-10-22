@@ -86,8 +86,9 @@ Manual moves that still need plain `herdr` (attach, `/btw`, killing a TUI by pro
 
 From the repo, the owner installs with `cargo install --path . --locked`, then runs
 `~/.cargo/bin/agentboard board-build` and `python3 scripts/check-seat-surface.py`.
-Expect `agentboard 0.1.0 tools=23 commit=<checkout revision> backend=surreal`
-(or sqlite), then `seat surface ok: tools=23 commit=<checkout revision>`.
+Expect one build line `agentboard <version> tools=<n> commit=<checkout revision>
+backend=surreal` (or sqlite), then `seat surface ok: tools=<n> commit=<checkout revision>`,
+where `<n>` is the derived count that command prints: read it, never type it.
 The revision is `git describe --always --dirty --abbrev=8`; the check derives the
 source tool count and refuses a mismatch in either count or revision. Run it before
 each seat start, including after a rebuild that has not yet been installed.

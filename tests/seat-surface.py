@@ -61,13 +61,20 @@ for name in ['SKILL.md', 'claude.md', 'opencode.md']:
 assert len(set(steps)) == 1
 assert re.findall(r'^\d+\.', steps[0], re.M) == ['1.', '2.', '3.']
 assert 'surface first' in steps[0] and 'Coder and reviewer' in steps[0]
-# Published fixed counts must agree with the router; these pages now use only
-# the checker's derived tools= output. Catch any future literal reintroduction.
-for name in ['skills/agentboard-manager/roles.md', 'skills/manager/SKILL.md',
-             'skills/manager/claude.md', 'skills/manager/opencode.md']:
+# Fixed-count scan, and only that. It reads exactly the five seat-facing pages
+# listed below: skills/agentboard-manager/{roles,SKILL}.md and the three
+# skills/manager entry files. It does NOT read AGENTS.md (its prove table prints
+# the expected tool count beside the rg command on purpose), README.md,
+# PROTOCOL.md, workflow.md or docs/. No scan there means no coverage there: a
+# literal on those pages is not caught by this test.
+for name in ['skills/agentboard-manager/roles.md', 'skills/agentboard-manager/SKILL.md',
+             'skills/manager/SKILL.md', 'skills/manager/claude.md',
+             'skills/manager/opencode.md']:
     text = (root / name).read_text()
     published = re.findall(r'(?:\*\*)?(\d+)(?:\*\*)? tools|tools=(\d+)', text)
     assert not published, f'{name}: fixed count must be replaced by the derived value: {published}'
     assert 'derived' in text
 print('seat-surface: published counts use derived output; no fixed count can drift')
+print('seat-surface: fixed-count scan covers roles.md, agentboard-manager/SKILL.md and the three '
+      'skills/manager entry files; AGENTS.md and the other docs are not scanned')
 print('seat-surface: matching catalog accepted; pre-E11, missing diff verbs, wrong count and stale commit refused; both deleted guards detected; three shared steps match')
