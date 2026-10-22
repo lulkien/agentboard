@@ -24,8 +24,9 @@ A server of any other version is refused by name (`want surrealdb 2.7.x`).
 |---|---|
 | `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 48 passed` (unit) and `test result: ok. 26 passed` (`tests/manager.rs`, the stub-herdr suite); add `-- --nocapture` and `rg -c SKIP` prints nothing |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 38 passed` and `26 passed` (needs no `surreal` binary) |
+| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 48 passed` (unit), `26 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
+| `cargo test --no-default-features --features sqlite` | `test result: ok. 38 passed`, `26 passed`, and `2 passed` (needs no `surreal` binary) |
+| `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
 | `bash tests/cli.sh` | `191/191 passed (backend: surreal)` (against the sqlite binary: `196/196 passed (backend: sqlite)`) |
 | `bash tests/dispatch.sh` | `59/59 passed (backend: surreal)` (either build) |
 | `bash tests/manager.sh` | `50/50 passed (backend: surreal)`: `manager up/down/renew` and `wait --agent` against `tests/herdr_stub.py` and a throwaway board. `AGENTBOARD_HERDR_LIVE=1 bash tests/manager-live.sh` is the one round against the real herdr (scratch agents only); without the variable it prints `skipped` |
