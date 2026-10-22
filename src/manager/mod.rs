@@ -364,14 +364,20 @@ pub fn tab_new(c: &Client, cwd: &str, label: Option<&str>) -> Result<String, Str
     Ok(format!("tab {} root pane {}", t.tab_id, t.root_pane))
 }
 
-/// `K=V` strings into pairs; the value may itself contain `=`.
+/// `K=V` strings into unique pairs; the value may itself contain `=`.
+/// Repeated keys refuse before preflight or serialization can resolve them differently.
 fn parse_env(env: &[String]) -> Result<Vec<(String, String)>, String> {
+    let mut seen = std::collections::HashSet::new();
     env.iter()
         .map(|kv| {
-            kv.split_once('=')
+            let (key, value) = kv
+                .split_once('=')
                 .filter(|(k, _)| !k.is_empty())
-                .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                .ok_or_else(|| format!("--env {kv:?}: want K=V"))
+                .ok_or_else(|| format!("--env {kv:?}: want K=V"))?;
+            if !seen.insert(key) {
+                return Err(format!("--env duplicate key {key:?}"));
+            }
+            Ok((key.to_owned(), value.to_owned()))
         })
         .collect()
 }

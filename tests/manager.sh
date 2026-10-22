@@ -18,6 +18,15 @@ unset HERDR_SOCKET
 export HOME=$S/home XDG_CONFIG_HOME=$S/home/xdg
 mkdir -p "$HOME/.claude" "$S/repo"
 echo '{}' >"$HOME/.claude/coding-mcp.json"; echo '{}' >"$HOME/.claude/reviewer-mcp.json"
+# Executables are fixtures: herdr is stubbed, so no real CLI is launched.
+mkdir -p "$S/bin" "$HOME/.codex"
+for kind in claude opencode codex; do
+  printf '#!/bin/sh\nexit 0\n' >"$S/bin/$kind"
+  chmod +x "$S/bin/$kind"
+done
+for role in coder reviewer analyzer manager; do echo '#' >"$HOME/.codex/$role.config.toml"; done
+unset CODEX_HOME
+export PATH="$S/bin:$PATH"
 pass=0 total=0 rc=0 out="" err=""
 run() { out=$("$@" 2>"$S/err"); rc=$?; err=$(<"$S/err"); }
 check() { total=$((total + 1)); if [ "$2" -eq 0 ]; then pass=$((pass + 1)); echo "PASS $1"; else echo "FAIL $1 :: rc=$rc out=[$out] err=[$err]"; fi; }
@@ -56,6 +65,61 @@ check "pane env overrides a shared actor per role and preserves other variables"
 stub
 M up --repo "$S/repo" --coder unknown-kind
 check "unknown seat argv kind refuses by name before any herdr call" $([ $rc -eq 1 ] && has "$err" 'unknown-kind' && [ -z "$(methods)" ] && echo 0 || echo 1)
+
+stub
+M up --repo "$S/repo" --analyzer codex --role-name-prefix tri- --env AGENTBOARD_ACTOR=wrong --env KEEP=value
+check "three-seat up creates three distinct panes in the same tab" $([ $rc -eq 0 ] && has "$out" "tri-analyzer pane s:p3 (codex)" && [ "$(methods)" = "agent.list tab.create pane.split pane.split agent.start agent.list agent.start agent.list agent.start agent.list" ] && echo 0 || echo 1)
+check "analyzer reuses its profile argv and per-pane actor environment" $(has "$(req agent.start | tail -1)" '"args":["-p","analyzer"]' && has "$(req pane.split | tail -1)" '"env":{"AGENTBOARD_ACTOR":"analyzer","KEEP":"value"}' && has "$(req pane.split | tail -1)" '"target_pane_id":"s:p2"' && echo 0 || echo 1)
+r=$(rows | awk '$1 ~ /^tri-/')
+check "three sessions register by role name and kind" $([ "$(wc -l <<<"$r")" = 3 ] && has "$r" tri-coder && has "$r" tri-reviewer && has "$r" tri-analyzer && echo 0 || echo 1)
+M status --json
+check "manager status joins all three registered seats" $(python3 -c 'import json,sys;r=[x for x in json.loads(sys.argv[1])["agents"] if x["name"].startswith("tri-")];assert len(r)==3;assert {x["name"] for x in r}=={"tri-coder","tri-reviewer","tri-analyzer"};assert all(x["board"]=="registered" for x in r)' "$out" && echo 0 || echo 1)
+
+stub
+mv "$S/bin/codex" "$S/bin/codex.saved"
+PATH="$S/bin" M up --repo "$S/repo" --analyzer codex --role-name-prefix missing-
+echo "missing binary: $err"
+check "missing analyzer binary refuses by exact name before any pane exists" $([ $rc -eq 1 ] && [ "$err" = 'agentboard: up: analyzer: binary "codex" is not executable on PATH' ] && [ -z "$(methods)" ] && ! has "$(rows)" missing- && echo 0 || echo 1)
+M up --repo "$S/repo" --analyzer codex --env "PATH=$S/bin"
+check "binary preflight checks the requested pane PATH" $([ $rc -eq 1 ] && has "$err" 'binary "codex" is not executable on PATH' && [ -z "$(methods)" ] && echo 0 || echo 1)
+mv "$S/bin/codex.saved" "$S/bin/codex"
+chmod -x "$S/bin/codex"
+PATH="$S/bin" M up --repo "$S/repo" --analyzer codex --role-name-prefix nonexec-
+check "a non-executable analyzer binary refuses before creating panes" $([ $rc -eq 1 ] && has "$err" 'binary "codex" is not executable on PATH' && [ -z "$(methods)" ] && ! has "$(rows)" nonexec- && echo 0 || echo 1)
+chmod +x "$S/bin/codex"
+mv "$HOME/.codex/analyzer.config.toml" "$HOME/.codex/analyzer.saved"
+M up --repo "$S/repo" --analyzer codex --role-name-prefix profile-
+echo "missing profile: $err"
+check "missing analyzer profile refuses by exact path before any pane exists" $([ $rc -eq 1 ] && [ "$err" = "agentboard: up: $HOME/.codex/analyzer.config.toml does not exist" ] && [ -z "$(methods)" ] && ! has "$(rows)" profile- && echo 0 || echo 1)
+mv "$HOME/.codex/analyzer.saved" "$HOME/.codex/analyzer.config.toml"
+mkdir "$S/custom-codex"
+CODEX_HOME="$S/custom-codex" M up --repo "$S/repo" --analyzer codex
+check "Codex profile preflight respects CODEX_HOME without home fallback" $([ $rc -eq 1 ] && [ "$err" = "agentboard: up: $S/custom-codex/analyzer.config.toml does not exist" ] && [ -z "$(methods)" ] && echo 0 || echo 1)
+M up --repo "$S/repo" --analyzer codex --env "CODEX_HOME=$S/custom-codex"
+check "profile preflight checks the requested pane CODEX_HOME" $([ $rc -eq 1 ] && [ "$err" = "agentboard: up: $S/custom-codex/analyzer.config.toml does not exist" ] && [ -z "$(methods)" ] && echo 0 || echo 1)
+M up --repo "$S/repo" --analyzer claude
+echo "missing Claude profile: $err"
+check "missing Claude analyzer config refuses before any pane exists" $([ $rc -eq 1 ] && [ "$err" = "agentboard: up: $HOME/.claude/analyzer-mcp.json does not exist" ] && [ -z "$(methods)" ] && echo 0 || echo 1)
+
+export STUB_SEAT=stuck STUB_SEAT_ONLY=analyzer AGENTBOARD_UP_PROMPT_TIMEOUT_MS=2500; stub
+M up --repo "$S/repo" --analyzer codex --role-name-prefix fail3-
+check "third-seat startup failure closes all three panes and registers no partial team" $([ $rc -eq 1 ] && has "$err" 'fail3-analyzer is not at a prompt' && [ "$(methods | tr ' ' '\n' | grep -c '^pane.close$')" = 3 ] && ! has "$(rows)" fail3- && echo 0 || echo 1)
+unset STUB_SEAT STUB_SEAT_ONLY AGENTBOARD_UP_PROMPT_TIMEOUT_MS
+
+stub
+M up --repo "$S/repo" --analyzer -unknown-kind
+check "hyphen-leading analyzer kind reaches the named store refusal" $([ $rc -eq 1 ] && [ "$err" = 'agentboard: up: no seat argv for kind "-unknown-kind"' ] && [ -z "$(methods)" ] && echo 0 || echo 1)
+
+# A valid first value and unusable final value must never diverge at startup.
+mkdir "$S/empty-path" "$S/repeated-codex"
+stub
+M up --repo "$S/repo" --analyzer codex --role-name-prefix dup-path- --env "PATH=$S/bin" --env "PATH=$S/empty-path"
+echo "repeated PATH: $err; pane_calls=$(methods | tr ' ' '\n' | grep -cE '^(tab.create|pane.split)$')"
+check "repeated PATH refuses by name with zero pane calls" $([ $rc -eq 1 ] && [ "$err" = 'agentboard: --env duplicate key "PATH"' ] && [ -z "$(methods)" ] && ! has "$(rows)" dup-path- && echo 0 || echo 1)
+stub
+M up --repo "$S/repo" --analyzer codex --role-name-prefix dup-home- --env "CODEX_HOME=$HOME/.codex" --env "CODEX_HOME=$S/repeated-codex"
+echo "repeated CODEX_HOME: $err; pane_calls=$(methods | tr ' ' '\n' | grep -cE '^(tab.create|pane.split)$')"
+check "repeated CODEX_HOME refuses by name with zero pane calls" $([ $rc -eq 1 ] && [ "$err" = 'agentboard: --env duplicate key "CODEX_HOME"' ] && [ -z "$(methods)" ] && ! has "$(rows)" dup-home- && echo 0 || echo 1)
 
 export STUB_BUSY=2; stub
 M up --repo "$S/repo" --role-name-prefix b-

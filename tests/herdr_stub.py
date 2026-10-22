@@ -47,6 +47,7 @@ hang = os.environ.get("STUB_HANG")
 seat = os.environ.get("STUB_SEAT", "")
 only = os.environ.get("STUB_SEAT_ONLY", "")
 cwd = ["/repo"]
+next_pane = [2]
 # STUB_PROMPT=none: pane.read of a settled pane shows no input box.
 prompt_screen = "welcome\nauto mode on\n" if os.environ.get("STUB_PROMPT") == "none" else "welcome\n> \n"
 
@@ -89,7 +90,9 @@ def handle(method, p):
         cwd[0] = p.get("cwd", "/repo")
         return {"type": "tab_created", "tab": {"tab_id": "s:t1"}, "root_pane": {"pane_id": "s:p1"}}
     if method == "pane.split":
-        return {"type": "pane_info", "pane": {"pane_id": "s:p2"}}
+        pane_id = f"s:p{next_pane[0]}"
+        next_pane[0] += 1
+        return {"type": "pane_info", "pane": {"pane_id": pane_id}}
     if method == "agent.start":
         if busy[0] > 0:
             busy[0] -= 1

@@ -325,22 +325,25 @@ pub enum ManagerCmd {
         #[command(subcommand)]
         action: ManagerPaneCmd,
     },
-    /// Open a team: tab, two panes, coder and reviewer started and registered by name
+    /// Open coder and reviewer seats, optionally with an analyzer in a third pane
     Up {
-        /// Repo the tab and both agents are rooted in
+        /// Repo the tab and agents are rooted in
         #[arg(long)]
         repo: String,
         #[arg(long, default_value = "claude")]
         coder: String,
         #[arg(long, default_value = "opencode")]
         reviewer: String,
+        /// Add an analyzer seat of this CLI kind
+        #[arg(long, allow_hyphen_values = true)]
+        analyzer: Option<String>,
         /// Tab label (default: the repo directory name)
         #[arg(long, allow_hyphen_values = true)]
         label: Option<String>,
-        /// Prepended to `coder` and `reviewer` to make the herdr and board names
+        /// Prepended to each role to make the herdr and board names
         #[arg(long, default_value = "")]
         role_name_prefix: String,
-        /// K=V set in both panes' environment, repeatable
+        /// K=V shared by all panes; AGENTBOARD_ACTOR is set per role; duplicate keys refused
         #[arg(long, allow_hyphen_values = true)]
         env: Vec<String>,
     },

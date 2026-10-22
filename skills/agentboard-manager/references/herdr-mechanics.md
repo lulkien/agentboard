@@ -27,9 +27,9 @@ herdr agent list             # name, agent kind, agent_status, pane_id
 
 ## Topology: manager tab, team tab
 
-Manager in own tab. Coding agents share NEW tab (analyzer, coder, reviewer; `manager up` creates coder and reviewer until T287 adds the analyzer flag). Never split manager's tab, never put workers in manager's tab.
+Manager in own tab. Coding agents share NEW tab (analyzer, coder, reviewer; `manager up --analyzer K` includes the third seat). Never split manager's tab, never put workers in manager's tab.
 
-`agentboard manager up --repo <repo> [--coder K] [--reviewer K]` does the two-seat move in one verb: refuses while a `coder`/`reviewer` is live, creates fresh tab rooted in repo, splits into two panes, starts coder (default claude) and reviewer (default opencode), answers folder-trust dialog, forces the names, registers both by name. Start the analyzer in its own pane with `manager pane split` and `manager agent start` until T287 adds `--analyzer`; do not pretend the flag exists. `manager down` is the reverse. This file covers only what those verbs do not.
+`agentboard manager up --repo <repo> [--coder K] [--reviewer K] [--analyzer K]` creates the worker tab. See the manual for seat selection, preflight and teardown names. This file covers only the mechanics those verbs do not handle.
 
 Create worker panes from own pane only when user asks for something other than team tab. Don't invent workspaces.
 

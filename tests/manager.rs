@@ -523,6 +523,31 @@ fn show(args: &[&str], out: &str, reqs: &[Value]) {
 }
 
 #[test]
+fn duplicate_env_keys_refuse_before_pane_split() {
+    for (key, first, last) in [
+        ("PATH", "/valid", "/missing"),
+        ("CODEX_HOME", "/valid", "/missing"),
+        ("KEEP", "same", "same"),
+    ] {
+        let first = format!("{key}={first}");
+        let last = format!("{key}={last}");
+        let (code, out, err, requests) = run_write(
+            "idle",
+            &[
+                "pane", "split", "w1:p6", "--right", "--env", &first, "--env", &last,
+            ],
+        );
+        assert_eq!(code, Some(1), "{key}: {out} {err}");
+        assert!(out.is_empty());
+        assert_eq!(
+            err.trim(),
+            format!("agentboard: --env duplicate key {key:?}")
+        );
+        assert!(requests.is_empty(), "{key}: {requests:?}");
+    }
+}
+
+#[test]
 fn each_mutating_verb_sends_its_method_and_params() {
     let cases: [(Vec<&str>, Value, &str); 8] = [
         (

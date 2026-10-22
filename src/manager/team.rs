@@ -1,11 +1,12 @@
-//! The composite verbs: `up` opens a team (tab, two panes, two agents, board
-//! rows), `down` closes it, `renew` clears both panes between epics. Each is a
+//! The composite verbs: `up` opens a team (tab, two or three seats, board
+//! rows), `down` closes it, `renew` clears named panes between epics. Each is a
 //! fixed sequence of the methods in `write`, and every stop goes through `guard`.
 
 use super::client::Client;
 use super::write::guard;
 use super::{Failure, Seat};
 use crate::store;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -73,13 +74,50 @@ fn seat_env(env: &[(String, String)], role: &str) -> Vec<(String, String)> {
     env
 }
 
+/// Validate all requested seats before creating any panes. Profile arguments
+/// remain in seat_args; Codex's profile file is selected through CODEX_HOME.
+fn preflight(seat: &Seat, env: &[(String, String)]) -> Result<Vec<String>, String> {
+    let args = seat_args(seat.role, seat.kind)?;
+    let value = |key: &str| {
+        env.iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| std::ffi::OsString::from(v))
+            .or_else(|| std::env::var_os(key))
+    };
+    let found = value("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| {
+            std::fs::metadata(dir.join(seat.kind))
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+    });
+    if !found {
+        return Err(format!(
+            "up: {}: binary {:?} is not executable on PATH",
+            actor_role(seat.role),
+            seat.kind
+        ));
+    }
+    if seat.kind == "codex" {
+        let home = value("CODEX_HOME")
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from)
+            .map_or_else(|| home_file(".codex"), Ok)?;
+        let profile = home.join(format!("{}.config.toml", actor_role(seat.role)));
+        if !profile.is_file() {
+            return Err(format!("up: {} does not exist", profile.display()));
+        }
+    }
+    Ok(args)
+}
+
 pub struct Up<'a> {
     pub repo: &'a str,
     pub coder: &'a str,
     pub reviewer: &'a str,
+    pub analyzer: Option<&'a str>,
     pub label: Option<&'a str>,
     pub prefix: &'a str,
-    /// `K=V`, shared by both panes; AGENTBOARD_ACTOR is always the seat role.
+    /// `K=V`, shared by all panes; AGENTBOARD_ACTOR is always the seat role.
     pub env: &'a [String],
 }
 
@@ -94,7 +132,7 @@ pub fn up(c: &Client, o: &Up) -> Result<String, Failure> {
         repo.file_name()
             .map_or("team".to_owned(), |n| n.to_string_lossy().into_owned())
     });
-    let seats = [
+    let mut seats = vec![
         Seat {
             role: "coding",
             kind: o.coder,
@@ -106,10 +144,17 @@ pub fn up(c: &Client, o: &Up) -> Result<String, Failure> {
             name: format!("{}reviewer", o.prefix),
         },
     ];
-    let argv = [
-        seat_args(seats[0].role, seats[0].kind)?,
-        seat_args(seats[1].role, seats[1].kind)?,
-    ];
+    if let Some(kind) = o.analyzer {
+        seats.push(Seat {
+            role: "analyzer",
+            kind,
+            name: format!("{}analyzer", o.prefix),
+        });
+    }
+    let argv = seats
+        .iter()
+        .map(|seat| preflight(seat, &env))
+        .collect::<Result<Vec<_>, _>>()?;
     let live = c.agents()?;
     for s in &seats {
         if let Some(a) = live.iter().find(|a| a.name.as_deref() == Some(&s.name)) {
@@ -125,20 +170,22 @@ pub fn up(c: &Client, o: &Up) -> Result<String, Failure> {
     let mut panes = vec![tab.root_pane.clone()];
     let mut registered: Vec<&str> = Vec::new();
     let made = (|| -> Result<Vec<String>, String> {
-        panes.push(c.pane_split(
-            &tab.root_pane,
-            "right",
-            Some(&repo_s),
-            &seat_env(&env, seats[1].role),
-        )?);
+        for seat in &seats[1..] {
+            panes.push(c.pane_split(
+                panes.last().expect("tab has a root pane"),
+                "right",
+                Some(&repo_s),
+                &seat_env(&env, seat.role),
+            )?);
+        }
         let mut notes = Vec::new();
         for (i, s) in seats.iter().enumerate() {
             let pane = panes[i].clone();
             start_when_shell_ready(c, s, &pane, &argv[i])?;
             notes.extend(settle(c, &s.name, &pane, &repo_s)?);
         }
-        // Rows only once both seats are at a prompt, so a failure on the second
-        // seat leaves nothing behind but what the cleanup below removes.
+        // Register only once all seats are at a prompt; a later startup failure
+        // leaves nothing behind but what the cleanup below removes.
         for s in &seats {
             store::register_session(&s.name, s.kind, &repo_s, None)?;
             registered.push(&s.name);
@@ -160,8 +207,14 @@ pub fn up(c: &Client, o: &Up) -> Result<String, Failure> {
         }
     };
     let mut line = format!(
-        "up tab {}: {} pane {} ({}), {} pane {} ({})",
-        tab.tab_id, seats[0].name, panes[0], seats[0].kind, seats[1].name, panes[1], seats[1].kind
+        "up tab {}: {}",
+        tab.tab_id,
+        seats
+            .iter()
+            .zip(&panes)
+            .map(|(s, pane)| { format!("{} pane {} ({})", s.name, pane, s.kind) })
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     // A trust answer is a decision made for the operator: never silent.
     for n in notes {

@@ -86,7 +86,7 @@ Lease is 30 min by default. A long diff has no MCP shape (inline string only): u
 
 | Move | Verb |
 |---|---|
-| open a team: tab, coder and reviewer panes started, sessions registered | `manager up --repo P [--coder claude] [--reviewer opencode] [--role-name-prefix X] [--env K=V]` |
+| open a team: coder and reviewer, optionally analyzer, registered in one tab | `manager up --repo P [--coder claude] [--reviewer opencode] [--analyzer K] [--role-name-prefix X] [--env K=V]` |
 | board sessions joined with live agents (registered / gone / unregistered) | `manager status [--json]` |
 | herdr's session snapshot | `manager snapshot [--json]` |
 | map a pane's agent name to the board | `register <name> --agent claude\|opencode [--task T]` (`manager up` already registers) |
@@ -98,10 +98,13 @@ Lease is 30 min by default. A long diff has no MCP shape (inline string only): u
 | hand a row to a pane | `dispatch T<n> --to <name> [--force] [--print]` |
 | file and amend | `epic add`, `add --epic E --parent T`, `edit`, `parent`, `epic status` |
 
-`manager up` still creates coder and reviewer only; the analyzer seat and its
-flag are the P5/T287 row. Until that lands, start the analyzer in its own pane
-with `manager pane split` and `manager agent start`, register it by name, and say
-which path you used. Do not pretend the flag exists.
+`manager up --analyzer K` adds the analyzer to the usual coder/reviewer pair.
+All requested binaries and required profiles must exist before any pane is made.
+The names are the role names with any prefix; each pane gets its role actor.
+Repeated `--env` keys are refused by name before any pane is created.
+For a three-seat team, pass all names to `manager down` or `manager renew`
+(`--names analyzer,coder,reviewer`, with the prefix if used); their defaults
+continue to target coder and reviewer only.
 
 Manual moves that still need plain `herdr` (attach, `/btw`, killing a TUI by process group, seat swap): `references/herdr-mechanics.md`.
 
