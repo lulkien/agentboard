@@ -10,9 +10,15 @@ Exactly three levels: **implement -> review -> fix**.
 - A child of a level-3 row, or a re-parent that reaches level 4, is refused (`chain too deep`, exit 1).
 - The board files the review row. Never file one by hand. The first move of a parentless row into `review` creates `Review <title>`. A resubmission reuses it.
 
+## The seat's surface, before the loop
+
+A seat asserts the surface it acts with before it works. One command: `agentboard board-build`. One expected number: the `tools=` count it prints, which must equal the number of agentboard tools this seat's own session offers, with the commit at HEAD and no `(stale, ...)` or `(unverified, ...)` suffix. The catalog form of the check is in `roles.md`.
+
+No match, no work: stop, do not claim, do not submit. Report the count and commit the seat holds and the count and commit the command printed. Why: a stale surface silently applies the rules it was built with and reports success, which is worse than a crash. The board refuses the write as well, with `board surface mismatch` naming both counts (`PROTOCOL.md`, Per-write tool count).
+
 ## One round
 
-1. Manager files the implement row (`add --epic E`) with an executable goal and dispatches it.
+1. Manager files the implement row (`add --epic E`) with an executable goal and dispatches it. `dispatch --to <session>` is silently overridden by the row's assignee: a live registered assignee wins and the command still prints success. To hand the row to another pane, run `edit <id> --assignee reviewer` first, then dispatch bare.
 2. Coder: `task_claim`, work, `diff_add`, `task_update report= status=review`.
 3. Manager reads `children T<impl>` for the review row and dispatches the reviewer to it. The tree stays frozen while the reviewer reads.
 4. Reviewer reads the newest diff. Clean: review row `done`. Findings: it files the fix row (`--parent` = review row) and sets the review row `needs_fix`.

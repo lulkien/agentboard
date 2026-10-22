@@ -97,6 +97,13 @@ have both adapters call it, so a rule exists once.
   checkout, and `tests/mcp_client.py` drives the latter. After changing the CLI or
   MCP surface run `cargo install --path . --locked`, or the verbs you built are
   missing from the binary every agent executes.
+- An install that changes the board surface is not done at the install: every
+  process must prove the surface it holds, the panes already running and every
+  seat started later alike. In each, `agentboard board-build` prints the derived
+  `tools=` count and commit, and the seat's own catalog must match both. A tool
+  count that does not match is a defect, not a warning: the pane stops writing
+  until its MCP server is reloaded (a TUI reload alone is not enough; the child
+  holds the old process) and the check passes.
 - Managed SurrealDB daemons hold `board.lock` for their lifetime; per-operation
   writers use `board.write.lock`. Legacy/manual raw daemons do not hold the
   lifetime lock: first cutover still needs the port/positive-fd checks and the
