@@ -19,8 +19,8 @@ AGENTBOARD_ACTOR`.
 ## Ordering
 
 Every list, claim and wait uses the same order: `(priority, id)` ascending, priority
-an `i32` (lower runs first). Id-less claim walks the claimable tail of that order
-and skips tasks assigned to another actor.
+an `i32` (lower runs first). Id-less claim walks the `todo` rows in that order and
+skips tasks assigned to another actor; it never picks up a `review` or `blocked` row.
 
 ## Tasks
 
@@ -31,9 +31,10 @@ starts at 1 and grows by one per accepted field change.
 Statuses, in board order: `todo`, `in_progress`, `blocked`, `review`, `done`,
 `canceled`. `done` and `canceled` are terminal; lists hide them unless asked.
 
-Claimable without an assignee: any non-terminal status. Claimable by its assignee:
-any non-terminal status. A `done` or `canceled` task is never claimable, and an
-explicit claim of one refuses by name.
+`todo` rows can be claimed by id or by the id-less probe. `in_progress` and `review`
+rows can only be claimed by id, and only by their assignee unless the row has none.
+`blocked` is never claimable, and `done`/`canceled` are terminal: lists hide them unless
+asked, and an explicit claim of one refuses by name.
 
 ## Nine tools
 
@@ -81,13 +82,17 @@ line and every field exactly as stored.
 
 Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
 
-- `if_revision` must equal the stored revision, or `stale task revision X, expected Y`.
-- Changing a task held by another actor needs `force` **and** a non-empty `reason`;
+- `if_revision` must equal the stored revision, or `stale task revision <given>; current
+  revision is <stored>`.
+- Changing the protected fields of a task held by another actor in `in_progress`,
+  `blocked` or `review` needs `force` **and** a non-empty `reason`;
   `force` without a reason refuses, a reason without `force` refuses, and the
   reason is recorded in the event.
 - `assignee` together with `clear_assignee` refuses, and likewise for `parent` and
   `path`: pick one.
-- No changed field and no comment is `no change`.
+- A comment with no field change is a comment: it lands as a `commented` event and the
+  revision stays put, so a displaced holder can still leave notes.
+- No field change and no comment is `task update has no field changes`.
 - An unknown target assignee needs `new_actor`.
 
 ### task_claim
@@ -99,8 +104,9 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
 With no id, claims the first eligible task in `(priority, id)` order and answers the
 work order, or `no ready tasks` when nothing is eligible. With an id, claims that
 task and refuses `held by NAME` when another actor holds it, `not claimable` when
-its status cannot be claimed. Claiming a task you already hold changes nothing and
-appends no event.
+its status cannot be claimed. Claiming a `todo` row assigned to you starts the work:
+it becomes `in_progress`, the revision moves and a `claimed` event lands. Claiming a row
+you already hold in `in_progress` or `review` changes nothing and appends no event.
 
 ### task_comment
 
@@ -127,9 +133,11 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
   `feed cursor belongs to a different board`.
 - With no cursor, the page is the newest page *of matching events*, and `older` says
   whether more matching events sit before it.
-- `wait` (seconds, clamped to 300) blocks until a matching event exists or the
-  timeout expires; the answer is still a normal page, possibly empty, with a valid
-  cursor. A waiter holds no read transaction while it sleeps, so it blocks no writer.
+- `wait` (seconds, clamped to 300) blocks until a matching event is written after the
+  read starts, or the timeout expires. With no cursor it starts *now*: existing history
+  is not replayed, so an empty page is the normal first answer. The answer is always a
+  normal page with a valid cursor, and a waiter holds no read transaction while it
+  sleeps.
 - `full: true` prints event bodies untruncated.
 
 ### board_brief
@@ -144,8 +152,9 @@ activity first. `last_seen` is history, never liveness.
 
 ## Refusals
 
-Every refusal is one line with a stable prefix. MCP reports `isError: true` with the
-same words; the CLI prints `agentboard: <text>` and exits `1`. Samples:
+Every refusal is one line with a stable prefix. Over MCP a refusal is a JSON-RPC error
+(`-32602`, invalid params) whose message is the same text; a tool result is never
+`isError: true`. The CLI prints `agentboard: <text>` and exits `1`. Samples:
 
 ```
 actor required: pass --actor or set AGENTBOARD_ACTOR (names are board addresses)

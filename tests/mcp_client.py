@@ -173,6 +173,7 @@ def main():
         is_error, body = server.call("board_nope", {})
         check("an unknown tool is an error", True, is_error)
 
+
         # Long text: compact reads cut it, full reads return it whole.
         long_comment = "c" * 400
         long_title = "t" * 100
@@ -190,6 +191,19 @@ def main():
         has("compact task_get truncates the title", "…", body)
         _, body = server.call("task_get", {"id": 2, "full": True})
         has("full task_get returns the whole title", long_title, body)
+
+        # A comment with no field change is a comment; claiming your own todo starts it.
+        is_error, body = server.call("task_add", {"title": "own todo", "assignee": "worker", "new_actor": True})
+        has("assigned todo created", "ok", body)
+        is_error, body = server.call("task_claim", {"id": 3})
+        has("claiming your assigned todo starts it", "in_progress", body)
+        has("claiming your assigned todo bumps the revision", "revision 2", body)
+        is_error, body = server.call("task_update", {"id": 3, "if_revision": 2, "comment": "only a note"})
+        check("comment-only update is not an error", False, is_error)
+        has("comment-only update keeps the revision", "revision 2", body)
+        is_error, body = server.call("board_feed", {"kind": "commented"})
+        has("comment-only update lands in the feed", "only a note", body)
+
 
         is_error, body = server.call(
             "task_update", {"id": 1, "if_revision": 2, "assignee": "bob", "clear_assignee": True}

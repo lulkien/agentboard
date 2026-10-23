@@ -63,8 +63,12 @@ tool calls arrive attributed.
 
 ## Teardown
 
+`tab close` takes the id, never the label:
+
 ```bash
-herdr tab close team        # closes the tab and its panes
+tab=$(herdr tab list | python3 -c \
+  'import json,sys; tabs=json.load(sys.stdin)["result"]["tabs"]; print(next(t["tab_id"] for t in tabs if t.get("label")=="team"))')
+herdr tab close "$tab"
 herdr agent list            # confirm nothing named coder/reviewer remains
 ```
 

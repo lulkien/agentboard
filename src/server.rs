@@ -1,4 +1,4 @@
-//! MCP surface: nine tools, text-only results, short acknowledgements.
+//! MCP surface: 9 tools, text-only results, short acknowledgements.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with the
 //! changed record plus its event cursor. Agents pay tokens per byte.

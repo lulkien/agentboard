@@ -14,8 +14,9 @@ args = parser.parse_args()
 
 # Only usage pages are scanned. Historical client fixtures (notably
 # tests/schema-version.py) are excluded by path, never by retired tool name.
-paths = [ROOT / name for name in ('README.md', 'PROTOCOL.md')]
-for directory in ('skills/agentboard-manager', 'skills/manager', 'docs'):
+paths = [ROOT / name for name in ('README.md', 'PROTOCOL.md', 'AGENTS.md',
+                                 'skills/README.md')]
+for directory in ('skills/agentboard-manager', 'skills/manager'):
     paths.extend(sorted((ROOT / directory).rglob('*.md')))
 
 # An explicit scratch path overrides any caller AGENTBOARD_DB. The path is
@@ -71,8 +72,6 @@ for path in paths:
                 continue
             if line[max(0, match.start()-2):match.start()] == '::':
                 continue
-            if path.name == 'surrealdb-migration.md' and name in {'session_with', 'board_path'}:
-                continue  # Rust function discussed in migration implementation history.
             tool_count += 1
             if name not in tools:
                 errors.append(f'{path.relative_to(ROOT)}:{number}: unknown MCP tool {name}')

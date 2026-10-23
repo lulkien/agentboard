@@ -83,6 +83,31 @@ impl Board {
         let old = self
             .read_task_in_txn(&txn, input.id)?
             .ok_or(Error::MissingTask(input.id))?;
+        // A comment with no field change is a comment, not a no-op: it lands as an
+        // event and leaves the revision alone, exactly like `comment`.
+        if patch_is_empty(input.patch)
+            && let Some(comment) = input.comment
+        {
+            if comment.trim().is_empty() {
+                return Err(Error::EmptyComment);
+            }
+            self.touch_actor(&mut txn, input.actor, input.id, input.now_ms)?;
+            let mut payload = serde_json::Map::new();
+            payload.insert("text".into(), comment.into());
+            let event = Event {
+                seq: 0,
+                task_id: input.id,
+                actor: input.actor.to_owned(),
+                kind: EventKind::Commented,
+                timestamp_ms: input.now_ms,
+                recipient: None,
+                payload: payload.into(),
+            };
+            let event = self.append_event(&mut txn, &mut metadata, event)?;
+            write_metadata(self.meta, &mut txn, &metadata)?;
+            txn.commit()?;
+            return Ok(Updated { task: old, event });
+        }
         let applied = old.apply(
             input.actor,
             input.expected_revision,
@@ -467,4 +492,15 @@ fn changes(old: &Task, next: &Task) -> Result<serde_json::Value> {
         }
     }
     Ok(changed.into())
+}
+
+fn patch_is_empty(patch: &crate::domain::TaskPatch) -> bool {
+    patch.title.is_none()
+        && patch.description.is_none()
+        && patch.goal.is_none()
+        && patch.status.is_none()
+        && patch.priority.is_none()
+        && patch.assignee.is_none()
+        && patch.parent_id.is_none()
+        && patch.path.is_none()
 }

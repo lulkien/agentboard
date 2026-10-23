@@ -32,7 +32,8 @@ Wire details: `PROTOCOL.md`. Changing the tree: `AGENTS.md`. Both in the repo.
   register the MCP server with that name, for example
   `agentboard serve --actor coder`.
 - Names are addresses on a trusted team, not authentication. One live process per
-  name: two agents sharing one name refuse each other's writes as `held by …`.
+  name: the board cannot tell two processes with one name apart, so they land in the
+  same row as one identity and the revision guard is the only brake.
 - Every seat points at the same `AGENTBOARD_DB`. Different directories are
   different boards that cannot see each other.
 
@@ -77,9 +78,10 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   `--after 0` replays from the first event.
 - `--wait 300` is the maximum. A timeout is a normal empty page with a valid
   cursor: print it, re-read the board, arm again.
-- The manager wakes a seat by assigning it work (`task_update --assignee coder`),
-  by commenting on its task, or by moving a status. All three land in the feed; the
-  assignment carries the recipient.
+- Only an assignment carries `recipient`: `task_update --assignee coder`, or a
+  `task_add` that names one. A comment or a status move lands in the feed with no
+  recipient, so a waiter filtered by `--recipient` never sees it. Wait unfiltered, or
+  wake the seat by assigning it.
 - If a seat must be poked outside the board, that is a herdr prompt, not a board
   write.
 

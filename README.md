@@ -30,7 +30,7 @@ with `cc`.
   `$XDG_STATE_HOME/agentboard/lmdb` (`~/.local/state/agentboard/lmdb` by default).
 - Files inside: `data.mdb`, `lock.mdb`, `lifetime.lock`. Anything else makes the
   directory foreign, and the store refuses it by name rather than guessing.
-- Map size: `AGENTBOARD_MAP_SIZE_MB`, default 256. There is no growth in place; a
+- Map size: `AGENTBOARD_MAP_SIZE_MB`, default 1024. There is no growth in place; a
   bigger board means a bigger map before it is created.
 - `agentboard reset --yes` discards the board. It refuses while another process
   holds it, and it refuses to delete a directory with unknown files in it.

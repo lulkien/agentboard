@@ -43,14 +43,18 @@ A seat with no work waits on the feed instead of polling the board in a loop:
 ```bash
 cursor=$(agentboard feed --limit 1 | rg '^cursor ' | cut -d' ' -f2)
 while :; do
-  out=$(agentboard feed --after "$cursor" --recipient "$AGENTBOARD_ACTOR" --wait 300)
+  out=$(agentboard feed --after "$cursor" --wait 300)
   cursor=$(printf '%s\n' "$out" | rg '^cursor ' | cut -d' ' -f2)
   [ -n "$(printf '%s\n' "$out" | rg '^[0-9]+ ')" ] && break
 done
 ```
 
-The same thing over MCP is `board_feed(after=cursor, recipient=me, wait=300)` on a
-loop. A timeout is an empty page, not an error.
+The same thing over MCP is `board_feed(after=cursor, wait=300)` on a loop. A timeout
+is an empty page, not an error.
+
+Wait *unfiltered*: only an assignment carries `recipient`, so
+`--recipient "$AGENTBOARD_ACTOR"` would never see the comment or status change that
+answers a question. Read the page, then act on what it names.
 
 ## Questions and blockers
 

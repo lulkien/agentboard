@@ -157,6 +157,39 @@ has "foreign cursor text" "different board" "$out"
 out=$("$B" feed --limit 1 --kind created --after "0:0" 2>&1); code=$?
 check "cursor from another instance exit" 1 "$code"
 
+# --- claim rules and comment-only updates --------------------------------
+fresh i
+"$B" add "own todo" --assignee manager --new-actor >/dev/null
+"$B" add "review row" --status review >/dev/null
+"$B" add "blocked row" --status blocked --assignee manager >/dev/null
+out=$("$B" claim 1)
+has "claiming your assigned todo starts the work" "in_progress" "$out"
+has "claiming your assigned todo bumps the revision" "revision 2" "$out"
+out=$("$B" claim 1)
+has "claiming a held in_progress row is idempotent" "revision 2" "$out"
+out=$("$B" claim); code=$?
+check "id-less claim skips review and blocked rows" 3 "$code"
+out=$("$B" claim 2)
+has "an explicit claim takes a review row" "review" "$out"
+out=$("$B" claim 3 2>&1); code=$?
+check "blocked is never claimable" 1 "$code"
+has "blocked refusal names the status" "blocked cannot be claimed" "$out"
+out=$("$B" update 3 --if-revision 1 --comment "a note without a field change")
+has "comment-only update succeeds" "ok" "$out"
+has "comment-only update leaves the revision" "revision 1" "$out"
+has "comment-only update lands as a comment" "a note without a field change" "$("$B" feed --kind commented)"
+out=$(AGENTBOARD_ACTOR=other "$B" update 3 --if-revision 1 --comment "still notes")
+has "a foreign holder can still comment" "ok" "$out"
+out=$("$B" update 3 --if-revision 1 2>&1); code=$?
+check "no field and no comment exit" 1 "$code"
+has "no field and no comment text" "task update has no field changes" "$out"
+out=$("$B" feed --wait 1)
+has "a no-cursor wait answers a page" "cursor " "$out"
+check "a no-cursor wait returns no events" 0 "$(printf '%s\n' "$out" | grep -cE '^[0-9]+ ' || true)"
+out=$(AGENTBOARD_ACTOR=bob "$B" update 3 --if-revision 1 --title "bob on a blocked row" 2>&1); code=$?
+check "protected status still needs force" 1 "$code"
+has "protected status refusal" "held by" "$out"
+
 # --- brief, agents, reset ------------------------------------------------
 fresh h
 "$B" add "brief task" >/dev/null

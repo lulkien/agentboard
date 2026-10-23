@@ -22,12 +22,12 @@ Everything is offline and uses scratch boards; there is no server to start and n
 | `cargo test --offline --lib` | `test result: ok. 58 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no output |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `65/65 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `35/35 passed (mcp, lmdb)` |
+| `bash tests/cli.sh` | `82/82 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `41/41 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 9 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 9 pages, 49 CLI names, 79 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 11 pages, 56 CLI names, 80 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; debug ceiling 25 ms, release 5 ms |
 
@@ -80,11 +80,10 @@ have both adapters call it, so a rule exists once.
   with `CursorInstanceMismatch`.
 - Full text must never go through the compact renderer: no title clip, no
   whitespace collapse. A reader that asks for full text gets stored bytes.
-- The tool count on the first line of `src/server.rs`, the header in
-  `tests/mcp_client.py` and the counts in `README.md`/`PROTOCOL.md` come from
-  `python3 scripts/sync-tool-count.py`; run it with `--check` in a gate and never
-  count by hand.
-- An explicit-id `claim` refusal is an error (CLI exit 1, MCP `isError`); only the
+- Tool counts in `src/server.rs` (first line), `README.md`, `PROTOCOL.md` and this
+  file come from `python3 scripts/sync-tool-count.py`; run it with `--check` in a gate
+  and never count by hand.
+- An explicit-id `claim` refusal is an error (CLI exit 1, MCP `-32602`); only the
   id-less probe answers `no ready tasks` with exit 3. A refusal returned as `Ok` is
   read by scripts as a successful claim.
 - Never assert on a rendered timestamp or relative age; assert on events, counts or
