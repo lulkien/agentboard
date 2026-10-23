@@ -74,6 +74,11 @@ pub enum Cmd {
         #[arg(long)]
         full: bool,
     },
+    /// Show direct-child progress for an epic
+    Epic {
+        #[arg(value_name = "ID")]
+        id: u64,
+    },
     /// Change fields, status or owner
     Update {
         #[arg(value_name = "ID")]

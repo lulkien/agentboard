@@ -1,6 +1,6 @@
 # Protocol
 
-What an agent sees. Nine MCP tools, the cursor format, the refusals, the exit
+What an agent sees. Ten MCP tools, the cursor format, the refusals, the exit
 codes. The store that implements this is described in `AGENTS.md`; running a team
 is described in `skills/agentboard-team`.
 
@@ -36,7 +36,7 @@ rows can only be claimed by id, and only by their assignee unless the row has no
 `blocked` is never claimable, and `done`/`canceled` are terminal: lists hide them unless
 asked, and an explicit claim of one refuses by name.
 
-## Nine tools
+## Ten tools
 
 ### task_add
 
@@ -71,6 +71,29 @@ The record with its revision. Compact reads collapse whitespace and cut titles a
 72 and fields at 160 characters with `…`. `full: true` prints the title on its own
 line and every field exactly as stored.
 
+### task_epic
+
+```json
+{"id": 7}
+```
+
+An epic is any task with at least one direct child, derived from `parent_id` in
+one read snapshot. CLI `agentboard epic ID` and this tool share exactly four lines
+(the CLI appends its final newline):
+
+```text
+<compact task row>
+todo <n>  in_progress <n>  blocked <n>  review <n>  done <n>  canceled <n>
+done <done>/<total>
+total <total> cursor <instance_id>:<seq>
+```
+
+Counts include every direct child, including terminal children, without paging;
+grandchildren do not count. Only `done` contributes to the numerator; `canceled`
+contributes to total. The row uses the usual compact title truncation. A leaf
+refuses `task T7 is not an epic; an epic is a task with children`; a missing id
+refuses `task T7 does not exist`. Reads append no events.
+
 ### task_update
 
 ```json
@@ -94,6 +117,13 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
   revision stays put, so a displaced holder can still leave notes.
 - No field change and no comment is `task update has no field changes`.
 - An unknown target assignee needs `new_actor`.
+- An explicit `done` or `canceled` status update checks direct children in the
+  same write transaction. If any are neither `done` nor `canceled`, it refuses
+  `epic T7 has 2 open children; close or drop them first`, substituting the id and
+  open count. Force cannot bypass this rule. The refusal changes no task, roster,
+  index or event. Leaves and epics with all children terminal may close. Other
+  edits, comments, adding or reparenting children, and reopening remain allowed;
+  statuses never cascade.
 
 ### task_claim
 
@@ -142,8 +172,11 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
 
 ### board_brief
 
-No arguments. One line of counts per status, then one line per active task in board
-order `(priority, id)`, up to ten.
+No arguments. All epic rows first, each compact task row followed by `  done D/N`,
+then up to ten unparented non-epic tasks in `blocked`, `in_progress` or `review`.
+Each section sorts by `(priority, id)`. Nested and terminal epics remain visible
+while they have children. The final line is the six global status counts, counting
+every task once. There are no section headings; an empty board prints just counts.
 
 ### board_agents
 
@@ -167,6 +200,8 @@ task update has no field changes
 unknown assignee "nobody"; use new_actor=true to register the target
 comment must be nonempty
 task T4 does not exist
+task T7 is not an epic; an epic is a task with children
+epic T7 has 2 open children; close or drop them first
 task cannot be its own parent
 feed cursor belongs to a different board; reset a cursor or reset the board
 invalid feed cursor "nope"

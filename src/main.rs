@@ -161,6 +161,11 @@ fn run(
             }
             Ok((lines.join("\n"), ExitCode::SUCCESS))
         }
+        Some(Cmd::Epic { id }) => {
+            let board = open(&path)?;
+            let epic = board.epic(id).map_err(|e| e.to_string())?;
+            Ok((render::epic_text(&epic), ExitCode::SUCCESS))
+        }
         Some(Cmd::Get { id, full }) => {
             let board = open(&path)?;
             let task = board

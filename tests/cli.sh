@@ -205,5 +205,41 @@ has "reset succeeded" "new board instance" "$out"
 out=$("$B" ls)
 has "reset leaves an empty board" "total 0" "$out"
 
+# --- derived epics and atomic close refusals -----------------------------
+fresh epic
+"$B" add "umbrella" --priority 20 >/dev/null
+"$B" add "open child" --parent 1 --status in_progress --assignee manager >/dev/null
+"$B" add "done child" --parent 1 --status done >/dev/null
+"$B" add "dropped child" --parent 1 --status canceled >/dev/null
+"$B" add "ordinary active" --status review --priority -1 >/dev/null
+out=$(AGENTBOARD_ACTOR= "$B" epic 1); code=$?
+check "epic needs no actor" 0 "$code"
+check "epic has four lines" 4 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+check "epic compact row" "$("$B" ls --all | rg '^T1 ')" "$(printf '%s\n' "$out" | head -1)"
+check "epic status counts" "todo 0  in_progress 1  blocked 0  review 0  done 1  canceled 1" "$(printf '%s\n' "$out" | sed -n '2p')"
+check "epic progress" "done 1/3" "$(printf '%s\n' "$out" | sed -n '3p')"
+has "epic total and snapshot cursor" "total 3 cursor " "$out"
+out=$("$B" epic 2 2>&1); code=$?
+check "leaf epic exit" 1 "$code"
+check "leaf epic text" "agentboard: task T2 is not an epic; an epic is a task with children" "$out"
+out=$("$B" epic 999 2>&1); code=$?
+check "missing epic exit" 1 "$code"
+check "missing epic text" "agentboard: task T999 does not exist" "$out"
+for status in done canceled; do
+    out=$("$B" update 1 --if-revision 1 --status "$status" 2>&1); code=$?
+    check "epic $status refusal exit" 1 "$code"
+    check "epic $status refusal text" "agentboard: epic T1 has 1 open children; close or drop them first" "$out"
+done
+out=$("$B" brief)
+check "brief epic first" T1 "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)"
+has "brief epic progress" "done 1/3" "$(printf '%s\n' "$out" | head -1)"
+check "brief ordinary active second" T5 "$(printf '%s\n' "$out" | sed -n '2p' | cut -d' ' -f1)"
+lacks "brief hides child rows" "T2 " "$out"
+check "brief counts last" "todo 1  in_progress 1  blocked 0  review 1  done 1  canceled 1" "$(printf '%s\n' "$out" | tail -1)"
+"$B" update 2 --if-revision 1 --status canceled >/dev/null
+out=$("$B" update 1 --if-revision 1 --status done); code=$?
+check "all terminal epic closes" 0 "$code"
+has "closed epic record" "T1 done" "$out"
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]

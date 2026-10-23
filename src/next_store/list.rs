@@ -1,5 +1,7 @@
 //! Task listing and the compact board summary.
 
+use std::collections::HashMap;
+
 use crate::domain::{Status, Task};
 
 use super::feed::Cursor;
@@ -31,10 +33,67 @@ pub struct TaskPage {
 
 pub struct Brief {
     pub counts: Vec<(Status, u64)>,
+    pub epics: Vec<Epic>,
     pub active: Vec<Task>,
 }
 
+pub struct Epic {
+    pub task: Task,
+    pub counts: Vec<(Status, u64)>,
+    pub done: u64,
+    pub total: u64,
+    pub cursor: Cursor,
+}
+
+fn status_counts(counts: &[u64; 6]) -> Vec<(Status, u64)> {
+    Status::ALL
+        .iter()
+        .map(|s| (*s, counts[keys::status_code(*s) as usize]))
+        .collect()
+}
+
+fn rollup(task: Task, counts: &[u64; 6], cursor: Cursor) -> Epic {
+    Epic {
+        task,
+        counts: status_counts(counts),
+        done: counts[keys::status_code(Status::Done) as usize],
+        total: counts.iter().sum(),
+        cursor,
+    }
+}
+
 impl Board {
+    /// Direct-child counts in the caller's snapshot, including write transactions.
+    pub(super) fn child_counts(&self, txn: &heed::RoTxn<'_>) -> Result<HashMap<u64, [u64; 6]>> {
+        let mut counts = HashMap::new();
+        for entry in self.tasks.iter(txn)? {
+            let (_, raw) = entry?;
+            let task: Task = serde_json::from_slice(raw)?;
+            if let Some(parent) = task.parent_id {
+                counts.entry(parent).or_insert([0; 6])[keys::status_code(task.status) as usize] +=
+                    1;
+            }
+        }
+        Ok(counts)
+    }
+
+    pub fn epic(&self, id: u64) -> Result<Epic> {
+        let txn = self.env.read_txn()?;
+        let metadata = self.checked_metadata(&txn)?;
+        let task = self
+            .read_task_in_txn(&txn, id)?
+            .ok_or(Error::MissingTask(id))?;
+        let counts = self.child_counts(&txn)?;
+        let counts = counts.get(&id).ok_or(Error::NotEpic(id))?;
+        Ok(rollup(
+            task,
+            counts,
+            Cursor {
+                instance_id: metadata.instance_id,
+                seq: metadata.next_event_seq.saturating_sub(1),
+            },
+        ))
+    }
     /// Filtered page ordered by `(priority, id)`. The status or assignee index picks
     /// the candidates; the remaining filters run on the decoded task.
     pub fn list(&self, filter: &ListFilter<'_>) -> Result<TaskPage> {
@@ -67,30 +126,39 @@ impl Board {
         })
     }
 
-    /// Counts by status plus the oldest active work: blocked, in progress, review.
+    /// Derived epic progress and unparented active work, with global counts.
     pub fn brief(&self, active_limit: usize) -> Result<Brief> {
         let txn = self.env.read_txn()?;
-        self.checked_metadata(&txn)?;
+        let metadata = self.checked_metadata(&txn)?;
+        let children = self.child_counts(&txn)?;
+        let cursor = Cursor {
+            instance_id: metadata.instance_id,
+            seq: metadata.next_event_seq.saturating_sub(1),
+        };
         let mut counts = [0_u64; 6];
         let mut active = Vec::new();
+        let mut epics = Vec::new();
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
             let task: Task = serde_json::from_slice(raw)?;
             counts[keys::status_code(task.status) as usize] += 1;
-            if matches!(
-                task.status,
-                Status::Blocked | Status::InProgress | Status::Review
-            ) {
+            if let Some(child_counts) = children.get(&task.id) {
+                epics.push(rollup(task, child_counts, cursor.clone()));
+            } else if task.parent_id.is_none()
+                && matches!(
+                    task.status,
+                    Status::Blocked | Status::InProgress | Status::Review
+                )
+            {
                 active.push(task);
             }
         }
         active.sort_by_key(|task| (task.priority, task.id));
         active.truncate(active_limit);
+        epics.sort_by_key(|epic| (epic.task.priority, epic.task.id));
         Ok(Brief {
-            counts: Status::ALL
-                .iter()
-                .map(|status| (*status, counts[keys::status_code(*status) as usize]))
-                .collect(),
+            counts: status_counts(&counts),
+            epics,
             active,
         })
     }

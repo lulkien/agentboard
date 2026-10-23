@@ -5,7 +5,7 @@ everyone reads the same event feed. The board is a single LMDB directory: no
 daemon, no socket, no network, no database server. Every CLI call and every MCP
 server opens that directory and the file lock keeps them honest.
 
-9 MCP tools, 12 CLI verbs, one store behind both.
+10 MCP tools, 13 CLI verbs, one store behind both.
 
 ## Why it exists
 
@@ -61,6 +61,7 @@ agentboard add "title" [--description TEXT] [--goal TEXT] [--status S]
 agentboard ls [--status S] [--assignee NAME] [--parent ID] [--path PATH]
               [--all] [--limit N] [--offset N]
 agentboard get ID [--full]
+agentboard epic ID
 agentboard update ID --if-revision N
               [--title|--description|--goal|--status|--priority|--assignee|
                --clear-assignee|--parent|--clear-parent|--path|--clear-path]
@@ -88,6 +89,12 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   `--force` and a non-empty `--reason`; force without a reason refuses, and a
   reason without force refuses.
 - `comment` appends an event and never moves the revision.
+- `epic` shows a task's direct-child status counts and done/total progress. Epics
+  are derived from parent links; any task with children is an epic, including a
+  nested or closed task. Closing an epic as `done` or `canceled` requires every
+  direct child to be `done` or `canceled`, even with force.
+- `brief` shows all epic rows with progress first, then up to ten unparented active
+  tasks, then global status counts. Each section uses `(priority, id)` order.
 - `feed` is the bus. It answers a page of events plus the cursor to pass as
   `--after`. With no cursor it returns the newest page of *matching* events and
   says `older true` when more matching events sit before it. `--after 0` replays
@@ -131,11 +138,12 @@ one.
 | `task_add` | `ok`, the record, its event cursor |
 | `task_list` | one line per task, `total N`, cursor, `more true` |
 | `task_get` | the record; `full=true` for stored text |
+| `task_epic` | compact epic row, direct-child counts, done/total, total and cursor |
 | `task_update` | `ok`, the record, its cursor; refuses stale, held, missing reason |
 | `task_claim` | the work order, or `no ready tasks` |
 | `task_comment` | `ok`, cursor |
 | `board_feed` | events, cursor, `more`/`older`; `wait` seconds; `full=true` |
-| `board_brief` | counts per status plus the oldest active tasks |
+| `board_brief` | epic progress, unparented active tasks, then counts per status |
 | `board_agents` | roster lines, newest activity first |
 
 Both adapters call the same store functions, so a refusal reads the same in both

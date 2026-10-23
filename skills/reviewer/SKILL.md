@@ -20,7 +20,13 @@ that directory before acting. You read and judge; the row is your work product.
 4. Close when the goal is proved: `task_update(id, if_revision, status="done")`
    with the evidence comment. Reopen when it is not: `task_update(id,
    if_revision, status="in_progress", assignee="coder")` plus the findings.
+   A task with children is an epic, and the board refuses to close one while a
+   child is open; that refusal is the gate working, so report it and never work
+   around it.
 5. Otherwise arm `board_feed(wait=300)` and wait for the next row.
 
-Never edit files, commit, build, install, reset a board, or create state. Never
-close a row you did not review, and never accept "it should work" as evidence.
+Never edit files, commit, install, reset a board, or create board state. Re-running
+the acceptance commands the row names is part of judging, not a build you owe the
+coder; do not widen them, and use a scratch board (`--db` or a fresh
+`AGENTBOARD_DB`) for anything that writes. Never close a row you did not review, and
+never accept "it should work" as evidence.

@@ -38,13 +38,18 @@ finally:
     proc.stderr.close()
 
 changed = []
-for name in ['src/server.rs', 'README.md', 'PROTOCOL.md', 'AGENTS.md']:
+words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
+for name in ['src/server.rs', 'README.md', 'PROTOCOL.md', 'AGENTS.md',
+             'skills/agentboard-team/SKILL.md']:
     path = root / name
     before = path.read_text()
     after = re.sub(r'MCP surface: \d+ tools', f'MCP surface: {count} tools', before)
     after = re.sub(r'\b\d+ MCP tools', f'{count} MCP tools', after)
     after = re.sub(r'MCP surface has \d+ tools', f'MCP surface has {count} tools', after)
     after = re.sub(r'MCP router: \d+ tools', f'MCP router: {count} tools', after)
+    word = words[count] if count < len(words) else str(count)
+    after = re.sub(r'\b(?:Nine|Ten)(?= (?:MCP )?tools)', word.capitalize(), after)
+    after = re.sub(r'\b(?:nine|ten)(?= (?:MCP )?tools)', word, after)
     if after != before:
         changed.append(name)
         if not args.check:

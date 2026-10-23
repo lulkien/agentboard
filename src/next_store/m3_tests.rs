@@ -448,7 +448,206 @@ fn list_filters_pages_and_brief_counts() {
     assert_eq!(count(Status::Done), 1);
     assert_eq!(count(Status::Review), 1);
     let active: Vec<u64> = brief.active.iter().map(|task| task.id).collect();
-    assert_eq!(active, vec![review.id]);
+    assert!(active.is_empty());
+    assert_eq!(brief.epics[0].task.id, review.id);
+    assert_eq!(brief.epics[0].total, 1);
+}
+
+#[test]
+fn epic_rollup_is_direct_unpaged_and_read_only() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let root = board
+        .add("manager", draft("root", Status::Done, 10, None), false, 0)
+        .unwrap()
+        .task;
+    let mut children = Vec::new();
+    for status in Status::ALL {
+        let mut input = draft("child", status, 1, Some("manager"));
+        input.parent_id = Some(root.id);
+        children.push(board.add("manager", input, false, 1).unwrap().task);
+    }
+    let mut nested = draft("grandchild", Status::Done, 0, None);
+    nested.parent_id = Some(children[0].id);
+    board.add("manager", nested, false, 2).unwrap();
+    let before = board.metadata().unwrap();
+    let agents = board.agents().unwrap();
+    let epic = board.epic(root.id).unwrap();
+    assert_eq!(epic.total, 6);
+    assert_eq!(epic.done, 1);
+    assert!(epic.counts.iter().all(|(_, count)| *count == 1));
+    assert_eq!(epic.cursor.seq, before.next_event_seq - 1);
+    assert_eq!(epic.cursor.instance_id, before.instance_id);
+    let brief = board.brief(0).unwrap();
+    assert_eq!(
+        brief.epics.iter().map(|e| e.task.id).collect::<Vec<_>>(),
+        vec![children[0].id, root.id]
+    );
+    assert!(brief.active.is_empty());
+    assert_eq!(brief.counts.iter().map(|(_, n)| n).sum::<u64>(), 8);
+    assert!(matches!(board.epic(children[1].id), Err(Error::NotEpic(_))));
+    assert!(matches!(board.epic(999), Err(Error::MissingTask(999))));
+    assert_eq!(board.metadata().unwrap(), before);
+    assert_eq!(board.agents().unwrap(), agents);
+    for _ in 0..201 {
+        let mut input = draft("many", Status::Canceled, 0, None);
+        input.parent_id = Some(root.id);
+        board.add("manager", input, false, 3).unwrap();
+    }
+    assert_eq!(board.epic(root.id).unwrap().total, 207);
+    let parent = TaskPatch {
+        parent_id: Some(None),
+        ..TaskPatch::default()
+    };
+    board
+        .update(UpdateInput {
+            id: 8,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &parent,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 4,
+        })
+        .unwrap();
+    assert!(matches!(board.epic(children[0].id), Err(Error::NotEpic(_))));
+    assert_eq!(board.brief(10).unwrap().epics.len(), 1);
+}
+
+#[test]
+fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let root = board
+        .add(
+            "manager",
+            draft("root", Status::InProgress, 0, Some("manager")),
+            false,
+            0,
+        )
+        .unwrap()
+        .task;
+    for status in [Status::Todo, Status::Review, Status::Done, Status::Canceled] {
+        let mut input = draft("child", status, 0, None);
+        input.parent_id = Some(root.id);
+        board.add("manager", input, false, 1).unwrap();
+    }
+    let before = board.metadata().unwrap();
+    let roster = board.agents().unwrap();
+    let tasks = board.list(&list_all()).unwrap().tasks;
+    for status in [Status::Done, Status::Canceled] {
+        for force in [false, true] {
+            let patch = TaskPatch {
+                status: Some(status),
+                assignee: Some(Some("new-target".into())),
+                ..TaskPatch::default()
+            };
+            let error = board
+                .update(UpdateInput {
+                    id: root.id,
+                    actor: if force { "outsider" } else { "manager" },
+                    expected_revision: 1,
+                    patch: &patch,
+                    force,
+                    force_reason: force.then_some("override"),
+                    new_actor: true,
+                    comment: Some("must not land"),
+                    now_ms: 2,
+                })
+                .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "epic T1 has 2 open children; close or drop them first"
+            );
+            assert_eq!(board.get(root.id).unwrap().unwrap(), root);
+            assert_eq!(board.metadata().unwrap(), before);
+            assert_eq!(board.agents().unwrap(), roster);
+            assert_eq!(board.list(&list_all()).unwrap().tasks, tasks);
+            assert!(board.event(before.next_event_seq).unwrap().is_none());
+        }
+    }
+    // Non-status edits and comments remain legal even on a terminal epic.
+    let title = TaskPatch {
+        title: Some("renamed".into()),
+        ..TaskPatch::default()
+    };
+    board
+        .update(UpdateInput {
+            id: root.id,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &title,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 3,
+        })
+        .unwrap();
+    for id in [2, 3] {
+        board
+            .update(UpdateInput {
+                id,
+                actor: "manager",
+                expected_revision: 1,
+                patch: &status_patch(Status::Canceled),
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 4,
+            })
+            .unwrap();
+    }
+    for (revision, status) in [(2, Status::Done), (3, Status::Canceled)] {
+        board
+            .update(UpdateInput {
+                id: root.id,
+                actor: "manager",
+                expected_revision: revision,
+                patch: &status_patch(status),
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 5,
+            })
+            .unwrap();
+    }
+    let mut input = draft("reopened child", Status::Todo, 0, None);
+    input.parent_id = Some(root.id);
+    board.add("manager", input, false, 6).unwrap();
+    board
+        .update(UpdateInput {
+            id: root.id,
+            actor: "manager",
+            expected_revision: 4,
+            patch: &TaskPatch {
+                title: Some("terminal edit".into()),
+                ..TaskPatch::default()
+            },
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 7,
+        })
+        .unwrap();
+    board
+        .update(UpdateInput {
+            id: root.id,
+            actor: "manager",
+            expected_revision: 5,
+            patch: &TaskPatch::default(),
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: Some("note"),
+            now_ms: 8,
+        })
+        .unwrap();
 }
 
 #[test]

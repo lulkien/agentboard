@@ -10,7 +10,7 @@ mod open;
 mod tasks;
 
 pub use feed::{Cursor, FeedFilter, FeedPage, WAIT_MAX_MS};
-pub use list::{Brief, DEFAULT_LIST_LIMIT, ListFilter, MAX_LIST_LIMIT, TaskPage};
+pub use list::{Brief, DEFAULT_LIST_LIMIT, Epic, ListFilter, MAX_LIST_LIMIT, TaskPage};
 pub use open::{Board, BoardOptions, Error, Metadata, ResetOutcome, Result};
 pub use tasks::{Added, Agent, ClaimOutcome, UpdateInput, Updated};
 

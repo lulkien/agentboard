@@ -13,7 +13,7 @@ seats, handles quota, and decides with the human.
 
 May:
 - `task_add` to file work, including the assignee
-- `task_list`, `task_get`, `board_brief`, `board_agents`, `board_feed`
+- `task_list`, `task_get`, `task_epic`, `board_brief`, `board_agents`, `board_feed`
 - `task_comment` to record a decision
 - `task_update` with `force`+`reason` to reassign a stalled or quota-exhausted row
 - herdr: create the worker tab and panes, start agents, prompt them, read panes

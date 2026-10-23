@@ -1,7 +1,7 @@
 //! Compact text rendering shared by the CLI and the MCP tools.
 
-use crate::domain::{Event, Task};
-use crate::store::{Agent, Brief, FeedPage};
+use crate::domain::{Event, Status, Task};
+use crate::store::{Agent, Brief, Epic, FeedPage};
 
 /// Width of a task title in a one-line list.
 const TITLE_WIDTH: usize = 72;
@@ -127,16 +127,41 @@ pub fn feed_page(page: &FeedPage, full: bool) -> String {
 }
 
 pub fn brief_text(brief: &Brief) -> String {
-    let counts: Vec<String> = brief
-        .counts
-        .iter()
-        .map(|(status, count)| format!("{} {count}", status.as_str()))
-        .collect();
-    let mut lines = vec![counts.join("  ")];
+    let mut lines: Vec<String> = brief.epics.iter().map(epic_line).collect();
     for task in &brief.active {
         lines.push(task_line(task));
     }
+    lines.push(counts_text(&brief.counts));
     lines.join("\n")
+}
+
+fn counts_text(counts: &[(Status, u64)]) -> String {
+    counts
+        .iter()
+        .map(|(status, count)| format!("{} {count}", status.as_str()))
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
+pub fn epic_line(epic: &Epic) -> String {
+    format!(
+        "{}  done {}/{}",
+        task_line(&epic.task),
+        epic.done,
+        epic.total
+    )
+}
+
+pub fn epic_text(epic: &Epic) -> String {
+    format!(
+        "{}\n{}\ndone {}/{}\ntotal {} cursor {}",
+        task_line(&epic.task),
+        counts_text(&epic.counts),
+        epic.done,
+        epic.total,
+        epic.total,
+        epic.cursor.encode()
+    )
 }
 
 pub fn agent_line(agent: &Agent) -> String {

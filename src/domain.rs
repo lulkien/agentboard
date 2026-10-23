@@ -282,7 +282,7 @@ impl Task {
                 actual: self.revision,
             });
         }
-        if force && !force_reason.is_some_and(|reason| !reason.trim().is_empty()) {
+        if force && force_reason.is_none_or(|reason| reason.trim().is_empty()) {
             return Err(Error::MissingForceReason);
         }
         if !force && force_reason.is_some() {

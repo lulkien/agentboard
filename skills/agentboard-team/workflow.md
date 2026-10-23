@@ -33,8 +33,10 @@ row. Reopening means reusing the row, never filing a second one.
    The event carries `recipient`, which wakes the reviewer.
 5. Reviewer reads the work, then either `status="done"` with the evidence comment or
    `status="in_progress"`, `assignee="coder"` and its findings.
-6. Manager reads `board_brief` for counts and `task_list` for what is where; it does
-   not chase individual panes while the board is moving.
+6. Manager reads `board_brief` for groups and counts, `task_epic` for an umbrella's
+   direct-child progress, and `task_list` for what is where. Close or drop the
+   direct children before closing their umbrella. The manager does not chase
+   individual panes while the board is moving.
 
 ## Waiting without spinning
 

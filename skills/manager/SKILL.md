@@ -27,3 +27,7 @@ Do these steps yourself:
 5. Judge a claim from the seat's reported output plus the board and git state.
    Send a doubt to the reviewer as a row; never fix it yourself and never close a
    reviewer's row. Commit locally only when the owner says so, and never push.
+6. A big goal is an umbrella row: file it assigned to yourself, file its children
+   with `parent`, read its progress with MCP `task_epic` (CLI `epic ID`), and close
+   it only when every child is terminal. The board refuses an epic close while a
+   child is open.

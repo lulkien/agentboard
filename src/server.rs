@@ -1,4 +1,4 @@
-//! MCP surface: 9 tools, text-only results, short acknowledgements.
+//! MCP surface: 10 tools, text-only results, short acknowledgements.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with the
 //! changed record plus its event cursor. Agents pay tokens per byte.
@@ -107,6 +107,11 @@ pub struct GetArgs {
     /// Print the full description and goal
     #[serde(default)]
     pub full: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EpicArgs {
+    pub id: u64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -309,6 +314,22 @@ impl Board {
     }
 
     #[tool(
+        name = "task_epic",
+        description = "One epic with direct-child status counts and progress"
+    )]
+    async fn task_epic(
+        &self,
+        Parameters(args): Parameters<EpicArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let epic = blocking(&self.board, move |board| {
+            board.epic(args.id).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(err)?;
+        Ok(text(render::epic_text(&epic)))
+    }
+
+    #[tool(
         name = "task_update",
         description = "Change fields, status or owner with an expected revision"
     )]
@@ -459,7 +480,7 @@ impl Board {
 
     #[tool(
         name = "board_brief",
-        description = "Counts by status plus the oldest active work"
+        description = "Epic progress, unparented active tasks, then counts by status"
     )]
     async fn board_brief(&self) -> Result<CallToolResult, ErrorData> {
         let brief = blocking(&self.board, move |board| {
@@ -509,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_surface_is_nine_tools_with_valid_schemas() {
+    fn the_tool_surface_is_ten_tools_with_valid_schemas() {
         let server = Board::new(scratch_board("surface"), None);
         let tools = server.tool_router.list_all();
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
@@ -522,6 +543,7 @@ mod tests {
                 "task_add",
                 "task_claim",
                 "task_comment",
+                "task_epic",
                 "task_get",
                 "task_list",
                 "task_update",

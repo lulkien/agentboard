@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP surface check: nine tools on one stdio server, no daemon, scratch board."""
+"""MCP surface check: ten tools on one stdio server, no daemon, scratch board."""
 
 import json
 import os
@@ -13,6 +13,7 @@ TOOLS = {
     "task_add",
     "task_list",
     "task_get",
+    "task_epic",
     "task_update",
     "task_claim",
     "task_comment",
@@ -126,7 +127,7 @@ def main():
 
         listed = server.send("tools/list", {})
         names = {tool["name"] for tool in listed["result"]["tools"]}
-        check("tools/list is the nine-tool surface", TOOLS, names)
+        check("tools/list is the ten-tool surface", TOOLS, names)
 
         is_error, body = server.call("task_add", {"title": "mcp task", "description": "full text here"})
         check("task_add is not an error", False, is_error)
@@ -219,6 +220,42 @@ def main():
             _, body = flag_server.call("board_agents", {})
             has("flag actor registers bob", "bob", body)
             check("flag actor wins over the environment", False, "alice" in body)
+        # CLI and MCP share one snapshot and renderer, with no intervening writes.
+        with Server(os.path.join(scratch, "epics"), "worker") as epics:
+            epics.start()
+            _, body = epics.call("task_add", {"title": "umbrella", "priority": 20})
+            for status in ["todo", "done", "canceled"]:
+                epics.call("task_add", {"title": status + " child", "parent": 1, "status": status})
+            epics.call("task_add", {"title": "ordinary", "status": "review", "priority": -1})
+            error, body = epics.call("task_epic", {"id": 1})
+            check("task_epic succeeds", False, error)
+            check("epic four lines", 4, len(body.splitlines()))
+            check("epic direct counts", "todo 1  in_progress 0  blocked 0  review 0  done 1  canceled 1", body.splitlines()[1])
+            check("epic progress", "done 1/3", body.splitlines()[2])
+            has("epic total cursor", "total 3 cursor ", body)
+            cli = subprocess.check_output([BIN, "--db", os.path.join(scratch, "epics"), "epic", "1"], text=True)
+            check("CLI and MCP epic bytes match", cli.removesuffix("\n"), body)
+            print("epic parity: CLI == MCP (four lines, same scratch snapshot)")
+            for ident, message in [(2, "task T2 is not an epic; an epic is a task with children"), (999, "task T999 does not exist")]:
+                reply = epics.send("tools/call", {"name": "task_epic", "arguments": {"id": ident}})
+                check("epic read refusal code", -32602, reply.get("error", {}).get("code"))
+                check("epic read refusal text", message, reply.get("error", {}).get("message"))
+            for status in ["done", "canceled"]:
+                reply = epics.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 1, "status": status}})
+                check("epic close JSON-RPC code", -32602, reply.get("error", {}).get("code"))
+                check("epic close exact count", "epic T1 has 1 open children; close or drop them first", reply.get("error", {}).get("message"))
+            print("epic refusal: -32602 epic T1 has 1 open children; close or drop them first")
+            _, brief = epics.call("board_brief")
+            check("brief epic first", "T1", brief.splitlines()[0].split()[0])
+            has("brief progress", "done 1/3", brief.splitlines()[0])
+            check("brief ordinary second", "T5", brief.splitlines()[1].split()[0])
+            check("brief excludes children", 3, len(brief.splitlines()))
+            check("brief global counts last", "todo 2  in_progress 0  blocked 0  review 1  done 1  canceled 1", brief.splitlines()[-1])
+            epics.call("task_update", {"id": 2, "if_revision": 1, "status": "canceled"})
+            error, body = epics.call("task_update", {"id": 1, "if_revision": 1, "status": "done"})
+            check("all terminal epic closes", False, error)
+            has("closed epic body", "T1 done", body)
+            print("tools/list: task_epic present")
     finally:
         server.close()
 

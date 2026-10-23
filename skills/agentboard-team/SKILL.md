@@ -18,7 +18,7 @@ server opens the directory, and the file lock keeps concurrent writers honest.
 
 Pages here:
 
-- this manual: the board, the seats, the launcher, the wake loop, the nine tools
+- this manual: the board, the seats, the launcher, the wake loop, the ten tools
 - `workflow.md`: how a task moves and who moves it
 - `roles.md`: manager, analyzer, coder and reviewer: what each may run and never does
 
@@ -122,23 +122,30 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
 - If a seat must be poked outside the board, that is a herdr prompt, not a board
   write.
 
-## Nine tools, same store as the CLI
+## Ten tools, same store as the CLI
 
 | Tool | Use |
 | --- | --- |
 | `task_add` | file work; assigns on creation when you name an assignee |
 | `task_list` | status, assignee, parent, path; `all=true` includes closed rows |
 | `task_get` | one task and its revision; `full=true` for stored text |
+| `task_epic` | umbrella row, direct-child counts and done/total progress |
 | `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override |
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
-| `board_brief` | counts per status plus the oldest active work |
+| `board_brief` | epic progress, unparented active work, then global status counts |
 | `board_agents` | roster with last activity and last task |
 
-CLI parity: `add`, `ls`, `get`, `update`, `claim`, `comment`, `feed`, `brief`,
+CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `brief`,
 `agents`, `path`, `reset --yes`, `serve`. Exit codes: `0` ok, `1` refused, `3` no
 ready tasks.
+
+Use `task_epic` (CLI `epic ID`) to read an umbrella's direct children as status
+counts and done/total progress. Any task with children is an epic; nested epics
+also appear in `board_brief`. Brief puts epic progress first, unparented active
+work next, and global counts last. Close or drop all direct children before
+closing an umbrella; force does not bypass that store rule.
 
 ## Rules for every agent
 

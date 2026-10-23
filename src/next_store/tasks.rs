@@ -117,6 +117,22 @@ impl Board {
             input.now_ms,
         )?;
         let next = applied.task;
+        if matches!(input.patch.status, Some(Status::Done | Status::Canceled)) {
+            let counts = self.child_counts(&txn)?;
+            let count = counts.get(&input.id).map_or(0, |counts| {
+                Status::ALL
+                    .iter()
+                    .filter(|s| !matches!(s, Status::Done | Status::Canceled))
+                    .map(|s| counts[keys::status_code(*s) as usize])
+                    .sum()
+            });
+            if count > 0 {
+                return Err(Error::EpicOpenChildren {
+                    id: input.id,
+                    count,
+                });
+            }
+        }
         self.check_parent_chain(&txn, &next)?;
         self.ensure_target(
             &mut txn,
