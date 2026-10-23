@@ -1,77 +1,55 @@
 # AGENTS.md — changing this code
 
-agentboard is one Rust binary that is both a task board (SurrealDB by default, SQLite
-opt-in) and a bridge to agent panes, with two front doors: a CLI and an MCP server on stdio. This file is
-about CHANGING this tree, not about running a team with it.
+agentboard is one Rust binary that is both a shared task board on an embedded LMDB
+directory and a bridge-free MCP server on stdio. This file is about CHANGING this
+tree, not about running a team with it.
 
 Read first:
 
-- `README.md` — the model and the tools.
+- `README.md` — the model, the verbs and the nine tools.
 - `PROTOCOL.md` — the wire surface agents see.
-- `src/schema.sql` — SQLite schema; SurrealDB definitions live in `src/store/surreal/mod.rs`.
-  Versions 1/2 -> 3 migrate additively on every CLI/MCP entry when needed.
+- `skills/agentboard-manager` — running a team with this tool; the repo copy is canonical.
 
 ## Prove it
 
 Run these from the repo root. A change is not done until each prints what is beside it.
-The default build is SurrealDB; sqlite is the opt-in build (`--no-default-features --features sqlite`).
-
-Fresh-box prerequisite: a `surreal` binary, version 2.7.x, on `PATH` or at
-`~/.surrealdb/surreal`. A default `cargo test` starts throwaway servers from it, so with
-`AGENTBOARD_REQUIRE_SURREAL=1` a missing binary fails the run instead of printing `SKIP`.
-A server of any other version is refused by name (`want surrealdb 2.7.x`).
+Everything is offline and uses scratch boards; there is no server to start and no
+`surreal` binary anywhere.
 
 | Command | Expected |
-|---|---|
-| `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
-| `cargo build --release` | `Finished` |
-| `AGENTBOARD_REQUIRE_SURREAL=1 cargo test` | `test result: ok. 63 passed` (unit), `29 passed` (`tests/manager.rs`, stub herdr), and `2 passed` (`tests/herdr_schema.rs`); the schema check names `SKIP` without a herdr socket |
-| `cargo test --no-default-features --features sqlite` | `test result: ok. 55 passed`, `29 passed`, and `2 passed` (needs no `surreal` binary) |
-| `AGENTBOARD_REQUIRE_HERDR=1 cargo test --test herdr_schema -- --nocapture` | `schema ok: ... methods, ... param fields, protocol ...` and `2 passed`; requires a reachable herdr control socket and `herdr` on `PATH`, uses only ping and `herdr api schema --output`. `python3 tests/herdr_schema.py --inventory` prints requests derived from source. |
-| `bash tests/cli.sh` | `251/251 passed (backend: surreal)` (against the sqlite binary: `258/258 passed (backend: sqlite)`) |
-| `bash tests/dispatch.sh` | `91/91 passed (backend: surreal)` (either build) |
-| `bash tests/manager.sh` | `68/68 passed (backend: surreal)`: `manager up/down/renew` and `wait --agent` against `tests/herdr_stub.py` and a throwaway board. `AGENTBOARD_HERDR_LIVE=1 bash tests/manager-live.sh` is the one round against the real herdr (scratch agents only); without the variable it prints `skipped` |
-| `bash tests/surreal.sh` | `surreal.sh: all checks passed` (builds both feature sets itself, plus a debug surreal build under `target/surreal-debug`, then restores the default release build; runs `cli.sh` and `dispatch.sh` on both builds, `mcp_client.py` on both, and prints `251/251`, `258/258`, `91/91`, `232/232` for them; about a minute once that cache is warm) |
-| `bash tests/race.sh` | `claims=80 unique=80 elapsed_ms=... (backend: surreal)` (`AGENTBOARD_TEST_BIN` picks the binary; sqlite prints `(backend: sqlite)`) |
-| `bash tests/wait.sh` | ends with `elapsed_ms=... (backend: surreal)`, no `FAIL` |
-| `python3 scripts/sync-tool-count.py --check` | `MCP router: 17 tools; published counts match`; source header and docs are generated from the router with this script (omit `--check` to update) |
-| `python3 tests/sqlite-first-use.py` (after a sqlite release build) | `sqlite-first-use: 20 rounds x 8 simultaneous first adds passed` (fresh scratch files only) |
-| `python3 tests/board-upgrade.py OLD_BINARY target/release/agentboard` (OLD_BINARY built at `ea016707`) | `board-upgrade: ... passed`: host-runnable scratch preservation, interruption, positive-evidence guards, unreadable warnings and version compatibility; no PID namespace needed |
-| `python3 tests/server-lock.py target/release/agentboard` | `Ran 3 tests` and `OK`: host scratch managed-daemon lifetime flock, second-server/upgrade exclusion and progress after release |
-| `python3 tests/schema-version.py` | `schema-version: both backends and mutation checks passed` (CLI/MCP, concurrency, preservation and deleted-version-guard proofs; scratch boards only) |
+| --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo clippy --all-targets -- -D warnings` | no output (`Finished` only); run it again with `--no-default-features --features sqlite` |
+| `cargo test --offline --lib` | `test result: ok. 58 passed; 0 failed; 1 ignored` |
+| `cargo clippy --offline --all-targets -- -D warnings` | no output |
+| `cargo build --release` | `Finished` |
+| `bash tests/cli.sh` | `65/65 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `35/35 passed (mcp, lmdb)` |
+| `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
+| `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
+| `python3 scripts/sync-tool-count.py --check` | `MCP router: 9 tools; published counts match` |
+| `python3 tests/doc-names.py` | `doc-names: 9 pages, 49 CLI names, 79 MCP names passed` |
+| `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
+| `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; debug ceiling 25 ms, release 5 ms |
 
-The suites drive `target/release/agentboard`: build release before running them.
-`tests/cli.sh`, `dispatch.sh`, `race.sh` and `wait.sh` source `tests/board.sh` (which sources
-`tests/server.sh`): it reads the backend off the binary (`AGENTBOARD_TEST_BIN` picks it),
-clears `AGENTBOARD_DB` and `AGENTBOARD_SURREAL_URL`, and starts throwaway servers on random
-loopback ports, so a bare run never touches the default board. Each prints
-`(backend: surreal|sqlite)` in its summary line, and `tests/surreal.sh` matches it.
-`python3 tests/mcp_client.py` cannot start a server itself: on the default build it refuses
-(exit 1, one line) unless `AGENTBOARD_TEST_DB` (a fresh data directory) and
-`AGENTBOARD_SURREAL_URL` (a throwaway server, never port 18720) are both set. Prefer
-`bash tests/surreal.sh`, which supplies both and prints `232/232 checks passed (backend: surreal)`. With a
-sqlite binary and no `AGENTBOARD_TEST_DB`, it uses `.probe/client.db`.
-Add or change behaviour with a test in the suite that owns that kind of check
-(`cli.sh` for exit codes and stderr, `mcp_client.py` for tool text, `dispatch.sh`
-for the bridge). When a count changes, update the expectation here.
-
-A change under `src/store/surreal/` is not done on a box where any of its tests
-printed `SKIP` (no `surreal` binary): the `AGENTBOARD_REQUIRE_SURREAL=1` row turns a
-skip into a failure. SKIP is fine on a device that builds only the sqlite binary.
+`AGENTBOARD_TEST_BIN` points any suite at another binary; the suites never touch a
+live board, because each one sets `AGENTBOARD_DB` to a fresh `mktemp` directory.
+Add or change behaviour with a test in the suite that owns that kind of check:
+`tests/cli.sh` for verbs, exit codes and text, `tests/mcp_client.py` for tool text
+and JSON-RPC shape, `tests/race.sh` for cross-process claims. When a count changes,
+update the expectation here.
 
 ## Layout
 
-- `src/main.rs` is thin: parse, call the store, print, set the exit code.
-- `src/cli.rs` holds argv as types (clap derive); validation stays in the store.
-- `src/store/` has one module per concern: `tasks`, `epics`, `diffs`, `sessions`, `wait`,
-  `dispatch`, `proc`, `render`. Event logging and id parsing live in `mod.rs`. `diffs` is
-  the append-only diff rows (`diff_add`/`diff_get`/`diff_list`); the coder-filed
-  review gate and the legacy auto-filed review row live in `tasks::apply`, and the
-  reopen cap and chain-depth rules in `apply`, `add` and `set_parent`, once per backend.
-  The strings every adapter prints for those rules are in `text.rs`.
-- `src/server.rs` is the MCP adapter.
+- `src/domain.rs` — task, status, patch, claim and event rules; no I/O, no printing.
+- `src/next_store/` (module `store`) — the LMDB store: `open` (Board, options, reset,
+  lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/claim/comment,
+  index upkeep, events), `feed` (cursors, filters, bounded wait), `list` (list,
+  brief), `tests`/`m3_tests` (store proofs).
+- `src/render.rs` — the only place compact text is built, including the `…`
+  truncation and the full-text path.
+- `src/cli.rs` — argv as types. Validation stays in the store.
+- `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
+- `src/server.rs` — the MCP adapter, nine tools, store work on `spawn_blocking`.
 
 Dependencies point one way: `main.rs` and `server.rs` call `store`; `store` never
 calls them. Store modules never print and never exit; the adapters render text and
@@ -80,48 +58,37 @@ have both adapters call it, so a rule exists once.
 
 ## Traps
 
-- An explicit-id `claim` refusal is an `Err` (CLI exit 1, MCP -32603); only the
-  id-less probe stays `Ok("no ready tasks")`. A refusal returned as `Ok` is read by
-  scripts as a successful claim.
-- Give every free-text argv slot `allow_hyphen_values` (and `allow_negative_numbers`
-  on numeric ones). Without it clap rejects `--description "- bullet"`; `tests/cli.sh`
-  exists to catch that.
-- Never assert on a rendered relative age (`created: 0s`, `lease: 59m left`): the
-  result depends on where the second hand falls. Compare a render with the
-  age/lease lines stripped, assert a range, or assert on events.
-- The tool count on line 1 of `src/server.rs` must equal
-  `rg -c "#\[tool\(" src/server.rs`. Derive it; do not count by hand.
-- Rework in the primary chain reopens the implement row; never file a fix row
-  and never create a fourth level. The review row is the coder's to file, and
-  the board validates it at publish; the manager files only the analyze root.
-- The chain close is the reviewer's `task_update(status="done"|"not_done")` on
-  the review row, refused to the identity that recorded the newest diff. The
-  chain reopen is the manager's store operation (`chain_reopen`, no adapter door
-  yet), refused to the identity that recorded the close and after a commit.
-- Agents run `~/.cargo/bin/agentboard`; `./target/release/agentboard` is only the
-  checkout, and `tests/mcp_client.py` drives the latter. After changing the CLI or
-  MCP surface run `cargo install --path . --locked`, or the verbs you built are
-  missing from the binary every agent executes.
-- Board compatibility uses only the persisted schema version on every CLI/MCP
-  entry. No seat-start build identity or catalog check is required. The manager
-  reloads MCP processes when a new binary is needed.
-- Managed SurrealDB daemons hold `board.lock` for their lifetime; per-operation
-  writers use `board.write.lock`. Legacy/manual raw daemons do not hold the
-  lifetime lock: first cutover still needs the port/positive-fd checks and the
-  owner's stopped-all-servers confirmation. Unreadable `/proc` entries warn; they
-  are not positive holder evidence.
-- Older schema versions migrate additively in the triggering call under the
-  write lock; DDL, backfill and version commit together. Newer boards refuse by
-  name. Type changes and unsupported transitions require manual inspection.
-  Coder seats never install or run offline maintenance on a live board.
-- Route every herdr/tmux bridge call through the one bounded runner in
-  `src/store/proc.rs`, which honours `$AGENTBOARD_DELIVER_TIMEOUT_MS`. Before
-  claiming "every call is bounded", run `rg "Command::output" src/` and check.
-- A kill must kill the process group (`process_group(0)` plus a group kill), and
-  its test must assert the process is dead: a test that only times the caller
-  passes with the kill deleted.
-- There is no `sqlite3` CLI on the dev box; inspect a board with python3's stdlib
-  `sqlite3` module.
+- A `flock` exclusive→shared downgrade is a release, so a `reset` can unlink
+  `data.mdb` inside it. Open compares `(dev, inode)` across the downgrade and
+  retries; do not remove that check.
+- `serve()` returns a running service. Awaiting only that returns immediately and a
+  client sees its initialize reply followed by a closed stream; call
+  `.waiting().await`.
+- rmcp 3.5 accepts `initialize` for protocol `2025-11-25` with no `_meta`. The
+  2026-07-28 draft drops `initialize` and demands inline
+  `io.modelcontextprotocol/protocolVersion` and `clientCapabilities` in
+  `params._meta`; a plain `initialize` for that version is refused.
+- Give every free-text argv slot `allow_hyphen_values` and numeric slots the same,
+  or `add "- dash title"` and `--priority -3` are rejected as flags. `tests/cli.sh`
+  exists to catch exactly that.
+- There is no map growth in place: a full map fails the write atomically and names
+  `AGENTBOARD_MAP_SIZE_MB`. Set it before the board is created.
+- `reset` must take the exclusive lock before it scans for unknown files, or a
+  stray file turns disposal into a half-deleted board.
+- A bare sequence cursor (for example `--after 0`) means "this board", so history
+  replay works without knowing the instance id; a foreign `instance:seq` refuses
+  with `CursorInstanceMismatch`.
+- Full text must never go through the compact renderer: no title clip, no
+  whitespace collapse. A reader that asks for full text gets stored bytes.
+- The tool count on the first line of `src/server.rs`, the header in
+  `tests/mcp_client.py` and the counts in `README.md`/`PROTOCOL.md` come from
+  `python3 scripts/sync-tool-count.py`; run it with `--check` in a gate and never
+  count by hand.
+- An explicit-id `claim` refusal is an error (CLI exit 1, MCP `isError`); only the
+  id-less probe answers `no ready tasks` with exit 3. A refusal returned as `Ok` is
+  read by scripts as a successful claim.
+- Never assert on a rendered timestamp or relative age; assert on events, counts or
+  a range.
 - Mutation-check a guard you add: remove it and confirm a test fails.
 
 ## Git
@@ -129,31 +96,27 @@ have both adapters call it, so a rule exists once.
 - Branch `master`; one objective per commit.
 - `git add` explicit paths, never `-A`: it sweeps scratch files into the commit.
 - Commits land locally and are never pushed by an agent; pushing is the human's call.
+- `rework-plan/` is untracked on purpose. `tmp-review-*.md` are throwaway and stay out.
 
 ## If you are the reviewer
 
-You read and judge; you never edit. Inputs: the diff the review brief names (`diff_list`, `diff_get`; an evidence-only row points at the patch), the row's
-`description` and `goal`. Output: findings classified blocker, follow-up or nit. No file edit, no
-commit, no build, no install, no probe that creates state; `git status --short` stays clean.
-Rule 5 of the reviewer rules in `PROTOCOL.md`.
+You read and judge; you never edit. Inputs: the commit or row the brief names, its
+`description` and `goal`. Output: findings classified blocker, follow-up or nit.
+No file edit, no commit, no build, no install, no probe that creates state;
+`git status --short` stays clean apart from the one report file the brief allows.
 
 ## Decide with the human, not alone
 
 - Pushing.
 - Wiping or migrating a live board.
-- Changing the schema.
+- Changing the board format or the seven database names.
 - Adding a dependency the task at hand does not need.
 
 ## Where the rest lives
 
-- `skills/agentboard-manager` — running a team with this tool. The repo copy is canonical:
-  edit it there. `skills/install.sh --force` creates canonical repo links under
+- `skills/agentboard-manager` — running a team: launcher, wake commands, roles,
+  workflow. `skills/install.sh --force` creates canonical repo links under
   `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
-  canonical names. The Claude/opencode command links also go through that home.
-  There is one physical copy: never copy over the installed links.
-- `PROTOCOL.md` — the wire surface: the chain, the cap, the diff verbs, who moves which status.
-- `seats/README.md` — how each seat is started: the codex role cards, the shared
-  MCP config, the home links that point at them, and the measured facts (shell as a
-  removable tool, sandbox vs cwd, the approval_mode keys) behind each card.
-- `docs/three-task-chain.md` — the design note behind the three-row chain.
-- `docs/workflow.md` — the only page with diagrams; the other pages link to it.
+  canonical names. There is one physical copy: never copy over the installed links.
+- `PROTOCOL.md` — the wire surface: nine tools, cursors, refusals, exit codes.
+- `skills/manager/` — the seat entry points (`/manager`, `$manager`).

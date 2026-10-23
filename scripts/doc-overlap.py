@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check overlap across the five core pages listed in PAGES below.
 
-Scope: docs/three-task-chain.md, docs/workflow.md, and the agentboard-manager
-SKILL.md, workflow.md and roles.md. Paths resolve from this script's repository.
+Scope: README.md, PROTOCOL.md, AGENTS.md, and the agentboard-manager SKILL.md,
+workflow.md and roles.md. Paths resolve from this script's repository.
 Headings are excluded because navigation labels are not instructions. Table and
 list markers are excluded from exact-line checks because structural rows and
 bullets are not standalone prose; their text still participates in shingles.
@@ -18,8 +18,9 @@ from pathlib import Path
 import re
 
 PAGES = (
-    'docs/three-task-chain.md',
-    'docs/workflow.md',
+    'README.md',
+    'PROTOCOL.md',
+    'AGENTS.md',
     'skills/agentboard-manager/SKILL.md',
     'skills/agentboard-manager/workflow.md',
     'skills/agentboard-manager/roles.md',

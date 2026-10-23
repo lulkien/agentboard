@@ -1,123 +1,131 @@
 ---
 name: agentboard-manager
-description: "Use when working a task on the agentboard, or managing an analyzer, coder and reviewer team on it."
-version: 3.0.0
+description: "Use when working a task on the agentboard, or running a team of CLI agents on it."
+version: 4.0.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [agentboard, herdr, manager, analyzer, coder, reviewer, delegation]
-    related_skills: [claude-code, opencode]
+    tags: [agentboard, manager, coder, reviewer, lmdb, feed]
+    related_skills: [claude-code, opencode, herdr]
 ---
 # agentboard manual
 
-The board holds work (rows, status, reports, events). herdr holds processes (tabs, panes, agents).
-Full wire reference: `PROTOCOL.md`. Tool reference: `README.md`. Both live in the agentboard repo.
-Three pages here, nothing else binding:
+The board holds the work: tasks, statuses, owners, comments and an event feed.
+It is one LMDB directory. There is no server process: every CLI call and every MCP
+server opens the directory, and the file lock keeps concurrent writers honest.
 
-- this manual: the verbs and exit codes
-- `workflow.md`: how a row moves, who moves which status
-- `roles.md`: manager, analyzer, coder, reviewer: what each may run and never does
+Three pages here:
 
-Read this page and `workflow.md`. Read `roles.md` for your seat.
-Start the manager seat with `/manager` (Claude Code, opencode, Hermes) or `$manager` (Codex); entry points live in the repo at `skills/manager/`.
+- this manual: the board, the launcher, the wake loop, the nine tools
+- `workflow.md`: how a task moves and who moves it
+- `roles.md`: manager, coder, reviewer: what each may run and never does
 
-## The three-row chain
+Wire details: `PROTOCOL.md`. Changing the tree: `AGENTS.md`. Both in the repo.
 
-The manager files ONE analyze root and waits. The analyzer publishes the plan as
-`needs_impl` and files the implement child; the coder implements that plan,
-records the diff, files the review child, and publishes `needs_review`; the
-reviewer reopens the implement row or closes all three rows. The board enforces
-the shape: one child per row, a review row takes no child, and rework reopens the
-implement row instead of adding a fourth row. The same review row serves every
-round.
+## The board
 
-Two things the manager must never do on a chain:
+- One directory per board: `$AGENTBOARD_DB`, else
+  `~/.local/state/agentboard/lmdb`.
+- A seat writes as its name: export `AGENTBOARD_ACTOR` or pass `--actor`, and
+  register the MCP server with that name, for example
+  `agentboard serve --actor coder`.
+- Names are addresses on a trusted team, not authentication. One live process per
+  name: two agents sharing one name refuse each other's writes as `held by …`.
+- Every seat points at the same `AGENTBOARD_DB`. Different directories are
+  different boards that cannot see each other.
 
-- file the implement row or the review row; those belong to the analyzer and the
-  coder, and the board refuses a review row the coder did not file. The manager
-  files only the analyze root;
-- chase a seat by hand. Read the board, dispatch the next stage, and let the
-  lease and the chain move the row. There is no pane typing by the manager.
+## Launch a team (herdr-direct)
 
-A stage that is waiting on the next seat can sit quietly without being stalled:
-add `needs_impl` and `needs_review` to `needs_fix`, `blocking` and `done` in
-every watch set. A status filter matches a status the board already holds, so
-arm the stage row with statuses it has not reached and never re-arm a satisfied
-list; an event-kind filter is the broad alternative.
+The manager owns panes; the board owns the work. Nothing in the binary starts
+processes, so these commands are yours to run. `references/herdr-mechanics.md` has
+the traps.
+
+```bash
+export REPO=/path/to/repo
+herdr tab create --cwd "$REPO" --label team        # worker tab, never the manager's
+herdr pane list                                    # note the new tab's pane id
+herdr pane split --pane "$P" --direction right --cwd "$REPO"
+herdr pane split --pane "$P" --direction down  --cwd "$REPO"
+herdr agent start coder    --kind claude   --pane "$PANE_CODER"
+herdr agent start reviewer --kind opencode --pane "$PANE_REVIEWER"
+herdr agent list                                   # name, kind, status, pane
+```
+
+Then each seat is told its board name in one line, with no apostrophes:
+
+```bash
+herdr agent prompt coder 'You are coder on the agentboard. Use MCP tools only, actor=coder. Start with task_claim.'
+herdr agent prompt reviewer 'You are reviewer on the agentboard. MCP tools only, actor=reviewer. Start with board_feed wait=300.'
+```
+
+`herdr agent prompt` needs `--wait` when you want proof the prompt landed; without
+it a stalled prompt (an open overlay) goes unnoticed. If a prompt does not turn the
+agent busy, read the pane: `herdr agent read coder --lines 40`.
+
+## Wake loop
+
+There is no push channel. A seat waits on the feed, and the manager wakes it by
+writing to the board:
+
+```bash
+agentboard feed --after "$CURSOR" --recipient coder --wait 300
+```
+
+- The cursor is `<instance>:<seq>`. Keep the one the feed printed and pass it back;
+  `--after 0` replays from the first event.
+- `--wait 300` is the maximum. A timeout is a normal empty page with a valid
+  cursor: print it, re-read the board, arm again.
+- The manager wakes a seat by assigning it work (`task_update --assignee coder`),
+  by commenting on its task, or by moving a status. All three land in the feed; the
+  assignment carries the recipient.
+- If a seat must be poked outside the board, that is a herdr prompt, not a board
+  write.
+
+## Nine tools, same store as the CLI
+
+| Tool | Use |
+| --- | --- |
+| `task_add` | file work; assigns on creation when you name an assignee |
+| `task_list` | status, assignee, parent, path; `all=true` includes closed rows |
+| `task_get` | one task and its revision; `full=true` for stored text |
+| `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override |
+| `task_claim` | next ready task, or one by id |
+| `task_comment` | append context; never moves the revision |
+| `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
+| `board_brief` | counts per status plus the oldest active work |
+| `board_agents` | roster with last activity and last task |
+
+CLI parity: `add`, `ls`, `get`, `update`, `claim`, `comment`, `feed`, `brief`,
+`agents`, `path`, `reset --yes`, `serve`. Exit codes: `0` ok, `1` refused, `3` no
+ready tasks.
 
 ## Rules for every agent
 
-- The board is the only status channel. No `NOTES.md`, `STATUS.md`, summary files.
-- The row is the prompt: `claim` returns `description` and `goal` verbatim. Do not stage prompt text in files.
-- Write to the board through the MCP tools. Do not shell out to the `agentboard` binary for board writes. One exception: a diff body too big for an inline MCP string goes in with `diff add --body-file` (`references/diff-submission.md`).
-- Never guess a missing requirement: `task_update(status="blocking", note=<one narrow question>)`, then `task_wait`.
-- `done` means verified. Paste the real output of the check the goal names into `report`.
-- Touch only your row. Do not run suites or installs the goal does not name.
-- A probe that touches a board uses a throwaway one: set `AGENTBOARD_DB` (and `AGENTBOARD_SURREAL_URL`) in the same command. A bare `agentboard` call hits the live board.
+- The board is the only status channel. No `NOTES.md`, no `STATUS.md`.
+- The task row is the prompt: `task_get` returns `description` and `goal` verbatim.
+  Do not stage prompt text in files.
+- Write through the MCP tools, not by shelling out to `agentboard`.
+- Never guess a missing requirement: comment one narrow question, set status
+  `blocked`, then wait on the feed.
+- `done` means verified. Put the real command output in a comment on the row.
+- Touch only your task. Do not run suites or installs the goal does not name.
+- A probe that touches a board uses a scratch one:
+  `AGENTBOARD_DB=$(mktemp -d)/b agentboard ...`.
 
-## Board verbs (MCP tool, CLI verb)
+## Handoff and quota
 
-| Job | MCP tool | CLI |
-|---|---|---|
-| take a row, get description and goal | `task_claim`, then `task_get full=true` | `claim [T]`, `get T --full` |
-| progress note | `task_update note=` | `note T "..."` |
-| keep a long lease | `task_update heartbeat=true` | `heartbeat T` |
-| record the change | `diff_add id body=` | `diff add T (--body TEXT\|--body-file PATH\|-)` |
-| outcome and status | `task_update report= status=` | `report T "..."`, `status T <s> [note]` |
-| hand the next row to its seat | `task_dispatch id= to=` | `dispatch T<n> --to <name>` |
-| block on a human | `task_update status=blocking note=<question>` | `ask T "..."` |
-| wait for the board | `task_wait` | `wait [T..] [--epic E] [--open] [--status csv] [--kind csv] [--timeout S]` |
-| read | `task_get`, `task_list`, `task_children`, `diff_list`, `diff_get`, `board_brief` | `get`, `ls`, `children`, `diff ls`, `diff get`, `brief` |
+A handoff is one assignment: `task_update(id, if_revision, assignee="next-actor")`.
+The event carries `recipient`, which is what wakes the next seat.
 
-Lease is 30 min by default. A long diff has no MCP shape (inline string only): use `diff add --body-file`; see `references/diff-submission.md`.
+When a holder runs out of quota:
 
-## Exit codes
+```bash
+agentboard get 12                       # revision 3, held by coder-1
+agentboard update 12 --if-revision 3 --assignee coder-2 --force --reason quota
+```
 
-- Any refusal exits 1 with an `agentboard: ` prefix on stderr (unknown task, bad value, refused move, cap hit, `chain too deep`, refused `claim` of an explicit id). MCP returns the same text as a tool error.
-- `wait` exits 0 and prints `matched:`; exits 3 and prints `timeout:`. `manager events wait` uses the same two codes.
-- The id-less `claim` with nothing ready prints `no ready tasks` and exits 0.
-- `dispatch` refuses a row that is not `ready` (exit 1; `--force` resets it first).
-
-## Manager verbs (manager only)
-
-`agentboard manager ...` drives herdr. There is no shell helper.
-
-| Move | Verb |
-|---|---|
-| open a team: coder and reviewer, optionally analyzer, registered in one tab | `manager up --repo P [--coder claude] [--reviewer opencode] [--analyzer K] [--role-name-prefix X] [--env K=V]` |
-| board sessions joined with live agents (registered / gone / unregistered) | `manager status [--json]` |
-| herdr's session snapshot | `manager snapshot [--json]` |
-| map a pane's agent name to the board | `register <name> --agent claude\|opencode [--task T]` (`manager up` already registers) |
-| close a team; refuses a working or blocked agent | `manager down [--force] [--names A,B]` |
-| clear context at an epic boundary; refuses a working seat | `manager renew [--names A,B]` |
-| one agent: list, get, read, start, prompt, keys, rename, focus, wait | `manager agent <verb>` |
-| panes and tabs | `manager pane <verb>`, `manager tab <verb>` |
-| wake on an agent status | `manager events wait --until S [--agent N] [--timeout 300]`, or `wait T7 --agent N --status ...` |
-| hand a row to a pane | `dispatch T<n> --to <name> [--force] [--print]` |
-| file and amend | `epic add`, `add --epic E --parent T`, `edit`, `parent`, `epic status` |
-
-`manager up --analyzer K` adds the analyzer to the usual coder/reviewer pair.
-All requested binaries and required profiles must exist before any pane is made.
-The names are the role names with any prefix; each pane gets its role actor.
-Repeated `--env` keys are refused by name before any pane is created.
-For a three-seat team, pass all names to `manager down` or `manager renew`
-(`--names analyzer,coder,reviewer`, with the prefix if used); their defaults
-continue to target coder and reviewer only.
-
-Manual moves that still need plain `herdr` (attach, `/btw`, killing a TUI by process group, seat swap): `references/herdr-mechanics.md`.
-
-## References (read only when the case arises)
-
-- `references/diff-submission.md`: recording a large or verbatim diff, proving the bytes.
-- `references/worker-claim-probes.md`: reproducing a worker's "the engine cannot do this" claim.
-- `references/herdr-mechanics.md`: what the manager verbs do not cover.
-- `references/herdr-socket-api.md`: herdr socket protocol notes.
-
-## Schema compatibility
-
-Each CLI and MCP call reads the board schema version first. A newer board
-refuses by name; an older one migrates additively under the write lock within
-that call. Seat start runs no build comparison or refusal. The manager reloads
-MCP processes when a new binary is needed. See `PROTOCOL.md`, Board schema version.
+The displaced holder's field writes refuse and its comments still land. Stop or
+isolate the old process before the replacement edits the same working tree, and
+tell the replacement which artifact to resume from.
