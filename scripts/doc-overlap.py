@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check overlap across the five core pages listed in PAGES below.
+"""Check overlap across the six core pages listed in PAGES below.
 
 Scope: README.md, PROTOCOL.md, AGENTS.md, and the agentboard-manager SKILL.md,
 workflow.md and roles.md. Paths resolve from this script's repository.

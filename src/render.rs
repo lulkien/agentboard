@@ -38,7 +38,7 @@ pub fn task_record(task: &Task, full: bool) -> String {
     let mut lines = Vec::new();
     if full {
         lines.push(format!(
-            "T{} {:<12} prio {:>4} {:<10}",
+            "T{} {} prio {} {}",
             task.id,
             task.status.as_str(),
             task.priority,

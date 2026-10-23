@@ -18,7 +18,7 @@ AGENTBOARD_ACTOR`.
 
 ## Ordering
 
-Every list, claim and wait uses the same order: `(priority, id)` ascending, priority
+Lists and claim use the same order: `(priority, id)` ascending, priority
 an `i32` (lower runs first). Id-less claim walks the `todo` rows in that order and
 skips tasks assigned to another actor; it never picks up a `review` or `blocked` row.
 
@@ -57,8 +57,8 @@ unknown assignee without `new_actor`.
  "path": "optional", "all": false, "limit": 20, "offset": 0}
 ```
 
-One line per task, then `total N cursor <cursor>`, then `more true` when another
-page follows. `limit` clamps to 1..200. An explicit `status` is honoured even when
+One line per task, or the single line `no tasks` when the filter matches nothing, then
+`total N cursor <cursor>`, then `more true` when another page follows. `limit` clamps to 1..200. An explicit `status` is honoured even when
 it is terminal.
 
 ### task_get
@@ -142,8 +142,8 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
 
 ### board_brief
 
-No arguments. One line of counts per status, then one line per active task, oldest
-or highest-priority first, up to ten.
+No arguments. One line of counts per status, then one line per active task in board
+order `(priority, id)`, up to ten.
 
 ### board_agents
 
@@ -158,7 +158,6 @@ Every refusal is one line with a stable prefix. Over MCP a refusal is a JSON-RPC
 
 ```
 actor required: pass --actor or set AGENTBOARD_ACTOR (names are board addresses)
-actor must be nonempty
 unknown task status: "queued"
 stale task revision 3; current revision is 4
 task is held by alice
