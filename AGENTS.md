@@ -152,5 +152,8 @@ Rule 5 of the reviewer rules in `PROTOCOL.md`.
   canonical names. The Claude/opencode command links also go through that home.
   There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: the chain, the cap, the diff verbs, who moves which status.
+- `seats/README.md` — how each seat is started: the codex role cards, the shared
+  MCP config, the home links that point at them, and the measured facts (shell as a
+  removable tool, sandbox vs cwd, the approval_mode keys) behind each card.
 - `docs/three-task-chain.md` — the design note behind the three-row chain.
 - `docs/workflow.md` — the only page with diagrams; the other pages link to it.
