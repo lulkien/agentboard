@@ -4,6 +4,8 @@ How each agentboard seat is started, kept in the repo so the checkout is the
 source of truth and a review can read the whole surface without logging into a
 home directory.
 
+[Capability matrix](capability-matrix.md): measured behavior, configuration evidence, and explicit gaps (including the OpenCode absolute-path discovery).
+
 | Path | Seat | Loaded by | State |
 |---|---|---|---|
 | `codex/<role>.config.toml` | coder, analyzer, reviewer, manager | `codex -p <role>` | live, verified |

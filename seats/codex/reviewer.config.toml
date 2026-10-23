@@ -4,8 +4,22 @@
 # per-tool approval_mode is set, because "never" turns any tool that needs
 # approval into a hard error instead of a prompt. Authority is the playbook's
 # job (roles.md), the sandbox is the part that cannot be argued with.
+#
+# read-only over the checkout AND no shell (owner directive 2026-10-23). The two
+# are separate walls: sandbox_mode blocks writes, it does not block execution, so
+# a reviewer with a shell can still run python, rg or a suite inside a read-only
+# tree. The review is a reading job - the verdict goes on the board row, not into
+# a file - so the shell is removed outright rather than narrowed.
+# Measured on codex-cli 0.163.0 exactly as for the coder: a seat asked to run a
+# command answers NO SHELL TOOL AVAILABLE.
+# Consequence, recorded on T307/T308: this seat cannot run a suite either, so the
+# gate-runner question covers both seats and stays open there.
 approval_policy = "never"
 sandbox_mode = "read-only"
+
+[features]
+shell_tool = false
+unified_exec = false
 
 [mcp_servers.agentboard.env]
 AGENTBOARD_ACTOR = "reviewer"
