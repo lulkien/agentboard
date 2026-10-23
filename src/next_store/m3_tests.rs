@@ -3,7 +3,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -823,9 +822,36 @@ fn eight_processes_claim_each_task_exactly_once() {
         }
     }
     claimed.sort_unstable();
-    claimed.dedup();
-    assert_eq!(claimed.len(), 24);
+    // Counted before any dedup: two winners on one task must fail this assertion.
+    assert_eq!(
+        claimed.len(),
+        24,
+        "a task was claimed more than once: {claimed:?}"
+    );
+    let mut unique = claimed.clone();
+    unique.dedup();
+    assert_eq!(unique.len(), 24);
     let board = Board::open_with_options(&board_path, options()).unwrap();
+    let mut claimed_events = 0;
+    let mut cursor = board.cursor_now().unwrap();
+    cursor.seq = 0;
+    loop {
+        let page = board
+            .feed(&FeedFilter {
+                task: None,
+                kind: Some(EventKind::Claimed),
+                recipient: None,
+                after: Some(cursor.encode().as_str()),
+                limit: 50,
+            })
+            .unwrap();
+        claimed_events += page.events.len();
+        cursor = page.next.clone();
+        if !page.more {
+            break;
+        }
+    }
+    assert_eq!(claimed_events, 24);
     let mut filter = list_all();
     filter.status = Some(Status::InProgress);
     assert_eq!(board.list(&filter).unwrap().total, 24);
@@ -855,7 +881,8 @@ fn claim_worker() {
 #[ignore = "records the M3 claim latency budget; run with --ignored"]
 fn claim_latency_over_one_thousand_tasks() {
     let scratch = Scratch::new();
-    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let board_path = scratch.path().join("board");
+    let board = Board::open_with_options(&board_path, options()).unwrap();
     for index in 0..1000 {
         board
             .add(
@@ -866,37 +893,217 @@ fn claim_latency_over_one_thousand_tasks() {
             )
             .unwrap();
     }
-    let latencies = Mutex::new(Vec::new());
-    std::thread::scope(|scope| {
-        for worker in 0..8 {
-            let board = &board;
-            let latencies = &latencies;
-            scope.spawn(move || {
-                let actor = format!("worker-{worker}");
-                loop {
-                    let started = Instant::now();
-                    match board.claim(&actor, None, 0).unwrap() {
-                        ClaimOutcome::Claimed(_) => {
-                            latencies
-                                .lock()
-                                .unwrap()
-                                .push(started.elapsed().as_micros() as u64);
-                        }
-                        ClaimOutcome::NoWork => break,
-                        ClaimOutcome::AlreadyHeld(task) => {
-                            panic!("id-less claim answered AlreadyHeld for T{}", task.id)
-                        }
-                    }
-                }
-            });
+    drop(board);
+    let mut workers = Vec::new();
+    for actor in 0..8 {
+        workers.push(
+            Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "store::m3_tests::latency_worker", "--nocapture"])
+                .env("AGENTBOARD_M3_LAT_PATH", &board_path)
+                .env("AGENTBOARD_M3_LAT_ACTOR", format!("proc-{actor}"))
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+    }
+    let mut latencies = Vec::new();
+    for worker in workers {
+        let output = worker.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "latency worker failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Some(raw) = line.strip_prefix("M3_LAT_US=") {
+                latencies.push(raw.parse::<u64>().unwrap());
+            }
         }
-    });
-    let mut latencies = latencies.into_inner().unwrap();
+    }
     assert_eq!(latencies.len(), 1000);
     latencies.sort_unstable();
     let p50 = latencies[latencies.len() / 2] as f64 / 1000.0;
     let p95 = latencies[latencies.len() * 95 / 100] as f64 / 1000.0;
-    println!("claim latency: p50={p50:.3}ms p95={p95:.3}ms over 1000 tasks");
-    // Debug builds carry the target. The release budget is 5 ms.
-    assert!(p95 <= 25.0, "p95 {p95}ms exceeds the debug budget");
+    println!("claim latency, 8 processes over 1000 tasks: p50={p50:.3}ms p95={p95:.3}ms");
+    // Debug builds carry a looser ceiling; the release budget is 5 ms.
+    let budget = if cfg!(debug_assertions) { 25.0 } else { 5.0 };
+    assert!(p95 <= budget, "p95 {p95}ms exceeds the {budget}ms budget");
+}
+
+#[test]
+fn latency_worker() {
+    let Ok(path) = std::env::var("AGENTBOARD_M3_LAT_PATH") else {
+        return;
+    };
+    let actor = std::env::var("AGENTBOARD_M3_LAT_ACTOR").unwrap();
+    let board = Board::open_with_options(path, options()).unwrap();
+    loop {
+        let started = Instant::now();
+        let outcome = board.claim(&actor, None, 0).unwrap();
+        let elapsed = started.elapsed().as_micros() as u64;
+        match outcome {
+            ClaimOutcome::Claimed(_) => println!("M3_LAT_US={elapsed}"),
+            ClaimOutcome::NoWork => return,
+            ClaimOutcome::AlreadyHeld(task) => {
+                panic!("id-less claim answered AlreadyHeld for T{}", task.id)
+            }
+        }
+    }
+}
+
+#[test]
+fn filtered_feed_without_a_cursor_returns_the_newest_match() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let first = board
+        .add("manager", draft("early", Status::Todo, 0, None), false, 0)
+        .unwrap()
+        .task;
+    let handoff = TaskPatch {
+        assignee: Some(Some("bob".into())),
+        ..TaskPatch::default()
+    };
+    board
+        .update(UpdateInput {
+            id: first.id,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &handoff,
+            force: true,
+            force_reason: Some("assign"),
+            new_actor: true,
+            comment: None,
+            now_ms: 1,
+        })
+        .unwrap();
+    // Bury the handoff under unrelated events so a global-sequence window misses it.
+    for index in 0..40 {
+        board
+            .add(
+                "manager",
+                draft(&format!("filler {index}"), Status::Todo, index, None),
+                false,
+                index as i64 + 2,
+            )
+            .unwrap();
+    }
+    let page = board
+        .feed(&FeedFilter {
+            task: None,
+            kind: None,
+            recipient: Some("bob"),
+            after: None,
+            limit: 5,
+        })
+        .unwrap();
+    assert_eq!(page.events.len(), 1);
+    assert_eq!(page.events[0].task_id, first.id);
+    assert!(!page.more);
+    assert!(!page.older);
+    let filtered = board
+        .feed(&FeedFilter {
+            task: None,
+            kind: Some(EventKind::Created),
+            recipient: None,
+            after: None,
+            limit: 3,
+        })
+        .unwrap();
+    assert_eq!(filtered.events.len(), 3);
+    assert!(filtered.older, "older created events must be reported");
+}
+
+#[test]
+fn review_claim_takes_an_unassigned_row_and_keeps_the_status() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let task = board
+        .add(
+            "manager",
+            draft("review me", Status::Review, 0, None),
+            false,
+            0,
+        )
+        .unwrap()
+        .task;
+    let ClaimOutcome::Claimed(taken) = board.claim("reviewer", Some(task.id), 1).unwrap() else {
+        panic!("an unassigned review row must be claimable by an explicit ID");
+    };
+    assert_eq!(taken.task.status, Status::Review);
+    assert_eq!(taken.task.assignee.as_deref(), Some("reviewer"));
+    assert_eq!(taken.event.payload["old_status"], "review");
+    assert_eq!(taken.event.payload["new_status"], "review");
+}
+
+#[test]
+fn explicit_status_filter_reaches_terminal_rows() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let done = board
+        .add("manager", draft("done", Status::Done, 0, None), false, 0)
+        .unwrap()
+        .task;
+    let mut filter = list_all();
+    filter.include_terminal = false;
+    filter.status = Some(Status::Done);
+    let page = board.list(&filter).unwrap();
+    assert_eq!(
+        page.tasks.iter().map(|task| task.id).collect::<Vec<_>>(),
+        vec![done.id]
+    );
+    filter.status = None;
+    assert!(board.list(&filter).unwrap().tasks.is_empty());
+}
+
+#[test]
+fn wait_from_the_list_cursor_sees_a_late_handoff() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add("manager", draft("first", Status::Todo, 0, None), false, 0)
+        .unwrap();
+    let page = board.list(&list_all()).unwrap();
+    let cursor = page.cursor.encode();
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "store::m3_tests::late_event_worker",
+            "--nocapture",
+        ])
+        .env("AGENTBOARD_M3_LATE_PATH", scratch.path())
+        .env("AGENTBOARD_M3_LATE_DELAY_MS", "80")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let late = board
+        .wait(
+            &FeedFilter {
+                task: None,
+                kind: None,
+                recipient: None,
+                after: Some(cursor.as_str()),
+                limit: 10,
+            },
+            5_000,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "late worker failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(late.events.len(), 1);
+    assert_eq!(late.events[0].payload["task"]["title"], "late");
+}
+
+#[test]
+fn wait_timeout_is_clamped_to_the_cap() {
+    let clamped = super::feed::clamp_timeout(10);
+    assert_eq!(clamped, Duration::from_millis(10));
+    let capped = super::feed::clamp_timeout(WAIT_MAX_MS + 60_000);
+    assert_eq!(capped, Duration::from_millis(WAIT_MAX_MS));
+    assert_eq!(WAIT_MAX_MS, 300_000);
 }

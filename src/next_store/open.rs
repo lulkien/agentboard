@@ -214,20 +214,45 @@ impl Board {
         if !path.join("data.mdb").exists() {
             refuse_unknown_entries(&path)?;
         }
-        let lock = open_lifetime_lock(&path)?;
-        // Take the exclusive lock first: it is what a first opener needs, and trying
-        // it before any shared lock removes the release-then-retry window in which a
-        // reset could delete the files under a new mapping.
+        // An exclusive-to-shared lock downgrade is a release, so a reset can unlink
+        // the files in that gap. Retry when the mapped data file is not the one we
+        // opened.
+        let mut replaced = false;
+        for _ in 0..3 {
+            let before = data_file_id(&path);
+            let board = Self::open_once(&path, options)?;
+            let after = data_file_id(&path);
+            let stable = match (before, after) {
+                (Some(before), Some(after)) => before == after,
+                (None, Some(_)) => true,
+                (_, None) => false,
+            };
+            if stable {
+                return Ok(board);
+            }
+            replaced = true;
+            drop(board);
+        }
+        debug_assert!(replaced);
+        Err(Error::Corrupt(
+            "board files were replaced while opening; retry",
+        ))
+    }
+
+    fn open_once(path: &Path, options: BoardOptions) -> Result<Self> {
+        let lock = open_lifetime_lock(path)?;
+        // Ask for the exclusive lock first: it is what a first opener needs, and
+        // trying it before any shared lock removes the release-then-retry window.
         match lock.try_lock() {
             Ok(()) => {
-                let board = Self::open_locked(path, options, lock)?;
+                let board = Self::open_locked(path.to_owned(), options, lock)?;
                 board._lifetime_lock.lock_shared()?;
                 Ok(board)
             }
             Err(fs::TryLockError::WouldBlock) => {
                 // Somebody else owns or holds the board; wait as a reader.
                 lock.lock_shared()?;
-                Self::open_locked(path, options, lock)
+                Self::open_locked(path.to_owned(), options, lock)
             }
             Err(fs::TryLockError::Error(error)) => Err(error.into()),
         }
@@ -447,6 +472,19 @@ fn prepare_path(path: &Path) -> Result<PathBuf> {
         refuse_symlink(&path.join(name))?;
     }
     Ok(path)
+}
+
+#[cfg(unix)]
+fn data_file_id(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path.join("data.mdb"))
+        .ok()
+        .map(|meta| (meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn data_file_id(_path: &Path) -> Option<(u64, u64)> {
+    None
 }
 
 fn refuse_unknown_entries(path: &Path) -> Result<()> {

@@ -127,7 +127,12 @@ impl Board {
 }
 
 fn keep(filter: &ListFilter<'_>, task: &Task) -> bool {
-    if !filter.include_terminal && matches!(task.status, Status::Done | Status::Canceled) {
+    // An explicit status filter is honoured as asked; the terminal exclusion only
+    // applies to an unfiltered list.
+    if filter.status.is_none()
+        && !filter.include_terminal
+        && matches!(task.status, Status::Done | Status::Canceled)
+    {
         return false;
     }
     if let Some(status) = filter.status

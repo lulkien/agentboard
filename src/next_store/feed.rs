@@ -51,10 +51,65 @@ pub struct FeedFilter<'a> {
 pub struct FeedPage {
     pub events: Vec<Event>,
     pub next: Cursor,
+    /// More matching events exist after this page.
     pub more: bool,
+    /// Matching events exist before this page (only set for a no-cursor read).
+    pub older: bool,
 }
 
 impl Board {
+    /// The newest page of matching events, plus whether older matches remain.
+    /// Walks backwards so a filtered read cannot fall into a window of unrelated
+    /// global sequences and come back empty.
+    fn newest_matching(
+        &self,
+        txn: &heed::RoTxn<'_>,
+        filter: &FeedFilter<'_>,
+        limit: usize,
+        high: u64,
+    ) -> Result<(Vec<Event>, bool)> {
+        let mut picked: Vec<Event> = Vec::new();
+        let mut seq = high;
+        while seq >= 1 {
+            if let Some(raw) = self.events.get(txn, &keys::task(seq))? {
+                let event: Event = serde_json::from_slice(raw)?;
+                if event.seq != seq {
+                    return Err(Error::Corrupt("event key/sequence mismatch"));
+                }
+                if matches(filter, &event) {
+                    picked.push(event);
+                    if picked.len() == limit {
+                        let older = self.any_match_at_or_below(txn, filter, seq - 1)?;
+                        picked.reverse();
+                        return Ok((picked, older));
+                    }
+                }
+            }
+            seq -= 1;
+        }
+        picked.reverse();
+        Ok((picked, false))
+    }
+
+    fn any_match_at_or_below(
+        &self,
+        txn: &heed::RoTxn<'_>,
+        filter: &FeedFilter<'_>,
+        from: u64,
+    ) -> Result<bool> {
+        let mut seq = from;
+        while seq >= 1 {
+            if let Some(raw) = self.events.get(txn, &keys::task(seq))? {
+                let event: Event = serde_json::from_slice(raw)?;
+                if matches(filter, &event) {
+                    return Ok(true);
+                }
+            }
+            seq -= 1;
+        }
+        Ok(false)
+    }
+
     /// One page of events in ascending sequence order. The cursor is taken from the
     /// same read snapshot the rows came from, so a caller can list and then wait
     /// without missing a handoff committed in between.
@@ -77,7 +132,21 @@ impl Board {
                 // A cursor is the last sequence the caller saw, so resume after it.
                 cursor.seq.saturating_add(1)
             }
-            None => high.saturating_sub(limit as u64 - 1),
+            None => {
+                // No cursor asks for the newest page *of matching events*, so a
+                // filtered read cannot come back empty while a match sits just
+                // outside a window of global sequences.
+                let (events, older) = self.newest_matching(&txn, filter, limit, high)?;
+                return Ok(FeedPage {
+                    events,
+                    next: Cursor {
+                        instance_id: metadata.instance_id,
+                        seq: high,
+                    },
+                    more: false,
+                    older,
+                });
+            }
         };
         let mut events = Vec::new();
         let mut more = false;
@@ -112,6 +181,7 @@ impl Board {
                 seq: next_seq,
             },
             more,
+            older: false,
         })
     }
 
@@ -129,7 +199,7 @@ impl Board {
     /// and drops its own read transaction, so a parked waiter blocks no writer.
     /// With no cursor, the wait starts now instead of replaying history.
     pub fn wait(&self, filter: &FeedFilter<'_>, timeout_ms: u64) -> Result<FeedPage> {
-        let timeout = Duration::from_millis(timeout_ms.min(WAIT_MAX_MS));
+        let timeout = clamp_timeout(timeout_ms);
         let started = Instant::now();
         let from_now = if filter.after.is_none() {
             Some(self.cursor_now()?.encode())
@@ -156,6 +226,10 @@ impl Board {
             std::thread::sleep((timeout - elapsed).min(Duration::from_millis(POLL_INTERVAL_MS)));
         }
     }
+}
+
+pub(super) fn clamp_timeout(timeout_ms: u64) -> Duration {
+    Duration::from_millis(timeout_ms.min(WAIT_MAX_MS))
 }
 
 fn matches(filter: &FeedFilter<'_>, event: &Event) -> bool {
