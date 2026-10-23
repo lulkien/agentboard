@@ -99,6 +99,7 @@ pub enum Error {
     },
     Unstamped,
     ForeignBoard,
+    UnknownEntry(String),
     Corrupt(&'static str),
     UnknownAssignee(String),
     MissingTask(u64),
@@ -124,6 +125,10 @@ impl std::fmt::Display for Error {
             Self::FormatMismatch { expected, found } => write!(f, "board format {found} is incompatible with expected {expected}; run board reset --yes after stopping clients"),
             Self::Unstamped => f.write_str("unstamped board; inspect it before board reset --yes"),
             Self::ForeignBoard => f.write_str("directory is not an agentboard LMDB board"),
+            Self::UnknownEntry(name) => write!(
+                f,
+                "unexpected entry {name:?} in the board directory; a board holds only data.mdb, lock.mdb and lifetime.lock, so move it aside"
+            ),
             Self::Corrupt(reason) => write!(f, "corrupt board: {reason}"),
             Self::UnknownAssignee(name) => write!(f, "unknown assignee {name:?}; use new_actor=true to register the target"),
             Self::MissingTask(id) => write!(f, "task T{id} does not exist"),
@@ -196,6 +201,11 @@ impl Board {
     pub fn open_with_options(path: impl AsRef<Path>, options: BoardOptions) -> Result<Self> {
         options.map_size_bytes()?;
         let path = prepare_path(path.as_ref())?;
+        // A fresh directory must be ours before anything is created in it; an
+        // existing board may carry incidental files and is opened by its metadata.
+        if !path.join("data.mdb").exists() {
+            refuse_unknown_entries(&path)?;
+        }
         let lock = open_lifetime_lock(&path)?;
         loop {
             lock.lock_shared()?;
@@ -355,14 +365,15 @@ impl Board {
     pub fn reset(path: impl AsRef<Path>, options: BoardOptions) -> Result<ResetOutcome> {
         options.map_size_bytes()?;
         let path = prepare_path(path.as_ref())?;
-        // Refuse an unrecognised directory before anything is removed, so a stray
-        // file cannot turn the disposal into a half-deleted board.
-        refuse_unknown_entries(&path)?;
         let lock = open_lifetime_lock(&path)?;
+        // The attached-client refusal wins over a directory complaint, and the
+        // directory is re-checked under the exclusive lock so a stray file cannot
+        // turn the disposal into a half-deleted board.
         lock.try_lock().map_err(|error| match error {
             fs::TryLockError::WouldBlock => Error::ResetBusy,
             fs::TryLockError::Error(error) => Error::Io(error),
         })?;
+        refuse_unknown_entries(&path)?;
         let old_instance_id = inspect_for_reset(&path)?;
         for name in ["data.mdb", "lock.mdb"] {
             let file = path.join(name);
@@ -427,11 +438,12 @@ fn prepare_path(path: &Path) -> Result<PathBuf> {
 fn refuse_unknown_entries(path: &Path) -> Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
+        let name = entry.file_name();
         if !matches!(
-            entry.file_name().to_str(),
+            name.to_str(),
             Some("lifetime.lock" | "data.mdb" | "lock.mdb")
         ) {
-            return Err(Error::ForeignBoard);
+            return Err(Error::UnknownEntry(name.to_string_lossy().into_owned()));
         }
     }
     Ok(())
@@ -461,15 +473,7 @@ fn open_lifetime_lock(path: &Path) -> Result<File> {
 
 fn inspect_for_reset(path: &Path) -> Result<Option<String>> {
     if !path.join("data.mdb").exists() {
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
-            if !matches!(
-                entry.file_name().to_str(),
-                Some("lifetime.lock" | "lock.mdb")
-            ) {
-                return Err(Error::ForeignBoard);
-            }
-        }
+        refuse_unknown_entries(path)?;
         return Ok(None);
     }
     let mut builder = EnvOpenOptions::new();

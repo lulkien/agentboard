@@ -334,12 +334,14 @@ fn unrelated_directory_refuses_initialization() {
     fs::write(scratch.path().join("unrelated.txt"), b"keep").unwrap();
     assert!(matches!(
         Board::open_with_options(scratch.path(), options()),
-        Err(Error::ForeignBoard)
+        Err(Error::UnknownEntry(name)) if name == "unrelated.txt"
     ));
     assert_eq!(
         fs::read(scratch.path().join("unrelated.txt")).unwrap(),
         b"keep"
     );
+    // A refused open must not leave a lock file behind in a foreign directory.
+    assert!(!scratch.path().join("lifetime.lock").exists());
 }
 
 #[cfg(unix)]
@@ -550,13 +552,23 @@ fn reset_refuses_unknown_directory_entry_and_preserves_the_board() {
     fs::write(scratch.path().join("notes.txt"), b"keep me").unwrap();
     assert!(matches!(
         Board::reset(scratch.path(), options()),
-        Err(Error::ForeignBoard)
+        Err(Error::UnknownEntry(name)) if name == "notes.txt"
     ));
     assert!(scratch.path().join("data.mdb").exists());
     assert_eq!(
         fs::read(scratch.path().join("notes.txt")).unwrap(),
         b"keep me"
     );
+    // With the board attached the attached-client refusal is reported first.
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    assert!(matches!(
+        Board::reset(scratch.path(), options()),
+        Err(Error::ResetBusy)
+    ));
+    assert_eq!(board.get(1).unwrap().unwrap().title, "Prepare a patch");
+    drop(board);
+    // Once the stray entry is gone the board opens and its rows are intact.
+    fs::remove_file(scratch.path().join("notes.txt")).unwrap();
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
     assert_eq!(board.get(1).unwrap().unwrap().title, "Prepare a patch");
 }
