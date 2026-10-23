@@ -39,11 +39,10 @@ async fn blocking<T: Send + 'static>(
         .map_err(|error| format!("task join: {error}"))?
 }
 
-fn actor() -> Result<String, String> {
+fn actor_from_env() -> Option<String> {
     std::env::var("AGENTBOARD_ACTOR")
         .ok()
         .filter(|name| !name.trim().is_empty())
-        .ok_or_else(|| "actor required: set AGENTBOARD_ACTOR for this MCP client".to_owned())
 }
 
 fn now_ms() -> i64 {
@@ -56,6 +55,8 @@ fn now_ms() -> i64 {
 pub struct Board {
     tool_router: ToolRouter<Self>,
     board: Arc<BoardHandle>,
+    /// Set by `agentboard serve --actor`; otherwise the environment decides.
+    actor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -174,15 +175,32 @@ pub struct FeedArgs {
     /// Block up to this many seconds for a matching event
     #[serde(default)]
     pub wait: Option<u64>,
+    /// Return comment and update text untruncated
+    #[serde(default)]
+    pub full: bool,
 }
 
 #[tool_router]
 impl Board {
-    pub fn new(board: BoardHandle) -> Self {
+    pub fn new(board: BoardHandle, actor: Option<String>) -> Self {
         Self {
             tool_router: Self::tool_router(),
             board: Arc::new(board),
+            actor,
         }
+    }
+
+    /// The actor this invocation writes as: `--actor` wins over the environment,
+    /// so a wrapper that passes a flag is not silently overridden by an exported
+    /// variable.
+    fn actor_name(&self) -> Result<String, String> {
+        self.actor
+            .clone()
+            .filter(|name| !name.trim().is_empty())
+            .or_else(actor_from_env)
+            .ok_or_else(|| {
+                "actor required: start the server with --actor or set AGENTBOARD_ACTOR".to_owned()
+            })
     }
 
     #[tool(
@@ -193,7 +211,7 @@ impl Board {
         &self,
         Parameters(args): Parameters<AddArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = actor().map_err(err)?;
+        let actor = self.actor_name().map_err(err)?;
         let status = match args.status.as_deref() {
             Some(raw) => Status::parse(raw).map_err(|e| err(e.to_string()))?,
             None => Status::Todo,
@@ -298,11 +316,20 @@ impl Board {
         &self,
         Parameters(args): Parameters<UpdateArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = actor().map_err(err)?;
+        let actor = self.actor_name().map_err(err)?;
         let status = match args.status.as_deref() {
             Some(raw) => Some(Status::parse(raw).map_err(|e| err(e.to_string()))?),
             None => None,
         };
+        if args.assignee.is_some() && args.clear_assignee {
+            return Err(err("choose assignee or clear_assignee, not both".into()));
+        }
+        if args.parent.is_some() && args.clear_parent {
+            return Err(err("choose parent or clear_parent, not both".into()));
+        }
+        if args.path.is_some() && args.clear_path {
+            return Err(err("choose path or clear_path, not both".into()));
+        }
         let patch = TaskPatch {
             title: args.title,
             description: args.description,
@@ -357,7 +384,7 @@ impl Board {
         &self,
         Parameters(args): Parameters<ClaimArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = actor().map_err(err)?;
+        let actor = self.actor_name().map_err(err)?;
         let outcome = blocking(&self.board, move |board| {
             board
                 .claim(&actor, args.id, now_ms())
@@ -379,7 +406,7 @@ impl Board {
         &self,
         Parameters(args): Parameters<CommentArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = actor().map_err(err)?;
+        let actor = self.actor_name().map_err(err)?;
         let event = blocking(&self.board, move |board| {
             board
                 .comment(&actor, args.id, &args.body, now_ms())
@@ -408,6 +435,7 @@ impl Board {
             task,
             limit,
             wait,
+            full,
             ..
         } = args;
         let page = blocking(&self.board, move |board| {
@@ -426,7 +454,7 @@ impl Board {
         })
         .await
         .map_err(err)?;
-        Ok(text(render::feed_page(&page)))
+        Ok(text(render::feed_page(&page, full)))
     }
 
     #[tool(
@@ -482,7 +510,7 @@ mod tests {
 
     #[test]
     fn the_tool_surface_is_nine_tools_with_valid_schemas() {
-        let server = Board::new(scratch_board("surface"));
+        let server = Board::new(scratch_board("surface"), None);
         let tools = server.tool_router.list_all();
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         assert_eq!(
@@ -511,7 +539,7 @@ mod tests {
 
     #[test]
     fn every_tool_description_names_the_board_object() {
-        let server = Board::new(scratch_board("descriptions"));
+        let server = Board::new(scratch_board("descriptions"), None);
         for tool in server.tool_router.list_all() {
             let description = tool.description.clone().unwrap_or_default();
             assert!(!description.is_empty(), "{} has no description", tool.name);

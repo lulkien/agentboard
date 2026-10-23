@@ -1,7 +1,7 @@
 //! Compact text rendering shared by the CLI and the MCP tools.
 
-use crate::domain::{self, Event, Status, Task};
-use crate::store::{Agent, Brief, Cursor, FeedPage};
+use crate::domain::{Event, Task};
+use crate::store::{Agent, Brief, FeedPage};
 
 /// Width of a task title in a one-line list.
 const TITLE_WIDTH: usize = 72;
@@ -31,27 +31,56 @@ pub fn task_line(task: &Task) -> String {
     )
 }
 
+/// A compact record, or the stored text itself when `full` is set: no title clip,
+/// no whitespace collapsing, no marker. A reader that asks for full text must get
+/// exactly what was written.
 pub fn task_record(task: &Task, full: bool) -> String {
-    let width = if full { usize::MAX } else { FIELD_WIDTH };
-    let mut lines = vec![task_line(task), format!("revision {}", task.revision)];
+    let mut lines = Vec::new();
+    if full {
+        lines.push(format!(
+            "T{} {:<12} prio {:>4} {:<10}",
+            task.id,
+            task.status.as_str(),
+            task.priority,
+            task.assignee.as_deref().unwrap_or("-")
+        ));
+        lines.push(format!("title {}", task.title));
+    } else {
+        lines.push(task_line(task));
+    }
+    lines.push(format!("revision {}", task.revision));
     if let Some(parent) = task.parent_id {
         lines.push(format!("parent T{parent}"));
     }
     if let Some(path) = task.path.as_deref() {
-        lines.push(format!("path {}", truncate(path, width)));
+        lines.push(format!(
+            "path {}",
+            if full {
+                path.to_owned()
+            } else {
+                truncate(path, FIELD_WIDTH)
+            }
+        ));
     }
     for (name, value) in [
         ("description", task.description.as_str()),
         ("goal", task.goal.as_str()),
     ] {
         if !value.is_empty() {
-            lines.push(format!("{name} {}", truncate(value, width)));
+            lines.push(format!(
+                "{name} {}",
+                if full {
+                    value.to_owned()
+                } else {
+                    truncate(value, FIELD_WIDTH)
+                }
+            ));
         }
     }
     lines.join("\n")
 }
 
-pub fn event_line(event: &Event) -> String {
+pub fn event_line(event: &Event, full: bool) -> String {
     let target = format!("T{}", event.task_id);
     let mut line = format!(
         "{} {} {:<10} {:<8} {}",
@@ -71,13 +100,22 @@ pub fn event_line(event: &Event) -> String {
         .or_else(|| event.payload.get("reason"))
         .and_then(|value| value.as_str());
     if let Some(body) = body {
-        line.push_str(&format!(" | {}", truncate(body, FIELD_WIDTH)));
+        let shown = if full {
+            body.to_owned()
+        } else {
+            truncate(body, FIELD_WIDTH)
+        };
+        line.push_str(&format!(" | {shown}"));
     }
     line
 }
 
-pub fn feed_page(page: &FeedPage) -> String {
-    let mut lines: Vec<String> = page.events.iter().map(event_line).collect();
+pub fn feed_page(page: &FeedPage, full: bool) -> String {
+    let mut lines: Vec<String> = page
+        .events
+        .iter()
+        .map(|event| event_line(event, full))
+        .collect();
     lines.push(format!("cursor {}", page.next.encode()));
     if page.more {
         lines.push("more true".into());
@@ -114,26 +152,10 @@ pub fn agent_line(agent: &Agent) -> String {
     )
 }
 
-pub fn cursor_line(cursor: &Cursor) -> String {
-    cursor.encode()
-}
-
-pub fn statuses() -> String {
-    Status::ALL
-        .iter()
-        .map(|status| status.as_str())
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
 pub fn claim_line(outcome: &crate::store::ClaimOutcome) -> String {
     match outcome {
         crate::store::ClaimOutcome::Claimed(updated) => task_record(&updated.task, false),
         crate::store::ClaimOutcome::AlreadyHeld(task) => task_record(task, false),
         crate::store::ClaimOutcome::NoWork => "no ready tasks".to_owned(),
     }
-}
-
-pub fn domain_error(error: &domain::Error) -> String {
-    error.to_string()
 }

@@ -51,10 +51,10 @@ def has(name, needle, hay):
 
 
 class Server:
-    def __init__(self, db, actor):
+    def __init__(self, db, actor, args=()):
         env = dict(os.environ, AGENTBOARD_DB=db, AGENTBOARD_ACTOR=actor)
         self.proc = subprocess.Popen(
-            [BIN, "serve"],
+            [BIN, "serve", *args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -88,12 +88,31 @@ class Server:
         body = "".join(part.get("text", "") for part in result.get("content", []))
         return bool(result.get("isError")), body
 
+    def start(self):
+        hello = self.send(
+            "initialize",
+            {
+                "protocolVersion": PROTOCOL,
+                "capabilities": {},
+                "clientInfo": {"name": "check", "version": "0"},
+            },
+        )
+        self.send("notifications/initialized", {}, notification=True)
+        return hello
+
     def close(self):
         try:
             self.proc.stdin.close()
             self.proc.wait(timeout=10)
         except Exception:
             self.proc.kill()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
 
 def main():
@@ -102,16 +121,8 @@ def main():
     scratch = tempfile.mkdtemp(prefix="agentboard-mcp.")
     server = Server(os.path.join(scratch, "board"), "worker")
     try:
-        hello = server.send(
-            "initialize",
-            {
-                "protocolVersion": PROTOCOL,
-                "capabilities": {},
-                "clientInfo": {"name": "check", "version": "0"},
-            },
-        )
+        hello = server.start()
         has("initialize names the server", "agentboard", json.dumps(hello))
-        server.send("notifications/initialized", {}, notification=True)
 
         listed = server.send("tools/list", {})
         names = {tool["name"] for tool in listed["result"]["tools"]}
@@ -161,6 +172,39 @@ def main():
 
         is_error, body = server.call("board_nope", {})
         check("an unknown tool is an error", True, is_error)
+
+        # Long text: compact reads cut it, full reads return it whole.
+        long_comment = "c" * 400
+        long_title = "t" * 100
+        is_error, body = server.call("task_comment", {"id": 1, "body": long_comment})
+        check("long comment accepted", False, is_error)
+        is_error, body = server.call("board_feed", {"kind": "commented"})
+        has("compact feed marks the cut", "…", body)
+        check("compact feed hides the whole comment", False, long_comment in body)
+        is_error, body = server.call("board_feed", {"kind": "commented", "full": True})
+        has("full feed returns the whole comment", long_comment, body)
+
+        is_error, body = server.call("task_add", {"title": long_title})
+        has("long title accepted", "ok", body)
+        _, body = server.call("task_get", {"id": 2})
+        has("compact task_get truncates the title", "…", body)
+        _, body = server.call("task_get", {"id": 2, "full": True})
+        has("full task_get returns the whole title", long_title, body)
+
+        is_error, body = server.call(
+            "task_update", {"id": 1, "if_revision": 2, "assignee": "bob", "clear_assignee": True}
+        )
+        check("assignee with clear_assignee is an error", True, is_error)
+        has("assignee conflict names the choice", "not both", body)
+
+        # --actor beats the exported variable, so a wrapper flag is not ignored.
+        with Server(os.path.join(scratch, "board"), "alice", args=["--actor", "bob"]) as flag_server:
+            flag_server.start()
+            _, body = flag_server.call("task_add", {"title": "flagged actor"})
+            has("flag actor writes the task", "ok", body)
+            _, body = flag_server.call("board_agents", {})
+            has("flag actor registers bob", "bob", body)
+            check("flag actor wins over the environment", False, "alice" in body)
     finally:
         server.close()
 

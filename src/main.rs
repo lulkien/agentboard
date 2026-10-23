@@ -72,7 +72,7 @@ fn run(
     let path = board_path(db)?;
     let actor = actor_name(actor);
     match cmd {
-        None | Some(Cmd::Serve) => serve(path),
+        None | Some(Cmd::Serve) => serve(path, actor),
         Some(Cmd::Path) => Ok((path.display().to_string(), ExitCode::SUCCESS)),
         Some(Cmd::Reset { yes }) => {
             if !yes {
@@ -274,6 +274,7 @@ fn run(
             recipient,
             task,
             limit,
+            full,
             wait,
         }) => {
             let kind = parse_kind(kind.as_deref())?;
@@ -292,7 +293,7 @@ fn run(
                     .wait(&filter, wait.saturating_mul(1000))
                     .map_err(|e| e.to_string())?
             };
-            Ok((render::feed_page(&page), ExitCode::SUCCESS))
+            Ok((render::feed_page(&page, full), ExitCode::SUCCESS))
         }
         Some(Cmd::Brief) => {
             let board = open(&path)?;
@@ -311,7 +312,7 @@ fn run(
     }
 }
 
-fn serve(path: PathBuf) -> Result<(String, ExitCode), String> {
+fn serve(path: PathBuf, actor: Option<String>) -> Result<(String, ExitCode), String> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -320,7 +321,7 @@ fn serve(path: PathBuf) -> Result<(String, ExitCode), String> {
         let board =
             Board::open_with_options(&path, BoardOptions::from_env().map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
-        let server = agentboard::server::Board::new(board);
+        let server = agentboard::server::Board::new(board, actor);
         let running = server
             .serve(rmcp::transport::stdio())
             .await

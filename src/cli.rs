@@ -36,7 +36,7 @@ pub enum Cmd {
         goal: String,
         #[arg(long)]
         status: Option<String>,
-        #[arg(long, default_value_t = 100)]
+        #[arg(long, default_value_t = 100, allow_hyphen_values = true)]
         priority: i32,
         #[arg(long)]
         assignee: Option<String>,
@@ -88,7 +88,7 @@ pub enum Cmd {
         goal: Option<String>,
         #[arg(long)]
         status: Option<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         priority: Option<i32>,
         #[arg(long)]
         assignee: Option<String>,
@@ -140,6 +140,9 @@ pub enum Cmd {
         task: Option<u64>,
         #[arg(long, default_value_t = 50)]
         limit: usize,
+        /// Print whole comment and update text, untruncated
+        #[arg(long)]
+        full: bool,
         /// Block up to this many seconds for a matching event
         #[arg(long, default_value_t = 0)]
         wait: u64,

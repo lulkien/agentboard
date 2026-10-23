@@ -72,6 +72,41 @@ has "a comment leaves the revision" "revision 1" "$out"
 out=$("$B" comment 1 --body "-dash body")
 has "hyphen comment body accepted" "ok" "$out"
 
+# --- long comment text is reachable, and a long title survives --full -----
+fresh d2
+long_comment=$(printf 'c%.0s' {1..400})
+long_title=$(printf 't%.0s' {1..100})
+"$B" add "$long_title" >/dev/null
+"$B" comment 1 --body "$long_comment" >/dev/null
+out=$("$B" feed --kind commented)
+lacks "compact feed truncates the comment" "$long_comment" "$out"
+has "compact feed marks the cut" "…" "$out"
+out=$("$B" feed --kind commented --full)
+has "feed --full returns the whole comment" "$long_comment" "$out"
+out=$("$B" get 1)
+has "compact record truncates the title" "…" "$out"
+out=$("$B" get 1 --full)
+has "get --full returns the whole title" "$long_title" "$out"
+lacks "get --full leaves no marker" "…" "$out"
+indented=$'line one\n    line two'
+"$B" add "indented body" --description "$indented" >/dev/null
+out=$("$B" get 2 --full)
+has "full text keeps inner whitespace" "line two" "$out"
+check "full text keeps the indented line intact" 1 "$(printf '%s\n' "$out" | rg -c '^    line two$')"
+
+# --- a negative priority is a value, and history is reachable -------------
+fresh d3
+"$B" add "urgent" --priority -3 >/dev/null
+has "negative priority stored" "prio   -3" "$("$B" ls)"
+"$B" add "later" --priority 9 >/dev/null
+out=$("$B" feed --after 0)
+first=$(printf '%s\n' "$out" | head -1)
+has "after 0 starts at the oldest event" "created" "$first"
+check "after 0 replays both creations" 2 "$(printf '%s\n' "$out" | rg -c ' created  T')"
+out=$("$B" update 1 --if-revision 1 --assignee bob --clear-assignee 2>&1); code=$?
+check "assignee and clear-assignee conflict exit" 1 "$code"
+has "assignee and clear-assignee conflict text" "not both" "$out"
+
 # --- revision guard and a forced take-over -------------------------------
 fresh e
 "$B" add "guarded" >/dev/null

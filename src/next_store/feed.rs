@@ -26,6 +26,14 @@ impl Cursor {
     }
 
     pub fn parse(raw: &str) -> Result<Self> {
+        // A bare sequence means "this board": `--after 0` is how a caller asks for
+        // history from the beginning without knowing the instance id.
+        if let Ok(seq) = raw.parse::<u64>() {
+            return Ok(Self {
+                instance_id: String::new(),
+                seq,
+            });
+        }
         let (instance_id, seq) = raw
             .rsplit_once(':')
             .ok_or_else(|| Error::InvalidCursor(raw.to_owned()))?;
@@ -126,7 +134,7 @@ impl Board {
         let start = match filter.after {
             Some(raw) => {
                 let cursor = Cursor::parse(raw)?;
-                if cursor.instance_id != metadata.instance_id {
+                if !cursor.instance_id.is_empty() && cursor.instance_id != metadata.instance_id {
                     return Err(Error::CursorInstanceMismatch);
                 }
                 // A cursor is the last sequence the caller saw, so resume after it.
