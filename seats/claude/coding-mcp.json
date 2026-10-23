@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "agentboard": {
+      "type": "stdio",
+      "command": "agentboard",
+      "args": [],
+      "env": {
+        "AGENTBOARD_ACTOR": "coder"
+      }
+    },
+    "git-mcp-rs": {
+      "type": "stdio",
+      "command": "git-mcp-rs",
+      "args": []
+    },
+    "ferris-search": {
+      "type": "stdio",
+      "command": "ferris-search",
+      "args": []
+    },
+    "codebase-memory-mcp": {
+      "type": "stdio",
+      "command": "codebase-memory-mcp",
+      "args": []
+    }
+  }
+}
