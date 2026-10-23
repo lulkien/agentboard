@@ -3,7 +3,7 @@ name = "agentboard"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
-description = "Tiny task board + tmux bridge for a team of CLI coding agents"
+description = "Shared task board for a team of CLI agents"
 license = "MIT"
 
 [[bin]]
@@ -13,19 +13,12 @@ path = "src/main.rs"
 [dependencies]
 # No colour stack: help and errors are plain text on purpose.
 clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
+heed = "0.23.0"
 rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-io"] }
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-surrealdb = { version = "2.0", default-features = false, features = ["protocol-ws"], optional = true }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process"] }
-heed = "0.23.0"
-
-[features]
-default = ["surreal"]
-sqlite = ["dep:rusqlite"]
-surreal = ["dep:surrealdb"]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [profile.release]
 opt-level = 2

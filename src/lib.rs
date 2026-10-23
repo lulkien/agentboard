@@ -1,7 +1,10 @@
-//! Domain rules for the next agentboard store. The current CLI/MCP binary keeps
-//! using its existing backend until the adapter cutover is ready.
+//! Shared task board for a team of CLI agents: domain rules, an embedded LMDB
+//! store, a CLI and an MCP server on one board.
 
+pub mod cli;
 pub mod domain;
+pub mod render;
+pub mod server;
 
 #[path = "next_store/mod.rs"]
 pub mod store;

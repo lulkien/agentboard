@@ -181,6 +181,25 @@ impl Board {
         Ok(Some(agent))
     }
 
+    /// The roster, newest activity first; names that never acted (`last_seen_ms`
+    /// absent) sort last.
+    pub fn agents(&self) -> Result<Vec<Agent>> {
+        let txn = self.env.read_txn()?;
+        self.checked_metadata(&txn)?;
+        let mut agents = Vec::new();
+        for entry in self.agents.iter(&txn)? {
+            let (_, raw) = entry?;
+            agents.push(serde_json::from_slice::<Agent>(raw)?);
+        }
+        agents.sort_by(|left, right| {
+            right
+                .last_seen_ms
+                .cmp(&left.last_seen_ms)
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        Ok(agents)
+    }
+
     pub(super) fn read_task_in_txn(&self, txn: &heed::RoTxn<'_>, id: u64) -> Result<Option<Task>> {
         let Some(raw) = self.tasks.get(txn, &keys::task(id))? else {
             return Ok(None);

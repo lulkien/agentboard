@@ -5,6 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Milliseconds since the Unix epoch, the board's only clock.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64)
+}
+
 pub const MAX_ACTOR_CHARS: usize = 64;
 pub const MAX_TITLE_CHARS: usize = 200;
 
@@ -77,6 +84,7 @@ pub enum Error {
     Held { holder: String },
     StaleRevision { expected: u64, actual: u64 },
     NotClaimable(Status),
+    UnknownEventKind(String),
     NoChange,
     RevisionOverflow,
 }
@@ -97,6 +105,7 @@ impl std::fmt::Display for Error {
                 "task title must be trimmed, have no control characters, and be at most {MAX_TITLE_CHARS} characters"
             ),
             Self::UnknownStatus(value) => write!(f, "unknown task status: {value:?}"),
+            Self::UnknownEventKind(value) => write!(f, "unknown event kind: {value:?}"),
             Self::SelfParent => f.write_str("task cannot be its own parent"),
             Self::MissingAssignee(status) => {
                 write!(f, "{} requires an assignee", status.as_str())
@@ -366,6 +375,34 @@ pub enum EventKind {
     Commented,
 }
 
+impl EventKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Claimed => "claimed",
+            Self::Commented => "commented",
+        }
+    }
+
+    pub const ALL: [EventKind; 4] = [
+        EventKind::Created,
+        EventKind::Updated,
+        EventKind::Claimed,
+        EventKind::Commented,
+    ];
+
+    pub fn parse(raw: &str) -> Result<Self, Error> {
+        match raw {
+            "created" => Ok(Self::Created),
+            "updated" => Ok(Self::Updated),
+            "claimed" => Ok(Self::Claimed),
+            "commented" => Ok(Self::Commented),
+            other => Err(Error::UnknownEventKind(other.to_owned())),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub seq: u64,
@@ -375,6 +412,12 @@ pub struct Event {
     pub timestamp_ms: i64,
     pub recipient: Option<String>,
     pub payload: serde_json::Value,
+}
+
+impl Event {
+    pub fn kind_str(&self) -> &'static str {
+        self.kind.as_str()
+    }
 }
 
 #[cfg(test)]
