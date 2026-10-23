@@ -146,10 +146,12 @@ ready tasks.
 - The task row is the prompt: `task_get` returns `description` and `goal` verbatim.
   Do not stage prompt text in files.
 - Write through the MCP tools, not by shelling out to `agentboard`.
-- Prefer MCP over shell everywhere: board work through the agentboard tools, code
-  reading through `codebase-memory-mcp`, git reads through `git-mcp-rs`, the web
-  through `ferris-search`. Reach for the shell only to build, test or run a
-  command the goal names, and say why when you do.
+- Prefer MCP over shell for reading and searching: code through
+  `codebase-memory-mcp`, git through `git-mcp-rs`, the web through `ferris-search`,
+  the board through the agentboard tools. Shell is not banned: builds, tests,
+  installs and the commands a goal names run there, and a command with no MCP
+  equivalent is fine. Keep `grep`, `cat`, `sed`, `find` and `ls` for the cases MCP
+  cannot answer, not as the default reading path.
 - Never guess a missing requirement: comment one narrow question, set status
   `blocked`, then wait on the feed.
 - `done` means verified. Put the real command output in a comment on the row.
