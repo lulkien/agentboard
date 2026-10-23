@@ -1,0 +1,9 @@
+# Codex profile: manager seat (agentboard). Loaded by `codex -p manager`, which
+# layers $CODEX_HOME/manager.config.toml over the base config.
+# approval_policy never, so the seat never stops to ask a human; the base config
+# pre-approves every board tool.
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.agentboard.env]
+AGENTBOARD_ACTOR = "manager"

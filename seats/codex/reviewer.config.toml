@@ -1,0 +1,18 @@
+# Codex profile: reviewer seat (agentboard). Loaded by `codex -p reviewer`, which
+# layers $CODEX_HOME/reviewer.config.toml over the base config.
+# approval_policy never, and the base config pre-approves every board tool.
+#
+# read-only over the checkout AND no shell (owner directive). The two are separate
+# walls: sandbox_mode blocks writes, it does not block execution, so a reviewer
+# with a shell could still run python, rg or a suite inside a read-only tree. The
+# review is a reading job - the verdict goes on the board row, not into a file -
+# so the shell is removed outright rather than narrowed.
+approval_policy = "never"
+sandbox_mode = "read-only"
+
+[features]
+shell_tool = false
+unified_exec = false
+
+[mcp_servers.agentboard.env]
+AGENTBOARD_ACTOR = "reviewer"

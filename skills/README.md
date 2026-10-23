@@ -1,10 +1,11 @@
 # skills
 
-`agentboard-manager/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`,
-plus `references/herdr-mechanics.md`). `manager/` is the small initialization
-skill: confirm the board, launch the worker panes with herdr, file one row, arm the
-feed. Its `claude.md` and `opencode.md` resources keep the proven command-file
-formats.
+`agentboard-team/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`,
+plus `references/herdr-mechanics.md`). The four seat directories are one-page entry
+points: `manager/`, `analyzer/`, `coder/`, `reviewer/`. Each confirms the seat's
+board name, names what it may run on the board and what it never does, and ends by
+arming the feed. Their `claude.md` and `opencode.md` resources keep the proven
+command-file formats; the `SKILL.md` is what Codex and Hermes load.
 
 ## Install
 
@@ -19,20 +20,20 @@ this repo, and every agent alias points at that canonical name:
     ~/.config/opencode/skills/<name> -> ~/.agents/skills/<name>
     ~/.hermes/skills/<name> -> ~/.agents/skills/<name>
 
-The two installed names are `agentboard-manager` and `manager`: ten directory
-links plus two command links, each printing `linked:`. Only the canonical links
-contain the repo location; all five paths for a name resolve to one physical repo
-directory, so an edit is visible without reinstalling. Unrelated skills are left
-alone. Codex honours `CODEX_HOME`.
+Five names are installed — `agentboard-team` plus the four seats — so each run
+creates `5 x 5 = 25` directory links and eight command links, each printing
+`linked:`. Only the canonical links contain the repo location; all five paths for a
+name resolve to one physical repo directory, so an edit is visible without
+reinstalling. Unrelated skills are left alone. Codex honours `CODEX_HOME`.
 
 | CLI | Entry point in repo | Installed entry point | Invocation |
 |---|---|---|---|
-| Claude Code | `manager/claude.md` | `~/.claude/commands/manager.md` → canonical `manager/claude.md` | `/manager [focus]` |
-| opencode | `manager/opencode.md` | `~/.config/opencode/commands/manager.md` → canonical `manager/opencode.md` | `/manager [focus]` |
-| Codex | `manager/SKILL.md` | `$CODEX_HOME/skills/manager` → canonical `manager` | `$manager [focus]` via `/skills` |
-| Hermes | `manager/SKILL.md` | `~/.hermes/skills/manager` → canonical `manager` | `/manager [focus]` |
+| Claude Code | `<seat>/claude.md` | `~/.claude/commands/<seat>.md` → canonical `<seat>/claude.md` | `/<seat> [focus]` |
+| opencode | `<seat>/opencode.md` | `~/.config/opencode/commands/<seat>.md` → canonical `<seat>/opencode.md` | `/<seat> [focus]` |
+| Codex | `<seat>/SKILL.md` | `$CODEX_HOME/skills/<seat>` → canonical `<seat>` | `$<seat> [focus]` via `/skills` |
+| Hermes | `<seat>/SKILL.md` | `~/.hermes/skills/<seat>` → canonical `<seat>` | `/<seat> [focus]` |
 
-The installer preflights all twelve destinations before changing any parent.
+The installer preflights all thirty-three destinations before changing any parent.
 Without `--force`, an existing file, directory or dangling symlink prints
 `exists: <path> (use --force)` and exits 1 with no changes. `--force` replaces only
 the named destinations. Missing parents are created. A custom canonical directory
@@ -42,22 +43,23 @@ paths then need adjusting.
 Each seat's MCP entry must carry its board name: `agentboard serve --actor coder`
 (or the same in the client's MCP config), pointed at the shared `AGENTBOARD_DB`.
 That name is what the board attributes writes to and what the feed addresses.
+`seats/` holds the canonical client cards for those entries.
 
-`tests/skills-install.sh` proves the layout in isolated homes: two canonical links,
-four aliases per skill, twelve destinations, one edit visible through all four
-aliases, and a second run that refuses without `--force` while naming every
-conflict.
+`tests/skills-install.sh` proves the layout in isolated homes: five canonical
+links, four aliases per skill, eight command links, one edit visible through all
+four aliases, a second run that refuses without `--force` while naming every
+conflict, and the four seat entry points present with both command files.
 
 ## Discovery notes (2026-10-22)
 
 - Claude documents personal skills at `~/.claude/skills` and follows symlinked
   skill directories; its interactive discovery was not exercised here.
-- Codex 0.163.0 lists both `manager` and `agentboard-manager` in `/skills` after
-  installation, and inserts `$manager` when selected
+- Codex 0.163.0 lists installed skill names in `/skills` and inserts `$<name>` when
+  selected
   ([custom prompts are deprecated](https://learn.chatgpt.com/docs/custom-prompts);
   Codex uses the [skill picker](https://learn.chatgpt.com/docs/build-skills)), so
-  no `~/.codex/prompts/manager.md` is installed.
-- Hermes' installed loader finds exactly one `manager` catalog row, resolves its
-  slash key to `/manager`, and loads the body through both symlink hops.
+  no `~/.codex/prompts/` file is installed.
+- Hermes' installed loader finds one catalog row per name, resolves each slash key,
+  and loads the body through both symlink hops.
 - OpenCode documents scanning `~/.config/opencode/skills`; its CLI was not on this
-  shell's `PATH`, so live discovery was not exercised. The command file is kept.
+  shell's `PATH`, so live discovery was not exercised. The command files are kept.

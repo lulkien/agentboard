@@ -15,9 +15,10 @@ args = parser.parse_args()
 # Only usage pages are scanned. Historical client fixtures (notably
 # tests/schema-version.py) are excluded by path, never by retired tool name.
 paths = [ROOT / name for name in ('README.md', 'PROTOCOL.md', 'AGENTS.md',
-                                 'skills/README.md')]
-for directory in ('skills/agentboard-manager', 'skills/manager'):
-    paths.extend(sorted((ROOT / directory).rglob('*.md')))
+                                 'skills/README.md', 'seats/README.md')]
+for directory in sorted((ROOT / 'skills').iterdir()):
+    if (directory / 'SKILL.md').exists():
+        paths.extend(sorted(directory.rglob('*.md')))
 
 # An explicit scratch path overrides any caller AGENTBOARD_DB. The path is
 # nonexistent for either backend; tools/list needs no board operations.

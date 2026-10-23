@@ -1,5 +1,7 @@
 #!/bin/sh
 # Canonical repo links in ~/.agents/skills, then agent aliases through that home.
+# Every skill directory that carries a claude.md or an opencode.md also gets that
+# CLI's command link, so a seat entry point is one edit in the repo.
 # usage: install.sh [--force] [canonical-dir]
 set -eu
 force=0
@@ -36,9 +38,9 @@ for dir in "$src"/*/; do
     # A caller may explicitly choose an agent's directory as the canonical home.
     [ "$agent_dir" = "$target" ] || check "$agent_dir/$name"
   done
+  if [ -f "$dir/claude.md" ]; then check "$claude_commands/$name.md"; fi
+  if [ -f "$dir/opencode.md" ]; then check "$opencode_commands/$name.md"; fi
 done
-check "$claude_commands/manager.md"
-check "$opencode_commands/manager.md"
 [ "$refuse" -eq 0 ] || exit 1
 
 link() {
@@ -54,6 +56,6 @@ for dir in "$src"/*/; do
   for agent_dir in "$claude_skills" "$codex_skills" "$opencode_skills" "$hermes_skills"; do
     [ "$agent_dir" = "$target" ] || link "$target/$name" "$agent_dir/$name"
   done
+  if [ -f "$dir/claude.md" ]; then link "$target/$name/claude.md" "$claude_commands/$name.md"; fi
+  if [ -f "$dir/opencode.md" ]; then link "$target/$name/opencode.md" "$opencode_commands/$name.md"; fi
 done
-link "$target/manager/claude.md" "$claude_commands/manager.md"
-link "$target/manager/opencode.md" "$opencode_commands/manager.md"

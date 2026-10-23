@@ -1,0 +1,62 @@
+# Shared Codex config for every agentboard seat. Merge this into
+# $CODEX_HOME/config.toml (default ~/.codex/config.toml); the role cards in this
+# directory are layered over it by `codex -p <role>`.
+#
+# No absolute paths, on purpose: the MCP servers are named by command, and codex
+# resolves them on the seat's PATH. The seat's PATH must carry ~/.cargo/bin and
+# ~/.local/bin, which the shell that starts a pane already has.
+#
+# Not carried here, on purpose: [tui], [projects."..."].trust_level and [notice]
+# are host state, not policy. A seat's trust in a checkout is a fact about this
+# machine, not about the role.
+#
+# approval_mode: a per-tool key is the form that works; a server-level
+# `approval_mode` is ignored by name on every start, and the server-wide form is
+# `default_tools_approval_mode`. This matters because every seat runs
+# approval_policy = "never", and under "never" a tool with no approval mode is a
+# hard error instead of a prompt. The list below is the whole board surface: all
+# nine tools, so no seat dies on the one that was forgotten.
+
+[mcp_servers.agentboard]
+command = "agentboard"
+
+[mcp_servers.agentboard.tools.task_add]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.task_list]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.task_get]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.task_update]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.task_claim]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.task_comment]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.board_feed]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.board_brief]
+approval_mode = "approve"
+
+[mcp_servers.agentboard.tools.board_agents]
+approval_mode = "approve"
+
+# Role-shared search and git servers. Same set the claude and opencode seats
+# carry (~/.claude/coding-mcp.json, ~/.config/opencode/opencode.json).
+[mcp_servers.git-mcp-rs]
+command = "git-mcp-rs"
+default_tools_approval_mode = "approve"
+
+[mcp_servers.ferris-search]
+command = "ferris-search"
+default_tools_approval_mode = "approve"
+
+[mcp_servers.codebase-memory-mcp]
+command = "codebase-memory-mcp"
+default_tools_approval_mode = "approve"

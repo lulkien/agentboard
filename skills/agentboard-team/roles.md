@@ -1,14 +1,15 @@
 # Seats
 
-Three roles, one board. A seat is a CLI agent process with its own
-`AGENTBOARD_ACTOR`, pointed at the same `AGENTBOARD_DB`. Nothing in the board
-enforces these rules; they are the team's contract, and the board's refusals
-(stale revision, held task, missing reason) are what make breaking them visible.
+Four seats, one board: manager, analyzer, coder, reviewer. A seat is a CLI agent
+process with its own `AGENTBOARD_ACTOR`, pointed at the same `AGENTBOARD_DB`.
+Nothing in the board enforces these rules; they are the team's contract, and the
+board's refusals (stale revision, held task, missing reason) are what make breaking
+them visible. Each seat also has a one-page entry skill of its own.
 
 ## Manager
 
-Runs no code beyond the board and herdr. Files work, reads the board, dispatches,
-handles quota, and decides with the human.
+Runs no code beyond the board and herdr. Files work, reads the board, hands rows to
+seats, handles quota, and decides with the human.
 
 May:
 - `task_add` to file work, including the assignee
@@ -53,13 +54,21 @@ Never:
 - close a row it did not review
 - accept "it should work" as evidence
 
-## Analyzer (optional)
+## Analyzer
 
-Used when a task needs a plan before code.
+The seat that turns a question into a plan. The manager files the row with the
+question; the analyzer reads it, plans, and hands the same row on.
 
-May: `task_comment` a plan, then `task_update` to hand the row to the coder with
-the plan in the comment or in the `description`.
-Never: implement, or file a second row for the same work.
+May:
+- `task_claim` the row assigned to it
+- `task_comment` the plan: files, functions, behaviour, and what not to touch
+- `task_update` the row to hand it to the coder (`assignee="coder"`, plan in the
+  comment or in the `description`), keeping the row in `in_progress`
+
+Never:
+- implement the plan, edit product files, or run the change
+- file a second row for the same work
+- close a row; the reviewer or the coder closes it
 
 ## Talking between seats
 

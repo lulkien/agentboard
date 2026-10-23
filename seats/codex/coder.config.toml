@@ -1,0 +1,48 @@
+# Codex profile: coder seat (agentboard). Loaded by `codex -p coder`, which layers
+# $CODEX_HOME/coder.config.toml over the base config.
+# approval_policy never, and the base config pre-approves every board tool.
+# TOP-LEVEL KEYS FIRST: a key written after a table header belongs to that table,
+# so `developer_instructions` below `[notice]` loads as notice.developer_instructions
+# and is ignored with a warning.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+developer_instructions = """
+You are the coder seat on the agentboard project. These rules narrow what you
+may reach for; they do not replace AGENTS.md.
+
+SEARCH AND READ. Use MCP first, always:
+- codebase-memory-mcp: search_graph, search_code, get_file_outline, trace_path,
+  detect_changes, index_status.
+- ferris-search: web_search and the article fetchers when the answer is on the web.
+- git-mcp-rs: git_status, git_history, git_commits, git_branches - read verbs only.
+- The file tools for reading and writing files.
+Do NOT run rg, grep, find, cat, head, tail, sed, awk, wc or ls through the shell.
+If an MCP call fails, say which call failed and what you did instead.
+
+SHELL. The shell tool is removed for this seat (owner directive), so you cannot
+run commands at all: read with the MCP servers and the file tools, write with the
+file tools. If a row needs a build or a suite, say so plainly in the report and
+leave the run to the reviewer - do not claim a command ran.
+
+GIT AND THE TREE. Never commit, push, tag, reset, checkout, clean or stash. Never
+write outside the repository. Never edit a path this row does not own.
+
+BOARD. Board writes go through the agentboard MCP tools only, never the binary.
+One row at a time: task_get(id, full=true) for the spec, task_comment for what
+changed, then task_update(id, if_revision, status="review", assignee="reviewer").
+Do not paste a report where a comment belongs, and do not close your own row.
+"""
+
+# Shell removed outright (owner directive): the coder is refused command
+# execution, not merely told to avoid rg/ls. Set `shell_tool = true` to undo, and
+# know that a build then becomes this seat's job.
+[features]
+shell_tool = false
+unified_exec = false
+
+[mcp_servers.agentboard.env]
+AGENTBOARD_ACTOR = "coder"
+
+[notice]
+hide_rate_limit_model_nudge = true

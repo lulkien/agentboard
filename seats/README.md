@@ -1,0 +1,71 @@
+# Seat cards
+
+How each CLI seat reaches the board, kept in the repo so the checkout is the source
+of truth and a review can read the whole surface without logging into a home
+directory. The skills in `../skills/` say what a seat may do; these cards say how
+its client gets a board identity.
+
+| Path | Seat | Loaded by |
+|---|---|---|
+| `codex/<seat>.config.toml` | analyzer, coder, manager, reviewer | `codex -p <seat>` |
+| `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
+| `claude/<seat>-mcp.json` | analyzer, coder, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
+| `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
+
+## Install
+
+    ./seats/install.sh --force
+
+It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml` and each
+claude card to `~/.claude/<seat>-mcp.json`. The codex base config is not a link: it
+is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
+`[projects.*].trust_level`, `[notice]`) also lives. `install.sh` refuses an existing
+file that is not a symlink into this repo, and `--force` replaces only the named
+destinations.
+
+## What every card carries
+
+- Commands, never home paths: `agentboard`, `git-mcp-rs`, `ferris-search`,
+  `codebase-memory-mcp` resolve on the seat's `PATH`. Check the one that matters
+  with `readlink -f "$(command -v agentboard)"`.
+- The board tool set is the nine tools of this build: `task_add`, `task_list`,
+  `task_get`, `task_update`, `task_claim`, `task_comment`, `board_feed`,
+  `board_brief`, `board_agents`.
+- One actor per card. A base config must never carry `AGENTBOARD_ACTOR`: every
+  seat that reads it would write under that name.
+
+## Codex
+
+`approval_policy = "never"` and per-role `sandbox_mode`, with the per-tool
+`approval_mode = "approve"` in the base config. Under `never` a tool with no
+approval mode is a hard error, so the base lists every board tool.
+
+- analyzer: `workspace-write`, opened in a scratch directory, so it reads the repo
+  and writes only its probe area.
+- coder: `danger-full-access` with `features.shell_tool = false` (owner directive:
+  the codex coder is refused command execution; a build belongs to another seat).
+- manager: `workspace-write`.
+- reviewer: `read-only` with no shell (owner directive: reading and judging only).
+
+## Claude
+
+One `--mcp-config` card per seat, because a Claude seat's actor comes from that
+file. `coder-mcp.json`, `analyzer-mcp.json` and `reviewer-mcp.json` differ only in
+`AGENTBOARD_ACTOR`.
+
+## Not shipped here
+
+- `opencode` keeps one global `~/.config/opencode/opencode.json`, so it can carry
+  only one board actor. Its `agentboard` entry therefore runs
+  `opencode/agentboard-mcp.sh`, which takes the actor from `AGENTBOARD_SEAT` in the
+  pane environment (`herdr tab create --env AGENTBOARD_SEAT=coder`) and falls back
+  to `opencode`. A seat started without that variable writes as `opencode`.
+- The Hermes manager reads `~/.hermes/config.yaml`, which is host state: it holds
+  model providers and keys as well as MCP servers.
+
+## Verified or not
+
+The codex cards are checked with `codex -p <seat> mcp list`, which loads the
+profile and prints the servers and env that profile resolves. The claude cards are
+not exercised here: the account quota decides whether a live seat can be started,
+and a card that has not been run is not a proof.

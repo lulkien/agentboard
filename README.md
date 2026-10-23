@@ -145,5 +145,7 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
 
 - `PROTOCOL.md` — the wire surface.
 - `AGENTS.md` — changing this tree: gates, layout, traps.
-- `skills/agentboard-manager` — running a team: launcher, wake, roles, workflow.
-- `skills/manager` — seat entry points.
+- `skills/agentboard-team` — running a team: the board, launcher, wake, roles,
+  workflow.
+- `skills/manager`, `skills/analyzer`, `skills/coder`, `skills/reviewer` — one
+  entry skill per seat.

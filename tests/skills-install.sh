@@ -8,6 +8,9 @@ repo=pathlib.Path.cwd()
 installer=repo/'skills/install.sh'
 passed=0
 
+def skills():
+    return [d.name for d in sorted((repo/'skills').iterdir()) if (d/'SKILL.md').exists()]
+
 def run(home,*args,**overrides):
     env=dict(os.environ,HOME=str(home))
     for key in ['CODEX_HOME','AGENTBOARD_CLAUDE_COMMANDS','AGENTBOARD_OPENCODE_COMMANDS']:
@@ -18,12 +21,13 @@ def run(home,*args,**overrides):
 def destinations(home,canonical=None,codehome=None,claude=None,opencode=None):
     canonical=canonical or home/'.agents/skills'
     paths={}
-    for name in ['agentboard-manager','manager']:
+    for name in skills():
         paths[canonical/name]=repo/'skills'/name
         for parent in [home/'.claude/skills',(codehome or home/'.codex')/'skills',home/'.config/opencode/skills',home/'.hermes/skills']:
             paths[parent/name]=canonical/name
-    paths[(claude or home/'.claude/commands')/'manager.md']=canonical/'manager/claude.md'
-    paths[(opencode or home/'.config/opencode/commands')/'manager.md']=canonical/'manager/opencode.md'
+        for card,root in (('claude',claude or home/'.claude/commands'),('opencode',opencode or home/'.config/opencode/commands')):
+            if (repo/'skills'/name/f'{card}.md').exists():
+                paths[root/f'{name}.md']=canonical/name/f'{card}.md'
     return paths
 
 def check(name):
@@ -38,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     for path,target in expected.items():
         assert path.is_symlink() and os.readlink(path)==str(target),(path,target)
         assert path.resolve()==target.resolve(),path
-    assert p.stdout.count('linked: ')==12,p.stdout
+    assert p.stdout.count('linked: ')==len(expected),p.stdout
     for directory,_,files in os.walk(home/'.hermes/skills',followlinks=True):
         if 'SKILL.md' in files:
             path=pathlib.Path(directory)/'SKILL.md'
@@ -46,12 +50,12 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
                 assert path==home/'.hermes/skills/manager/SKILL.md',path
     assert not (home/'.codex/prompts/manager.md').exists()
     # One edit, four readers, no reinstall. Remove the probe even on a failure.
-    with tempfile.NamedTemporaryFile(dir=home/'.agents/skills/agentboard-manager',prefix='.install-probe-',mode='w+') as probe:
+    with tempfile.NamedTemporaryFile(dir=home/'.agents/skills/agentboard-team',prefix='.install-probe-',mode='w+') as probe:
         probe.write('one physical copy\n');probe.flush()
         for agent in ['.claude','.codex','.config/opencode','.hermes']:
-            alias=home/agent/'skills/agentboard-manager'/pathlib.Path(probe.name).name
+            alias=home/agent/'skills/agentboard-team'/pathlib.Path(probe.name).name
             assert alias.read_text()=='one physical copy\n'
-    check('canonical repo links, four indirect aliases per skill, live edit visibility, 12 destinations')
+    check(f'canonical repo links, four indirect aliases per skill, live edit visibility, {len(expected)} destinations')
 
     p=run(home);assert p.returncode==1 and not p.stdout,p
     for path in expected: assert f'exists: {path} (use --force)' in p.stderr
@@ -66,7 +70,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     for parent in ['.agents','.claude','.codex','.hermes']:
         assert not (conflict/parent).exists(),parent
     assert not (conflict/'.config/opencode/skills').exists()
-    check('last-destination conflict leaves all earlier parents absent and contents untouched')
+    check('a command conflict leaves all earlier parents absent and contents untouched')
 
     broken=root/'broken';path=broken/'.codex/skills/manager'
     path.parent.mkdir(parents=True);path.symlink_to('missing')
@@ -91,6 +95,15 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     assert (target/'commands/keep').read_text()=='untouched'
     assert not (custom/'.agents').exists() and not (custom/'.codex').exists()
     check('custom canonical home, CODEX_HOME, and command paths with spaces are honored')
+
+    # Every seat entry point must be one of the installed skills, so a seat can
+    # never be launched into a skill that was never linked.
+    for seat in ['manager','analyzer','coder','reviewer']:
+        assert seat in skills(),seat
+        for card in ('claude','opencode'):
+            assert (repo/'skills'/seat/f'{card}.md').exists(),(seat,card)
+    assert (repo/'skills/agentboard-team/SKILL.md').exists()
+    check('four seat entry points and the shared manual are installed as skills')
 print(f'{passed}/{passed} passed (skills installer)')
 PY
 

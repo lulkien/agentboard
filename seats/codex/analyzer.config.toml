@@ -1,0 +1,15 @@
+# Codex profile: analyzer seat (agentboard). Loaded by `codex -p analyzer`, which
+# layers $CODEX_HOME/analyzer.config.toml over the base config.
+# approval_policy never, so the seat never stops to ask a human; the base config
+# pre-approves every board tool, because "never" turns an unapproved tool into a
+# hard error instead of a prompt.
+# workspace-write, with the pane rooted in a scratch directory rather than the
+# checkout: writes are confined to the working directory plus /tmp, so a probe
+# fixture and the CLI's own session state work while the repository answers
+# read-only filesystem. Rooted in the repo this mode would hand the analyzer the
+# tree.
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.agentboard.env]
+AGENTBOARD_ACTOR = "analyzer"

@@ -19,19 +19,21 @@ herdr agent list             # name, kind, agent_status, pane id
 `HERDR_ENV` not `1` means this shell is not inside herdr: say so and stop rather
 than starting processes that nothing can see.
 
-## One worker tab
+## One tab per seat
 
-The manager stays in its own pane and tab. Workers get a fresh tab; never split the
-manager's tab and never park workers in it.
+The manager stays in its own tab. Every worker gets a fresh tab of its own: one
+agent per tab, never two agents as split panes of one tab — a split puts two
+agents on one screen and one set of keys, and a pane read then shows the wrong
+seat.
 
 ```bash
-herdr tab create --cwd "$REPO" --label team
+herdr tab create --cwd "$REPO" --label coder
 herdr pane list                       # find the new tab's pane id
-herdr pane split --pane "$P" --direction right --cwd "$REPO"
-herdr pane split --pane "$P" --direction down  --cwd "$REPO"
+herdr agent start coder --kind claude --pane "$P"
 ```
 
-Panes inherit cwd; pass `--cwd` anyway so a seat never opens in the wrong tree.
+Repeat for `analyzer` and `reviewer` with their own `--label` and pane. Panes
+inherit cwd; pass `--cwd` anyway so a seat never opens in the wrong tree.
 
 ## Start and prompt a seat
 

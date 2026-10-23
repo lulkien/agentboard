@@ -21,9 +21,9 @@ PAGES = (
     'README.md',
     'PROTOCOL.md',
     'AGENTS.md',
-    'skills/agentboard-manager/SKILL.md',
-    'skills/agentboard-manager/workflow.md',
-    'skills/agentboard-manager/roles.md',
+    'skills/agentboard-team/SKILL.md',
+    'skills/agentboard-team/workflow.md',
+    'skills/agentboard-team/roles.md',
 )
 
 

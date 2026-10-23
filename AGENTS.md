@@ -8,7 +8,7 @@ Read first:
 
 - `README.md` — the model, the verbs and the nine tools.
 - `PROTOCOL.md` — the wire surface agents see.
-- `skills/agentboard-manager` — running a team with this tool; the repo copy is canonical.
+- `skills/agentboard-team` — running a team with this tool; the repo copy is canonical.
 
 ## Prove it
 
@@ -25,9 +25,9 @@ Everything is offline and uses scratch boards; there is no server to start and n
 | `bash tests/cli.sh` | `82/82 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `41/41 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
-| `bash tests/skills-install.sh` | `6/6 passed (skills installer)` (isolated homes; no board writes) |
+| `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 9 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 11 pages, 56 CLI names, 80 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 21 pages, 60 CLI names, 147 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; debug ceiling 25 ms, release 5 ms |
 
@@ -113,9 +113,12 @@ No file edit, no commit, no build, no install, no probe that creates state;
 
 ## Where the rest lives
 
-- `skills/agentboard-manager` — running a team: launcher, wake commands, roles,
+- `skills/agentboard-team` — running a team: launcher, wake commands, roles,
   workflow. `skills/install.sh --force` creates canonical repo links under
   `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
   canonical names. There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: nine tools, cursors, refusals, exit codes.
-- `skills/manager/` — the seat entry points (`/manager`, `$manager`).
+- `skills/{manager,analyzer,coder,reviewer}/` — one seat entry point each
+  (`/manager`, `/analyzer`, `/coder`, `/reviewer`; `$<seat>` under Codex).
+- `seats/` — the canonical per-seat client cards (codex profiles, claude MCP
+  configs) and `seats/install.sh` to link them into a home directory.

@@ -2,7 +2,7 @@
 
 What an agent sees. Nine MCP tools, the cursor format, the refusals, the exit
 codes. The store that implements this is described in `AGENTS.md`; running a team
-is described in `skills/agentboard-manager`.
+is described in `skills/agentboard-team`.
 
 ## Transport
 
