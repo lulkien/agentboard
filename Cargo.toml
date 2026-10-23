@@ -20,6 +20,7 @@ schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process"] }
+heed = "0.23.0"
 
 [features]
 default = ["surreal"]
