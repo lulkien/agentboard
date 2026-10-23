@@ -43,6 +43,33 @@ fn options() -> BoardOptions {
     BoardOptions { map_size_mb: 8 }
 }
 
+#[cfg(target_os = "linux")]
+fn lock_fds() -> Vec<String> {
+    let mut held = Vec::new();
+    let Ok(entries) = fs::read_dir("/proc/self/fd") else {
+        return held;
+    };
+    for entry in entries.flatten() {
+        if let Ok(target) = fs::read_link(entry.path())
+            && target
+                .file_name()
+                .is_some_and(|name| name == "lifetime.lock")
+        {
+            held.push(format!(
+                "{} -> {}",
+                entry.file_name().to_string_lossy(),
+                target.display()
+            ));
+        }
+    }
+    held
+}
+
+#[cfg(not(target_os = "linux"))]
+fn lock_fds() -> Vec<String> {
+    Vec::new()
+}
+
 fn draft(assignee: Option<&str>) -> NewTask {
     NewTask {
         title: "Prepare a patch".into(),
@@ -150,7 +177,13 @@ fn format_and_map_size_refuse_before_any_task_decode() {
         Board::open_with_options(scratch.path(), options()),
         Err(Error::FormatMismatch { expected: FORMAT_VERSION, found }) if found == FORMAT_VERSION + 1
     ));
-    let reset = Board::reset(scratch.path(), options()).unwrap();
+    let reset = Board::reset(scratch.path(), options());
+    assert!(
+        reset.is_ok(),
+        "reset failed: {reset:?}; lock fds: {:?}",
+        lock_fds()
+    );
+    let reset = reset.unwrap();
     assert_eq!(reset.old_instance_id.as_deref(), Some(original.as_str()));
     assert_ne!(reset.new_instance_id, original);
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
@@ -550,10 +583,12 @@ fn reset_refuses_unknown_directory_entry_and_preserves_the_board() {
     board.add("manager", draft(None), false, 0).unwrap();
     drop(board);
     fs::write(scratch.path().join("notes.txt"), b"keep me").unwrap();
-    assert!(matches!(
-        Board::reset(scratch.path(), options()),
-        Err(Error::UnknownEntry(name)) if name == "notes.txt"
-    ));
+    let outcome = Board::reset(scratch.path(), options());
+    assert!(
+        matches!(outcome, Err(Error::UnknownEntry(ref name)) if name == "notes.txt"),
+        "expected UnknownEntry(notes.txt), got {outcome:?}; lock fds: {:?}",
+        lock_fds()
+    );
     assert!(scratch.path().join("data.mdb").exists());
     assert_eq!(
         fs::read(scratch.path().join("notes.txt")).unwrap(),
@@ -561,10 +596,11 @@ fn reset_refuses_unknown_directory_entry_and_preserves_the_board() {
     );
     // With the board attached the attached-client refusal is reported first.
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
-    assert!(matches!(
-        Board::reset(scratch.path(), options()),
-        Err(Error::ResetBusy)
-    ));
+    let outcome = Board::reset(scratch.path(), options());
+    assert!(
+        matches!(outcome, Err(Error::ResetBusy)),
+        "expected ResetBusy, got {outcome:?}"
+    );
     assert_eq!(board.get(1).unwrap().unwrap().title, "Prepare a patch");
     drop(board);
     // Once the stray entry is gone the board opens and its rows are intact.

@@ -20,6 +20,15 @@ pub enum Status {
 }
 
 impl Status {
+    pub const ALL: [Status; 6] = [
+        Status::Todo,
+        Status::InProgress,
+        Status::Blocked,
+        Status::Review,
+        Status::Done,
+        Status::Canceled,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Todo => "todo",

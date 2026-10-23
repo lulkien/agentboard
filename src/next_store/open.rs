@@ -101,6 +101,9 @@ pub enum Error {
     ForeignBoard,
     UnknownEntry(String),
     Corrupt(&'static str),
+    EmptyComment,
+    InvalidCursor(String),
+    CursorInstanceMismatch,
     UnknownAssignee(String),
     MissingTask(u64),
     MissingParent(u64),
@@ -130,6 +133,11 @@ impl std::fmt::Display for Error {
                 "unexpected entry {name:?} in the board directory; a board holds only data.mdb, lock.mdb and lifetime.lock, so move it aside"
             ),
             Self::Corrupt(reason) => write!(f, "corrupt board: {reason}"),
+            Self::EmptyComment => f.write_str("comment must be nonempty"),
+            Self::InvalidCursor(raw) => write!(f, "invalid feed cursor {raw:?}"),
+            Self::CursorInstanceMismatch => {
+                f.write_str("feed cursor belongs to a different board; reset a cursor or reset the board")
+            }
             Self::UnknownAssignee(name) => write!(f, "unknown assignee {name:?}; use new_actor=true to register the target"),
             Self::MissingTask(id) => write!(f, "task T{id} does not exist"),
             Self::MissingParent(id) => write!(f, "parent T{id} does not exist"),
@@ -207,25 +215,21 @@ impl Board {
             refuse_unknown_entries(&path)?;
         }
         let lock = open_lifetime_lock(&path)?;
-        loop {
-            lock.lock_shared()?;
-            if path.join("data.mdb").exists() || path.join("lock.mdb").exists() {
-                return Self::open_locked(path, options, lock);
+        // Take the exclusive lock first: it is what a first opener needs, and trying
+        // it before any shared lock removes the release-then-retry window in which a
+        // reset could delete the files under a new mapping.
+        match lock.try_lock() {
+            Ok(()) => {
+                let board = Self::open_locked(path, options, lock)?;
+                board._lifetime_lock.lock_shared()?;
+                Ok(board)
             }
-            lock.unlock()?;
-            match lock.try_lock() {
-                Ok(()) => {
-                    let board = Self::open_locked(path, options, lock)?;
-                    board._lifetime_lock.lock_shared()?;
-                    return Ok(board);
-                }
-                Err(fs::TryLockError::WouldBlock) => {
-                    // Two first-open processes can otherwise release their shared
-                    // lock and immediately re-take it, starving the exclusive one.
-                    std::thread::sleep(std::time::Duration::from_millis(2));
-                }
-                Err(fs::TryLockError::Error(error)) => return Err(error.into()),
+            Err(fs::TryLockError::WouldBlock) => {
+                // Somebody else owns or holds the board; wait as a reader.
+                lock.lock_shared()?;
+                Self::open_locked(path, options, lock)
             }
+            Err(fs::TryLockError::Error(error)) => Err(error.into()),
         }
     }
 
@@ -369,10 +373,20 @@ impl Board {
         // The attached-client refusal wins over a directory complaint, and the
         // directory is re-checked under the exclusive lock so a stray file cannot
         // turn the disposal into a half-deleted board.
-        lock.try_lock().map_err(|error| match error {
-            fs::TryLockError::WouldBlock => Error::ResetBusy,
-            fs::TryLockError::Error(error) => Error::Io(error),
-        })?;
+        // A client that is closing can hold the lock for a moment; give the
+        // exclusive request a short, bounded grace before calling it attached.
+        let mut waited = 0;
+        loop {
+            match lock.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) if waited < 20 => {
+                    waited += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(fs::TryLockError::WouldBlock) => return Err(Error::ResetBusy),
+                Err(fs::TryLockError::Error(error)) => return Err(Error::Io(error)),
+            }
+        }
         refuse_unknown_entries(&path)?;
         let old_instance_id = inspect_for_reset(&path)?;
         for name in ["data.mdb", "lock.mdb"] {

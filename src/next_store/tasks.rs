@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Event, EventKind, NewTask, Status, Task, TaskPatch, validate_actor};
+use crate::domain::{self, Event, EventKind, NewTask, Status, Task, TaskPatch, validate_actor};
 
 use super::keys;
-use super::open::{Board, Error, Result, write_metadata};
+use super::open::{Board, Error, Metadata, Result, write_metadata};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Agent {
@@ -44,9 +44,9 @@ impl Board {
     /// `new_actor` registers an unknown target assignee, never the caller.
     pub fn add(&self, actor: &str, input: NewTask, new_actor: bool, now_ms: i64) -> Result<Added> {
         let mut txn = self.env.write_txn()?;
-        let mut metadata = self.checked_metadata(&txn)?;
+        let metadata = self.checked_metadata(&txn)?;
+        let mut metadata = metadata;
         let task_id = metadata.next_task_id;
-        let event_seq = metadata.next_event_seq;
         let task = Task::new(task_id, actor, input, now_ms)?;
         if let Some(parent_id) = task.parent_id
             && self.tasks.get(&txn, &keys::task(parent_id))?.is_none()
@@ -55,31 +55,23 @@ impl Board {
         }
         self.ensure_target(&mut txn, task.assignee.as_deref(), actor, new_actor, now_ms)?;
         self.touch_actor(&mut txn, actor, task_id, now_ms)?;
-        let event = Event {
-            seq: event_seq,
-            task_id,
-            actor: actor.to_owned(),
-            kind: EventKind::Created,
-            timestamp_ms: now_ms,
-            recipient: task.assignee.clone(),
-            payload: serde_json::json!({"task": task}),
-        };
         self.tasks
             .put(&mut txn, &keys::task(task_id), &serde_json::to_vec(&task)?)?;
-        self.events.put(
+        self.add_indexes(&mut txn, &task)?;
+        let event = self.append_event(
             &mut txn,
-            &keys::task(event_seq),
-            &serde_json::to_vec(&event)?,
+            &mut metadata,
+            Event {
+                seq: 0,
+                task_id,
+                actor: actor.to_owned(),
+                kind: EventKind::Created,
+                timestamp_ms: now_ms,
+                recipient: task.assignee.clone(),
+                payload: serde_json::json!({ "task": task }),
+            },
         )?;
-        self.events_by_task
-            .put(&mut txn, &keys::event_by_task(task_id, event_seq), b"")?;
-        self.tasks_by_status
-            .put(&mut txn, &keys::status(&task), b"")?;
-        if let Some(index_key) = keys::assignee(&task) {
-            self.tasks_by_assignee.put(&mut txn, &index_key, b"")?;
-        }
         metadata.next_task_id = task_id.checked_add(1).ok_or(Error::CounterOverflow)?;
-        metadata.next_event_seq = event_seq.checked_add(1).ok_or(Error::CounterOverflow)?;
         write_metadata(self.meta, &mut txn, &metadata)?;
         txn.commit()?;
         Ok(Added { task, event })
@@ -109,22 +101,7 @@ impl Board {
             input.now_ms,
         )?;
         self.touch_actor(&mut txn, input.actor, input.id, input.now_ms)?;
-        let old_status_key = keys::status(&old);
-        if !self.tasks_by_status.delete(&mut txn, &old_status_key)? {
-            return Err(Error::Corrupt("missing old status index key"));
-        }
-        if let Some(old_assignee_key) = keys::assignee(&old)
-            && !self.tasks_by_assignee.delete(&mut txn, &old_assignee_key)?
-        {
-            return Err(Error::Corrupt("missing old assignee index key"));
-        }
-        self.tasks_by_status
-            .put(&mut txn, &keys::status(&next), b"")?;
-        if let Some(next_assignee_key) = keys::assignee(&next) {
-            self.tasks_by_assignee
-                .put(&mut txn, &next_assignee_key, b"")?;
-        }
-        let event_seq = metadata.next_event_seq;
+        self.replace_indexes(&mut txn, &old, &next)?;
         let recipient = if next.assignee != old.assignee {
             next.assignee.clone()
         } else {
@@ -139,7 +116,7 @@ impl Board {
             payload.insert("comment".into(), comment.into());
         }
         let event = Event {
-            seq: event_seq,
+            seq: 0,
             task_id: input.id,
             actor: input.actor.to_owned(),
             kind: EventKind::Updated,
@@ -149,14 +126,7 @@ impl Board {
         };
         self.tasks
             .put(&mut txn, &keys::task(input.id), &serde_json::to_vec(&next)?)?;
-        self.events.put(
-            &mut txn,
-            &keys::task(event_seq),
-            &serde_json::to_vec(&event)?,
-        )?;
-        self.events_by_task
-            .put(&mut txn, &keys::event_by_task(input.id, event_seq), b"")?;
-        metadata.next_event_seq = event_seq.checked_add(1).ok_or(Error::CounterOverflow)?;
+        let event = self.append_event(&mut txn, &mut metadata, event)?;
         write_metadata(self.meta, &mut txn, &metadata)?;
         txn.commit()?;
         Ok(Updated { task: next, event })
@@ -211,7 +181,7 @@ impl Board {
         Ok(Some(agent))
     }
 
-    fn read_task_in_txn(&self, txn: &heed::RoTxn<'_>, id: u64) -> Result<Option<Task>> {
+    pub(super) fn read_task_in_txn(&self, txn: &heed::RoTxn<'_>, id: u64) -> Result<Option<Task>> {
         let Some(raw) = self.tasks.get(txn, &keys::task(id))? else {
             return Ok(None);
         };
@@ -326,6 +296,122 @@ impl Board {
             .put(txn, actor.as_bytes(), &serde_json::to_vec(&record)?)?;
         Ok(())
     }
+    /// Claim a task: an explicit ID answers its refusal, an id-less probe walks the
+    /// status index and answers `NoWork` when nothing is eligible.
+    pub fn claim(&self, actor: &str, explicit: Option<u64>, now_ms: i64) -> Result<ClaimOutcome> {
+        validate_actor(actor)?;
+        let mut txn = self.env.write_txn()?;
+        let mut metadata = self.checked_metadata(&txn)?;
+        let old = match explicit {
+            Some(id) => self
+                .read_task_in_txn(&txn, id)?
+                .ok_or(Error::MissingTask(id))?,
+            None => match self.next_claimable_in_txn(&txn, actor)? {
+                Some(task) => task,
+                None => return Ok(ClaimOutcome::NoWork),
+            },
+        };
+        let next = match old.claim(actor, explicit.is_some(), now_ms) {
+            Ok(domain::Claim::Started(task) | domain::Claim::ReviewTaken(task)) => task,
+            Ok(domain::Claim::AlreadyHeld(task)) => return Ok(ClaimOutcome::AlreadyHeld(task)),
+            Err(error) => return Err(Error::Domain(error)),
+        };
+        self.replace_indexes(&mut txn, &old, &next)?;
+        self.touch_actor(&mut txn, actor, next.id, now_ms)?;
+        self.tasks
+            .put(&mut txn, &keys::task(next.id), &serde_json::to_vec(&next)?)?;
+        let event = self.append_event(
+            &mut txn,
+            &mut metadata,
+            Event {
+                seq: 0,
+                task_id: next.id,
+                actor: actor.to_owned(),
+                kind: EventKind::Claimed,
+                timestamp_ms: now_ms,
+                recipient: None,
+                payload: serde_json::json!({
+                    "old_status": old.status.as_str(),
+                    "new_status": next.status.as_str(),
+                }),
+            },
+        )?;
+        write_metadata(self.meta, &mut txn, &metadata)?;
+        txn.commit()?;
+        Ok(ClaimOutcome::Claimed(Updated { task: next, event }))
+    }
+
+    /// Append one comment event. Comments never change the task revision.
+    pub fn comment(&self, actor: &str, id: u64, text: &str, now_ms: i64) -> Result<Event> {
+        validate_actor(actor)?;
+        if text.trim().is_empty() {
+            return Err(Error::EmptyComment);
+        }
+        let mut txn = self.env.write_txn()?;
+        let mut metadata = self.checked_metadata(&txn)?;
+        if self.tasks.get(&txn, &keys::task(id))?.is_none() {
+            return Err(Error::MissingTask(id));
+        }
+        self.touch_actor(&mut txn, actor, id, now_ms)?;
+        let event = self.append_event(
+            &mut txn,
+            &mut metadata,
+            Event {
+                seq: 0,
+                task_id: id,
+                actor: actor.to_owned(),
+                kind: EventKind::Commented,
+                timestamp_ms: now_ms,
+                recipient: None,
+                payload: serde_json::json!({ "text": text }),
+            },
+        )?;
+        write_metadata(self.meta, &mut txn, &metadata)?;
+        txn.commit()?;
+        Ok(event)
+    }
+
+    fn add_indexes(&self, txn: &mut heed::RwTxn<'_>, task: &Task) -> Result<()> {
+        self.tasks_by_status.put(txn, &keys::status(task), b"")?;
+        if let Some(index_key) = keys::assignee(task) {
+            self.tasks_by_assignee.put(txn, &index_key, b"")?;
+        }
+        Ok(())
+    }
+
+    fn replace_indexes(&self, txn: &mut heed::RwTxn<'_>, old: &Task, next: &Task) -> Result<()> {
+        if !self.tasks_by_status.delete(txn, &keys::status(old))? {
+            return Err(Error::Corrupt("missing old status index key"));
+        }
+        if let Some(old_assignee_key) = keys::assignee(old)
+            && !self.tasks_by_assignee.delete(txn, &old_assignee_key)?
+        {
+            return Err(Error::Corrupt("missing old assignee index key"));
+        }
+        self.add_indexes(txn, next)
+    }
+
+    fn append_event(
+        &self,
+        txn: &mut heed::RwTxn<'_>,
+        metadata: &mut Metadata,
+        mut event: Event,
+    ) -> Result<Event> {
+        event.seq = metadata.next_event_seq;
+        self.events
+            .put(txn, &keys::task(event.seq), &serde_json::to_vec(&event)?)?;
+        self.events_by_task
+            .put(txn, &keys::event_by_task(event.task_id, event.seq), b"")?;
+        metadata.next_event_seq = event.seq.checked_add(1).ok_or(Error::CounterOverflow)?;
+        Ok(event)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClaimOutcome {
+    Claimed(Updated),
+    AlreadyHeld(Task),
+    NoWork,
 }
 
 fn changes(old: &Task, next: &Task) -> Result<serde_json::Value> {
