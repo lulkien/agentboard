@@ -112,6 +112,10 @@ pub enum Error {
         count: u64,
     },
     MissingParent(u64),
+    ParentTerminal {
+        id: u64,
+        status: domain::Status,
+    },
     ParentCycle(u64),
     CounterOverflow,
     ResetBusy,
@@ -148,6 +152,7 @@ impl std::fmt::Display for Error {
             Self::NotEpic(id) => write!(f, "task T{id} is not an epic; an epic is a task with children"),
             Self::EpicOpenChildren { id, count } => write!(f, "epic T{id} has {count} open children; close or drop them first"),
             Self::MissingParent(id) => write!(f, "parent T{id} does not exist"),
+            Self::ParentTerminal { id, status } => write!(f, "parent T{id} is {}; reopen it before adding children", status.as_str()),
             Self::ParentCycle(id) => write!(f, "task T{id} parent link would create a cycle"),
             Self::CounterOverflow => f.write_str("board ID counter overflow"),
             Self::ResetBusy => f.write_str("board reset refused: another client is attached"),

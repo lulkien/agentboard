@@ -48,7 +48,9 @@ asked, and an explicit claim of one refuses by name.
 
 Answers `ok`, the record, and `cursor N` for the created event. Refuses an empty
 title, a title over 200 characters, an unknown status, a self-parent, and an
-unknown assignee without `new_actor`.
+unknown assignee without `new_actor`. A direct parent must exist and be nonterminal.
+Creating or newly reparenting under a `done` or `canceled` parent refuses; the
+manager explicitly reopens the parent first, then retries. Parents never auto-reopen.
 
 ### task_list
 
@@ -122,8 +124,12 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
   `epic T7 has 2 open children; close or drop them first`, substituting the id and
   open count. Force cannot bypass this rule. The refusal changes no task, roster,
   index or event. Leaves and epics with all children terminal may close. Other
-  edits, comments, adding or reparenting children, and reopening remain allowed;
-  statuses never cascade.
+  edits, comments and reopening remain allowed; statuses never cascade.
+- A new parent attachment must name an existing nonterminal direct parent, even
+  when the child is terminal. Force cannot bypass this rule. Refusal changes no
+  task, roster, index or event. Unchanged parent links and clearing a parent stay
+  allowed. The manager explicitly reopens a closed parent before retrying; no
+  automatic reopening occurs.
 
 ### task_claim
 
@@ -202,6 +208,8 @@ comment must be nonempty
 task T4 does not exist
 task T7 is not an epic; an epic is a task with children
 epic T7 has 2 open children; close or drop them first
+parent T5 is done; reopen it before adding children
+parent T5 is canceled; reopen it before adding children
 task cannot be its own parent
 feed cursor belongs to a different board; reset a cursor or reset the board
 invalid feed cursor "nope"

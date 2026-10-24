@@ -92,7 +92,9 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
 - `epic` shows a task's direct-child status counts and done/total progress. Epics
   are derived from parent links; any task with children is an epic, including a
   nested or closed task. Closing an epic as `done` or `canceled` requires every
-  direct child to be `done` or `canceled`, even with force.
+  direct child to be `done` or `canceled`, even with force. Creating or reparenting
+  a child under a terminal parent refuses. The manager explicitly reopens the
+  parent first, then retries; parents never auto-reopen.
 - `brief` shows all epic rows with progress first, then up to ten unparented active
   tasks, then global status counts. Each section uses `(priority, id)` order.
 - `feed` is the bus. It answers a page of events plus the cursor to pass as

@@ -145,7 +145,10 @@ Use `task_epic` (CLI `epic ID`) to read an umbrella's direct children as status
 counts and done/total progress. Any task with children is an epic; nested epics
 also appear in `board_brief`. Brief puts epic progress first, unparented active
 work next, and global counts last. Close or drop all direct children before
-closing an umbrella; force does not bypass that store rule.
+closing an umbrella; force does not bypass that store rule. Creating or reparenting
+a child under a done or canceled parent refuses, even with force. To attach more
+work, the manager must change that parent back to an open status and retry the
+attachment. This never happens automatically.
 
 ## Rules for every agent
 

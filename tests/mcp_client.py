@@ -55,7 +55,7 @@ class Server:
     def __init__(self, db, actor, args=()):
         env = dict(os.environ, AGENTBOARD_DB=db, AGENTBOARD_ACTOR=actor)
         self.proc = subprocess.Popen(
-            [BIN, "serve", *args],
+            [BIN, "--db", db, "serve", *args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -256,6 +256,35 @@ def main():
             check("all terminal epic closes", False, error)
             has("closed epic body", "T1 done", body)
             print("tools/list: task_epic present")
+        for status in ["done", "canceled"]:
+            with Server(os.path.join(scratch, "parent-" + status), "manager") as parents:
+                parents.start()
+                parents.call("task_add", {"title": "parent", "status": status})
+                parents.call("task_add", {"title": "move"})
+                _, before = parents.call("task_list", {"all": True})
+                _, parent_before = parents.call("task_get", {"id": 1})
+                _, child_before = parents.call("task_get", {"id": 2})
+                for tool, args in [
+                    ("task_add", {"title": "new", "parent": 1}),
+                    ("task_update", {"id": 2, "if_revision": 1, "parent": 1}),
+                ]:
+                    reply = parents.send("tools/call", {"name": tool, "arguments": args})
+                    check("terminal parent code", -32602, reply.get("error", {}).get("code"))
+                    check("terminal parent exact message", "parent T1 is " + status + "; reopen it before adding children", reply.get("error", {}).get("message"))
+                    _, after = parents.call("task_list", {"all": True})
+                    check("terminal refusal tasks and cursor unchanged", before, after)
+                    _, after = parents.call("task_get", {"id": 1})
+                    check("parent not auto-reopened", parent_before, after)
+                    _, after = parents.call("task_get", {"id": 2})
+                    check("moved child unchanged", child_before, after)
+                error, _ = parents.call("task_update", {"id": 1, "if_revision": 1, "status": "todo"})
+                check("manager reopens parent", False, error)
+                error, body = parents.call("task_add", {"title": "new", "parent": 1})
+                check("reopened add succeeds", False, error)
+                has("reopened add link", "parent T1", body)
+                error, body = parents.call("task_update", {"id": 2, "if_revision": 1, "parent": 1})
+                check("reopened reparent succeeds", False, error)
+                has("reopened reparent link", "parent T1", body)
     finally:
         server.close()
 

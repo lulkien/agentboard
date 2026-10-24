@@ -48,10 +48,8 @@ impl Board {
         let mut metadata = metadata;
         let task_id = metadata.next_task_id;
         let task = Task::new(task_id, actor, input, now_ms)?;
-        if let Some(parent_id) = task.parent_id
-            && self.tasks.get(&txn, &keys::task(parent_id))?.is_none()
-        {
-            return Err(Error::MissingParent(parent_id));
+        if let Some(parent_id) = task.parent_id {
+            self.check_attachment_parent(&txn, parent_id)?;
         }
         self.ensure_target(&mut txn, task.assignee.as_deref(), actor, new_actor, now_ms)?;
         self.touch_actor(&mut txn, actor, task_id, now_ms)?;
@@ -134,6 +132,11 @@ impl Board {
             }
         }
         self.check_parent_chain(&txn, &next)?;
+        if next.parent_id != old.parent_id
+            && let Some(parent_id) = next.parent_id
+        {
+            self.check_attachment_parent(&txn, parent_id)?;
+        }
         self.ensure_target(
             &mut txn,
             next.assignee.as_deref(),
@@ -281,6 +284,19 @@ impl Board {
             }
         }
         Ok(None)
+    }
+
+    fn check_attachment_parent(&self, txn: &heed::RoTxn<'_>, id: u64) -> Result<()> {
+        let parent = self
+            .read_task_in_txn(txn, id)?
+            .ok_or(Error::MissingParent(id))?;
+        if matches!(parent.status, Status::Done | Status::Canceled) {
+            return Err(Error::ParentTerminal {
+                id,
+                status: parent.status,
+            });
+        }
+        Ok(())
     }
 
     fn check_parent_chain(&self, txn: &heed::RoTxn<'_>, task: &Task) -> Result<()> {

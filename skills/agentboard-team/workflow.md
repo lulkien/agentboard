@@ -36,7 +36,9 @@ row. Reopening means reusing the row, never filing a second one.
 6. Manager reads `board_brief` for groups and counts, `task_epic` for an umbrella's
    direct-child progress, and `task_list` for what is where. Close or drop the
    direct children before closing their umbrella. The manager does not chase
-   individual panes while the board is moving.
+   individual panes while the board is moving. Before creating or reparenting a
+   child under a closed umbrella, the manager explicitly reopens the parent, then
+   retries. The board refuses the attachment and never auto-reopens the parent.
 
 ## Waiting without spinning
 

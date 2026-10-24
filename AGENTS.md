@@ -19,11 +19,11 @@ Everything is offline and uses scratch boards; there is no server to start and n
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 60 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 62 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no output |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `103/103 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `62/62 passed (mcp, lmdb)` |
+| `bash tests/cli.sh` | `135/135 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `92/92 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |

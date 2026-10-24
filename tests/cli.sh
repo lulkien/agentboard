@@ -241,5 +241,33 @@ out=$("$B" update 1 --if-revision 1 --status done); code=$?
 check "all terminal epic closes" 0 "$code"
 has "closed epic record" "T1 done" "$out"
 
+# --- terminal parents refuse new attachments, manager reopens and retries ---
+for status in done canceled; do
+    fresh "parent-$status"
+    "$B" --db "$AGENTBOARD_DB" add parent --status "$status" >/dev/null
+    "$B" --db "$AGENTBOARD_DB" add move >/dev/null
+    before=$("$B" --db "$AGENTBOARD_DB" ls --all)
+    for verb in add update; do
+        if [ "$verb" = add ]; then
+            out=$("$B" --db "$AGENTBOARD_DB" add new --parent 1 2>"$S/refusal"); code=$?
+        else
+            out=$("$B" --db "$AGENTBOARD_DB" update 2 --if-revision 1 --parent 1 2>"$S/refusal"); code=$?
+        fi
+        check "$status $verb exit" 1 "$code"
+        check "$status $verb stdout" "" "$out"
+        check "$status $verb exact refusal" "agentboard: parent T1 is $status; reopen it before adding children" "$(cat "$S/refusal")"
+        check "$status $verb unchanged" "$before" "$("$B" --db "$AGENTBOARD_DB" ls --all)"
+        has "$status parent revision unchanged" "revision 1" "$("$B" --db "$AGENTBOARD_DB" get 1)"
+        has "$status child revision unchanged" "revision 1" "$("$B" --db "$AGENTBOARD_DB" get 2)"
+    done
+    "$B" --db "$AGENTBOARD_DB" update 1 --if-revision 1 --status todo >/dev/null
+    out=$("$B" --db "$AGENTBOARD_DB" add new --parent 1); code=$?
+    check "$status reopened add exit" 0 "$code"
+    has "$status reopened add parent" "parent T1" "$out"
+    out=$("$B" --db "$AGENTBOARD_DB" update 2 --if-revision 1 --parent 1); code=$?
+    check "$status reopened reparent exit" 0 "$code"
+    has "$status reopened reparent parent" "parent T1" "$out"
+done
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]

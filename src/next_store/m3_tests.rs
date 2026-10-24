@@ -458,7 +458,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
     let scratch = Scratch::new();
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
     let root = board
-        .add("manager", draft("root", Status::Done, 10, None), false, 0)
+        .add("manager", draft("root", Status::Todo, 10, None), false, 0)
         .unwrap()
         .task;
     let mut children = Vec::new();
@@ -514,6 +514,258 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
         .unwrap();
     assert!(matches!(board.epic(children[0].id), Err(Error::NotEpic(_))));
     assert_eq!(board.brief(10).unwrap().epics.len(), 1);
+    // Build a legal closed epic after its children have all become terminal.
+    // Terminal parents remain readable in both epic and brief.
+    for child in &children[..4] {
+        board
+            .update(UpdateInput {
+                id: child.id,
+                actor: "manager",
+                expected_revision: 1,
+                patch: &status_patch(Status::Canceled),
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 5,
+            })
+            .unwrap();
+    }
+    board
+        .update(UpdateInput {
+            id: root.id,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &status_patch(Status::Done),
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 6,
+        })
+        .unwrap();
+    let before = board.metadata().unwrap();
+    let roster = board.agents().unwrap();
+    let closed = board.epic(root.id).unwrap();
+    assert_eq!(closed.task.status, Status::Done);
+    assert_eq!(closed.total, 207);
+    assert_eq!(board.brief(0).unwrap().epics[0].task, closed.task);
+    assert_eq!(board.metadata().unwrap(), before);
+    assert_eq!(board.agents().unwrap(), roster);
+}
+
+#[test]
+fn terminal_parent_attachments_are_atomic() {
+    for status in [Status::Done, Status::Canceled] {
+        let scratch = Scratch::new();
+        let board = Board::open_with_options(scratch.path(), options()).unwrap();
+        let parent = board
+            .add(
+                "manager",
+                draft("parent", status, 0, Some("manager")),
+                false,
+                0,
+            )
+            .unwrap()
+            .task;
+        let child = board
+            .add("manager", draft("move", Status::Done, 0, None), false, 0)
+            .unwrap()
+            .task;
+        // Compare all seven logical databases, including old events and both
+        // indexes, after each rejected write rather than only checking counters.
+        let snapshot = || {
+            let txn = board.env.read_txn().unwrap();
+            [
+                board.meta,
+                board.tasks,
+                board.events,
+                board.events_by_task,
+                board.agents,
+                board.tasks_by_status,
+                board.tasks_by_assignee,
+            ]
+            .into_iter()
+            .map(|db| {
+                db.iter(&txn)
+                    .unwrap()
+                    .map(|entry| {
+                        let (key, value) = entry.unwrap();
+                        (key.to_vec(), value.to_vec())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+        };
+        for force in [false, true] {
+            let stored_before = snapshot();
+            let before = board.metadata().unwrap();
+            let roster = board.agents().unwrap();
+            let tasks = board.list(&list_all()).unwrap().tasks;
+            let mut new = draft("new", Status::Canceled, 0, Some("new-target"));
+            new.parent_id = Some(parent.id);
+            let error = board.add("outsider", new, true, 1).unwrap_err();
+            assert_eq!(snapshot(), stored_before);
+            assert!(matches!(error, Error::ParentTerminal { id: 1, status: s } if s == status));
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "parent T1 is {}; reopen it before adding children",
+                    status.as_str()
+                )
+            );
+            let patch = TaskPatch {
+                parent_id: Some(Some(parent.id)),
+                assignee: Some(Some("new-target".into())),
+                ..TaskPatch::default()
+            };
+            let error = board
+                .update(UpdateInput {
+                    id: child.id,
+                    actor: "outsider",
+                    expected_revision: 1,
+                    patch: &patch,
+                    force,
+                    force_reason: force.then_some("override"),
+                    new_actor: true,
+                    comment: Some("must not land"),
+                    now_ms: 1,
+                })
+                .unwrap_err();
+            assert_eq!(snapshot(), stored_before);
+            assert!(matches!(error, Error::ParentTerminal { id: 1, status: s } if s == status));
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "parent T1 is {}; reopen it before adding children",
+                    status.as_str()
+                )
+            );
+            assert_eq!(board.metadata().unwrap(), before);
+            assert_eq!(board.agents().unwrap(), roster);
+            assert_eq!(board.list(&list_all()).unwrap().tasks, tasks);
+            assert_eq!(board.get(parent.id).unwrap().unwrap(), parent);
+            assert_eq!(board.get(child.id).unwrap().unwrap(), child);
+            assert!(board.event(before.next_event_seq).unwrap().is_none());
+            let mut filter = list_all();
+            filter.parent = Some(parent.id);
+            assert_eq!(board.list(&filter).unwrap().total, 0);
+            filter.parent = None;
+            filter.assignee = Some("new-target");
+            assert_eq!(board.list(&filter).unwrap().total, 0);
+        }
+        board
+            .update(UpdateInput {
+                id: parent.id,
+                actor: "manager",
+                expected_revision: 1,
+                patch: &status_patch(Status::Todo),
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 2,
+            })
+            .unwrap();
+        let mut new = draft("retry", Status::Done, 0, None);
+        new.parent_id = Some(parent.id);
+        board.add("manager", new, false, 3).unwrap();
+        board
+            .update(UpdateInput {
+                id: child.id,
+                actor: "manager",
+                expected_revision: 1,
+                patch: &TaskPatch {
+                    parent_id: Some(Some(parent.id)),
+                    ..TaskPatch::default()
+                },
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 3,
+            })
+            .unwrap();
+        // All children terminal: closing remains legal. Existing links can be
+        // supplied again, edited, commented on, or cleared under a closed parent.
+        board
+            .update(UpdateInput {
+                id: parent.id,
+                actor: "manager",
+                expected_revision: 2,
+                patch: &status_patch(status),
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 4,
+            })
+            .unwrap();
+        for (revision, parent_id) in [(2, Some(parent.id)), (3, None)] {
+            board
+                .update(UpdateInput {
+                    id: child.id,
+                    actor: "manager",
+                    expected_revision: revision,
+                    patch: &TaskPatch {
+                        title: Some("edited".into()),
+                        parent_id: Some(parent_id),
+                        ..TaskPatch::default()
+                    },
+                    force: false,
+                    force_reason: None,
+                    new_actor: false,
+                    comment: Some("allowed"),
+                    now_ms: 5,
+                })
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn nonterminal_parents_accept_both_attachments() {
+    for status in [
+        Status::Todo,
+        Status::InProgress,
+        Status::Blocked,
+        Status::Review,
+    ] {
+        let scratch = Scratch::new();
+        let board = Board::open_with_options(scratch.path(), options()).unwrap();
+        let parent = board
+            .add(
+                "manager",
+                draft("parent", status, 0, Some("manager")),
+                false,
+                0,
+            )
+            .unwrap()
+            .task;
+        let mut new = draft("child", Status::Todo, 0, None);
+        new.parent_id = Some(parent.id);
+        board.add("manager", new, false, 1).unwrap();
+        let moved = board
+            .add("manager", draft("move", Status::Todo, 0, None), false, 1)
+            .unwrap()
+            .task;
+        board
+            .update(UpdateInput {
+                id: moved.id,
+                actor: "manager",
+                expected_revision: 1,
+                patch: &TaskPatch {
+                    parent_id: Some(Some(parent.id)),
+                    ..TaskPatch::default()
+                },
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 2,
+            })
+            .unwrap();
+    }
 }
 
 #[test]
@@ -616,9 +868,12 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
             })
             .unwrap();
     }
-    let mut input = draft("reopened child", Status::Todo, 0, None);
+    let mut input = draft("late child", Status::Todo, 0, None);
     input.parent_id = Some(root.id);
-    board.add("manager", input, false, 6).unwrap();
+    assert!(matches!(
+        board.add("manager", input, false, 6),
+        Err(Error::ParentTerminal { .. })
+    ));
     board
         .update(UpdateInput {
             id: root.id,
