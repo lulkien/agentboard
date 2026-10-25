@@ -15,8 +15,8 @@ use serde::Deserialize;
 use crate::domain::{EventKind, NewTask, Status, TaskPatch};
 use crate::render;
 use crate::store::{
-    Board as BoardHandle, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput, UpdateInput,
-    WAIT_MAX_MS, WaitSpec, parse_status_csv,
+    AssigneeMatch, Board as BoardHandle, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput,
+    UpdateInput, WAIT_MAX_MS, WaitSpec, parse_status_csv,
 };
 
 const NAME: &str = "agentboard";
@@ -204,6 +204,17 @@ pub struct WaitArgs {
     /// Seconds; clamped to 1..=300
     #[serde(default)]
     pub timeout_s: Option<u64>,
+    /// true: also match when any watched row is handed to a new owner; a name:
+    /// only a handoff to that actor
+    #[serde(default)]
+    pub assignee: Option<WaitAssignee>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum WaitAssignee {
+    Any(bool),
+    To(String),
 }
 
 #[tool_router]
@@ -564,7 +575,13 @@ impl Board {
         };
         let ids = args.ids;
         let epic = args.epic;
+        let assignee = args.assignee;
         let outcome = blocking(&self.board, move |board| {
+            let assignee = match &assignee {
+                Some(WaitAssignee::Any(true)) => Some(AssigneeMatch::Any),
+                Some(WaitAssignee::To(name)) => Some(AssigneeMatch::To(name)),
+                Some(WaitAssignee::Any(false)) | None => None,
+            };
             board
                 .wait_tasks(&WaitSpec {
                     ids: &ids,
@@ -572,7 +589,7 @@ impl Board {
                     statuses: &statuses,
                     after: None,
                     timeout_ms: timeout_s.saturating_mul(1000),
-                    assignee: None,
+                    assignee,
                 })
                 .map_err(|e| e.to_string())
         })

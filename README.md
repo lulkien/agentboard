@@ -70,7 +70,7 @@ agentboard claim [ID]
 agentboard comment ID (--body TEXT | --body-file PATH|-)
 agentboard feed [--after CURSOR] [--kind K] [--recipient NAME] [--task ID]
                 [--limit N] [--full] [--wait SECONDS]
-agentboard wait ID... [--status CSV] [--epic] [--timeout SECONDS]
+agentboard wait ID... [--status CSV] [--assignee [NAME]] [--epic] [--timeout SECONDS]
 agentboard brief
 agentboard agents
 agentboard path
@@ -114,7 +114,11 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   `done,canceled`; every watched row must be in one of them, so it is an all-rows
   predicate and `wait 27 --status review` is the everyday case. `--epic` watches
   the direct children of each id and re-reads them on every poll, so a child filed
-  mid-wait joins the set. `--timeout` accepts 1 to 300 seconds and defaults to 300.
+  mid-wait joins the set. `--assignee` also returns when any one watched row is
+  handed to a new owner after the wait starts, even with its status unchanged, which
+  is how an analyzer-to-coder reassignment reaches the manager; `--assignee NAME`
+  accepts only a handoff to that actor, and a release is never a handoff.
+  `--timeout` accepts 1 to 300 seconds and defaults to 300.
   Values outside that range are rejected before waiting to bound manager waits. A match
   exits `0` and prints `matched: …`, a timeout exits `3` and still prints each row
   under `timeout: …`. A row already wanted when the wait began shows its newest
@@ -174,7 +178,7 @@ one.
 | `task_update` | `ok`, the record, its cursor; refuses stale, held, missing reason |
 | `task_claim` | the work order, or `no ready tasks` |
 | `task_comment` | `ok`, cursor |
-| `task_wait` | `matched:` or `timeout:`, one row per watched task, cursor |
+| `task_wait` | `matched:` or `timeout:`, one row per watched task, cursor; `assignee` also wakes on a handoff |
 | `board_feed` | events, cursor, `more`/`older`; `wait` seconds; `full=true` |
 | `board_brief` | epic progress, unparented active tasks, then counts per status |
 | `board_agents` | roster lines, newest activity first |

@@ -9,8 +9,8 @@ use rmcp::ServiceExt;
 
 use agentboard::domain::{self, EventKind, NewTask, Status, TaskPatch};
 use agentboard::store::{
-    Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput, UpdateInput, WaitSpec,
-    parse_status_csv,
+    AssigneeMatch, Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput,
+    UpdateInput, WaitSpec, parse_status_csv,
 };
 use agentboard::{cli, render};
 
@@ -348,6 +348,7 @@ fn run(
             ids,
             epic,
             status,
+            assignee,
             timeout,
         }) => {
             let statuses = wait_statuses(status.as_deref())?;
@@ -359,7 +360,10 @@ fn run(
                     statuses: &statuses,
                     after: None,
                     timeout_ms: timeout.saturating_mul(1000),
-                    assignee: None,
+                    assignee: assignee.as_ref().map(|name| {
+                        name.as_deref()
+                            .map_or(AssigneeMatch::Any, AssigneeMatch::To)
+                    }),
                 })
                 .map_err(|e| e.to_string())?;
             let code = if outcome.matched {

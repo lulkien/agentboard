@@ -181,7 +181,20 @@ pub fn wait_text(outcome: &WaitOutcome) -> String {
         .collect::<Vec<_>>()
         .join(",");
     let mut lines = vec![if outcome.matched {
-        format!("matched: {in_wanted} of {watched} watched in {wanted}")
+        let handoffs: Vec<String> = outcome
+            .rows
+            .iter()
+            .filter_map(|row| {
+                let to = row.handed_to.as_deref()?;
+                Some(format!("T{} to {to}", row.task.id))
+            })
+            .collect();
+        let handoff = if handoffs.is_empty() {
+            String::new()
+        } else {
+            format!("; handoff {}", handoffs.join(", "))
+        };
+        format!("matched: {in_wanted} of {watched} watched in {wanted}{handoff}")
     } else {
         format!(
             "timeout: {in_wanted} of {watched} watched in {wanted} after {}ms",

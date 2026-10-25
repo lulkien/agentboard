@@ -130,6 +130,11 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   works too: `agentboard wait 12 --epic` watches its direct children and returns
   once every one of them is `done` or `canceled`. The verdict's first line is
   `matched:` (exit 0) or `timeout:` (exit 3), and it writes nothing.
+- An analyzer-to-coder handoff changes the assignee and leaves the status alone, so
+  a status wait never sees it. Add `--assignee` to the same wait:
+  `agentboard wait 27 --status review,done,blocked --assignee --timeout 300`, or MCP
+  `task_wait(ids=[27], status="review,done,blocked", assignee=true)`. It returns on a
+  handoff after the wait starts and says `; handoff T27 to coder` on the first line.
 - A wait wakes the manager, not the seat. It reports that the row moved; no pane
   received a prompt. The seat that must act still needs a herdr prompt.
 

@@ -190,7 +190,7 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
 ### task_wait
 
 ```json
-{"ids": [7], "status": "done,canceled", "epic": false, "timeout_s": 300}
+{"ids": [7], "status": "done,canceled", "epic": false, "timeout_s": 300, "assignee": true}
 ```
 
 Blocks until every watched row is in one of `status` (a CSV, default `done,canceled`)
@@ -201,6 +201,9 @@ the two outcomes apart:
 matched: <n> of <m> watched in <statuses>
 timeout: <n> of <m> watched in <statuses> after <ms>ms
 ```
+
+A match caused by `assignee` appends `; handoff T<id> to <name>` to its first line,
+one entry per handed-off row in id order, comma-separated.
 
 Then one compact task row per watched row, sorted by id, in either outcome. In a
 match, a row that was already wanted shows its newest earlier event as
@@ -218,6 +221,13 @@ returned, so the caller can follow on with `board_feed`.
 - `status` parses with the same CSV rule as the CLI: trimmed, deduplicated, ordered
   as the board orders statuses. An empty list refuses `wait needs at least one
   wanted status`, never a vacuous match.
+- `assignee` is `true` or an actor name; absent or `false` keeps the status-only
+  predicate. It adds a second way to match: any one watched row (an epic's children
+  are re-resolved on every poll) gets an `updated` event after the wait started whose
+  recipient is the new assignee. `true` takes any such handoff; a name takes only a
+  handoff to that actor, and is shape-checked, not looked up on the roster. A release
+  clears the assignee, so it is no handoff. A handoff that landed before the wait
+  started is not seen, so read the row before arming the wait.
 - `timeout_s` defaults to `300` and clamps to `1..=300`. The CLI accepts only 1 to 300 seconds and defaults `--timeout` to 300; zero and values above 300 are refused.
 - A timeout is **not** a JSON-RPC error: the result is ordinary text whose first
   line is `timeout:`. Refusals are `-32602` like every other tool.

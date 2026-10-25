@@ -179,6 +179,11 @@ pub enum Cmd {
         /// CSV of wanted statuses (default done,canceled)
         #[arg(long, value_name = "CSV")]
         status: Option<String>,
+        /// Also match when a watched row is handed to a new owner (optionally NAME)
+        // No allow_hyphen_values: with an optional value it would swallow the next
+        // flag, so `--assignee --epic` would name "--epic". Use `--assignee=-x`.
+        #[arg(long, value_name = "NAME", num_args = 0..=1)]
+        assignee: Option<Option<String>>,
         /// Seconds; accepted range 1..=300 to bound manager waits; values outside it are rejected
         #[arg(long, default_value_t = WAIT_MAX_MS / 1000, value_parser = feed_wait_seconds)]
         timeout: u64,
@@ -237,5 +242,26 @@ mod tests {
         assert!((1..=300).contains(&timeout));
         let cli = Cli::try_parse_from(["agentboard", "feed"]).unwrap();
         assert!(matches!(cli.cmd, Some(Cmd::Feed { wait: None, .. })));
+    }
+
+    #[test]
+    fn wait_assignee_is_an_optional_value() {
+        let parse = |extra: &[&str]| {
+            let mut args = vec!["agentboard", "wait", "1"];
+            args.extend_from_slice(extra);
+            let Some(Cmd::Wait { assignee, epic, .. }) = Cli::try_parse_from(args).unwrap().cmd
+            else {
+                panic!("expected wait")
+            };
+            (assignee, epic)
+        };
+        assert_eq!(parse(&[]), (None, false));
+        assert_eq!(parse(&["--assignee"]), (Some(None), false));
+        assert_eq!(
+            parse(&["--assignee", "coder"]),
+            (Some(Some("coder".into())), false)
+        );
+        assert_eq!(parse(&["--assignee", "--epic"]), (Some(None), true));
+        assert_eq!(parse(&["--assignee=-x"]), (Some(Some("-x".into())), false));
     }
 }

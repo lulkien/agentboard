@@ -341,6 +341,56 @@ has "epic wait shows the first child's move" "updated  T2" "$out"
 has "epic wait needed the last child" "updated  T3" "$out"
 lacks "epic wait hides the umbrella row itself" "T1 todo" "$out"
 
+# --- wait --assignee: a handoff wakes the waiter with status unchanged ------
+handoff_row() {
+    fresh "$1"
+    "$B" add "handoff row" --status in_progress --assignee analyzer --new-actor >/dev/null
+}
+handoff_later() {
+    (
+        sleep 0.5
+        AGENTBOARD_ACTOR=analyzer "$B" update 1 --if-revision 1 --assignee coder --new-actor >/dev/null
+    ) &
+    writer=$!
+}
+handoff_row wait-assignee
+handoff_later
+out=$("$B" wait 1 --status review,done,blocked --assignee --timeout 5); code=$?
+wait "$writer"
+check "wait assignee on a handoff exit" 0 "$code"
+check "wait assignee first line names the handoff" "matched: 0 of 1 watched in blocked,review,done; handoff T1 to coder" "$(printf '%s\n' "$out" | head -1)"
+has "wait assignee leaves status alone" "T1 in_progress" "$out"
+has "wait assignee prints the update event" "updated  T1" "$out"
+
+handoff_row wait-assignee-off
+handoff_later
+out=$("$B" wait 1 --status review,done,blocked --timeout 1); code=$?
+wait "$writer"
+check "wait without assignee ignores a handoff exit" 3 "$code"
+has "wait without assignee times out on status" "timeout: 0 of 1 watched in blocked,review,done" "$out"
+
+handoff_row wait-assignee-other
+handoff_later
+out=$("$B" wait 1 --status review,done,blocked --assignee reviewer --timeout 1); code=$?
+wait "$writer"
+check "wait assignee for another seat exit" 3 "$code"
+has "wait assignee for another seat times out" "timeout: 0 of 1 watched" "$out"
+
+handoff_row wait-assignee-named
+handoff_later
+out=$("$B" wait 1 --status review,done,blocked --assignee coder --timeout 5); code=$?
+wait "$writer"
+check "wait assignee naming the new owner exit" 0 "$code"
+has "wait assignee naming the new owner text" "; handoff T1 to coder" "$out"
+
+handoff_row wait-assignee-flags
+out=$("$B" wait 1 --assignee --epic 2>&1); code=$?
+check "wait assignee leaves --epic a flag exit" 1 "$code"
+check "wait assignee leaves --epic a flag text" "agentboard: task T1 is not an epic; an epic is a task with children" "$out"
+out=$("$B" wait 1 --assignee= 2>&1); code=$?
+check "wait assignee empty name exit" 1 "$code"
+has "wait assignee empty name text" "actor" "$out"
+
 # --- release: one verb returns a dead holder's row to todo -----------------
 fresh release
 "$B" add "held by a dead seat" >/dev/null

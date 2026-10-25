@@ -48,6 +48,7 @@ cares about instead of polling:
 ```bash
 agentboard wait 27 --status review --timeout 300    # returns when T27 is review
 agentboard wait 12 --epic                           # returns when every child is terminal
+agentboard wait 27 --status review,done,blocked --assignee --timeout 300   # also returns on a handoff
 ```
 
 MCP `task_wait(ids=[27], status="review", timeout_s=300)` is the same call. One wait
