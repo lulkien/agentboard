@@ -38,9 +38,10 @@ finally:
     proc.stderr.close()
 
 changed = []
-words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
+words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+         'nine', 'ten', 'eleven', 'twelve']
 for name in ['src/server.rs', 'README.md', 'PROTOCOL.md', 'AGENTS.md',
-             'skills/agentboard-team/SKILL.md']:
+             'skills/agentboard-team/SKILL.md', 'seats/README.md']:
     path = root / name
     before = path.read_text()
     after = re.sub(r'MCP surface: \d+ tools', f'MCP surface: {count} tools', before)
@@ -48,8 +49,13 @@ for name in ['src/server.rs', 'README.md', 'PROTOCOL.md', 'AGENTS.md',
     after = re.sub(r'MCP surface has \d+ tools', f'MCP surface has {count} tools', after)
     after = re.sub(r'MCP router: \d+ tools', f'MCP router: {count} tools', after)
     word = words[count] if count < len(words) else str(count)
-    after = re.sub(r'\b(?:Nine|Ten)(?= (?:MCP )?tools)', word.capitalize(), after)
-    after = re.sub(r'\b(?:nine|ten)(?= (?:MCP )?tools)', word, after)
+    # Spelled-out counts only count when a count follows them: "the eleven tools
+    # of this build" is a published count, "nine" on its own is prose. One pass,
+    # so a rewritten word is never rewritten again.
+    spelled = '|'.join(w.capitalize() for w in words) + '|' + '|'.join(words)
+    after = re.sub(rf'\b({spelled})(?= (?:MCP )?tools)',
+                   lambda match: word.capitalize() if match.group(1)[0].isupper() else word,
+                   after)
     if after != before:
         changed.append(name)
         if not args.check:

@@ -108,6 +108,44 @@ for path in paths:
                     break
                 prefix = (*prefix, word)
 
+# A stale number and a stale list are different failures: seats/README.md once
+# said "nine tools" and named nine of eleven, so a count-only check passed while
+# the list was wrong. Both are judged against the tools/list reply fetched above.
+NUMBER_WORDS = {word: value for value, word in enumerate(
+    'zero one two three four five six seven eight nine ten eleven twelve'.split())}
+TOOL_LIST = re.compile(r'^[ \t]*-[ \t]+The board tool set is the (\w+) tools of this build:',
+                       re.M)
+for path in paths:
+    text = path.read_text()
+    relative = path.relative_to(ROOT)
+    for match in TOOL_LIST.finditer(text):
+        # The list wraps across lines, so read to the end of the bullet.
+        block = ''
+        for following in text[match.end():].splitlines(keepends=True):
+            stripped = following.strip()
+            if not stripped or stripped.startswith(('- ', '* ', '#')):
+                break
+            block += following
+        line_number = text.count('\n', 0, match.start()) + 1
+        stated = NUMBER_WORDS.get(match.group(1).lower())
+        if stated is None and match.group(1).isdigit():
+            stated = int(match.group(1))
+        if stated is None:
+            errors.append(f'{relative}:{line_number}: unrecognised tool count '
+                          f'{match.group(1)!r}')
+        elif stated != len(tools):
+            errors.append(f'{relative}:{line_number}: says {match.group(1)} tools, '
+                          f'the router exposes {len(tools)}')
+        named = []
+        for name in re.finditer(r'`([^`]+)`', block):
+            located = text.count('\n', 0, match.end() + name.start()) + 1
+            named.append(name.group(1))
+            if name.group(1) not in tools:
+                errors.append(f'{relative}:{located}: the tool list names {name.group(1)}, '
+                              'which the router does not expose')
+        for missing in sorted(tools - set(named)):
+            errors.append(f'{relative}:{line_number}: the tool list is missing {missing}')
+
 if errors:
     raise SystemExit('\n'.join(errors))
 print(f'doc-names: {len(paths)} pages, {cli_count} CLI names, {tool_count} MCP names passed')
