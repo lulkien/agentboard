@@ -106,7 +106,7 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
 - `feed` is the bus. It answers a page of events plus the cursor to pass as
   `--after`. With no cursor it returns the newest page of *matching* events and
   says `older true` when more matching events sit before it. `--after 0` replays
-  from the first event. `--wait N` blocks up to N seconds (300 maximum) for a
+  from the first event. `--wait N` blocks up to N seconds (accepted range 1 to 300; omit for a nonblocking read) for a
   matching event and returns the cursor it stopped at. `--full` prints whole
   comment and update bodies.
 - `wait` blocks until the rows you name reach a status, and answers a verdict
@@ -114,8 +114,8 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   `done,canceled`; every watched row must be in one of them, so it is an all-rows
   predicate and `wait 27 --status review` is the everyday case. `--epic` watches
   the direct children of each id and re-reads them on every poll, so a child filed
-  mid-wait joins the set. `--timeout` is seconds with a default of `0`, which
-  means block until a match: unlike `feed --wait` there is no 300 s cap. A match
+  mid-wait joins the set. `--timeout` accepts 1 to 300 seconds and defaults to 300.
+  Values outside that range are rejected before waiting to bound manager waits. A match
   exits `0` and prints `matched: …`, a timeout exits `3` and still prints each row
   under `timeout: …`. A row already wanted when the wait began shows its newest
   earlier event as `last:`; a row that moved shows the events that moved it, at

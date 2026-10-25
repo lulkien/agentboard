@@ -218,8 +218,7 @@ returned, so the caller can follow on with `board_feed`.
 - `status` parses with the same CSV rule as the CLI: trimmed, deduplicated, ordered
   as the board orders statuses. An empty list refuses `wait needs at least one
   wanted status`, never a vacuous match.
-- `timeout_s` defaults to `300` and clamps to `1..=300`. Unlike the CLI's
-  `--timeout 0`, there is no wait-forever here: the call itself is bounded.
+- `timeout_s` defaults to `300` and clamps to `1..=300`. The CLI accepts only 1 to 300 seconds and defaults `--timeout` to 300; zero and values above 300 are refused.
 - A timeout is **not** a JSON-RPC error: the result is ordinary text whose first
   line is `timeout:`. Refusals are `-32602` like every other tool.
 - The wait re-queries the rows it watches, so it returns when they reach the wanted

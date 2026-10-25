@@ -335,12 +335,12 @@ fn run(
                 after: after.as_deref(),
                 limit,
             };
-            let page = if wait == 0 {
-                board.feed(&filter).map_err(|e| e.to_string())?
-            } else {
+            let page = if let Some(wait) = wait {
                 board
                     .wait(&filter, wait.saturating_mul(1000))
                     .map_err(|e| e.to_string())?
+            } else {
+                board.feed(&filter).map_err(|e| e.to_string())?
             };
             Ok((render::feed_page(&page, full), ExitCode::SUCCESS))
         }

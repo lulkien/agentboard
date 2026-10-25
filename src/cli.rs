@@ -4,6 +4,19 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::store::WAIT_MAX_MS;
+
+fn feed_wait_seconds(value: &str) -> Result<u64, String> {
+    let seconds = value.parse::<u64>().map_err(|error| error.to_string())?;
+    let maximum = WAIT_MAX_MS / 1000;
+    if seconds == 0 || seconds > maximum {
+        return Err(format!(
+            "requested wait {seconds}s is outside the allowed range 1..={maximum} seconds; retry with 1 to {maximum} seconds"
+        ));
+    }
+    Ok(seconds)
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "agentboard",
@@ -136,7 +149,7 @@ pub enum Cmd {
         #[arg(long, value_name = "PATH")]
         body_file: Option<String>,
     },
-    /// Show the event feed
+    /// Show the event feed (blocking waits capped at 300 seconds)
     Feed {
         #[arg(long, value_name = "CURSOR")]
         after: Option<String>,
@@ -151,11 +164,11 @@ pub enum Cmd {
         /// Print whole comment and update text, untruncated
         #[arg(long)]
         full: bool,
-        /// Block up to this many seconds for a matching event
-        #[arg(long, default_value_t = 0)]
-        wait: u64,
+        /// Seconds for a matching event; accepted range 1..=300; omit for a nonblocking read
+        #[arg(long, value_parser = feed_wait_seconds)]
+        wait: Option<u64>,
     },
-    /// Block until watched rows reach a status
+    /// Block until watched rows reach a status (300 seconds maximum)
     Wait {
         /// Task ids to watch
         #[arg(value_name = "ID", required = true, num_args = 1..)]
@@ -166,8 +179,8 @@ pub enum Cmd {
         /// CSV of wanted statuses (default done,canceled)
         #[arg(long, value_name = "CSV")]
         status: Option<String>,
-        /// Seconds; 0 waits until a match
-        #[arg(long, default_value_t = 0)]
+        /// Seconds; accepted range 1..=300 to bound manager waits; values outside it are rejected
+        #[arg(long, default_value_t = WAIT_MAX_MS / 1000, value_parser = feed_wait_seconds)]
         timeout: u64,
     },
     /// Counts by status plus active work
@@ -181,4 +194,48 @@ pub enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocking_wait_ceiling() {
+        for (input, expected) in [("1", 1), ("300", 300)] {
+            let cli = Cli::try_parse_from(["agentboard", "wait", "1", "--timeout", input]).unwrap();
+            let Some(Cmd::Wait { timeout, .. }) = cli.cmd else {
+                panic!("expected wait")
+            };
+            assert_eq!(timeout, expected, "wait --timeout {input}");
+        }
+        for (input, expected) in [("1", 1), ("300", 300)] {
+            let cli = Cli::try_parse_from(["agentboard", "feed", "--wait", input]).unwrap();
+            let Some(Cmd::Feed { wait, .. }) = cli.cmd else {
+                panic!("expected feed")
+            };
+            assert_eq!(wait, Some(expected), "feed --wait {input}");
+        }
+        for input in ["0", "301", "1800", "18446744073709551615"] {
+            for args in [
+                vec!["agentboard", "wait", "1", "--timeout", input],
+                vec!["agentboard", "feed", "--wait", input],
+            ] {
+                let error = Cli::try_parse_from(args).unwrap_err();
+                assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+                assert_ne!(error.exit_code(), 0);
+                let diagnostic = error.to_string();
+                assert!(diagnostic.contains(input), "{diagnostic}");
+                assert!(diagnostic.contains("300"), "{diagnostic}");
+                assert!(diagnostic.contains("1..=300"), "{diagnostic}");
+            }
+        }
+        let cli = Cli::try_parse_from(["agentboard", "wait", "1"]).unwrap();
+        let Some(Cmd::Wait { timeout, .. }) = cli.cmd else {
+            panic!("expected wait")
+        };
+        assert!((1..=300).contains(&timeout));
+        let cli = Cli::try_parse_from(["agentboard", "feed"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Cmd::Feed { wait: None, .. })));
+    }
 }
