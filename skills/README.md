@@ -20,8 +20,8 @@ this repo, and every agent alias points at that canonical name:
     ~/.config/opencode/skills/<name> -> ~/.agents/skills/<name>
     ~/.hermes/skills/<name> -> ~/.agents/skills/<name>
 
-Five names are installed — `agentboard-team` plus the four seats — so each run
-creates `5 x 5 = 25` directory links and eight command links, each printing
+Six names are installed — `agentboard-team`, the four seats and `grok-manager` — so
+each run creates `6 x 5 = 30` directory links and eight command links, each printing
 `linked:`. Only the canonical links contain the repo location; all five paths for a
 name resolve to one physical repo directory, so an edit is visible without
 reinstalling. Unrelated skills are left alone. Codex honours `CODEX_HOME`.
@@ -32,8 +32,13 @@ reinstalling. Unrelated skills are left alone. Codex honours `CODEX_HOME`.
 | opencode | `<seat>/opencode.md` | `~/.config/opencode/commands/<seat>.md` → canonical `<seat>/opencode.md` | `/<seat> [focus]` |
 | Codex | `<seat>/SKILL.md` | `$CODEX_HOME/skills/<seat>` → canonical `<seat>` | `$<seat> [focus]` via `/skills` |
 | Hermes | `<seat>/SKILL.md` | `~/.hermes/skills/<seat>` → canonical `<seat>` | `/<seat> [focus]` |
+| Grok Build | `grok-manager/SKILL.md` | `~/.agents/skills/grok-manager` → canonical (no alias needed) | `/grok-manager [focus]` |
 
-The installer preflights all thirty-three destinations before changing any parent.
+Grok scans `~/.agents/skills` itself, at every tier, so it needs no alias directory
+of its own; the seat entry points and the manual it shares all resolve through the
+canonical links.
+
+The installer preflights all thirty-eight destinations before changing any parent.
 Without `--force`, an existing file, directory or dangling symlink prints
 `exists: <path> (use --force)` and exits 1 with no changes. `--force` replaces only
 the named destinations. Missing parents are created. A custom canonical directory
@@ -63,3 +68,10 @@ conflict, and the four seat entry points present with both command files.
   and loads the body through both symlink hops.
 - OpenCode documents scanning `~/.config/opencode/skills`; its CLI was not on this
   shell's `PATH`, so live discovery was not exercised. The command files are kept.
+- Grok Build 1.0.70 was exercised here: `grok inspect --json` lists the canonical
+  `agentboard-team`, the four seats and `grok-manager` from `~/.agents/skills`
+  without any alias, reports `projectTrusted`, and lists the MCP servers it will
+  start. Project instructions and project skills load only in a trusted folder, so a
+  grok seat is launched with `--trust`; `grok mcp doctor <server>` proves the board
+  handshake without a model turn. MCP tools reach the model through `search_tool` /
+  `use_tool` with catalog keys like `agentboard__task_add`.

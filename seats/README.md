@@ -11,6 +11,7 @@ its client gets a board identity.
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
 | `claude/<seat>-mcp.json` | analyzer, coder, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
 | `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
+| `grok/register-mcp.sh` | grok (manager) | `grok mcp add --scope user` into `~/.grok/config.toml` |
 
 ## Install
 
@@ -52,6 +53,16 @@ approval mode is a hard error, so the base lists every board tool.
 One `--mcp-config` card per seat, because a Claude seat's actor comes from that
 file. `coder-mcp.json`, `analyzer-mcp.json` and `reviewer-mcp.json` differ only in
 `AGENTBOARD_ACTOR`.
+
+## Grok
+
+`grok/register-mcp.sh` writes the server into `~/.grok/config.toml` with
+`AGENTBOARD_ACTOR=<actor>` (default `grok`), because Grok keeps one user config and
+takes its actor from that entry. `grok mcp doctor agentboard` is the proof: it starts
+the server, completes the handshake and lists the tool catalog. A Grok seat needs
+`--trust` (project `AGENTS.md` and project skills load only in a trusted folder) and
+`--always-approve` (otherwise a tool call waits on a prompt nobody is watching); both
+go after herdr's `--`. The `grok-manager` skill carries the full launch recipe.
 
 ## Not shipped here
 
