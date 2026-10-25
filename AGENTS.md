@@ -30,7 +30,7 @@ place.
 Run these from the repo root. A change is not done until each prints what is beside
 it. `bash scripts/gate.sh` runs the whole table in order, checks each line, and stops
 at the first failure; `--full` adds the ignored latency run. Everything is offline
-and uses scratch boards; there is no server to start and no `surreal` binary anywhere.
+and uses scratch boards; there is no server to start.
 
 | Command | Expected |
 | --- | --- |
@@ -43,7 +43,7 @@ and uses scratch boards; there is no server to start and no `surreal` binary any
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 22 pages, 101 CLI names, 158 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 22 pages, 102 CLI names, 160 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 11 gates passed`; with `--full` `GATES OK: 12 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |

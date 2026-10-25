@@ -1,7 +1,7 @@
 ---
 name: manager
 description: "Initialize the agentboard manager seat when the user invokes the manager skill: brief, launch, file, wait."
-version: 5.0.0
+version: 5.1.0
 ---
 You are the manager; use the invocation's arguments as your focus.
 
@@ -16,7 +16,8 @@ Do these steps yourself:
 2. Launch only the seats this work needs, one herdr tab per seat and never split
    panes, and register each seat's MCP server with its board name
    (`agentboard serve --actor <seat>`). The manual's launch section has the exact
-   commands.
+   commands and the preferred-model table (Claude Opus/Sonnet 5.5, Codex
+   Sol/Luna) — pass those flags after `--` on `herdr agent start`.
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context), `goal` (the command and the output that proves it), and `assignee`
    when the owner is known. File a row only when you can hand it to a seat.
@@ -34,15 +35,20 @@ Do these steps yourself:
      watch `done,review,blocked`: `review` is the hand-off and the cue to prompt
      the reviewer. Including `in_progress` here matches the coder's claim, so the
      watch fires immediately and tells you nothing new.
+   - While an analyzer holds a row, status stays `in_progress` when they hand to
+     the coder. Arm `wait ID --status review,done,blocked --assignee --timeout 300`
+     (MCP `task_wait` with `assignee=true`) so that reassignment ends the wait; the
+     first line then carries `; handoff T… to coder`.
    - Stage the set by phase. Once you have prompted the reviewer, add
      `in_progress` to `done,review,blocked`: the coder has already claimed, so
      `in_progress` now means a reopen that needs the coder prompted again.
    - Keep one watcher per row. Kill the old arm before arming a new one, because
      two watchers wake you twice for one event.
-   - Use a 300 s long-poll arm (`wait ID --status CSV --timeout 300`) in the
-     background. Exit 3 means nothing matched; re-arm. Exit 0 means the row
-     reached an act-point. The CLI accepts only 1 to 300 seconds: it refuses
-     `--timeout` above 300 and refuses zero, so zero is no escape hatch.
+   - Use a 300 s long-poll arm (`wait ID --status CSV --timeout 300`, and add
+     `--assignee` when the act-point is a handoff) in the background. Exit 3 means
+     nothing matched; re-arm. Exit 0 means the row reached an act-point. The CLI
+     accepts only 1 to 300 seconds: it refuses `--timeout` above 300 and refuses
+     zero, so zero is no escape hatch.
    - Never prompt a seat mid-turn. Queue its next row and prompt when the seat
      frees; a live turn is not a mailbox.
 

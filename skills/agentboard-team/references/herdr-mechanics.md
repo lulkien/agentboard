@@ -29,23 +29,33 @@ seat.
 ```bash
 herdr tab create --cwd "$REPO" --label coder
 herdr pane list                       # find the new tab's pane id
-herdr agent start coder --kind claude --pane "$P"
+herdr agent start coder --kind claude --pane "$P" -- \
+  --model claude-sonnet-5-5 \
+  --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
+  --dangerously-skip-permissions
 ```
 
-Repeat for `analyzer` and `reviewer` with their own `--label` and pane. Panes
-inherit cwd; pass `--cwd` anyway so a seat never opens in the wrong tree.
+Repeat for `analyzer` and `reviewer` with their own `--label`, pane, preferred
+model, and permission mode from `SKILL.md` (analyzer/reviewer:
+`--permission-mode dontAsk` — refuse tree writes; only coder uses
+`--dangerously-skip-permissions`). Panes inherit cwd; pass `--cwd` anyway so a
+seat never opens in the wrong tree.
 
 ## Start and prompt a seat
 
 ```bash
-herdr agent start coder --kind claude --pane "$PANE_CODER"
+herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
+  --model claude-sonnet-5-5 \
+  --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
+  --dangerously-skip-permissions
 herdr agent prompt coder 'You are coder on the agentboard. MCP tools only, actor=coder. Start with task_claim.' --wait
 ```
 
 `--kind` is the canonical kind name from `herdr agent start --help` (`claude`,
-`codex`, `opencode`, `hermes`, …). The seat's board name is not a herdr concept:
-the MCP server is registered with `agentboard serve --actor coder`, so the pane's
-tool calls arrive attributed.
+`codex`, `opencode`, `hermes`, …). Everything after `--` is the agent's own argv
+(Claude `--model` / `--permission-mode`, Codex `-m` / `-p`, MCP config flags).
+The seat's board name is not a herdr concept: the MCP server is registered with
+`agentboard serve --actor coder`, so the pane's tool calls arrive attributed.
 
 ## Traps
 

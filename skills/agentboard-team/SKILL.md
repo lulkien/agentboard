@@ -61,17 +61,51 @@ One agent per tab. Never two agents as split panes of one tab: a tab is one seat
 workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
+Preferred models for worker seats (pass after `--`; herdr forwards them to the
+agent). Analyzer gets the stronger model; coder and reviewer share the cheaper
+one. Swap the id only when the human names a different model.
+
+| Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
+| --- | --- | --- |
+| analyzer | `--model claude-opus-5-5` | `-m gpt-6-sol` |
+| coder | `--model claude-sonnet-5-5` | `-m gpt-6-luna` |
+| reviewer | `--model claude-sonnet-5-5` | `-m gpt-6-luna` |
+
 ```bash
 export REPO=/path/to/repo
-herdr tab create --cwd "$REPO" --label coder
+herdr tab create --cwd "$REPO" --label analyzer
 herdr pane list                                    # note the new tab's pane id
-herdr agent start coder --kind claude --pane "$PANE_CODER"
-herdr agent prompt coder 'You are coder on the agentboard. Use MCP only, actor=coder. Load the coder skill, then claim your row.' --wait
+
+# Claude seats (MCP config + preferred model + permission mode)
+# Analyzer/reviewer are read-only on the tree: dontAsk refuses file/shell
+# writes instead of auto-approving. Coder needs unattended shell/tests → bypass.
+herdr agent start analyzer --kind claude --pane "$PANE_ANALYZER" -- \
+  --model claude-opus-5-5 \
+  --strict-mcp-config --mcp-config ~/.claude/analyzer-mcp.json \
+  --permission-mode dontAsk
+herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
+  --model claude-sonnet-5-5 \
+  --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
+  --dangerously-skip-permissions
+herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
+  --model claude-sonnet-5-5 \
+  --strict-mcp-config --mcp-config ~/.claude/reviewer-mcp.json \
+  --permission-mode dontAsk
+
+# Codex seats (profile + preferred model)
+herdr agent start analyzer --kind codex --pane "$PANE_ANALYZER" -- \
+  -p analyzer -m gpt-6-sol
+herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
+  -p coder -m gpt-6-luna
+herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
+  -p reviewer -m gpt-6-luna
+
+herdr agent prompt analyzer 'You are analyzer on the agentboard. Use MCP only, actor=analyzer. Load the analyzer skill, then claim your row.' --wait
 ```
 
-Repeat with `--label analyzer` and `--label reviewer` for the other seats, one tab
-each. Start only the seats the work needs: a reviewer with nothing to review is a
-tab that idles.
+Start only the seats the work needs: a reviewer with nothing to review is a tab
+that idles. Pick one kind per team; do not mix Claude and Codex rows of the table
+in one launch unless the human asks.
 
 `herdr agent prompt` needs `--wait` when you want proof the prompt landed; without
 it a stalled prompt (an open overlay) goes unnoticed. If a prompt does not turn the
@@ -149,7 +183,7 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
 | `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override; `release` to return a held row to `todo` |
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
-| `task_wait` | block until named rows (or an epic's children) reach a status |
+| `task_wait` | block until named rows (or an epic's children) reach a status; `assignee` also wakes on a handoff |
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
 | `board_brief` | epic progress, unparented active work, then global status counts |
 | `board_agents` | roster with last activity and last task |
