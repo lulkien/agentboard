@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP surface check: ten tools on one stdio server, no daemon, scratch board."""
+"""MCP surface check: eleven tools on one stdio server, no daemon, scratch board."""
 
 import json
 import os
@@ -17,6 +17,7 @@ TOOLS = {
     "task_update",
     "task_claim",
     "task_comment",
+    "task_wait",
     "board_feed",
     "board_brief",
     "board_agents",
@@ -127,7 +128,7 @@ def main():
 
         listed = server.send("tools/list", {})
         names = {tool["name"] for tool in listed["result"]["tools"]}
-        check("tools/list is the ten-tool surface", TOOLS, names)
+        check("tools/list is the eleven-tool surface", TOOLS, names)
 
         is_error, body = server.call("task_add", {"title": "mcp task", "description": "full text here"})
         check("task_add is not an error", False, is_error)
@@ -285,6 +286,34 @@ def main():
                 error, body = parents.call("task_update", {"id": 2, "if_revision": 1, "parent": 1})
                 check("reopened reparent succeeds", False, error)
                 has("reopened reparent link", "parent T1", body)
+
+        # task_wait: a row already wanted answers at once, a quiet board answers
+        # `timeout:` as ordinary text, and refusals stay JSON-RPC errors.
+        with Server(os.path.join(scratch, "wait"), "manager") as waits:
+            waits.start()
+            waits.call("task_add", {"title": "already done", "status": "done"})
+            is_error, body = waits.call("task_wait", {"ids": [1]})
+            check("task_wait is not an error", False, is_error)
+            check("task_wait answers matched", "matched: 1 of 1 watched in done,canceled", body.splitlines()[0])
+            has("task_wait prints the watched row", "T1 done", body)
+            has("task_wait labels an earlier event as last", "last:", body)
+            has("task_wait prints a cursor", "cursor ", body)
+            waits.call("task_add", {"title": "stays open"})
+            is_error, body = waits.call("task_wait", {"ids": [2], "timeout_s": 1})
+            check("a wait timeout is not an error", False, is_error)
+            has("a wait timeout starts with timeout:", "timeout:", body.splitlines()[0])
+            has("a wait timeout lists the open row", "T2 todo", body)
+            has("a wait timeout keeps a cursor", "cursor ", body)
+            reply = waits.send("tools/call", {"name": "task_wait", "arguments": {"ids": [1], "status": "queued"}})
+            check("wait unknown status code", -32602, reply.get("error", {}).get("code"))
+            has("wait unknown status names it", 'unknown task status: "queued"', reply.get("error", {}).get("message", ""))
+            reply = waits.send("tools/call", {"name": "task_wait", "arguments": {"ids": [2], "epic": True, "timeout_s": 1}})
+            check("wait epic on a leaf code", -32602, reply.get("error", {}).get("code"))
+            check("wait epic on a leaf message", "task T2 is not an epic; an epic is a task with children", reply.get("error", {}).get("message"))
+            reply = waits.send("tools/call", {"name": "task_wait", "arguments": {"ids": []}})
+            check("wait without ids code", -32602, reply.get("error", {}).get("code"))
+            check("wait without ids message", "wait needs at least one task id", reply.get("error", {}).get("message"))
+            print("task_wait: matched:, timeout:, and -32602 refusals")
     finally:
         server.close()
 

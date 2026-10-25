@@ -5,7 +5,7 @@ everyone reads the same event feed. The board is a single LMDB directory: no
 daemon, no socket, no network, no database server. Every CLI call and every MCP
 server opens that directory and the file lock keeps them honest.
 
-10 MCP tools, 13 CLI verbs, one store behind both.
+11 MCP tools, 14 CLI verbs, one store behind both.
 
 ## Why it exists
 
@@ -70,6 +70,7 @@ agentboard claim [ID]
 agentboard comment ID (--body TEXT | --body-file PATH|-)
 agentboard feed [--after CURSOR] [--kind K] [--recipient NAME] [--task ID]
                 [--limit N] [--full] [--wait SECONDS]
+agentboard wait ID... [--status CSV] [--epic] [--timeout SECONDS]
 agentboard brief
 agentboard agents
 agentboard path
@@ -103,9 +104,20 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   from the first event. `--wait N` blocks up to N seconds (300 maximum) for a
   matching event and returns the cursor it stopped at. `--full` prints whole
   comment and update bodies.
+- `wait` blocks until the rows you name reach a status, and answers a verdict
+  instead of a page. `--status` is a CSV of wanted statuses, default
+  `done,canceled`; every watched row must be in one of them, so it is an all-rows
+  predicate and `wait 27 --status review` is the everyday case. `--epic` watches
+  the direct children of each id and re-reads them on every poll, so a child filed
+  mid-wait joins the set. `--timeout` is seconds with a default of `0`, which
+  means block until a match: unlike `feed --wait` there is no 300 s cap. A match
+  exits `0` and prints `matched: …`, a timeout exits `3` and still prints each row
+  under `timeout: …`. A row already wanted when the wait began shows its newest
+  earlier event as `last:`; a row that moved shows the events that moved it, at
+  most 20 lines then `… N more events`. It appends no event and needs no actor.
 
-Exit codes: `0` ok, `1` refused or failed, `3` no ready tasks. A refusal prints
-one line naming the field, the value and what to do:
+Exit codes: `0` ok, `1` refused or failed, `3` no ready tasks or a `wait`
+timeout. A refusal prints one line naming the field, the value and what to do:
 
 ```
 agentboard: stale task revision 3; current revision is 4
@@ -144,6 +156,7 @@ one.
 | `task_update` | `ok`, the record, its cursor; refuses stale, held, missing reason |
 | `task_claim` | the work order, or `no ready tasks` |
 | `task_comment` | `ok`, cursor |
+| `task_wait` | `matched:` or `timeout:`, one row per watched task, cursor |
 | `board_feed` | events, cursor, `more`/`older`; `wait` seconds; `full=true` |
 | `board_brief` | epic progress, unparented active tasks, then counts per status |
 | `board_agents` | roster lines, newest activity first |

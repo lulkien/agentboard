@@ -22,8 +22,13 @@ Do these steps yourself:
    when the owner is known. File a row only when you can hand it to a seat.
 4. Arm MCP `board_feed(wait=300)` from the cursor the board printed and stop
    typing. After every wake or timeout, read `board_brief` and
-   `task_list(all=true)` and arm again. Reassign with `force` and a `reason` only
-   when a row is genuinely stuck or its holder ran out of quota.
+   `task_list(all=true)` and arm again. When you know which rows you are waiting
+   for, use MCP `task_wait` (CLI `wait ID... --status CSV --epic --timeout`) to
+   block on that row or on an epic's children until they reach a status: one call
+   replaces several feed arms. The MCP call clamps `timeout_s` to 300 s; for a
+   longer block use the CLI, where `--timeout 0` waits until the rows move.
+   Reassign with `force` and a `reason` only when a row is genuinely stuck or its
+   holder ran out of quota.
 5. Judge a claim from the seat's reported output plus the board and git state.
    Send a doubt to the reviewer as a row; never fix it yourself and never close a
    reviewer's row. Commit locally only when the owner says so, and never push.

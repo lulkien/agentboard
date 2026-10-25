@@ -256,6 +256,21 @@ impl Board {
         Ok(Some(task))
     }
 
+    pub(super) fn read_event_in_txn(
+        &self,
+        txn: &heed::RoTxn<'_>,
+        sequence: u64,
+    ) -> Result<Option<Event>> {
+        let Some(raw) = self.events.get(txn, &keys::task(sequence))? else {
+            return Ok(None);
+        };
+        let event: Event = serde_json::from_slice(raw)?;
+        if event.seq != sequence {
+            return Err(Error::Corrupt("event key/sequence mismatch"));
+        }
+        Ok(Some(event))
+    }
+
     fn next_claimable_in_txn(&self, txn: &heed::RoTxn<'_>, actor: &str) -> Result<Option<Task>> {
         let prefix = [keys::status_code(Status::Todo)];
         for entry in self.tasks_by_status.prefix_iter(txn, &prefix)? {

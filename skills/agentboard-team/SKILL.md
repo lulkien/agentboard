@@ -18,7 +18,7 @@ server opens the directory, and the file lock keeps concurrent writers honest.
 
 Pages here:
 
-- this manual: the board, the seats, the launcher, the wake loop, the ten tools
+- this manual: the board, the seats, the launcher, the wake loop, the eleven tools
 - `workflow.md`: how a task moves and who moves it
 - `roles.md`: manager, analyzer, coder and reviewer: what each may run and never does
 
@@ -121,8 +121,17 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   wake the seat by assigning it.
 - If a seat must be poked outside the board, that is a herdr prompt, not a board
   write.
+- To block on named rows, use the wait instead of re-arming the feed:
+  `agentboard wait 27 --status review --timeout 1800` returns the moment T27 reaches
+  review, and MCP `task_wait(ids=[27], status="review")` is the same call. An epic
+  works too: `agentboard wait 12 --epic` watches its direct children and returns
+  once every one of them is `done` or `canceled`. The verdict's first line is
+  `matched:` (exit 0) or `timeout:` (exit 3), and it writes nothing.
+- A wait wakes the manager, not the seat. It reports that the row moved; no pane
+  received a prompt. The seat that must act still needs a herdr prompt or its own
+  `board_feed` watch.
 
-## Ten tools, same store as the CLI
+## Eleven tools, same store as the CLI
 
 | Tool | Use |
 | --- | --- |
@@ -133,13 +142,14 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
 | `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override |
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
+| `task_wait` | block until named rows (or an epic's children) reach a status |
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
 | `board_brief` | epic progress, unparented active work, then global status counts |
 | `board_agents` | roster with last activity and last task |
 
-CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `brief`,
-`agents`, `path`, `reset --yes`, `serve`. Exit codes: `0` ok, `1` refused, `3` no
-ready tasks.
+CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `wait`,
+`brief`, `agents`, `path`, `reset --yes`, `serve`. Exit codes: `0` ok, `1` refused,
+`3` no ready tasks or a wait timeout.
 
 Use `task_epic` (CLI `epic ID`) to read an umbrella's direct children as status
 counts and done/total progress. Any task with children is an epic; nested epics

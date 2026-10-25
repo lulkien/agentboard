@@ -8,7 +8,10 @@ use clap::Parser;
 use rmcp::ServiceExt;
 
 use agentboard::domain::{self, EventKind, NewTask, Status, TaskPatch};
-use agentboard::store::{Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, UpdateInput};
+use agentboard::store::{
+    Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, UpdateInput, WaitSpec,
+    parse_status_csv,
+};
 use agentboard::{cli, render};
 
 fn main() -> ExitCode {
@@ -300,6 +303,30 @@ fn run(
             };
             Ok((render::feed_page(&page, full), ExitCode::SUCCESS))
         }
+        Some(Cmd::Wait {
+            ids,
+            epic,
+            status,
+            timeout,
+        }) => {
+            let statuses = wait_statuses(status.as_deref())?;
+            let board = open(&path)?;
+            let outcome = board
+                .wait_tasks(&WaitSpec {
+                    ids: &ids,
+                    epic,
+                    statuses: &statuses,
+                    after: None,
+                    timeout_ms: timeout.saturating_mul(1000),
+                })
+                .map_err(|e| e.to_string())?;
+            let code = if outcome.matched {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(3)
+            };
+            Ok((render::wait_text(&outcome), code))
+        }
         Some(Cmd::Brief) => {
             let board = open(&path)?;
             let brief = board.brief(10).map_err(|e| e.to_string())?;
@@ -361,6 +388,21 @@ fn read_body(body: Option<String>, file: Option<String>) -> Result<String, Strin
 fn parse_status(raw: Option<&str>) -> Result<Option<Status>, String> {
     raw.map(|value| Status::parse(value).map_err(|e| e.to_string()))
         .transpose()
+}
+
+/// Wanted statuses for a wait: an absent flag means `done,canceled`. An empty list
+/// is refused by name here, because a wait with nothing wanted would match at once.
+fn wait_statuses(raw: Option<&str>) -> Result<Vec<Status>, String> {
+    let Some(raw) = raw else {
+        return Ok(vec![Status::Done, Status::Canceled]);
+    };
+    parse_status_csv(raw).map_err(|error| match error {
+        agentboard::store::Error::WaitWithoutStatus => {
+            "wait: --status needs at least one of todo, in_progress, blocked, review, done, canceled"
+                .to_owned()
+        }
+        other => other.to_string(),
+    })
 }
 
 fn parse_kind(raw: Option<&str>) -> Result<Option<EventKind>, String> {

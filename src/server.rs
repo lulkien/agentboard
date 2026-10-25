@@ -1,4 +1,4 @@
-//! MCP surface: 10 tools, text-only results, short acknowledgements.
+//! MCP surface: 11 tools, text-only results, short acknowledgements.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with the
 //! changed record plus its event cursor. Agents pay tokens per byte.
@@ -14,7 +14,10 @@ use serde::Deserialize;
 
 use crate::domain::{EventKind, NewTask, Status, TaskPatch};
 use crate::render;
-use crate::store::{Board as BoardHandle, ClaimOutcome, FeedFilter, ListFilter, UpdateInput};
+use crate::store::{
+    Board as BoardHandle, ClaimOutcome, FeedFilter, ListFilter, UpdateInput, WAIT_MAX_MS, WaitSpec,
+    parse_status_csv,
+};
 
 const NAME: &str = "agentboard";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -183,6 +186,21 @@ pub struct FeedArgs {
     /// Return comment and update text untruncated
     #[serde(default)]
     pub full: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WaitArgs {
+    /// Task ids to watch
+    pub ids: Vec<u64>,
+    /// CSV of wanted statuses (default done,canceled)
+    #[serde(default)]
+    pub status: Option<String>,
+    /// The ids name epics; watch their direct children instead
+    #[serde(default)]
+    pub epic: bool,
+    /// Seconds; clamped to 1..=300
+    #[serde(default)]
+    pub timeout_s: Option<u64>,
 }
 
 #[tool_router]
@@ -479,6 +497,42 @@ impl Board {
     }
 
     #[tool(
+        name = "task_wait",
+        description = "Block until watched rows reach a status; answers matched: or timeout:"
+    )]
+    async fn task_wait(
+        &self,
+        Parameters(args): Parameters<WaitArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        // 0 is the CLI's "wait forever"; here the call itself is bounded, so an
+        // absent or zero budget means the cap.
+        let timeout_s = args
+            .timeout_s
+            .unwrap_or(WAIT_MAX_MS / 1000)
+            .clamp(1, WAIT_MAX_MS / 1000);
+        let statuses = match args.status.as_deref() {
+            Some(raw) => parse_status_csv(raw).map_err(|e| err(e.to_string()))?,
+            None => vec![Status::Done, Status::Canceled],
+        };
+        let ids = args.ids;
+        let epic = args.epic;
+        let outcome = blocking(&self.board, move |board| {
+            board
+                .wait_tasks(&WaitSpec {
+                    ids: &ids,
+                    epic,
+                    statuses: &statuses,
+                    after: None,
+                    timeout_ms: timeout_s.saturating_mul(1000),
+                })
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(err)?;
+        Ok(text(render::wait_text(&outcome)))
+    }
+
+    #[tool(
         name = "board_brief",
         description = "Epic progress, unparented active tasks, then counts by status"
     )]
@@ -530,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_surface_is_ten_tools_with_valid_schemas() {
+    fn the_tool_surface_is_eleven_tools_with_valid_schemas() {
         let server = Board::new(scratch_board("surface"), None);
         let tools = server.tool_router.list_all();
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
@@ -547,6 +601,7 @@ mod tests {
                 "task_get",
                 "task_list",
                 "task_update",
+                "task_wait",
             ]
         );
         for tool in &tools {

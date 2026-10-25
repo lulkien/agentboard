@@ -1,7 +1,7 @@
 //! Compact text rendering shared by the CLI and the MCP tools.
 
 use crate::domain::{Event, Status, Task};
-use crate::store::{Agent, Brief, Epic, FeedPage};
+use crate::store::{Agent, Brief, Epic, FeedPage, WaitOutcome};
 
 /// Width of a task title in a one-line list.
 const TITLE_WIDTH: usize = 72;
@@ -162,6 +162,51 @@ pub fn epic_text(epic: &Epic) -> String {
         epic.total,
         epic.cursor.encode()
     )
+}
+
+/// The verdict, one compact row per watched row, then the cursor to follow on with.
+/// A row that was already wanted when the wait started shows its newest earlier
+/// event as `last:` — context, never the cause of the return.
+pub fn wait_text(outcome: &WaitOutcome) -> String {
+    let in_wanted = outcome
+        .rows
+        .iter()
+        .filter(|row| outcome.wanted.contains(&row.task.status))
+        .count();
+    let watched = outcome.rows.len();
+    let wanted = outcome
+        .wanted
+        .iter()
+        .map(|status| status.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut lines = vec![if outcome.matched {
+        format!("matched: {in_wanted} of {watched} watched in {wanted}")
+    } else {
+        format!(
+            "timeout: {in_wanted} of {watched} watched in {wanted} after {}ms",
+            outcome.waited_ms
+        )
+    }];
+    for row in &outcome.rows {
+        lines.push(task_line(&row.task));
+        if !row.events.is_empty() {
+            lines.extend(
+                row.events
+                    .iter()
+                    .map(|event| format!("  {}", event_line(event, false))),
+            );
+            if row.omitted > 0 {
+                lines.push(format!("  … {} more events", row.omitted));
+            }
+        } else if outcome.matched
+            && let Some(last) = row.last.as_ref()
+        {
+            lines.push(format!("  last: {}", event_line(last, false)));
+        }
+    }
+    lines.push(format!("cursor {}", outcome.cursor.encode()));
+    lines.join("\n")
 }
 
 pub fn agent_line(agent: &Agent) -> String {

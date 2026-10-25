@@ -6,7 +6,7 @@ tree, not about running a team with it.
 
 Read first:
 
-- `README.md` — the model, the verbs and the ten tools.
+- `README.md` — the model, the verbs and the eleven tools.
 - `PROTOCOL.md` — the wire surface agents see.
 - `skills/agentboard-team` — running a team with this tool; the repo copy is canonical.
 
@@ -19,15 +19,15 @@ Everything is offline and uses scratch boards; there is no server to start and n
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 62 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 69 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no output |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `135/135 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `92/92 passed (mcp, lmdb)` |
+| `bash tests/cli.sh` | `167/167 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `107/107 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
-| `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 21 pages, 71 CLI names, 157 MCP names passed` |
+| `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
+| `python3 tests/doc-names.py` | `doc-names: 21 pages, 86 CLI names, 165 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; debug ceiling 25 ms, release 5 ms |
 
@@ -43,8 +43,9 @@ update the expectation here.
 - `src/domain.rs` — task, status, patch, claim and event rules; no I/O, no printing.
 - `src/next_store/` (module `store`) — the LMDB store: `open` (Board, options, reset,
   lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/claim/comment,
-  index upkeep, events), `feed` (cursors, filters, bounded wait), `list` (list,
-  brief), `tests`/`m3_tests` (store proofs).
+  index upkeep, events), `feed` (cursors, filters, bounded wait), `wait` (per-row
+  blocking wait that re-queries its watched set), `list` (list, brief),
+  `tests`/`m3_tests` (store proofs).
 - `src/render.rs` — the only place compact text is built, including the `…`
   truncation and the full-text path.
 - Epics are derived direct-child rollups in `store::epic`, shared by both
@@ -52,7 +53,7 @@ update the expectation here.
   roster, index and event writes; no epic flag or database is stored.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
-- `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
+- `src/server.rs` — the MCP adapter, eleven tools, store work on `spawn_blocking`.
 
 Dependencies point one way: `main.rs` and `server.rs` call `store`; `store` never
 calls them. Store modules never print and never exit; the adapters render text and
@@ -81,6 +82,11 @@ have both adapters call it, so a rule exists once.
 - A bare sequence cursor (for example `--after 0`) means "this board", so history
   replay works without knowing the instance id; a foreign `instance:seq` refuses
   with `CursorInstanceMismatch`.
+- A wait re-queries the watched rows on every poll and it is an ALL predicate: a
+  frozen id list misses a child filed mid-epic, and an any-row match turns "every
+  child terminal" into "the first child finished". Both mutations are caught by the
+  wait proofs in `tests.rs`/`m3_tests.rs` and `tests/cli.sh`. One row contributes at
+  most `MAX_WAIT_EVENTS` event lines; the rest are counted, never printed.
 - Full text must never go through the compact renderer: no title clip, no
   whitespace collapse. A reader that asks for full text gets stored bytes.
 - Tool counts in `src/server.rs` (first line), `README.md`, `PROTOCOL.md` and this
@@ -120,7 +126,7 @@ No file edit, no commit, no build, no install, no probe that creates state;
   workflow. `skills/install.sh --force` creates canonical repo links under
   `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
   canonical names. There is one physical copy: never copy over the installed links.
-- `PROTOCOL.md` — the wire surface: ten tools, cursors, refusals, exit codes.
+- `PROTOCOL.md` — the wire surface: eleven tools, cursors, refusals, exit codes.
 - `skills/{manager,analyzer,coder,reviewer}/` — one seat entry point each
   (`/manager`, `/analyzer`, `/coder`, `/reviewer`; `$<seat>` under Codex).
 - `seats/` — the canonical per-seat client cards (codex profiles, claude MCP

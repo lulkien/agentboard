@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
     name = "agentboard",
     version,
     about = "Shared task board for a team of CLI agents",
-    after_help = "Exit codes: 0 ok, 1 refused or failed, 3 no ready tasks. Mutations need an actor: --actor or $AGENTBOARD_ACTOR."
+    after_help = "Exit codes: 0 ok, 1 refused or failed, 2 usage, 3 no ready tasks or wait timeout. Mutations need an actor: --actor or $AGENTBOARD_ACTOR."
 )]
 pub struct Cli {
     /// Board directory (default $AGENTBOARD_DB, else the state dir's lmdb)
@@ -151,6 +151,21 @@ pub enum Cmd {
         /// Block up to this many seconds for a matching event
         #[arg(long, default_value_t = 0)]
         wait: u64,
+    },
+    /// Block until watched rows reach a status
+    Wait {
+        /// Task ids to watch
+        #[arg(value_name = "ID", required = true, num_args = 1..)]
+        ids: Vec<u64>,
+        /// The ids name epics; watch their direct children instead
+        #[arg(long)]
+        epic: bool,
+        /// CSV of wanted statuses (default done,canceled)
+        #[arg(long, value_name = "CSV")]
+        status: Option<String>,
+        /// Seconds; 0 waits until a match
+        #[arg(long, default_value_t = 0)]
+        timeout: u64,
     },
     /// Counts by status plus active work
     Brief,

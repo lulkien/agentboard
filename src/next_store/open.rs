@@ -104,6 +104,8 @@ pub enum Error {
     EmptyComment,
     InvalidCursor(String),
     CursorInstanceMismatch,
+    WaitWithoutStatus,
+    WaitWithoutTask,
     UnknownAssignee(String),
     MissingTask(u64),
     NotEpic(u64),
@@ -147,6 +149,8 @@ impl std::fmt::Display for Error {
             Self::CursorInstanceMismatch => {
                 f.write_str("feed cursor belongs to a different board; reset a cursor or reset the board")
             }
+            Self::WaitWithoutStatus => f.write_str("wait needs at least one wanted status"),
+            Self::WaitWithoutTask => f.write_str("wait needs at least one task id"),
             Self::UnknownAssignee(name) => write!(f, "unknown assignee {name:?}; use new_actor=true to register the target"),
             Self::MissingTask(id) => write!(f, "task T{id} does not exist"),
             Self::NotEpic(id) => write!(f, "task T{id} is not an epic; an epic is a task with children"),

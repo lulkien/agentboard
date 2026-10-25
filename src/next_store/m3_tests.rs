@@ -10,6 +10,7 @@ use crate::domain::{Error as DomainError, EventKind, NewTask, Status, TaskPatch}
 
 use super::{
     Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, UpdateInput, WAIT_MAX_MS,
+    WaitSpec, parse_status_csv,
 };
 
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
@@ -1554,10 +1555,383 @@ fn wait_from_the_list_cursor_sees_a_late_handoff() {
 }
 
 #[test]
-fn wait_timeout_is_clamped_to_the_cap() {
+fn feed_wait_still_clamps_a_single_call_to_the_cap() {
     let clamped = super::feed::clamp_timeout(10);
     assert_eq!(clamped, Duration::from_millis(10));
     let capped = super::feed::clamp_timeout(WAIT_MAX_MS + 60_000);
     assert_eq!(capped, Duration::from_millis(WAIT_MAX_MS));
     assert_eq!(WAIT_MAX_MS, 300_000);
+}
+
+fn done_and_canceled() -> [Status; 2] {
+    [Status::Done, Status::Canceled]
+}
+
+#[test]
+fn wait_returns_at_once_for_a_row_already_in_a_wanted_status() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add(
+            "manager",
+            draft("already done", Status::Done, 0, None),
+            false,
+            0,
+        )
+        .unwrap();
+    let outcome = board
+        .wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: false,
+            statuses: &done_and_canceled(),
+            after: None,
+            timeout_ms: 5_000,
+        })
+        .unwrap();
+    assert!(outcome.matched);
+    assert_eq!(outcome.wanted, vec![Status::Done, Status::Canceled]);
+    assert_eq!(outcome.rows.len(), 1);
+    assert_eq!(outcome.rows[0].task.id, 1);
+    assert_eq!(outcome.rows[0].task.status, Status::Done);
+    assert!(outcome.rows[0].events.is_empty());
+    assert_eq!(outcome.rows[0].omitted, 0);
+    let last = outcome.rows[0]
+        .last
+        .as_ref()
+        .expect("an already-wanted row shows its newest earlier event");
+    assert_eq!(last.seq, 1);
+    assert_eq!(last.kind, EventKind::Created);
+    assert_eq!(outcome.since.seq, 1);
+    assert_eq!(outcome.cursor.seq, 1);
+    assert!(
+        outcome.waited_ms < 1_000,
+        "an already-wanted row returned after {}ms",
+        outcome.waited_ms
+    );
+}
+
+#[test]
+fn wait_returns_the_events_of_a_row_moved_during_the_wait() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add("manager", draft("move me", Status::Todo, 0, None), false, 0)
+        .unwrap();
+    let outcome = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(80));
+            board
+                .update(UpdateInput {
+                    id: 1,
+                    actor: "manager",
+                    expected_revision: 1,
+                    patch: &status_patch(Status::Done),
+                    force: false,
+                    force_reason: None,
+                    new_actor: false,
+                    comment: Some("green"),
+                    now_ms: 5,
+                })
+                .unwrap();
+        });
+        board
+            .wait_tasks(&WaitSpec {
+                ids: &[1],
+                epic: false,
+                statuses: &done_and_canceled(),
+                after: None,
+                timeout_ms: 5_000,
+            })
+            .unwrap()
+    });
+    assert!(outcome.matched);
+    assert_eq!(outcome.rows[0].task.status, Status::Done);
+    assert_eq!(outcome.since.seq, 1);
+    assert_eq!(outcome.rows[0].last, None);
+    let events = &outcome.rows[0].events;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].seq, 2);
+    assert_eq!(events[0].kind, EventKind::Updated);
+    assert!(events[0].seq > outcome.since.seq);
+    assert_eq!(outcome.cursor.seq, 2);
+}
+
+#[test]
+fn wait_caps_one_rows_event_lines_and_counts_the_rest_as_omitted() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add(
+            "manager",
+            draft("busy row", Status::Todo, 0, None),
+            false,
+            0,
+        )
+        .unwrap();
+    let watermark = board.cursor_now().unwrap();
+    for step in 0..25 {
+        board
+            .comment("manager", 1, &format!("note {step}"), 1 + step)
+            .unwrap();
+    }
+    board
+        .update(UpdateInput {
+            id: 1,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &status_patch(Status::Done),
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 40,
+        })
+        .unwrap();
+    let after = watermark.encode();
+    let outcome = board
+        .wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: false,
+            statuses: &done_and_canceled(),
+            after: Some(after.as_str()),
+            timeout_ms: 5_000,
+        })
+        .unwrap();
+    assert!(outcome.matched);
+    let row = &outcome.rows[0];
+    assert_eq!(row.task.status, Status::Done);
+    // 25 comments plus the closing `updated` are 26 events after the watermark:
+    // the oldest 20 keep the story forward and the newest ones are counted.
+    assert_eq!(row.events.len(), 20);
+    assert_eq!(row.events.first().unwrap().seq, watermark.seq + 1);
+    assert_eq!(row.events.last().unwrap().seq, watermark.seq + 20);
+    assert_eq!(row.omitted, 6);
+    // The newest event of all is the closing update, so it is one of the omitted.
+    assert!(
+        row.events
+            .iter()
+            .all(|event| event.kind == EventKind::Commented)
+    );
+}
+
+#[test]
+fn wait_timeout_lists_every_row_with_its_real_status() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add("manager", draft("open", Status::Todo, 0, None), false, 0)
+        .unwrap();
+    board
+        .add("manager", draft("wanted", Status::Done, 1, None), false, 1)
+        .unwrap();
+    let started = Instant::now();
+    let outcome = board
+        .wait_tasks(&WaitSpec {
+            ids: &[2, 1],
+            epic: false,
+            statuses: &done_and_canceled(),
+            after: None,
+            timeout_ms: 120,
+        })
+        .unwrap();
+    assert!(!outcome.matched);
+    assert!(
+        outcome.waited_ms >= 100,
+        "timeout returned after {}ms of a 120ms budget",
+        outcome.waited_ms
+    );
+    assert!(started.elapsed() >= Duration::from_millis(100));
+    assert_eq!(
+        outcome
+            .rows
+            .iter()
+            .map(|row| (row.task.id, row.task.status))
+            .collect::<Vec<_>>(),
+        vec![(1, Status::Todo), (2, Status::Done)]
+    );
+    // A timeout answers positions, not causes: no row carries events or `last`.
+    assert!(
+        outcome
+            .rows
+            .iter()
+            .all(|row| row.events.is_empty() && row.last.is_none())
+    );
+    assert_eq!(outcome.cursor.seq, 2);
+}
+
+#[test]
+fn wait_expands_an_epic_and_requeries_children_on_every_poll() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add(
+            "manager",
+            draft("umbrella", Status::Todo, 0, None),
+            false,
+            0,
+        )
+        .unwrap();
+    let mut first = draft("child one", Status::InProgress, 0, Some("manager"));
+    first.parent_id = Some(1);
+    board.add("manager", first, false, 1).unwrap();
+    assert!(matches!(
+        board.wait_tasks(&WaitSpec {
+            ids: &[2],
+            epic: true,
+            statuses: &[Status::Done],
+            after: None,
+            timeout_ms: 0,
+        }),
+        Err(Error::NotEpic(2))
+    ));
+    assert!(matches!(
+        board.wait_tasks(&WaitSpec {
+            ids: &[999],
+            epic: true,
+            statuses: &[Status::Done],
+            after: None,
+            timeout_ms: 0,
+        }),
+        Err(Error::MissingTask(999))
+    ));
+    // A child filed mid-wait joins the watched set: child one going terminal is not
+    // enough, because child two is still open.
+    let outcome = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(80));
+            let mut late = draft("child two", Status::Todo, 0, None);
+            late.parent_id = Some(1);
+            board.add("manager", late, false, 2).unwrap();
+            std::thread::sleep(Duration::from_millis(80));
+            for id in [2, 3] {
+                board
+                    .update(UpdateInput {
+                        id,
+                        actor: "manager",
+                        expected_revision: 1,
+                        patch: &status_patch(Status::Done),
+                        force: false,
+                        force_reason: None,
+                        new_actor: false,
+                        comment: None,
+                        now_ms: 3 + id as i64,
+                    })
+                    .unwrap();
+                std::thread::sleep(Duration::from_millis(80));
+            }
+        });
+        board
+            .wait_tasks(&WaitSpec {
+                ids: &[1],
+                epic: true,
+                statuses: &done_and_canceled(),
+                after: None,
+                timeout_ms: 5_000,
+            })
+            .unwrap()
+    });
+    assert!(outcome.matched);
+    assert_eq!(
+        outcome
+            .rows
+            .iter()
+            .map(|row| row.task.id)
+            .collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    // Child one moved once after the watermark; child two arrived during the wait,
+    // so its creation is after the watermark too.
+    assert_eq!(
+        outcome
+            .rows
+            .iter()
+            .map(|row| row.events.len())
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(
+        outcome.rows[1].events[0].kind,
+        EventKind::Created,
+        "the late child's arrival explains why the wait kept going"
+    );
+}
+
+#[test]
+fn wait_refuses_a_foreign_watermark_and_accepts_a_bare_sequence() {
+    let scratch = Scratch::new();
+    let other = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let elsewhere = Board::open_with_options(other.path(), options()).unwrap();
+    board
+        .add("manager", draft("done", Status::Done, 0, None), false, 0)
+        .unwrap();
+    let foreign = elsewhere.cursor_now().unwrap().encode();
+    assert!(matches!(
+        board.wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: false,
+            statuses: &done_and_canceled(),
+            after: Some(foreign.as_str()),
+            timeout_ms: 0,
+        }),
+        Err(Error::CursorInstanceMismatch)
+    ));
+    let outcome = board
+        .wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: false,
+            statuses: &done_and_canceled(),
+            after: Some("0"),
+            timeout_ms: 0,
+        })
+        .unwrap();
+    assert!(outcome.matched);
+    assert_eq!(outcome.since.seq, 0);
+    assert_eq!(outcome.rows[0].events.len(), 1);
+    assert_eq!(outcome.rows[0].last, None);
+}
+
+#[test]
+fn wait_status_csv_is_trimmed_deduplicated_and_in_board_order() {
+    assert_eq!(
+        parse_status_csv(" done , review,done ").unwrap(),
+        vec![Status::Review, Status::Done]
+    );
+    assert!(matches!(
+        parse_status_csv(""),
+        Err(Error::WaitWithoutStatus)
+    ));
+    assert!(matches!(
+        parse_status_csv("done,"),
+        Err(Error::WaitWithoutStatus)
+    ));
+    assert!(matches!(
+        parse_status_csv("queued"),
+        Err(Error::Domain(DomainError::UnknownStatus(_)))
+    ));
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add("manager", draft("done", Status::Done, 0, None), false, 0)
+        .unwrap();
+    assert!(matches!(
+        board.wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: false,
+            statuses: &[],
+            after: None,
+            timeout_ms: 0,
+        }),
+        Err(Error::WaitWithoutStatus)
+    ));
+    assert!(matches!(
+        board.wait_tasks(&WaitSpec {
+            ids: &[],
+            epic: false,
+            statuses: &done_and_canceled(),
+            after: None,
+            timeout_ms: 0,
+        }),
+        Err(Error::WaitWithoutTask)
+    ));
 }

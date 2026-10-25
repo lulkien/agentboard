@@ -1,6 +1,6 @@
 # Protocol
 
-What an agent sees. Ten MCP tools, the cursor format, the refusals, the exit
+What an agent sees. Eleven MCP tools, the cursor format, the refusals, the exit
 codes. The store that implements this is described in `AGENTS.md`; running a team
 is described in `skills/agentboard-team`.
 
@@ -36,7 +36,7 @@ rows can only be claimed by id, and only by their assignee unless the row has no
 `blocked` is never claimable, and `done`/`canceled` are terminal: lists hide them unless
 asked, and an explicit claim of one refuses by name.
 
-## Ten tools
+## Eleven tools
 
 ### task_add
 
@@ -176,6 +176,44 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
   sleeps.
 - `full: true` prints event bodies untruncated.
 
+### task_wait
+
+```json
+{"ids": [7], "status": "done,canceled", "epic": false, "timeout_s": 300}
+```
+
+Blocks until every watched row is in one of `status` (a CSV, default `done,canceled`)
+and answers the verdict as its first line, so a caller needs no error channel to tell
+the two outcomes apart:
+
+```text
+matched: <n> of <m> watched in <statuses>
+timeout: <n> of <m> watched in <statuses> after <ms>ms
+```
+
+Then one compact task row per watched row, sorted by id, in either outcome. In a
+match, a row that was already wanted shows its newest earlier event as
+`  last: <event>` — context, not a claim that this event caused the return; a row
+that moved shows its events after the wait's watermark, one `  <event>` line each,
+truncated as the feed truncates. At most 20 event lines are printed per row: the
+oldest events after the watermark are kept and the remainder appears on one line as
+`  … N more events`. A timeout prints no event lines at all. The final
+line is `cursor <instance_id>:<seq>`, the high sequence at the moment the wait
+returned, so the caller can follow on with `board_feed`.
+
+- `ids` is required and each id must exist. With `epic: true` each id must have
+  direct children and the watched set is those children, re-resolved on every poll,
+  so a child filed mid-wait joins it.
+- `status` parses with the same CSV rule as the CLI: trimmed, deduplicated, ordered
+  as the board orders statuses. An empty list refuses `wait needs at least one
+  wanted status`, never a vacuous match.
+- `timeout_s` defaults to `300` and clamps to `1..=300`. Unlike the CLI's
+  `--timeout 0`, there is no wait-forever here: the call itself is bounded.
+- A timeout is **not** a JSON-RPC error: the result is ordinary text whose first
+  line is `timeout:`. Refusals are `-32602` like every other tool.
+- The wait re-queries the rows it watches, so it returns when they reach the wanted
+  status, not when any event lands. It writes nothing and needs no actor.
+
 ### board_brief
 
 No arguments. All epic rows first, each compact task row followed by `  done D/N`,
@@ -213,6 +251,8 @@ parent T5 is canceled; reopen it before adding children
 task cannot be its own parent
 feed cursor belongs to a different board; reset a cursor or reset the board
 invalid feed cursor "nope"
+wait needs at least one wanted status
+wait needs at least one task id
 ```
 
 ## CLI exit codes
@@ -222,7 +262,7 @@ invalid feed cursor "nope"
 | 0 | success |
 | 1 | refused or failed (`agentboard: …` on stderr) |
 | 2 | clap usage error (unknown verb, missing argument) |
-| 3 | `claim` found no ready tasks |
+| 3 | `claim` found no ready tasks, or `wait` hit its timeout |
 
-`no ready tasks` is the only non-error non-zero outcome; every other refusal is
-exit `1`.
+`no ready tasks` and a `wait` timeout are the only non-error non-zero outcomes; every
+other refusal is exit `1`.

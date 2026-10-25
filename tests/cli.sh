@@ -269,5 +269,77 @@ for status in done canceled; do
     has "$status reopened reparent parent" "parent T1" "$out"
 done
 
+# --- wait: a typed verdict about the rows you name -------------------------
+fresh wait
+"$B" add "already done" --status done >/dev/null
+"$B" add "moves during the wait" >/dev/null
+out=$("$B" wait 1); code=$?
+check "wait on a wanted row exit" 0 "$code"
+has "wait answers matched" "matched: 1 of 1 watched in done,canceled" "$out"
+has "wait prints the watched row" "T1 done" "$out"
+has "wait labels an earlier event as last" "  last: 1 " "$out"
+has "wait prints a cursor" "cursor " "$out"
+check "wait orders the wanted statuses by the board" "matched: 1 of 1 watched in review,done" "$("$B" wait 1 --status done,review | head -1)"
+check "wait is a read and appends nothing" 2 "$("$B" feed --after 0 | grep -c ' created  T')"
+(
+    sleep 0.5
+    "$B" update 2 --if-revision 1 --status done >/dev/null
+) &
+writer=$!
+out=$("$B" wait 2 --timeout 5); code=$?
+wait "$writer"
+check "wait on a row another process moves exit" 0 "$code"
+has "wait sees the move" "matched: 1 of 1 watched in done,canceled" "$out"
+has "wait shows the moved row's new status" "T2 done" "$out"
+has "wait prints the event that moved it" "updated  T2" "$out"
+lacks "wait does not claim causality for a moved row" "last:" "$out"
+
+fresh wait-timeout
+"$B" add "stays open" >/dev/null
+"$B" add "already done" --status done >/dev/null
+out=$("$B" wait 1 --timeout 1); code=$?
+check "wait timeout exit" 3 "$code"
+has "wait timeout text" "timeout: 0 of 1 watched in done,canceled after " "$out"
+has "wait timeout still lists the row" "T1 todo" "$out"
+has "wait timeout still prints a cursor" "cursor " "$out"
+lacks "wait timeout has no last line" "last:" "$out"
+has "wait timeout counts wanted rows" "timeout: 1 of 2 watched in done,canceled" "$("$B" wait 1 2 --timeout 1 | head -1)"
+
+fresh wait-refusals
+"$B" add "only row" >/dev/null
+out=$("$B" wait 1 --status queued 2>&1); code=$?
+check "wait unknown status exit" 1 "$code"
+check "wait unknown status text" 'agentboard: unknown task status: "queued"' "$out"
+out=$("$B" wait 999 2>&1); code=$?
+check "wait missing task exit" 1 "$code"
+check "wait missing task text" "agentboard: task T999 does not exist" "$out"
+out=$("$B" wait 1 --epic 2>&1); code=$?
+check "wait epic on a leaf exit" 1 "$code"
+check "wait epic on a leaf text" "agentboard: task T1 is not an epic; an epic is a task with children" "$out"
+out=$("$B" wait 1 --status "" 2>&1); code=$?
+check "wait empty status exit" 1 "$code"
+has "wait empty status text" "wait: --status needs at least one of todo, in_progress, blocked, review, done, canceled" "$out"
+out=$("$B" wait 2>&1); code=$?
+check "wait without ids exit" 2 "$code"
+
+fresh wait-epic
+"$B" add "umbrella" >/dev/null
+"$B" add "child one" --parent 1 --status in_progress --assignee manager >/dev/null
+"$B" add "child two" --parent 1 --status in_progress --assignee manager >/dev/null
+(
+    sleep 0.5
+    "$B" update 2 --if-revision 1 --status done >/dev/null
+    sleep 0.5
+    "$B" update 3 --if-revision 1 --status done >/dev/null
+) &
+writer=$!
+out=$("$B" wait 1 --epic --timeout 5); code=$?
+wait "$writer"
+check "epic wait exit" 0 "$code"
+has "epic wait watches the children" "matched: 2 of 2 watched in done,canceled" "$out"
+has "epic wait shows the first child's move" "updated  T2" "$out"
+has "epic wait needed the last child" "updated  T3" "$out"
+lacks "epic wait hides the umbrella row itself" "T1 todo" "$out"
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]
