@@ -24,13 +24,31 @@ Do these steps yourself:
    it never schedules, dispatches or wakes anyone. A seat does its row, reports it
    and stops rather than polling, so every wake after that is yours to give: when a
    seat reports, prompt the seat that holds the next row by name with
-   `herdr agent prompt coder 'row 27 is yours; claim it, report, stop' --wait`.
-   To know when a seat has finished, block on the rows you care about with MCP
-   `task_wait` (CLI `wait ID... --status CSV [--epic] [--timeout N]`): one call
-   replaces several feed arms, and `matched:` / `timeout:` is the verdict. The MCP
-   call clamps `timeout_s` to 300 s; for a longer block use the CLI, where
-   `--timeout 0` waits until the rows move. `board_feed(wait=300)` stays for seeing
-   what moved on the whole board; re-arm it from the cursor it prints. Reassign with
+   `herdr agent prompt coder 'claim your assigned row, report, stop'`.
+
+   - Never block in the foreground. Send `herdr agent prompt` without `--wait`,
+     then arm a background watch with completion notification and come back when
+     it fires. A foreground sleep, a poll loop or a blocking prompt is a bug in
+     the manager, not diligence.
+   - Watch act-points, not the row's current state. While a coder holds a row,
+     watch `done,review,blocked`: `review` is the hand-off and the cue to prompt
+     the reviewer. Including `in_progress` here matches the coder's claim, so the
+     watch fires immediately and tells you nothing new.
+   - Stage the set by phase. Once you have prompted the reviewer, add
+     `in_progress` to `done,review,blocked`: the coder has already claimed, so
+     `in_progress` now means a reopen that needs the coder prompted again.
+   - Keep one watcher per row. Kill the old arm before arming a new one, because
+     two watchers wake you twice for one event.
+   - Use a 300 s long-poll arm (`wait ID --status CSV --timeout 300`) in the
+     background. Exit 3 means nothing matched; re-arm. Exit 0 means the row
+     reached an act-point. The CLI accepts only 1 to 300 seconds: it refuses
+     `--timeout` above 300 and refuses zero, so zero is no escape hatch.
+   - Never prompt a seat mid-turn. Queue its next row and prompt when the seat
+     frees; a live turn is not a mailbox.
+
+   `board_feed(wait=300)` stays for seeing what moved on the whole board; run
+   that watch in the background too and re-arm it from the cursor it prints.
+   Reassign with
    `force` and a `reason` only when a row is genuinely stuck or its holder ran out of
    quota.
 5. Judge a claim from the seat's reported output plus the board and git state.
