@@ -112,7 +112,10 @@ impl std::fmt::Display for Error {
             }
             Self::MissingForceReason => f.write_str("forced update requires a reason"),
             Self::ForceReasonWithoutForce => f.write_str("force reason requires force=true"),
-            Self::Held { holder } => write!(f, "task is held by {holder}"),
+            Self::Held { holder } => write!(
+                f,
+                "task is held by {holder}; --force with a reason takes it, or --release --force with a reason returns it to todo"
+            ),
             Self::StaleRevision { expected, actual } => {
                 write!(
                     f,

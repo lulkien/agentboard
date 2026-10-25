@@ -9,7 +9,7 @@ use rmcp::ServiceExt;
 
 use agentboard::domain::{self, EventKind, NewTask, Status, TaskPatch};
 use agentboard::store::{
-    Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, UpdateInput, WaitSpec,
+    Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput, UpdateInput, WaitSpec,
     parse_status_csv,
 };
 use agentboard::{cli, render};
@@ -191,6 +191,7 @@ fn run(
             clear_parent,
             path: project,
             clear_path,
+            release,
             force,
             reason,
             comment,
@@ -206,6 +207,47 @@ fn run(
             }
             if clear_path && project.is_some() {
                 return Err("choose --path or --clear-path, not both".into());
+            }
+            if release && (status.is_some() || assignee.is_some() || clear_assignee) {
+                return Err(
+                    "choose --release or --status/--assignee/--clear-assignee, not both".into(),
+                );
+            }
+            // A release writes the row itself; a field flag beside it would be read
+            // and discarded, so name the conflict instead of dropping the argument.
+            if release
+                && (title.is_some()
+                    || description.is_some()
+                    || goal.is_some()
+                    || priority.is_some()
+                    || parent.is_some()
+                    || clear_parent
+                    || project.is_some()
+                    || clear_path)
+            {
+                return Err("choose --release or a field change, not both".into());
+            }
+            let board = open(&path)?;
+            if release {
+                let released = board
+                    .release(ReleaseInput {
+                        id,
+                        actor: &actor,
+                        expected_revision: if_revision,
+                        force,
+                        force_reason: reason.as_deref(),
+                        comment: comment.as_deref(),
+                        now_ms: now_ms(),
+                    })
+                    .map_err(|e| e.to_string())?;
+                return Ok((
+                    format!(
+                        "ok\n{}\ncursor {}",
+                        render::task_record(&released.task, false),
+                        released.event.seq
+                    ),
+                    ExitCode::SUCCESS,
+                ));
             }
             let patch = TaskPatch {
                 title,
@@ -229,7 +271,6 @@ fn run(
                     project.map(Some)
                 },
             };
-            let board = open(&path)?;
             let updated = board
                 .update(UpdateInput {
                     id,

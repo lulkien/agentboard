@@ -33,10 +33,28 @@ pub struct UpdateInput<'a> {
     pub now_ms: i64,
 }
 
+/// Return one held row to `todo` with no owner, in one write.
+pub struct ReleaseInput<'a> {
+    pub id: u64,
+    pub actor: &'a str,
+    pub expected_revision: u64,
+    pub force: bool,
+    pub force_reason: Option<&'a str>,
+    pub comment: Option<&'a str>,
+    pub now_ms: i64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Updated {
     pub task: Task,
     pub event: Event,
+}
+
+/// The actor, the optional audit comment and the clock the appended event carries.
+struct EventFields<'a> {
+    actor: &'a str,
+    comment: Option<&'a str>,
+    now_ms: i64,
 }
 
 impl Board {
@@ -114,7 +132,6 @@ impl Board {
             input.force_reason,
             input.now_ms,
         )?;
-        let next = applied.task;
         if matches!(input.patch.status, Some(Status::Done | Status::Canceled)) {
             let counts = self.child_counts(&txn)?;
             let count = counts.get(&input.id).map_or(0, |counts| {
@@ -131,47 +148,126 @@ impl Board {
                 });
             }
         }
-        self.check_parent_chain(&txn, &next)?;
-        if next.parent_id != old.parent_id
-            && let Some(parent_id) = next.parent_id
+        self.check_parent_chain(&txn, &applied.task)?;
+        if applied.task.parent_id != old.parent_id
+            && let Some(parent_id) = applied.task.parent_id
         {
             self.check_attachment_parent(&txn, parent_id)?;
         }
         self.ensure_target(
             &mut txn,
-            next.assignee.as_deref(),
+            applied.task.assignee.as_deref(),
             input.actor,
             input.new_actor,
             input.now_ms,
         )?;
-        self.touch_actor(&mut txn, input.actor, input.id, input.now_ms)?;
-        self.replace_indexes(&mut txn, &old, &next)?;
+        self.persist_update(
+            txn,
+            &mut metadata,
+            &old,
+            applied,
+            EventFields {
+                actor: input.actor,
+                comment: input.comment,
+                now_ms: input.now_ms,
+            },
+        )
+    }
+
+    /// Return one held row to `todo` and clear its owner. The holder may do it;
+    /// a foreign actor needs `force` and a reason, exactly like any other write
+    /// to a protected row, so no seat strips a live holder's row silently.
+    /// A terminal row and a holder-less row refuse before anything is written.
+    pub fn release(&self, input: ReleaseInput<'_>) -> Result<Updated> {
+        let txn = self.env.write_txn()?;
+        let mut metadata = self.checked_metadata(&txn)?;
+        let old = self
+            .read_task_in_txn(&txn, input.id)?
+            .ok_or(Error::MissingTask(input.id))?;
+        if matches!(old.status, Status::Done | Status::Canceled) {
+            return Err(Error::NotReleasable {
+                id: old.id,
+                status: old.status,
+            });
+        }
+        if old.assignee.is_none() {
+            return Err(Error::NoHolder(old.id));
+        }
+        // The ownership, revision and force rules are `apply`'s; a release is an
+        // ordinary patch of two protected fields, not a second code path.
+        let patch = TaskPatch {
+            status: Some(Status::Todo),
+            assignee: Some(None),
+            ..TaskPatch::default()
+        };
+        let applied = old.apply(
+            input.actor,
+            input.expected_revision,
+            &patch,
+            input.force,
+            input.force_reason,
+            input.now_ms,
+        )?;
+        self.persist_update(
+            txn,
+            &mut metadata,
+            &old,
+            applied,
+            EventFields {
+                actor: input.actor,
+                comment: input.comment,
+                now_ms: input.now_ms,
+            },
+        )
+    }
+
+    /// Persist one accepted field change: roster touch, status and assignee index
+    /// upkeep, the task, its `updated` event, the metadata, and the commit.
+    fn persist_update(
+        &self,
+        mut txn: heed::RwTxn<'_>,
+        metadata: &mut Metadata,
+        old: &Task,
+        applied: domain::Applied,
+        event_fields: EventFields<'_>,
+    ) -> Result<Updated> {
+        let domain::Applied {
+            task: next,
+            force_reason,
+        } = applied;
+        let EventFields {
+            actor,
+            comment,
+            now_ms,
+        } = event_fields;
+        self.touch_actor(&mut txn, actor, next.id, now_ms)?;
+        self.replace_indexes(&mut txn, old, &next)?;
         let recipient = if next.assignee != old.assignee {
             next.assignee.clone()
         } else {
             None
         };
         let mut payload = serde_json::Map::new();
-        payload.insert("changes".into(), changes(&old, &next)?);
-        if let Some(reason) = applied.force_reason {
+        payload.insert("changes".into(), changes(old, &next)?);
+        if let Some(reason) = force_reason {
             payload.insert("reason".into(), reason.into());
         }
-        if let Some(comment) = input.comment {
+        if let Some(comment) = comment {
             payload.insert("comment".into(), comment.into());
         }
         let event = Event {
             seq: 0,
-            task_id: input.id,
-            actor: input.actor.to_owned(),
+            task_id: next.id,
+            actor: actor.to_owned(),
             kind: EventKind::Updated,
-            timestamp_ms: input.now_ms,
+            timestamp_ms: now_ms,
             recipient,
             payload: payload.into(),
         };
         self.tasks
-            .put(&mut txn, &keys::task(input.id), &serde_json::to_vec(&next)?)?;
-        let event = self.append_event(&mut txn, &mut metadata, event)?;
-        write_metadata(self.meta, &mut txn, &metadata)?;
+            .put(&mut txn, &keys::task(next.id), &serde_json::to_vec(&next)?)?;
+        let event = self.append_event(&mut txn, metadata, event)?;
+        write_metadata(self.meta, &mut txn, metadata)?;
         txn.commit()?;
         Ok(Updated { task: next, event })
     }

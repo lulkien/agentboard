@@ -341,5 +341,61 @@ has "epic wait shows the first child's move" "updated  T2" "$out"
 has "epic wait needed the last child" "updated  T3" "$out"
 lacks "epic wait hides the umbrella row itself" "T1 todo" "$out"
 
+# --- release: one verb returns a dead holder's row to todo -----------------
+fresh release
+"$B" add "held by a dead seat" >/dev/null
+"$B" update 1 --if-revision 1 --status in_progress --assignee coder --new-actor >/dev/null
+out=$("$B" update 1 --if-revision 2 --release --force --reason "the coder seat hit its quota" \
+      --comment "back in the pool for another seat"); code=$?
+check "forced release exit" 0 "$code"
+check "forced release starts with ok" "ok" "$(printf '%s\n' "$out" | head -1)"
+check "forced release prints the todo record" \
+    "T1 todo         prio  100 -          held by a dead seat" "$(printf '%s\n' "$out" | sed -n '2p')"
+has "forced release bumps the revision" "revision 3" "$out"
+has "forced release prints a cursor" "cursor " "$out"
+has "forced release shows the comment in the feed" "back in the pool for another seat" "$("$B" feed --task 1 --kind updated)"
+check "forced release leaves no assignee on the row" "T1 todo         prio  100 -          held by a dead seat" "$("$B" ls | rg '^T1 ')"
+
+"$B" add "holder releases itself" >/dev/null
+"$B" update 2 --if-revision 1 --status in_progress --assignee coder >/dev/null
+out=$(AGENTBOARD_ACTOR=coder "$B" update 2 --if-revision 2 --release); code=$?
+check "holder release exit" 0 "$code"
+has "holder release returns the row" "T2 todo" "$out"
+has "holder release bumps the revision" "revision 3" "$out"
+
+out=$("$B" update 2 --if-revision 3 --release 2>&1); code=$?
+check "holder-less release exit" 1 "$code"
+check "holder-less release text" "agentboard: task T2 has no holder to release" "$out"
+
+"$B" add "finished" --status done >/dev/null
+out=$("$B" update 3 --if-revision 1 --release 2>&1); code=$?
+check "done row release exit" 1 "$code"
+check "done row release text" "agentboard: task T3 is done; nothing to release" "$out"
+
+"$B" add "still held" >/dev/null
+"$B" update 4 --if-revision 1 --status in_progress --assignee coder >/dev/null
+out=$("$B" update 4 --if-revision 2 --release --status todo 2>&1); code=$?
+check "--release with --status exit" 1 "$code"
+has "--release with --status text" "choose --release or --status/--assignee/--clear-assignee, not both" "$out"
+out=$("$B" update 4 --if-revision 2 --release --assignee bob 2>&1); code=$?
+check "--release with --assignee exit" 1 "$code"
+out=$("$B" update 4 --if-revision 2 --release --priority 5 2>&1); code=$?
+check "--release with --priority exit" 1 "$code"
+check "--release with --priority text" \
+    "agentboard: choose --release or a field change, not both" "$out"
+check "--release with --priority changes nothing" \
+    "T4 in_progress  prio  100 coder      still held" "$("$B" ls | rg '^T4 ')"
+out=$(AGENTBOARD_ACTOR=other "$B" update 4 --if-revision 2 --title "stolen" 2>&1); code=$?
+check "foreign write on a live holder exit" 1 "$code"
+has "held refusal names both recoverable paths" \
+    "held by coder; --force with a reason takes it, or --release --force with a reason returns it to todo" "$out"
+out=$("$B" update 4 --if-revision 2 --release --force 2>&1); code=$?
+check "forced release without a reason exit" 1 "$code"
+has "forced release without a reason text" "forced update requires a reason" "$out"
+out=$("$B" update 4 --if-revision 2 --release --force --reason "the reviewer seat owns this now"); code=$?
+check "forced release with a reason and no comment exit" 0 "$code"
+has "forced release shows the reason in the feed" \
+    "| the reviewer seat owns this now" "$("$B" feed --task 4 --kind updated)"
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]

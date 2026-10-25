@@ -102,7 +102,8 @@ refuses `task T7 does not exist`. Reads append no events.
 {"id": 7, "if_revision": 3, "title": "...", "description": "...", "goal": "...",
  "status": "review", "priority": 20, "assignee": "...", "clear_assignee": false,
  "parent": 2, "clear_parent": false, "path": "...", "clear_path": false,
- "force": false, "reason": "quota", "comment": "optional", "new_actor": false}
+ "release": false, "force": false, "reason": "quota", "comment": "optional",
+ "new_actor": false}
 ```
 
 Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
@@ -115,6 +116,16 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
   reason is recorded in the event.
 - `assignee` together with `clear_assignee` refuses, and likewise for `parent` and
   `path`: pick one.
+- `release: true` puts a held row back in `todo` with no assignee, in one write: the
+  revision moves, and one `updated` event carries `reason` and any `comment`. The
+  holder may release its own row; another actor needs `force` with a reason, as for
+  any other protected write. It cannot be combined with any field change —
+  `status`, `assignee`, `clear_assignee`, `title`, `description`, `goal`,
+  `priority`, `parent`, `clear_parent`, `path` or `clear_path` — which refuses with
+  `choose release or a field change, not both`; only `force`, `reason` and `comment`
+  ride along. A terminal row and a row without an owner refuse by name. The
+  event kind is unchanged and no field is added, so an older binary still reads the
+  row.
 - A comment with no field change is a comment: it lands as a `commented` event and the
   revision stays put, so a displaced holder can still leave notes.
 - No field change and no comment is `task update has no field changes`.
@@ -237,10 +248,12 @@ Every refusal is one line with a stable prefix. Over MCP a refusal is a JSON-RPC
 actor required: pass --actor or set AGENTBOARD_ACTOR (names are board addresses)
 unknown task status: "queued"
 stale task revision 3; current revision is 4
-task is held by alice
+task is held by alice; --force with a reason takes it, or --release --force with a reason returns it to todo
 forced update requires a reason
 force reason requires force=true
 task update has no field changes
+task T7 is done; nothing to release
+task T7 has no holder to release
 unknown assignee "nobody"; use new_actor=true to register the target
 comment must be nonempty
 task T4 does not exist

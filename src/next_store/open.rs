@@ -108,6 +108,11 @@ pub enum Error {
     WaitWithoutTask,
     UnknownAssignee(String),
     MissingTask(u64),
+    NotReleasable {
+        id: u64,
+        status: domain::Status,
+    },
+    NoHolder(u64),
     NotEpic(u64),
     EpicOpenChildren {
         id: u64,
@@ -153,6 +158,10 @@ impl std::fmt::Display for Error {
             Self::WaitWithoutTask => f.write_str("wait needs at least one task id"),
             Self::UnknownAssignee(name) => write!(f, "unknown assignee {name:?}; use new_actor=true to register the target"),
             Self::MissingTask(id) => write!(f, "task T{id} does not exist"),
+            Self::NotReleasable { id, status } => {
+                write!(f, "task T{id} is {}; nothing to release", status.as_str())
+            }
+            Self::NoHolder(id) => write!(f, "task T{id} has no holder to release"),
             Self::NotEpic(id) => write!(f, "task T{id} is not an epic; an epic is a task with children"),
             Self::EpicOpenChildren { id, count } => write!(f, "epic T{id} has {count} open children; close or drop them first"),
             Self::MissingParent(id) => write!(f, "parent T{id} does not exist"),

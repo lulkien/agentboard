@@ -314,6 +314,55 @@ def main():
             check("wait without ids code", -32602, reply.get("error", {}).get("code"))
             check("wait without ids message", "wait needs at least one task id", reply.get("error", {}).get("message"))
             print("task_wait: matched:, timeout:, and -32602 refusals")
+
+        # task_update release: a dead holder's row returns to todo in one write.
+        with Server(os.path.join(scratch, "release"), "manager") as releases:
+            releases.start()
+            releases.call("task_add", {"title": "held by a dead seat"})
+            releases.call(
+                "task_update",
+                {"id": 1, "if_revision": 1, "status": "in_progress", "assignee": "coder", "new_actor": True},
+            )
+            reply = releases.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 2, "release": True}})
+            check("foreign release without force code", -32602, reply.get("error", {}).get("code"))
+            has("foreign release names the holder", "held by coder", reply.get("error", {}).get("message", ""))
+            is_error, before = releases.call("task_get", {"id": 1})
+            reply = releases.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 2, "release": True}})
+            _, after = releases.call("task_get", {"id": 1})
+            check("a refused release changes nothing", before, after)
+            is_error, body = releases.call(
+                "task_update",
+                {"id": 1, "if_revision": 2, "release": True, "force": True, "reason": "the coder seat hit its quota", "comment": "back in the pool"},
+            )
+            check("forced release is not an error", False, is_error)
+            check("forced release prints ok", "ok", body.splitlines()[0])
+            has("forced release returns the todo record", "T1 todo", body)
+            has("forced release clears the assignee", "prio  100 -          held by a dead seat", body)
+            has("forced release bumps the revision", "revision 3", body)
+            has("forced release prints a cursor", "cursor ", body)
+            _, feed = releases.call("board_feed", {"kind": "updated", "full": True})
+            has("release event carries the comment", "back in the pool", feed)
+            reply = releases.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 3, "release": True}})
+            check("holder-less release code", -32602, reply.get("error", {}).get("code"))
+            check("holder-less release message", "task T1 has no holder to release", reply.get("error", {}).get("message"))
+            reply = releases.send(
+                "tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 3, "release": True, "status": "todo"}}
+            )
+            check("release with status code", -32602, reply.get("error", {}).get("code"))
+            has("release with status names the choice", "not both", reply.get("error", {}).get("message", ""))
+            is_error, before = releases.call("task_get", {"id": 1})
+            reply = releases.send(
+                "tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 3, "release": True, "priority": 5}}
+            )
+            check("release with a field flag code", -32602, reply.get("error", {}).get("code"))
+            check(
+                "release with a field flag message",
+                "choose release or a field change, not both",
+                reply.get("error", {}).get("message"),
+            )
+            _, after = releases.call("task_get", {"id": 1})
+            check("a release with a field flag changes nothing", before, after)
+            print("task_update release: todo record, -32602 held and holder-less refusals")
     finally:
         server.close()
 

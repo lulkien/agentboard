@@ -15,8 +15,8 @@ use serde::Deserialize;
 use crate::domain::{EventKind, NewTask, Status, TaskPatch};
 use crate::render;
 use crate::store::{
-    Board as BoardHandle, ClaimOutcome, FeedFilter, ListFilter, UpdateInput, WAIT_MAX_MS, WaitSpec,
-    parse_status_csv,
+    Board as BoardHandle, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput, UpdateInput,
+    WAIT_MAX_MS, WaitSpec, parse_status_csv,
 };
 
 const NAME: &str = "agentboard";
@@ -145,6 +145,9 @@ pub struct UpdateArgs {
     pub path: Option<String>,
     #[serde(default)]
     pub clear_path: bool,
+    /// Return the row to todo and clear its owner, in one write
+    #[serde(default)]
+    pub release: bool,
     /// Override another actor's protected task
     #[serde(default)]
     pub force: bool,
@@ -353,7 +356,7 @@ impl Board {
     )]
     async fn task_update(
         &self,
-        Parameters(args): Parameters<UpdateArgs>,
+        Parameters(mut args): Parameters<UpdateArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = self.actor_name().map_err(err)?;
         let status = match args.status.as_deref() {
@@ -368,6 +371,51 @@ impl Board {
         }
         if args.path.is_some() && args.clear_path {
             return Err(err("choose path or clear_path, not both".into()));
+        }
+        if args.release && (status.is_some() || args.assignee.is_some() || args.clear_assignee) {
+            return Err(err(
+                "choose release or status/assignee/clear_assignee, not both".into(),
+            ));
+        }
+        // A release writes the row itself; a field flag beside it would be read
+        // and discarded, so name the conflict instead of dropping the argument.
+        if args.release
+            && (args.title.is_some()
+                || args.description.is_some()
+                || args.goal.is_some()
+                || args.priority.is_some()
+                || args.parent.is_some()
+                || args.clear_parent
+                || args.path.is_some()
+                || args.clear_path)
+        {
+            return Err(err("choose release or a field change, not both".into()));
+        }
+        if args.release {
+            // Taken, not borrowed: the closure below owns what it sends, and the
+            // field path that follows is unreachable once `release` is set.
+            let reason = args.reason.take();
+            let comment = args.comment.take();
+            let released = blocking(&self.board, move |board| {
+                board
+                    .release(ReleaseInput {
+                        id: args.id,
+                        actor: &actor,
+                        expected_revision: args.if_revision,
+                        force: args.force,
+                        force_reason: reason.as_deref(),
+                        comment: comment.as_deref(),
+                        now_ms: now_ms(),
+                    })
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(err)?;
+            return Ok(text(format!(
+                "ok\n{}\ncursor {}",
+                render::task_record(&released.task, false),
+                released.event.seq
+            )));
         }
         let patch = TaskPatch {
             title: args.title,

@@ -107,6 +107,9 @@ pub enum Cmd {
         path: Option<String>,
         #[arg(long)]
         clear_path: bool,
+        /// Return the row to todo and clear its owner, in one write
+        #[arg(long)]
+        release: bool,
         /// Override another actor's protected task
         #[arg(long)]
         force: bool,

@@ -65,7 +65,7 @@ agentboard epic ID
 agentboard update ID --if-revision N
               [--title|--description|--goal|--status|--priority|--assignee|
                --clear-assignee|--parent|--clear-parent|--path|--clear-path]
-              [--force --reason R] [--comment TEXT] [--new-actor]
+              [--release] [--force --reason R] [--comment TEXT] [--new-actor]
 agentboard claim [ID]
 agentboard comment ID (--body TEXT | --body-file PATH|-)
 agentboard feed [--after CURSOR] [--kind K] [--recipient NAME] [--task ID]
@@ -89,6 +89,11 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   value refuses and prints both numbers. Changing another actor's task requires
   `--force` and a non-empty `--reason`; force without a reason refuses, and a
   reason without force refuses.
+- `update --release` sends a held row back to `todo` with no owner, in one write:
+  one revision bump and one `updated` event carrying `--reason` and `--comment`.
+  No field flag rides along: `--status`, `--assignee`, `--clear-assignee`,
+  `--title`, `--description`, `--goal`, `--priority`, `--parent`, `--clear-parent`,
+  `--path` or `--clear-path` beside it refuses; pick one or the other.
 - `comment` appends an event and never moves the revision.
 - `epic` shows a task's direct-child status counts and done/total progress. Epics
   are derived from parent links; any task with children is an epic, including a
@@ -121,9 +126,10 @@ timeout. A refusal prints one line naming the field, the value and what to do:
 
 ```
 agentboard: stale task revision 3; current revision is 4
-agentboard: task is held by alice
+agentboard: task is held by alice; --force with a reason takes it, or --release --force with a reason returns it to todo
 agentboard: forced update requires a reason
 agentboard: unknown assignee "nobody"; use new_actor=true to register the target
+agentboard: task T7 has no holder to release
 ```
 
 ## Quota take-over
@@ -135,6 +141,18 @@ reassigns the task with the current revision, `--force` and a reason.
 agentboard get 12           # revision 3, held by coder-1
 agentboard update 12 --if-revision 3 --assignee coder-2 --force --reason quota
 ```
+
+When nobody should take the row over, the same verb sends it back to the queue:
+
+```bash
+agentboard update 12 --if-revision 3 --release --force --reason "coder-1 is gone"
+```
+
+That one call makes the row `todo`, clears its owner and records the reason, so the
+next `claim` can pick it up. The holder may release its own row without `--force`;
+any other name needs the force and the reason, exactly as above, so a live holder is
+never stripped silently. A `done` or `canceled` row answers `nothing to release`, and
+a row with no owner answers `no holder to release`.
 
 The displaced holder's field writes now refuse; its comments still land. The
 replacement resumes from the artifact the row names, and the event trail shows the

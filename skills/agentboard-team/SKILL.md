@@ -139,7 +139,7 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
 | `task_list` | status, assignee, parent, path; `all=true` includes closed rows |
 | `task_get` | one task and its revision; `full=true` for stored text |
 | `task_epic` | umbrella row, direct-child counts and done/total progress |
-| `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override |
+| `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override; `release` to return a held row to `todo` |
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
 | `task_wait` | block until named rows (or an epic's children) reach a status |
@@ -187,7 +187,19 @@ The event carries `recipient`, which is what wakes the next seat. Move the statu
 the same call: `review` with `assignee="reviewer"`, `in_progress` back with
 `assignee="coder"`.
 
-When a holder runs out of quota:
+When a holder is gone for good — out of quota, its seat replaced by another name —
+send the row back instead of handing it over:
+
+```bash
+agentboard get 12                                     # revision 3, held by coder
+agentboard update 12 --if-revision 3 --release --force --reason "the coder seat is gone"
+```
+
+One call, one event: the row is `todo` with nobody on it, ready for `claim` again.
+The holder itself releases without `--force`; every other name needs the force and
+the reason, so nobody strips a live holder's row by accident.
+
+When the row must change hands rather than go back to the queue, reassign it:
 
 ```bash
 agentboard get 12                       # revision 3, held by coder

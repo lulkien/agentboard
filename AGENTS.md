@@ -19,15 +19,15 @@ Everything is offline and uses scratch boards; there is no server to start and n
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 69 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 74 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no output |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `167/167 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `107/107 passed (mcp, lmdb)` |
+| `bash tests/cli.sh` | `193/193 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `124/124 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 21 pages, 86 CLI names, 165 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 21 pages, 95 CLI names, 165 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; debug ceiling 25 ms, release 5 ms |
 
@@ -42,8 +42,8 @@ update the expectation here.
 
 - `src/domain.rs` — task, status, patch, claim and event rules; no I/O, no printing.
 - `src/next_store/` (module `store`) — the LMDB store: `open` (Board, options, reset,
-  lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/claim/comment,
-  index upkeep, events), `feed` (cursors, filters, bounded wait), `wait` (per-row
+  lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/release/claim/
+  comment, index upkeep, events), `feed` (cursors, filters, bounded wait), `wait` (per-row
   blocking wait that re-queries its watched set), `list` (list, brief),
   `tests`/`m3_tests` (store proofs).
 - `src/render.rs` — the only place compact text is built, including the `…`

@@ -9,8 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::domain::{Error as DomainError, EventKind, NewTask, Status, TaskPatch};
 
 use super::{
-    Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, UpdateInput, WAIT_MAX_MS,
-    WaitSpec, parse_status_csv,
+    Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, ReleaseInput, UpdateInput,
+    WAIT_MAX_MS, WaitSpec, parse_status_csv,
 };
 
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
@@ -290,6 +290,261 @@ fn forced_own_task_records_the_reason_without_a_handoff() {
     assert_eq!(updated.event.payload["reason"], "manager correction");
     assert_eq!(updated.event.recipient, None);
     assert_eq!(updated.task.assignee.as_deref(), Some("alice"));
+}
+
+#[test]
+fn holder_releases_a_row_to_todo_in_one_write() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let task = board
+        .add(
+            "manager",
+            draft("work", Status::Todo, 5, Some("alice")),
+            true,
+            0,
+        )
+        .unwrap()
+        .task;
+    let ClaimOutcome::Claimed(claimed) = board.claim("alice", Some(task.id), 1).unwrap() else {
+        panic!("alice must claim her row");
+    };
+    assert_eq!(claimed.task.revision, 2);
+    let before = board.metadata().unwrap();
+    let released = board
+        .release(ReleaseInput {
+            id: task.id,
+            actor: "alice",
+            expected_revision: 2,
+            force: false,
+            force_reason: None,
+            comment: Some("handing it back; this pane is going away"),
+            now_ms: 2,
+        })
+        .unwrap();
+    assert_eq!(released.task.status, Status::Todo);
+    assert_eq!(released.task.assignee, None);
+    assert_eq!(released.task.revision, 3);
+    assert_eq!(released.event.kind, EventKind::Updated);
+    assert_eq!(released.event.actor, "alice");
+    assert_eq!(released.event.task_id, task.id);
+    assert_eq!(
+        released.event.payload["comment"],
+        "handing it back; this pane is going away"
+    );
+    assert_eq!(released.event.payload["changes"]["status"]["new"], "todo");
+    assert_eq!(
+        released.event.payload["changes"]["assignee"]["new"],
+        serde_json::Value::Null
+    );
+    // A release wakes nobody: the row has no new owner to notify.
+    assert_eq!(released.event.recipient, None);
+    let after = board.metadata().unwrap();
+    assert_eq!(after.next_event_seq, before.next_event_seq + 1);
+    // Both indexes agree with the new record.
+    let mut filter = list_all();
+    filter.status = Some(Status::Todo);
+    assert_eq!(
+        board
+            .list(&filter)
+            .unwrap()
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
+        vec![task.id]
+    );
+    filter.status = None;
+    filter.assignee = Some("alice");
+    assert!(board.list(&filter).unwrap().tasks.is_empty());
+    assert_eq!(
+        board.agent("alice").unwrap().unwrap().last_task_id,
+        Some(task.id)
+    );
+}
+
+#[test]
+fn foreign_release_without_force_refuses_and_changes_nothing() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let task = board
+        .add(
+            "manager",
+            draft("work", Status::Todo, 5, Some("alice")),
+            true,
+            0,
+        )
+        .unwrap()
+        .task;
+    board.claim("alice", Some(task.id), 1).unwrap();
+    let before_task = board.get(task.id).unwrap().unwrap();
+    let before_meta = board.metadata().unwrap();
+    assert!(matches!(
+        board.release(ReleaseInput {
+            id: task.id,
+            actor: "bob",
+            expected_revision: 2,
+            force: false,
+            force_reason: None,
+            comment: Some("taking this back"),
+            now_ms: 2,
+        }),
+        Err(Error::Domain(DomainError::Held { holder })) if holder == "alice"
+    ));
+    assert_eq!(board.get(task.id).unwrap().unwrap(), before_task);
+    assert_eq!(board.metadata().unwrap(), before_meta);
+}
+
+#[test]
+fn forced_release_records_the_reason() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let task = board
+        .add(
+            "manager",
+            draft("work", Status::Todo, 5, Some("alice")),
+            true,
+            0,
+        )
+        .unwrap()
+        .task;
+    board.claim("alice", Some(task.id), 1).unwrap();
+    assert!(matches!(
+        board.release(ReleaseInput {
+            id: task.id,
+            actor: "manager",
+            expected_revision: 2,
+            force: true,
+            force_reason: Some("   "),
+            comment: None,
+            now_ms: 2,
+        }),
+        Err(Error::Domain(DomainError::MissingForceReason))
+    ));
+    assert!(matches!(
+        board.release(ReleaseInput {
+            id: task.id,
+            actor: "manager",
+            expected_revision: 2,
+            force: false,
+            force_reason: Some("quota"),
+            comment: None,
+            now_ms: 2,
+        }),
+        Err(Error::Domain(DomainError::ForceReasonWithoutForce))
+    ));
+    let released = board
+        .release(ReleaseInput {
+            id: task.id,
+            actor: "manager",
+            expected_revision: 2,
+            force: true,
+            force_reason: Some("the seat ran out of quota"),
+            comment: None,
+            now_ms: 3,
+        })
+        .unwrap();
+    assert_eq!(released.task.status, Status::Todo);
+    assert_eq!(released.task.assignee, None);
+    assert_eq!(released.task.revision, 3);
+    assert_eq!(
+        released.event.payload["reason"],
+        "the seat ran out of quota"
+    );
+}
+
+#[test]
+fn blocked_row_with_a_holder_releases_to_todo() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let task = board
+        .add(
+            "manager",
+            draft("stuck", Status::Blocked, 5, Some("alice")),
+            true,
+            0,
+        )
+        .unwrap()
+        .task;
+    let released = board
+        .release(ReleaseInput {
+            id: task.id,
+            actor: "alice",
+            expected_revision: 1,
+            force: false,
+            force_reason: None,
+            comment: None,
+            now_ms: 1,
+        })
+        .unwrap();
+    assert_eq!(released.task.status, Status::Todo);
+    assert_eq!(released.task.assignee, None);
+    assert_eq!(released.task.revision, 2);
+    assert_eq!(
+        released.event.payload["changes"]["status"]["old"],
+        "blocked"
+    );
+}
+
+#[test]
+fn terminal_and_holderless_rows_refuse_a_release_without_writing() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let closed = board
+        .add(
+            "manager",
+            draft("closed", Status::Done, 5, Some("manager")),
+            false,
+            0,
+        )
+        .unwrap()
+        .task;
+    let free = board
+        .add("manager", draft("free", Status::Todo, 4, None), false, 1)
+        .unwrap()
+        .task;
+    let before_meta = board.metadata().unwrap();
+    assert!(matches!(
+        board.release(ReleaseInput {
+            id: closed.id,
+            actor: "manager",
+            expected_revision: 1,
+            force: true,
+            force_reason: Some("tidy up"),
+            comment: Some("nothing to release"),
+            now_ms: 2,
+        }),
+        Err(Error::NotReleasable {
+            id,
+            status: Status::Done
+        }) if id == closed.id
+    ));
+    assert!(matches!(
+        board.release(ReleaseInput {
+            id: free.id,
+            actor: "manager",
+            expected_revision: 1,
+            force: false,
+            force_reason: None,
+            comment: Some("nobody holds this"),
+            now_ms: 3,
+        }),
+        Err(Error::NoHolder(id)) if id == free.id
+    ));
+    assert_eq!(board.metadata().unwrap(), before_meta);
+    assert_eq!(board.get(closed.id).unwrap().unwrap(), closed);
+    assert_eq!(board.get(free.id).unwrap().unwrap(), free);
+    assert_eq!(
+        Error::NotReleasable {
+            id: 7,
+            status: Status::Canceled
+        }
+        .to_string(),
+        "task T7 is canceled; nothing to release"
+    );
+    assert_eq!(
+        Error::NoHolder(7).to_string(),
+        "task T7 has no holder to release"
+    );
 }
 
 #[test]
