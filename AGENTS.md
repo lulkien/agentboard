@@ -35,7 +35,7 @@ and uses scratch boards; there is no server to start and no `surreal` binary any
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 75 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 82 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` | `193/193 passed (cli, lmdb)` |
@@ -105,7 +105,10 @@ have both adapters call it, so a rule exists once.
   frozen id list misses a child filed mid-epic, and an any-row match turns "every
   child terminal" into "the first child finished". Both mutations are caught by the
   wait proofs in `tests.rs`/`m3_tests.rs` and `tests/cli.sh`. One row contributes at
-  most `MAX_WAIT_EVENTS` event lines; the rest are counted, never printed.
+  most `MAX_WAIT_EVENTS` event lines; the rest are counted, never printed. The
+  optional assignee branch is the opposite shape: ANY watched row, decided from
+  `updated` events with a recipient after the watermark, scanning past the event
+  cap. Do not make it ALL-rows or read it from current state.
 - Full text must never go through the compact renderer: no title clip, no
   whitespace collapse. A reader that asks for full text gets stored bytes.
 - Tool counts in `src/server.rs` (first line), `README.md`, `PROTOCOL.md`, this file

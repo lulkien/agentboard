@@ -572,6 +572,7 @@ impl Board {
                     statuses: &statuses,
                     after: None,
                     timeout_ms: timeout_s.saturating_mul(1000),
+                    assignee: None,
                 })
                 .map_err(|e| e.to_string())
         })

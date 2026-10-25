@@ -9,8 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::domain::{Error as DomainError, EventKind, NewTask, Status, TaskPatch};
 
 use super::{
-    Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, ReleaseInput, UpdateInput,
-    WAIT_MAX_MS, WaitSpec, parse_status_csv,
+    AssigneeMatch, Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, ReleaseInput,
+    UpdateInput, WAIT_MAX_MS, WaitSpec, parse_status_csv,
 };
 
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
@@ -1868,6 +1868,7 @@ fn wait_returns_at_once_for_a_row_already_in_a_wanted_status() {
             statuses: &done_and_canceled(),
             after: None,
             timeout_ms: 5_000,
+            assignee: None,
         })
         .unwrap();
     assert!(outcome.matched);
@@ -1923,6 +1924,7 @@ fn wait_returns_the_events_of_a_row_moved_during_the_wait() {
                 statuses: &done_and_canceled(),
                 after: None,
                 timeout_ms: 5_000,
+                assignee: None,
             })
             .unwrap()
     });
@@ -1977,6 +1979,7 @@ fn wait_caps_one_rows_event_lines_and_counts_the_rest_as_omitted() {
             statuses: &done_and_canceled(),
             after: Some(after.as_str()),
             timeout_ms: 5_000,
+            assignee: None,
         })
         .unwrap();
     assert!(outcome.matched);
@@ -2014,6 +2017,7 @@ fn wait_timeout_lists_every_row_with_its_real_status() {
             statuses: &done_and_canceled(),
             after: None,
             timeout_ms: 120,
+            assignee: None,
         })
         .unwrap();
     assert!(!outcome.matched);
@@ -2063,6 +2067,7 @@ fn wait_expands_an_epic_and_requeries_children_on_every_poll() {
             statuses: &[Status::Done],
             after: None,
             timeout_ms: 0,
+            assignee: None,
         }),
         Err(Error::NotEpic(2))
     ));
@@ -2073,6 +2078,7 @@ fn wait_expands_an_epic_and_requeries_children_on_every_poll() {
             statuses: &[Status::Done],
             after: None,
             timeout_ms: 0,
+            assignee: None,
         }),
         Err(Error::MissingTask(999))
     ));
@@ -2109,6 +2115,7 @@ fn wait_expands_an_epic_and_requeries_children_on_every_poll() {
                 statuses: &done_and_canceled(),
                 after: None,
                 timeout_ms: 5_000,
+                assignee: None,
             })
             .unwrap()
     });
@@ -2155,6 +2162,7 @@ fn wait_refuses_a_foreign_watermark_and_accepts_a_bare_sequence() {
             statuses: &done_and_canceled(),
             after: Some(foreign.as_str()),
             timeout_ms: 0,
+            assignee: None,
         }),
         Err(Error::CursorInstanceMismatch)
     ));
@@ -2165,6 +2173,7 @@ fn wait_refuses_a_foreign_watermark_and_accepts_a_bare_sequence() {
             statuses: &done_and_canceled(),
             after: Some("0"),
             timeout_ms: 0,
+            assignee: None,
         })
         .unwrap();
     assert!(outcome.matched);
@@ -2203,6 +2212,7 @@ fn wait_status_csv_is_trimmed_deduplicated_and_in_board_order() {
             statuses: &[],
             after: None,
             timeout_ms: 0,
+            assignee: None,
         }),
         Err(Error::WaitWithoutStatus)
     ));
@@ -2213,7 +2223,306 @@ fn wait_status_csv_is_trimmed_deduplicated_and_in_board_order() {
             statuses: &done_and_canceled(),
             after: None,
             timeout_ms: 0,
+            assignee: None,
         }),
         Err(Error::WaitWithoutTask)
+    ));
+}
+
+fn handoff_statuses() -> [Status; 3] {
+    [Status::Review, Status::Done, Status::Blocked]
+}
+
+/// The analyzer -> coder handoff: only the assignee changes, status stays put.
+fn reassign(board: &Board, id: u64, actor: &str, revision: u64, to: &str) {
+    board
+        .update(UpdateInput {
+            id,
+            actor,
+            expected_revision: revision,
+            patch: &TaskPatch {
+                assignee: Some(Some(to.into())),
+                ..TaskPatch::default()
+            },
+            force: false,
+            force_reason: None,
+            new_actor: true,
+            comment: None,
+            now_ms: 50,
+        })
+        .unwrap();
+}
+
+/// A row in progress held by the analyzer, waited on with `assignee`, while a
+/// second thread hands it to `to` after 80 ms.
+fn wait_through_a_handoff(
+    assignee: Option<AssigneeMatch<'_>>,
+    to: &str,
+    timeout_ms: u64,
+) -> super::WaitOutcome {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add(
+            "analyzer",
+            draft("plan me", Status::InProgress, 0, Some("analyzer")),
+            true,
+            0,
+        )
+        .unwrap();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(80));
+            reassign(&board, 1, "analyzer", 1, to);
+        });
+        board
+            .wait_tasks(&WaitSpec {
+                ids: &[1],
+                epic: false,
+                statuses: &handoff_statuses(),
+                after: None,
+                timeout_ms,
+                assignee,
+            })
+            .unwrap()
+    })
+}
+
+#[test]
+fn wait_matches_a_handoff_with_status_unchanged() {
+    let outcome = wait_through_a_handoff(Some(AssigneeMatch::Any), "coder", 5_000);
+    assert!(outcome.matched);
+    let row = &outcome.rows[0];
+    assert_eq!(row.task.status, Status::InProgress);
+    assert_eq!(row.task.assignee.as_deref(), Some("coder"));
+    assert_eq!(row.handed_to.as_deref(), Some("coder"));
+    assert_eq!(row.last, None);
+    assert!(
+        row.events
+            .iter()
+            .any(|event| event.kind == EventKind::Updated
+                && event.recipient.as_deref() == Some("coder")
+                && event.seq > outcome.since.seq)
+    );
+}
+
+#[test]
+fn wait_without_assignee_ignores_a_handoff() {
+    let outcome = wait_through_a_handoff(None, "coder", 300);
+    assert!(!outcome.matched);
+    let row = &outcome.rows[0];
+    assert_eq!(row.task.assignee.as_deref(), Some("coder"));
+    assert_eq!(row.handed_to, None);
+    assert!(row.events.is_empty());
+}
+
+#[test]
+fn wait_assignee_name_restricts_the_match() {
+    let missed = wait_through_a_handoff(Some(AssigneeMatch::To("reviewer")), "coder", 300);
+    assert!(!missed.matched);
+    assert_eq!(missed.rows[0].handed_to, None);
+    let hit = wait_through_a_handoff(Some(AssigneeMatch::To("coder")), "coder", 5_000);
+    assert!(hit.matched);
+    assert_eq!(hit.rows[0].handed_to.as_deref(), Some("coder"));
+}
+
+#[test]
+fn wait_assignee_ignores_handoffs_before_the_watermark_and_releases() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add(
+            "analyzer",
+            draft("plan me", Status::InProgress, 0, Some("analyzer")),
+            true,
+            0,
+        )
+        .unwrap();
+    // Handed off before the wait starts: the watermark is after it.
+    reassign(&board, 1, "analyzer", 1, "coder");
+    let before = board
+        .wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: false,
+            statuses: &handoff_statuses(),
+            after: None,
+            timeout_ms: 200,
+            assignee: Some(AssigneeMatch::Any),
+        })
+        .unwrap();
+    assert!(!before.matched);
+    assert_eq!(before.rows[0].handed_to, None);
+    // A release clears the assignee: its recipient is empty, so it is no handoff.
+    let released = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(80));
+            board
+                .release(ReleaseInput {
+                    id: 1,
+                    actor: "coder",
+                    expected_revision: 2,
+                    force: false,
+                    force_reason: None,
+                    comment: None,
+                    now_ms: 60,
+                })
+                .unwrap();
+        });
+        board
+            .wait_tasks(&WaitSpec {
+                ids: &[1],
+                epic: false,
+                statuses: &handoff_statuses(),
+                after: None,
+                timeout_ms: 300,
+                assignee: Some(AssigneeMatch::Any),
+            })
+            .unwrap()
+    });
+    assert!(!released.matched);
+    assert_eq!(released.rows[0].task.status, Status::Todo);
+    assert_eq!(released.rows[0].task.assignee, None);
+    assert_eq!(released.rows[0].handed_to, None);
+}
+
+#[test]
+fn wait_assignee_on_an_epic_matches_any_child() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add(
+            "manager",
+            draft("umbrella", Status::Todo, 0, None),
+            false,
+            0,
+        )
+        .unwrap();
+    for title in ["child one", "child two"] {
+        let mut child = draft(title, Status::Todo, 0, None);
+        child.parent_id = Some(1);
+        board.add("manager", child, false, 1).unwrap();
+    }
+    let epic_wait = |board: &Board| {
+        board
+            .wait_tasks(&WaitSpec {
+                ids: &[1],
+                epic: true,
+                statuses: &handoff_statuses(),
+                after: None,
+                timeout_ms: 5_000,
+                assignee: Some(AssigneeMatch::Any),
+            })
+            .unwrap()
+    };
+    // One child handed off is a match while the other is still todo: ANY row.
+    let one = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(80));
+            reassign(&board, 2, "manager", 1, "analyzer");
+        });
+        epic_wait(&board)
+    });
+    assert!(one.matched);
+    assert_eq!(
+        one.rows
+            .iter()
+            .map(|row| (row.task.id, row.task.status, row.handed_to.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![(2, Status::Todo, Some("analyzer")), (3, Status::Todo, None)]
+    );
+    // A child filed mid-wait and then handed off joins the watched set and matches.
+    let late = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(80));
+            let mut child = draft("child three", Status::Todo, 0, None);
+            child.parent_id = Some(1);
+            board.add("manager", child, false, 2).unwrap();
+            std::thread::sleep(Duration::from_millis(80));
+            reassign(&board, 4, "manager", 1, "coder");
+        });
+        epic_wait(&board)
+    });
+    assert!(late.matched);
+    assert_eq!(
+        late.rows
+            .iter()
+            .map(|row| (row.task.id, row.handed_to.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![(2, None), (3, None), (4, Some("coder"))]
+    );
+}
+
+#[test]
+fn wait_assignee_sees_a_handoff_past_the_event_cap() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add(
+            "analyzer",
+            draft("chatty", Status::InProgress, 0, Some("analyzer")),
+            true,
+            0,
+        )
+        .unwrap();
+    let watermark = board.cursor_now().unwrap();
+    for step in 0..25 {
+        board
+            .comment("analyzer", 1, &format!("note {step}"), 1 + step)
+            .unwrap();
+    }
+    reassign(&board, 1, "analyzer", 1, "coder");
+    let after = watermark.encode();
+    let outcome = board
+        .wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: false,
+            statuses: &handoff_statuses(),
+            after: Some(after.as_str()),
+            timeout_ms: 5_000,
+            assignee: Some(AssigneeMatch::Any),
+        })
+        .unwrap();
+    assert!(outcome.matched);
+    let row = &outcome.rows[0];
+    assert_eq!(row.handed_to.as_deref(), Some("coder"));
+    // The handoff is the 26th fresh event, past the 20-line window.
+    assert_eq!(row.events.len(), super::MAX_WAIT_EVENTS);
+    assert_eq!(row.omitted, 6);
+    assert!(
+        row.events
+            .iter()
+            .all(|event| event.kind == EventKind::Commented)
+    );
+}
+
+#[test]
+fn wait_assignee_refusals() {
+    let scratch = Scratch::new();
+    let other = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let elsewhere = Board::open_with_options(other.path(), options()).unwrap();
+    board
+        .add("manager", draft("open", Status::Todo, 0, None), false, 0)
+        .unwrap();
+    let spec = |assignee, after| WaitSpec {
+        ids: &[1],
+        epic: false,
+        statuses: &[Status::Done],
+        after,
+        timeout_ms: 0,
+        assignee: Some(assignee),
+    };
+    assert!(matches!(
+        board.wait_tasks(&spec(AssigneeMatch::To(""), None)),
+        Err(Error::Domain(DomainError::EmptyActor))
+    ));
+    assert!(matches!(
+        board.wait_tasks(&spec(AssigneeMatch::To(" coder"), None)),
+        Err(Error::Domain(DomainError::InvalidActor))
+    ));
+    let foreign = elsewhere.cursor_now().unwrap().encode();
+    assert!(matches!(
+        board.wait_tasks(&spec(AssigneeMatch::Any, Some(foreign.as_str()))),
+        Err(Error::CursorInstanceMismatch)
     ));
 }

@@ -359,6 +359,7 @@ fn run(
                     statuses: &statuses,
                     after: None,
                     timeout_ms: timeout.saturating_mul(1000),
+                    assignee: None,
                 })
                 .map_err(|e| e.to_string())?;
             let code = if outcome.matched {

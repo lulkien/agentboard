@@ -1,9 +1,10 @@
 //! Per-row blocking wait: re-query the watched rows until every one of them is in
-//! a wanted status, or the deadline expires.
+//! a wanted status, any one of them is handed off (when asked), or the deadline
+//! expires.
 
 use std::time::{Duration, Instant};
 
-use crate::domain::{Event, Status, Task};
+use crate::domain::{Event, EventKind, Status, Task, validate_actor};
 
 use super::feed::Cursor;
 use super::keys;
@@ -28,6 +29,20 @@ pub struct WaitSpec<'a> {
     pub after: Option<&'a str>,
     /// 0 blocks until a match; there is no cap here.
     pub timeout_ms: u64,
+    /// `None` keeps the status-only ALL predicate. `Some` also matches when ANY
+    /// watched row is reassigned after the watermark.
+    pub assignee: Option<AssigneeMatch<'a>>,
+}
+
+/// Which handoffs end an assignee wait. A handoff is an `updated` event whose
+/// recipient is set: the assignee changed to a named actor. A release clears the
+/// assignee, so its recipient is empty and it is never a handoff.
+#[derive(Clone, Copy, Debug)]
+pub enum AssigneeMatch<'a> {
+    /// A handoff to anybody.
+    Any,
+    /// A handoff to this actor only.
+    To(&'a str),
 }
 
 pub struct WaitRow {
@@ -40,6 +55,9 @@ pub struct WaitRow {
     /// Events after the watermark that `MAX_WAIT_EVENTS` left out; 0 for a row
     /// that was already wanted.
     pub omitted: usize,
+    /// The new assignee of this row's first handoff after the watermark; `None`
+    /// without an assignee match, without a handoff, or on a timeout.
+    pub handed_to: Option<String>,
 }
 
 pub struct WaitOutcome {
@@ -83,10 +101,11 @@ struct Poll {
 }
 
 impl Board {
-    /// Block until every watched row is in one of `spec.statuses`, or the deadline
-    /// expires. The watched set is re-resolved on every poll, so a child added
-    /// mid-epic joins the set. Each poll opens one read transaction and drops it
-    /// before sleeping, so a parked waiter holds nothing and blocks no writer.
+    /// Block until every watched row is in one of `spec.statuses`, any watched row
+    /// is handed off when `spec.assignee` asks for it, or the deadline expires.
+    /// The watched set is re-resolved on every poll, so a child added mid-epic
+    /// joins the set. Each poll opens one read transaction and drops it before
+    /// sleeping, so a parked waiter holds nothing and blocks no writer.
     pub fn wait_tasks(&self, spec: &WaitSpec<'_>) -> Result<WaitOutcome> {
         if spec.statuses.is_empty() {
             return Err(Error::WaitWithoutStatus);
@@ -96,6 +115,9 @@ impl Board {
         }
         let wanted = ordered(spec.statuses);
         let since = self.wait_watermark(spec.after)?;
+        if let Some(AssigneeMatch::To(name)) = spec.assignee {
+            validate_actor(name)?;
+        }
         let deadline = (spec.timeout_ms != 0).then(|| Duration::from_millis(spec.timeout_ms));
         let started = Instant::now();
         loop {
@@ -152,21 +174,31 @@ impl Board {
         let txn = self.env.read_txn()?;
         let metadata = self.checked_metadata(&txn)?;
         let mut rows = Vec::new();
-        let mut matched = true;
+        // The status branch is ALL rows; the handoff branch is ANY row, because
+        // one handoff is one seat to prompt.
+        let mut all_wanted = true;
+        let mut handed_off = false;
         for id in self.watched_ids(&txn, spec)? {
             let task = self
                 .read_task_in_txn(&txn, id)?
                 .ok_or(Error::Corrupt("watched task disappeared"))?;
             if !wanted.contains(&task.status) {
-                matched = false;
+                all_wanted = false;
             }
+            let handed_to = match spec.assignee {
+                Some(target) => self.handoff(&txn, id, since, target)?,
+                None => None,
+            };
+            handed_off |= handed_to.is_some();
             rows.push(WaitRow {
                 task,
                 events: Vec::new(),
                 last: None,
                 omitted: 0,
+                handed_to,
             });
         }
+        let matched = all_wanted || handed_off;
         let cursor = Cursor {
             instance_id: metadata.instance_id,
             seq: metadata.next_event_seq.saturating_sub(1),
@@ -222,12 +254,7 @@ impl Board {
             .prefix_iter(txn, &keys::task(row.task.id))?
         {
             let (key, _) = entry?;
-            let bytes: [u8; 8] = key
-                .get(8..16)
-                .ok_or(Error::Corrupt("invalid event index key"))?
-                .try_into()
-                .map_err(|_| Error::Corrupt("invalid event index key"))?;
-            let seq = u64::from_be_bytes(bytes);
+            let seq = index_seq(key)?;
             if seq > since.seq {
                 fresh.push(seq);
             } else {
@@ -251,10 +278,51 @@ impl Board {
         Ok(())
     }
 
+    /// The new assignee of a row's first handoff after the watermark that
+    /// `target` accepts. It reads every fresh event, not the `MAX_WAIT_EVENTS`
+    /// window, so a handoff behind a burst of comments still counts.
+    fn handoff(
+        &self,
+        txn: &heed::RoTxn<'_>,
+        id: u64,
+        since: &Cursor,
+        target: AssigneeMatch<'_>,
+    ) -> Result<Option<String>> {
+        for entry in self.events_by_task.prefix_iter(txn, &keys::task(id))? {
+            let (key, _) = entry?;
+            let seq = index_seq(key)?;
+            if seq <= since.seq {
+                continue;
+            }
+            let event = self.wait_event(txn, seq)?;
+            if event.kind != EventKind::Updated {
+                continue;
+            }
+            let Some(recipient) = event.recipient else {
+                continue;
+            };
+            match target {
+                AssigneeMatch::To(name) if recipient != name => continue,
+                _ => return Ok(Some(recipient)),
+            }
+        }
+        Ok(None)
+    }
+
     fn wait_event(&self, txn: &heed::RoTxn<'_>, sequence: u64) -> Result<Event> {
         self.read_event_in_txn(txn, sequence)?
             .ok_or(Error::Corrupt("event index points to a missing event"))
     }
+}
+
+/// The event sequence stored in bytes 8..16 of an `events_by_task` key.
+fn index_seq(key: &[u8]) -> Result<u64> {
+    let bytes: [u8; 8] = key
+        .get(8..16)
+        .ok_or(Error::Corrupt("invalid event index key"))?
+        .try_into()
+        .map_err(|_| Error::Corrupt("invalid event index key"))?;
+    Ok(u64::from_be_bytes(bytes))
 }
 
 fn ordered(statuses: &[Status]) -> Vec<Status> {
