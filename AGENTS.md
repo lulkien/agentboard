@@ -27,24 +27,26 @@ place.
 
 ## Prove it
 
-Run these from the repo root. A change is not done until each prints what is beside it.
-Everything is offline and uses scratch boards; there is no server to start and no
-`surreal` binary anywhere.
+Run these from the repo root. A change is not done until each prints what is beside
+it. `bash scripts/gate.sh` runs the whole table in order, checks each line, and stops
+at the first failure; `--full` adds the ignored latency run. Everything is offline
+and uses scratch boards; there is no server to start and no `surreal` binary anywhere.
 
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
 | `cargo test --offline --lib` | `test result: ok. 74 passed; 0 failed; 1 ignored` |
-| `cargo clippy --offline --all-targets -- -D warnings` | no output |
+| `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` | `193/193 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `124/124 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 21 pages, 100 CLI names, 153 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 21 pages, 100 CLI names, 155 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
-| `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; debug ceiling 25 ms, release 5 ms |
+| `bash scripts/gate.sh` | `GATES OK: 11 gates passed`; with `--full` `GATES OK: 12 gates passed` |
+| `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 
 `AGENTBOARD_TEST_BIN` points any suite at another binary; the suites never touch a
 live board, because each one sets `AGENTBOARD_DB` to a fresh `mktemp` directory.
@@ -69,6 +71,8 @@ update the expectation here.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
 - `src/server.rs` — the MCP adapter, eleven tools, store work on `spawn_blocking`.
+- `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
+  and `tests/doc-names.py` are the two doc-drift gates it calls.
 
 Dependencies point one way: `main.rs` and `server.rs` call `store`; `store` never
 calls them. Store modules never print and never exit; the adapters render text and
@@ -104,14 +108,19 @@ have both adapters call it, so a rule exists once.
   most `MAX_WAIT_EVENTS` event lines; the rest are counted, never printed.
 - Full text must never go through the compact renderer: no title clip, no
   whitespace collapse. A reader that asks for full text gets stored bytes.
-- Tool counts in `src/server.rs` (first line), `README.md`, `PROTOCOL.md` and this
-  file come from `python3 scripts/sync-tool-count.py`; run it with `--check` in a gate
-  and never count by hand.
+- Tool counts in `src/server.rs` (first line), `README.md`, `PROTOCOL.md`, this file
+  and `seats/README.md` come from `python3 scripts/sync-tool-count.py`; run it with
+  `--check` in a gate and never count by hand. A count written in words counts too.
+- A published tool *list* is a second way to drift: `tests/doc-names.py` checks that
+  a "the board tool set is the N tools" bullet states the router's count and names
+  exactly the router's set, so adding a tool means fixing the list, not just the
+  number.
 - An explicit-id `claim` refusal is an error (CLI exit 1, MCP `-32602`); only the
   id-less probe answers `no ready tasks` with exit 3. A refusal returned as `Ok` is
   read by scripts as a successful claim.
 - Never assert on a rendered timestamp or relative age; assert on events, counts or
-  a range.
+  a range, and never on a wall-clock latency: the claim-latency ceilings exist to
+  catch a pathological claim path, not to hold a machine to a number.
 - Mutation-check a guard you add: remove it and confirm a test fails.
 
 ## Git
