@@ -46,14 +46,16 @@ Waiting belongs to the manager, not the seats. The manager blocks on the rows it
 cares about instead of polling:
 
 ```bash
-agentboard wait 27 --status review --timeout 1800   # returns when T27 is review
+agentboard wait 27 --status review --timeout 300    # returns when T27 is review
 agentboard wait 12 --epic                           # returns when every child is terminal
 ```
 
-MCP `task_wait(ids=[27], status="review", timeout_s=300)` is the same call; the
-verdict's first line is `matched:` or `timeout:` and it writes nothing. A seat never
-waits: it does its row, reports it and stops, and the manager prompts it with the
-next one. Do not build a feed loop in a seat; that design is retired.
+MCP `task_wait(ids=[27], status="review", timeout_s=300)` is the same call. One wait
+is at most 300 seconds: the CLI refuses `--timeout` above 300 or below 1, so a
+manager parks the wait in the background and re-arms a fresh one when it exits 3.
+The verdict's first line is `matched:` or `timeout:` and it writes nothing. A seat
+never waits: it does its row, reports it and stops, and the manager prompts it with
+the next one. Do not build a feed loop in a seat; that design is retired.
 
 When the manager does read the feed, read it *unfiltered*: only an assignment carries
 `recipient`, so `--recipient "$AGENTBOARD_ACTOR"` would never see the comment or

@@ -125,7 +125,7 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
 - If a seat must be poked outside the board, that is a herdr prompt, not a board
   write.
 - To block on named rows, use the wait instead of re-arming the feed:
-  `agentboard wait 27 --status review --timeout 1800` returns the moment T27 reaches
+  `agentboard wait 27 --status review --timeout 300` returns the moment T27 reaches
   review, and MCP `task_wait(ids=[27], status="review")` is the same call. An epic
   works too: `agentboard wait 12 --epic` watches its direct children and returns
   once every one of them is `done` or `canceled`. The verdict's first line is
