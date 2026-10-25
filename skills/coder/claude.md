@@ -16,8 +16,8 @@ before acting; the repo `AGENTS.md` narrows what you may run.
 4. `task_comment(id, body=<what changed and the exact output>)`.
 5. Hand it to review: `task_update(id, if_revision, status="review",
    assignee="reviewer")`. Never close your own row when a reviewer is named.
-6. Missing requirement: one narrow comment, status `blocked`, wait on the feed.
-   No work: arm `board_feed(wait=300)`.
+6. Missing requirement: one narrow comment, status `blocked`, then stop; the manager
+   brings the answer back. No work: report and stop; the manager wakes you.
 
 Never push, never install, never reset a live board, never touch another actor's
 row without `force` and a `reason`. Commit only when the row or the owner says so.

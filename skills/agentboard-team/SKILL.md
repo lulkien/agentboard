@@ -104,8 +104,11 @@ The repo's `seats/` directory is the canonical copy of those cards, and
 
 ## Wake loop
 
-There is no push channel. A seat waits on the feed, and the manager wakes it by
-writing to the board:
+There is no push channel, and there will not be one: the MANAGER is the wake. A
+seat does one row, reports it and stops; it never arms a feed wait or polls for
+its next row, and the manager prompts it with the next row.
+
+What follows is how the manager watches a board, not how a seat waits for work:
 
 ```bash
 agentboard feed --after "$CURSOR" --recipient coder --wait 300
@@ -128,8 +131,7 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   once every one of them is `done` or `canceled`. The verdict's first line is
   `matched:` (exit 0) or `timeout:` (exit 3), and it writes nothing.
 - A wait wakes the manager, not the seat. It reports that the row moved; no pane
-  received a prompt. The seat that must act still needs a herdr prompt or its own
-  `board_feed` watch.
+  received a prompt. The seat that must act still needs a herdr prompt.
 
 ## Eleven tools, same store as the CLI
 
@@ -173,7 +175,7 @@ attachment. This never happens automatically.
   equivalent is fine. Keep `grep`, `cat`, `sed`, `find` and `ls` for the cases MCP
   cannot answer, not as the default reading path.
 - Never guess a missing requirement: comment one narrow question, set status
-  `blocked`, then wait on the feed.
+  `blocked`, then stop and report; the manager brings the answer back.
 - `done` means verified. Put the real command output in a comment on the row.
 - Touch only your task. Do not run suites or installs the goal does not name.
 - A probe that touches a board uses a scratch one:
@@ -183,7 +185,8 @@ attachment. This never happens automatically.
 ## Handoff and quota
 
 A handoff is one assignment: `task_update(id, if_revision, assignee="next-actor")`.
-The event carries `recipient`, which is what wakes the next seat. Move the status in
+The event carries `recipient`, which names the next seat; nothing in the board
+wakes it — the manager prompts it. Move the status in
 the same call: `review` with `assignee="reviewer"`, `in_progress` back with
 `assignee="coder"`.
 

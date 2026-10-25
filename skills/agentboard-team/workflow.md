@@ -42,23 +42,22 @@ row. Reopening means reusing the row, never filing a second one.
 
 ## Waiting without spinning
 
-A seat with no work waits on the feed instead of polling the board in a loop:
+Waiting belongs to the manager, not the seats. The manager blocks on the rows it
+cares about instead of polling:
 
 ```bash
-cursor=$(agentboard feed --limit 1 | rg '^cursor ' | cut -d' ' -f2)
-while :; do
-  out=$(agentboard feed --after "$cursor" --wait 300)
-  cursor=$(printf '%s\n' "$out" | rg '^cursor ' | cut -d' ' -f2)
-  [ -n "$(printf '%s\n' "$out" | rg '^[0-9]+ ')" ] && break
-done
+agentboard wait 27 --status review --timeout 1800   # returns when T27 is review
+agentboard wait 12 --epic                           # returns when every child is terminal
 ```
 
-The same thing over MCP is `board_feed(after=cursor, wait=300)` on a loop. A timeout
-is an empty page, not an error.
+MCP `task_wait(ids=[27], status="review", timeout_s=300)` is the same call; the
+verdict's first line is `matched:` or `timeout:` and it writes nothing. A seat never
+waits: it does its row, reports it and stops, and the manager prompts it with the
+next one. Do not build a feed loop in a seat; that design is retired.
 
-Wait *unfiltered*: only an assignment carries `recipient`, so
-`--recipient "$AGENTBOARD_ACTOR"` would never see the comment or status change that
-answers a question. Read the page, then act on what it names.
+When the manager does read the feed, read it *unfiltered*: only an assignment carries
+`recipient`, so `--recipient "$AGENTBOARD_ACTOR"` would never see the comment or
+status change that answers a question. Read the page, then act on what it names.
 
 ## Questions and blockers
 
@@ -66,7 +65,8 @@ A missing requirement is not a guess:
 
 1. `task_comment(id, body=<one narrow question>)`
 2. `task_update(id, if_revision, status="blocked")`
-3. wait on the feed; the answer arrives as a comment from the owner of the decision.
+3. report and stop; the manager brings the answer back as a comment from the owner
+   of the decision, and wakes you to continue.
 
 ## Evidence
 

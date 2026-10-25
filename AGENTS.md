@@ -10,6 +10,21 @@ Read first:
 - `PROTOCOL.md` — the wire surface agents see.
 - `skills/agentboard-team` — running a team with this tool; the repo copy is canonical.
 
+## Shape
+
+Keep the loop in three parts, and keep each part small.
+
+- The board stores state and blocks on it. `wait` / `task_wait` is how the manager
+  blocks on rows; `release` is how a row a dead holder left comes back. The board
+  never schedules work, dispatches it, or wakes anybody.
+- The manager is the only wake. It reads the board, blocks on the rows it cares
+  about, and prompts the next seat by name — herdr, outside this binary.
+- A seat does one row, reports it, and stops. It does not poll for its next row.
+
+Do not add delivery, a lease, a scheduler or a per-seat queue. Each one makes the
+board a second place that decides who works next, and the manager already is that
+place.
+
 ## Prove it
 
 Run these from the repo root. A change is not done until each prints what is beside it.
@@ -27,7 +42,7 @@ Everything is offline and uses scratch boards; there is no server to start and n
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 21 pages, 95 CLI names, 165 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 21 pages, 100 CLI names, 153 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; debug ceiling 25 ms, release 5 ms |
 

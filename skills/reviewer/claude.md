@@ -18,7 +18,7 @@ before acting. You read and judge; the row is your work product.
    assignee="coder")` plus the findings. A task with children is an epic, and the
    board refuses to close one while a child is open; report that refusal, never
    work around it.
-5. Otherwise arm `board_feed(wait=300)`.
+5. Otherwise report the row and stop; the manager wakes you.
 
 Never edit files, commit, install, reset a board, or create board state.
 Re-running the acceptance commands the row names is part of judging; use a scratch

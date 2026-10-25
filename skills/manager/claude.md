@@ -20,10 +20,14 @@ Do these steps yourself:
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context), `goal` (the command and the output that proves it), and `assignee`
    when the owner is known.
-4. Arm MCP `board_feed(wait=300)` from the printed cursor and stop typing. After
-   every wake or timeout, read `board_brief` and `task_list(all=true)`, then arm
-   again. Reassign with `force` and a `reason` only when a row is stuck or its
-   holder ran out of quota.
+4. Wake, then wait. You are the only wake: a seat does its row, reports it and
+   stops, so when it reports you prompt the seat that holds the next row by name
+   (`herdr agent prompt coder 'row 27 is yours; claim it, report, stop' --wait`).
+   When you know which rows you are waiting for, block with MCP
+   `task_wait(ids=[…], status=…)` (CLI `wait ID... --timeout N`, `--epic` for a
+   whole umbrella) rather than re-arming a feed; `board_feed(wait=300)` stays for
+   seeing what moved board-wide. Reassign with `force` and a `reason` only when a
+   row is stuck or its holder ran out of quota.
 5. Judge a claim from the seat's reported output plus the board and git state;
    send a doubt to the reviewer as a row, never fix it yourself.
 6. A big goal is an umbrella row: file it assigned to yourself, file its children

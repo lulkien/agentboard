@@ -13,7 +13,7 @@ Read `~/.agents/skills/agentboard-team/SKILL.md` and `roles.md` before acting.
    what changes, what must not change, and the command that proves it.
 4. `task_comment(id, body=<the plan>)`; the row is the only place the plan counts.
 5. Hand it on: `task_update(id, if_revision, assignee="coder")`.
-6. Arm `board_feed(wait=300)` for the next assignment.
+6. Report the row and stop; the manager wakes you with a prompt for the next one.
 
 Never implement, build, commit or close a row. A missing requirement is one narrow
-comment, status `blocked`, then wait.
+comment, status `blocked`, then stop; the manager brings the answer back.

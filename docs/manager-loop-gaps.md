@@ -10,10 +10,14 @@ landed since.
 Where it says "today", it means: during that epic, on this box, with the board at
 `~/.local/state/agentboard/lmdb`.
 
-**Status 2026-10-25.** Gap #1 (`agentboard wait` and the `task_wait` MCP tool) is
-implemented in the working tree — store, both adapters, tests and docs — and the
-commit is left to the owner. Gaps #2–#5 remain open and unchanged: the evidence
-below still describes `0.2.0` as it was.
+**Status 2026-10-25.** Gap #1 (`agentboard wait` / `task_wait`) landed as `8a11dc1`,
+and gap #3 (`update --release` plus the self-describing holder refusal) as `3775ac9`.
+Gaps #2, #4 and #5 are closed by decision rather than by code: the owner fixed the
+design as "the board stores state and blocks, the manager is the wake, a seat does
+its row and stops" (AGENTS.md, `## Shape`). Delivery into a pane, liveness joins and
+a per-seat queue would each make the board a second scheduler, so they are not
+wanted; a seat field on events stays unnecessary while the manager launches each
+seat under its own actor name. The evidence below still describes `0.2.0` as it was.
 
 ---
 
