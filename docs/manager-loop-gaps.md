@@ -58,6 +58,11 @@ The only blocking primitive is the board-wide feed cursor:
 agentboard --actor hermes feed --after 601abf84…:218 --wait 1800
 ```
 
+That `1800` was accepted by `0.2.0` and silently cut to the store's 300 s ceiling
+(`feed.rs` `WAIT_MAX_MS`), so each re-arm was really five minutes, not thirty. Today
+`feed --wait` above 300 is refused outright, exit 2 (`4387229`); the command stays as
+it was typed.
+
 **Why that is not equivalent.** The cursor watches *any* event, not the row I care about;
 it exits after the timeout, so a quiet window and a stalled seat look identical; and I
 re-arm it every time, which is one agent turn per window. In the Qt GUI epic that was
