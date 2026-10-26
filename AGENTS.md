@@ -6,7 +6,7 @@ tree, not about running a team with it.
 
 Read first:
 
-- `README.md` — the model, the verbs and the eleven tools.
+- `README.md` — the model, the verbs and the ten tools.
 - `PROTOCOL.md` — the wire surface agents see.
 - `skills/agentboard-team` — running a team with this tool; the repo copy is canonical.
 
@@ -14,9 +14,10 @@ Read first:
 
 Keep the loop in three parts, and keep each part small.
 
-- The board stores state and blocks on it. `wait` / `task_wait` is how the manager
-  blocks on rows; `release` is how a row a dead holder left comes back. The board
-  never schedules work, dispatches it, or wakes anybody.
+- The board stores state and blocks on it. `agentboard wait` (CLI only; the MCP
+  surface has no wait tool) is how the manager blocks on rows; `release` is how a
+  row a dead holder left comes back. The board never schedules work, dispatches
+  it, or wakes anybody.
 - The manager is the only wake. It reads the board, blocks on the rows it cares
   about, and prompts the next seat by name — herdr, outside this binary.
 - A seat does one row, reports it, and stops. It does not poll for its next row.
@@ -38,13 +39,13 @@ and uses scratch boards; there is no server to start.
 | `cargo test --offline --lib` | `test result: ok. 86 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `271/271 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `193/193 passed (mcp, lmdb)` |
+| `bash tests/cli.sh` | `276/276 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `167/167 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/seats-install.sh` | `107/107 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
-| `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 22 pages, 104 CLI names, 167 MCP names passed` |
+| `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
+| `python3 tests/doc-names.py` | `doc-names: 22 pages, 105 CLI names, 155 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 12 gates passed`; with `--full` `GATES OK: 13 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
@@ -71,7 +72,7 @@ update the expectation here.
   roster, index and event writes; no epic flag or database is stored.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
-- `src/server.rs` — the MCP adapter, eleven tools, store work on `spawn_blocking`.
+- `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.
 
@@ -154,7 +155,7 @@ No file edit, no commit, no build, no install, no probe that creates state;
   workflow. `skills/install.sh --force` creates canonical repo links under
   `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
   canonical names. There is one physical copy: never copy over the installed links.
-- `PROTOCOL.md` — the wire surface: eleven tools, cursors, refusals, exit codes.
+- `PROTOCOL.md` — the wire surface: ten tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
   `agentboard-manager` with its `grok.md`.

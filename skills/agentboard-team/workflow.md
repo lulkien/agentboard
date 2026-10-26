@@ -54,8 +54,8 @@ agentboard wait 12 --epic                           # returns when every child i
 agentboard wait 27 --status review,done,blocked --assignee --timeout 300   # also returns on a handoff
 ```
 
-MCP `task_wait(ids=[27], status="review", timeout_s=300)` is the same call; add
-`assignee=true` (or a name) when the act-point is a handoff. One wait is at most
+There is no MCP wait tool: waits run only through the binary. Add `--assignee`
+(or a name) when the act-point is a handoff. One wait is at most
 300 seconds: the CLI refuses `--timeout` above 300 or below 1, so a manager parks
 the wait in the background and re-arms a fresh one when it exits 3. The verdict's
 first line is `matched:` or `timeout:` and it writes nothing. A seat never waits:

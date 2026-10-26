@@ -48,8 +48,8 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 - Commands, never home paths: `agentboard`, `git-mcp-rs`, `ferris-search`,
   `codebase-memory-mcp` resolve on the seat's `PATH`. Check the one that matters
   with `readlink -f "$(command -v agentboard)"`.
-- The board tool set is the eleven tools of this build: `task_add`, `task_list`,
-  `task_get`, `task_epic`, `task_update`, `task_claim`, `task_comment`, `task_wait`,
+- The board tool set is the ten tools of this build: `task_add`, `task_list`,
+  `task_get`, `task_epic`, `task_update`, `task_claim`, `task_comment`,
   `board_feed`, `board_brief`, `board_agents`.
 - One actor per card. A base config must never carry `AGENTBOARD_ACTOR`: every
   seat that reads it would write under that name.

@@ -18,7 +18,7 @@ server opens the directory, and the file lock keeps concurrent writers honest.
 
 Pages here:
 
-- this manual: the board, the seats, the launcher, the wake loop, the eleven tools
+- this manual: the board, the seats, the launcher, the wake loop, the ten tools
 - `workflow.md`: how a task moves and who moves it
 - `roles.md`: manager, analyst, coder and reviewer: what each may run and never does
 
@@ -173,19 +173,18 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   write.
 - To block on named rows, use the wait instead of re-arming the feed:
   `agentboard wait 27 --status review --timeout 300` returns the moment T27 reaches
-  review, and MCP `task_wait(ids=[27], status="review")` is the same call. An epic
+  review. There is no MCP wait tool; the binary is the only way to wait. An epic
   works too: `agentboard wait 12 --epic` watches its direct children and returns
   once every one of them is `done` or `canceled`. The verdict's first line is
   `matched:` (exit 0) or `timeout:` (exit 3), and it writes nothing.
 - An analyst-to-coder handoff changes the assignee and leaves the status alone, so
   a status wait never sees it. Add `--assignee` to the same wait:
-  `agentboard wait 27 --status review,done,blocked --assignee --timeout 300`, or MCP
-  `task_wait(ids=[27], status="review,done,blocked", assignee=true)`. It returns on a
+  `agentboard wait 27 --status review,done,blocked --assignee --timeout 300`. It returns on a
   handoff after the wait starts and says `; handoff T27 to coder` on the first line.
 - A wait wakes the manager, not the seat. It reports that the row moved; no pane
   received a prompt. The seat that must act still needs a herdr prompt.
 
-## Eleven tools, same store as the CLI
+## Ten tools, same store as the CLI
 
 | Tool | Use |
 | --- | --- |
@@ -196,7 +195,6 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
 | `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override; `release` to return a held row to `todo` |
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
-| `task_wait` | block until named rows (or an epic's children) reach a status; `assignee` also wakes on a handoff |
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
 | `board_brief` | epic progress, unparented active work, then global status counts |
 | `board_agents` | roster with last activity and last task |

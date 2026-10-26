@@ -337,6 +337,7 @@ has "wait answers matched" "matched: 1 of 1 watched in done,canceled" "$out"
 has "wait prints the watched row" "T1 done" "$out"
 has "wait labels an earlier event as last" "  last: 1 " "$out"
 has "wait prints a cursor" "cursor " "$out"
+check "wait ends with the attention line" "[ATTENTION] wait task is done, please check result" "$(printf '%s\n' "$out" | tail -1)"
 check "wait orders the wanted statuses by the board" "matched: 1 of 1 watched in review,done" "$("$B" wait 1 --status done,review | head -1)"
 check "wait is a read and appends nothing" 2 "$("$B" feed --after 0 | grep -c ' created  T')"
 (
@@ -360,6 +361,8 @@ check "wait timeout exit" 3 "$code"
 has "wait timeout text" "timeout: 0 of 1 watched in done,canceled after " "$out"
 has "wait timeout still lists the row" "T1 todo" "$out"
 has "wait timeout still prints a cursor" "cursor " "$out"
+check "wait timeout ends with the timeout notice" "[ATTENTION] wait timed out, nothing matched; re-arm or check the board" "$(printf '%s\n' "$out" | tail -1)"
+lacks "wait timeout has no matched notice" "[ATTENTION] wait task is done, please check result" "$out"
 lacks "wait timeout has no last line" "last:" "$out"
 has "wait timeout counts wanted rows" "timeout: 1 of 2 watched in done,canceled" "$("$B" wait 1 2 --timeout 1 | head -1)"
 
@@ -371,6 +374,7 @@ check "wait unknown status text" 'agentboard: unknown task status: "queued"' "$o
 out=$("$B" wait 999 2>&1); code=$?
 check "wait missing task exit" 1 "$code"
 check "wait missing task text" "agentboard: task T999 does not exist" "$out"
+lacks "wait refusal prints no attention line" "[ATTENTION]" "$out"
 out=$("$B" wait 1 --epic 2>&1); code=$?
 check "wait epic on a leaf exit" 1 "$code"
 check "wait epic on a leaf text" "agentboard: task T1 is not an epic; an epic is a task with children" "$out"
@@ -418,6 +422,7 @@ wait "$writer"
 check "wait assignee on a handoff exit" 0 "$code"
 check "wait assignee first line names the handoff" "matched: 0 of 1 watched in blocked,review,done; handoff T1 to coder" "$(printf '%s\n' "$out" | head -1)"
 has "wait assignee leaves status alone" "T1 in_progress" "$out"
+check "wait assignee handoff ends with the matched notice" "[ATTENTION] wait task is done, please check result" "$(printf '%s\n' "$out" | tail -1)"
 has "wait assignee prints the update event" "updated  T1" "$out"
 
 handoff_row wait-assignee-off

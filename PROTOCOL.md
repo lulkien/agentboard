@@ -1,6 +1,6 @@
 # Protocol
 
-What an agent sees. Eleven MCP tools, the cursor format, the refusals, the exit
+What an agent sees. Ten MCP tools, the cursor format, the refusals, the exit
 codes. The store that implements this is described in `AGENTS.md`; running a team
 is described in `skills/agentboard-team`.
 
@@ -36,7 +36,7 @@ rows can only be claimed by id, and only by their assignee unless the row has no
 `blocked` is never claimable, and `done`/`canceled` are terminal: lists hide them unless
 asked, and an explicit claim of one refuses by name.
 
-## Eleven tools
+## Ten tools
 
 ### task_add
 
@@ -197,53 +197,6 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
   normal page with a valid cursor, and a waiter holds no read transaction while it
   sleeps.
 - `full: true` prints event bodies untruncated.
-
-### task_wait
-
-```json
-{"ids": [7], "status": "done,canceled", "epic": false, "timeout_s": 300, "assignee": true}
-```
-
-Blocks until every watched row is in one of `status` (a CSV, default `done,canceled`)
-and answers the verdict as its first line, so a caller needs no error channel to tell
-the two outcomes apart:
-
-```text
-matched: <n> of <m> watched in <statuses>
-timeout: <n> of <m> watched in <statuses> after <ms>ms
-```
-
-A match caused by `assignee` appends `; handoff T<id> to <name>` to its first line,
-one entry per handed-off row in id order, comma-separated.
-
-Then one compact task row per watched row, sorted by id, in either outcome. In a
-match, a row that was already wanted shows its newest earlier event as
-`  last: <event>` — context, not a claim that this event caused the return; a row
-that moved shows its events after the wait's watermark, one `  <event>` line each,
-truncated as the feed truncates. At most 20 event lines are printed per row: the
-oldest events after the watermark are kept and the remainder appears on one line as
-`  … N more events`. A timeout prints no event lines at all. The final
-line is `cursor <instance_id>:<seq>`, the high sequence at the moment the wait
-returned, so the caller can follow on with `board_feed`.
-
-- `ids` is required and each id must exist. With `epic: true` each id must have
-  direct children and the watched set is those children, re-resolved on every poll,
-  so a child filed mid-wait joins it.
-- `status` parses with the same CSV rule as the CLI: trimmed, deduplicated, ordered
-  as the board orders statuses. An empty list refuses `wait needs at least one
-  wanted status`, never a vacuous match.
-- `assignee` is `true` or an actor name; absent or `false` keeps the status-only
-  predicate. It adds a second way to match: any one watched row (an epic's children
-  are re-resolved on every poll) gets an `updated` event after the wait started whose
-  recipient is the new assignee. `true` takes any such handoff; a name takes only a
-  handoff to that actor, and is shape-checked, not looked up on the roster. A release
-  clears the assignee, so it is no handoff. A handoff that landed before the wait
-  started is not seen, so read the row before arming the wait.
-- `timeout_s` defaults to `300` and clamps to `1..=300`. The CLI accepts only 1 to 300 seconds and defaults `--timeout` to 300; zero and values above 300 are refused.
-- A timeout is **not** a JSON-RPC error: the result is ordinary text whose first
-  line is `timeout:`. Refusals are `-32602` like every other tool.
-- The wait re-queries the rows it watches, so it returns when they reach the wanted
-  status, not when any event lands. It writes nothing and needs no actor.
 
 ### board_brief
 

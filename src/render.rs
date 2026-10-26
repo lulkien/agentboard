@@ -164,7 +164,12 @@ pub fn epic_text(epic: &Epic) -> String {
     )
 }
 
-/// The verdict, one compact row per watched row, then the cursor to follow on with.
+const WAIT_MATCHED_NOTICE: &str = "[ATTENTION] wait task is done, please check result";
+const WAIT_TIMEOUT_NOTICE: &str =
+    "[ATTENTION] wait timed out, nothing matched; re-arm or check the board";
+
+/// The verdict, one compact row per watched row, the cursor to follow on with, then
+/// an attention line so a backgrounded wait's last line says how it ended.
 /// A row that was already wanted when the wait started shows its newest earlier
 /// event as `last:` — context, never the cause of the return.
 pub fn wait_text(outcome: &WaitOutcome) -> String {
@@ -219,6 +224,14 @@ pub fn wait_text(outcome: &WaitOutcome) -> String {
         }
     }
     lines.push(format!("cursor {}", outcome.cursor.encode()));
+    lines.push(
+        if outcome.matched {
+            WAIT_MATCHED_NOTICE
+        } else {
+            WAIT_TIMEOUT_NOTICE
+        }
+        .to_owned(),
+    );
     lines.join("\n")
 }
 

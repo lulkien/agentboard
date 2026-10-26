@@ -66,7 +66,6 @@ task_epic = { approval_mode = "auto" }      # show an epic’s child-task progre
 task_update = { approval_mode = "approve" }  # change task fields, status, or owner
 task_claim = { approval_mode = "approve" }   # claim a ready task
 task_comment = { approval_mode = "approve" } # add a comment
-task_wait = { approval_mode = "auto" }      # wait for selected task statuses or an assignment handoff
 board_feed = { approval_mode = "auto" }     # read board events
 board_brief = { approval_mode = "auto" }    # show active work and status counts
 board_agents = { approval_mode = "approve" } # list registered actors

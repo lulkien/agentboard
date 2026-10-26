@@ -51,8 +51,8 @@ seat that silently has no board tools.
   when the folder is trusted (`grok inspect --json` shows `projectTrusted`).
 - Board tools: MCP tools are reached through the meta-tools, catalog key
   `agentboard__task_add` (two underscores), not a bare `task_add` and not
-  `mcp__agentboard__task_add`. Tell a seat to `use_tool("agentboard__task_wait", …)`
-  when it must block on a row.
+  `mcp__agentboard__task_add`. Waiting on a row is the
+  binary's `agentboard wait`, not a board tool.
 
 ## Prove the seat is wired
 

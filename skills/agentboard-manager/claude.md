@@ -53,7 +53,7 @@ Do these steps yourself:
      watch fires immediately and tells you nothing new.
    - While an analyst holds a row, status stays `in_progress` when they hand to
      the coder. Arm `wait ID --status review,done,blocked --assignee --timeout 300`
-     (MCP `task_wait` with `assignee=true`) so that reassignment ends the wait; the
+     so that reassignment ends the wait; the
      first line then carries `; handoff T… to coder`.
    - Stage the set by phase. Once you have prompted the reviewer, add
      `in_progress` to `done,review,blocked`: the coder has already claimed, so

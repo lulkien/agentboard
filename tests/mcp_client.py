@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP surface check: eleven tools on one stdio server, no daemon, scratch board."""
+"""MCP surface check: ten tools on one stdio server, no daemon, scratch board."""
 
 import json
 import os
@@ -17,7 +17,6 @@ TOOLS = {
     "task_update",
     "task_claim",
     "task_comment",
-    "task_wait",
     "board_feed",
     "board_brief",
     "board_agents",
@@ -128,7 +127,10 @@ def main():
 
         listed = server.send("tools/list", {})
         names = {tool["name"] for tool in listed["result"]["tools"]}
-        check("tools/list is the eleven-tool surface", TOOLS, names)
+        check("tools/list is the ten-tool surface", TOOLS, names)
+        check("tools/list has no task_wait", False, "task_wait" in names)
+        reply = server.send("tools/call", {"name": "task_wait", "arguments": {"ids": [1]}})
+        check("task_wait call is refused", True, "error" in reply or bool(reply["result"].get("isError")))
 
         is_error, body = server.call("task_add", {"title": "mcp task", "description": "full text here"})
         check("task_add is not an error", False, is_error)
@@ -335,75 +337,6 @@ def main():
                 has("closed pair child record", "T2 todo", body)
                 _, feed = pair.call("board_feed", {"after": "0", "kind": "updated"})
                 has("closed pair event names the recipient", "coder", feed)
-
-        # task_wait: a row already wanted answers at once, a quiet board answers
-        # `timeout:` as ordinary text, and refusals stay JSON-RPC errors.
-        with Server(os.path.join(scratch, "wait"), "manager") as waits:
-            waits.start()
-            waits.call("task_add", {"title": "already done", "status": "done"})
-            is_error, body = waits.call("task_wait", {"ids": [1]})
-            check("task_wait is not an error", False, is_error)
-            check("task_wait answers matched", "matched: 1 of 1 watched in done,canceled", body.splitlines()[0])
-            has("task_wait prints the watched row", "T1 done", body)
-            has("task_wait labels an earlier event as last", "last:", body)
-            has("task_wait prints a cursor", "cursor ", body)
-            waits.call("task_add", {"title": "stays open"})
-            is_error, body = waits.call("task_wait", {"ids": [2], "timeout_s": 1})
-            check("a wait timeout is not an error", False, is_error)
-            has("a wait timeout starts with timeout:", "timeout:", body.splitlines()[0])
-            has("a wait timeout lists the open row", "T2 todo", body)
-            has("a wait timeout keeps a cursor", "cursor ", body)
-            reply = waits.send("tools/call", {"name": "task_wait", "arguments": {"ids": [1], "status": "queued"}})
-            check("wait unknown status code", -32602, reply.get("error", {}).get("code"))
-            has("wait unknown status names it", 'unknown task status: "queued"', reply.get("error", {}).get("message", ""))
-            reply = waits.send("tools/call", {"name": "task_wait", "arguments": {"ids": [2], "epic": True, "timeout_s": 1}})
-            check("wait epic on a leaf code", -32602, reply.get("error", {}).get("code"))
-            check("wait epic on a leaf message", "task T2 is not an epic; an epic is a task with children", reply.get("error", {}).get("message"))
-            reply = waits.send("tools/call", {"name": "task_wait", "arguments": {"ids": []}})
-            check("wait without ids code", -32602, reply.get("error", {}).get("code"))
-            check("wait without ids message", "wait needs at least one task id", reply.get("error", {}).get("message"))
-            print("task_wait: matched:, timeout:, and -32602 refusals")
-
-        # task_wait assignee: a handoff from another process ends the wait while
-        # the status stays put. One Server answers one call at a time, so the
-        # handoff is a delayed CLI update on the same board.
-        def handoff_during(db, arguments, to="coder"):
-            with Server(db, "manager") as waiter:
-                waiter.start()
-                waiter.call("task_add", {"title": "handoff row", "status": "in_progress", "assignee": "analyst", "new_actor": True})
-                tools = waiter.send("tools/list", {})
-                schema = next(t for t in tools["result"]["tools"] if t["name"] == "task_wait")
-                check("task_wait schema has assignee", True, "assignee" in schema["inputSchema"]["properties"])
-                mover = subprocess.Popen(
-                    ["sh", "-c", 'sleep 0.5; "$BIN" --db "$DB" update 1 --if-revision 1 --assignee "$TO" --new-actor'],
-                    env=dict(os.environ, BIN=BIN, DB=db, TO=to, AGENTBOARD_ACTOR="analyst"),
-                    stdout=subprocess.DEVNULL,
-                )
-                reply = waiter.send("tools/call", {"name": "task_wait", "arguments": dict(arguments, ids=[1], status="review,done,blocked")})
-                mover.wait()
-                return reply
-
-        def wait_body(reply):
-            return "".join(part.get("text", "") for part in reply["result"]["content"])
-
-        reply = handoff_during(os.path.join(scratch, "wait-assignee-any"), {"assignee": True, "timeout_s": 5})
-        check("task_wait assignee true is not an error", False, bool(reply["result"].get("isError")))
-        check("task_wait assignee true names the handoff", "matched: 0 of 1 watched in blocked,review,done; handoff T1 to coder", wait_body(reply).splitlines()[0])
-        has("task_wait assignee true leaves status alone", "T1 in_progress", wait_body(reply))
-        reply = handoff_during(os.path.join(scratch, "wait-assignee-off"), {"timeout_s": 1})
-        has("task_wait without assignee times out", "timeout:", wait_body(reply).splitlines()[0])
-        reply = handoff_during(os.path.join(scratch, "wait-assignee-false"), {"assignee": False, "timeout_s": 1})
-        has("task_wait assignee false times out", "timeout:", wait_body(reply).splitlines()[0])
-        reply = handoff_during(os.path.join(scratch, "wait-assignee-other"), {"assignee": "reviewer", "timeout_s": 1})
-        has("task_wait assignee for another seat times out", "timeout:", wait_body(reply).splitlines()[0])
-        reply = handoff_during(os.path.join(scratch, "wait-assignee-named"), {"assignee": "coder", "timeout_s": 5})
-        has("task_wait assignee naming the new owner matches", "; handoff T1 to coder", wait_body(reply).splitlines()[0])
-        with Server(os.path.join(scratch, "wait-assignee-empty"), "manager") as empty:
-            empty.start()
-            empty.call("task_add", {"title": "row"})
-            reply = empty.send("tools/call", {"name": "task_wait", "arguments": {"ids": [1], "assignee": "", "timeout_s": 1}})
-            check("task_wait empty assignee code", -32602, reply.get("error", {}).get("code"))
-        print("task_wait assignee: handoff matched, timeout, named, and empty refusal")
 
         # task_update release: a dead holder's row returns to todo in one write.
         with Server(os.path.join(scratch, "release"), "manager") as releases:

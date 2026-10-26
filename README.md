@@ -5,7 +5,7 @@ everyone reads the same event feed. The board is a single LMDB directory: no
 daemon, no socket, no network, no database server. Every CLI call and every MCP
 server opens that directory and the file lock keeps them honest.
 
-11 MCP tools, 14 CLI verbs, one store behind both.
+10 MCP tools, 14 CLI verbs, one store behind both.
 
 ## Why it exists
 
@@ -125,7 +125,10 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   exits `0` and prints `matched: …`, a timeout exits `3` and still prints each row
   under `timeout: …`. A row already wanted when the wait began shows its newest
   earlier event as `last:`; a row that moved shows the events that moved it, at
-  most 20 lines then `… N more events`. It appends no event and needs no actor.
+  most 20 lines then `… N more events`. The last line is
+  `[ATTENTION] wait task is done, please check result` on a match and
+  `[ATTENTION] wait timed out, nothing matched; re-arm or check the board` on a
+  timeout; a refusal prints neither. It appends no event and needs no actor.
 
 Exit codes: `0` ok, `1` refused or failed, `3` no ready tasks or a `wait`
 timeout. A refusal prints one line naming the field, the value and what to do:
@@ -180,7 +183,6 @@ one.
 | `task_update` | `ok`, the record, its cursor; refuses stale, held, missing reason |
 | `task_claim` | the work order, or `no ready tasks` |
 | `task_comment` | `ok`, cursor |
-| `task_wait` | `matched:` or `timeout:`, one row per watched task, cursor; `assignee` also wakes on a handoff |
 | `board_feed` | events, cursor, `more`/`older`; `wait` seconds; `full=true` |
 | `board_brief` | epic progress, unparented active tasks, then counts per status |
 | `board_agents` | roster lines, newest activity first |
