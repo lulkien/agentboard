@@ -7,6 +7,10 @@
 # with a shell could still run python, rg or a suite inside a read-only tree. The
 # review is a reading job - the verdict goes on the board row, not into a file -
 # so the shell is removed outright rather than narrowed.
+#
+# With approval_policy never, a tool left on "auto" is refused ("requires approval,
+# but approval policy is never"). Every board read the reviewer needs is therefore
+# "approve"; only task_add stays "auto", so it cannot file work.
 approval_policy = "never"
 sandbox_mode = "read-only"
 
@@ -33,11 +37,11 @@ AGENTBOARD_ACTOR = "reviewer"
 task_add = { approval_mode = "auto" }        # create a task
 task_list = { approval_mode = "approve" }    # list tasks by status, owner, parent, or path
 task_get = { approval_mode = "approve" }     # read a task, optionally with full details
-task_epic = { approval_mode = "auto" }       # show an epic’s child-task progress
+task_epic = { approval_mode = "approve" }    # show an epic’s child-task progress
 task_update = { approval_mode = "approve" }  # change task fields, status, or owner
 task_claim = { approval_mode = "approve" }   # claim a ready task
 task_comment = { approval_mode = "approve" } # add a comment
-board_feed = { approval_mode = "auto" }      # read board events
-board_brief = { approval_mode = "auto" }     # show active work and status counts
+board_feed = { approval_mode = "approve" }   # read board events
+board_brief = { approval_mode = "approve" }  # show active work and status counts
 board_agents = { approval_mode = "approve" } # list registered actors
 
