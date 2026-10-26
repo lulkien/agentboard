@@ -8,7 +8,7 @@ its client gets a board identity.
 | Path | Seat | Loaded by |
 |---|---|---|
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
-| `codex/rules/agentboard.rules` | every codex seat | `$CODEX_HOME/rules/agentboard.rules` |
+| `codex/rules/agentboard.rules` | every codex seat | a marked block inside `$CODEX_HOME/rules/default.rules` |
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
 | `claude/<seat>-mcp.json` | analyst, coder, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
 | `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
@@ -18,13 +18,30 @@ its client gets a board identity.
 
     ./seats/install.sh --force
 
-It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml`, the
-Codex rules file to `$CODEX_HOME/rules/agentboard.rules`, and each claude card to
-`~/.claude/<seat>-mcp.json`. The codex base config is not a link: it
-is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
+It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml` and
+each claude card to `~/.claude/<seat>-mcp.json`. The codex base config is not a
+link: it is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
 `[projects.*].trust_level`, `[notice]`) also lives. `install.sh` refuses an existing
 file that is not a symlink into this repo, and `--force` replaces only the named
 destinations.
+
+The Codex rules are a block, not a link, because Codex appends its own allowed
+commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
+`codex/rules/agentboard.rules`, from its `# BEGIN AGENTBOARD RULES` line to its
+`# END AGENTBOARD RULES` line:
+
+- No block yet (or no file): it is appended, and every byte already there stays.
+- One well-formed block: left alone, reported `unchanged`, with a note if it differs
+  from the repo. `--force` rewrites just those lines where they stand.
+- Duplicate, missing, reversed or whitespace-padded markers: refused, `--force`
+  included, since guessing the span could delete your rules. Fix the file by hand.
+- A symlink or non-regular `default.rules` is refused and never written through.
+- Line endings (CRLF or LF) and file mode are kept; the write is a same-directory
+  temp plus rename, and it aborts if the file changed meanwhile. Install with
+  Codex closed.
+- An old `rules/agentboard.rules` link into this repo is removed; a foreign link goes
+  only under `--force`; a regular file is kept and reported.
+- To uninstall, delete the marked lines by hand; there is no uninstall verb.
 
 ## What every card carries
 

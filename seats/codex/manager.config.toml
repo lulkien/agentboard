@@ -4,6 +4,8 @@
 # pre-approves every board tool.
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
+model = "gpt-6-sol"
+model_reasoning_effort = "high"
 
 [mcp_servers.git-mcp-rs]
 command = "git-mcp-rs"

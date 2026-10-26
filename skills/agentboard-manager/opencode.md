@@ -78,3 +78,6 @@ Do these steps yourself:
    with `parent`, read its progress with MCP `task_epic` (CLI `epic ID`), and close
    it only when every child is terminal. The board refuses an epic close while a
    child is open.
+   When an epic completes, end its seats' agent sessions before the next epic
+   starts and never carry their conversations over. Start fresh sessions only
+   for the seats the next epic needs, one tab per seat; leave the others stopped.

@@ -1,4 +1,5 @@
 # BEGIN AGENTBOARD RULES
+# managed by agentboard seats/install.sh; --force rewrites this block
 prefix_rule(pattern=["herdr"], decision="allow")
 prefix_rule(pattern=["agentboard"], decision="allow")
 # END AGENTBOARD RULES
