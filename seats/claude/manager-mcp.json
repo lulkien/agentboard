@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "agentboard": {
+      "type": "stdio",
+      "command": "agentboard",
+      "args": [],
+      "env": {
+        "AGENTBOARD_ACTOR": "manager"
+      }
+    },
+    "git-mcp-rs": {
+      "type": "stdio",
+      "command": "git-mcp-rs",
+      "args": []
+    },
+    "ferris-search": {
+      "type": "stdio",
+      "command": "ferris-search",
+      "args": []
+    }
+  }
+}

@@ -70,8 +70,9 @@ approval mode is a hard error, so the base lists every board tool.
 ## Claude
 
 One `--mcp-config` card per seat, because a Claude seat's actor comes from that
-file. `coder-mcp.json`, `analyst-mcp.json` and `reviewer-mcp.json` differ only in
-`AGENTBOARD_ACTOR`.
+file. `analyst-mcp.json`, `coder-mcp.json`, `manager-mcp.json` and
+`reviewer-mcp.json` differ only in `AGENTBOARD_ACTOR`. A Claude manager starts with
+`claude --strict-mcp-config --mcp-config ~/.claude/manager-mcp.json`.
 
 ## Grok
 

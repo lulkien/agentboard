@@ -37,7 +37,7 @@ refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-
 # --- foreign claude/opencode links are refused, then --force replaces them ---
 newhome
 mkdir -p "$home/.codex/rules"
-for seat in analyst coder reviewer; do
+for seat in analyst coder manager reviewer; do
   ln -s "/old/checkout/seats/claude/$seat-mcp.json" "$home/.claude/$seat-mcp.json"
 done
 ln -s /old/checkout/seats/opencode/agentboard-mcp.sh "$home/.config/opencode/agentboard-mcp.sh"
@@ -47,7 +47,7 @@ has "foreign link text" 'use --force to replace it' "$tmp/err"
 is "foreign refusal prints nothing on stdout" test ! -s "$tmp/out"
 is "foreign refusal writes no rules" test ! -e "$rules"
 inst --force
-for seat in analyst coder reviewer; do
+for seat in analyst coder manager reviewer; do
   is "force relinks $seat" test "$(readlink "$home/.claude/$seat-mcp.json")" = "$repo/seats/claude/$seat-mcp.json"
 done
 is "force relinks opencode" test "$(readlink "$home/.config/opencode/agentboard-mcp.sh")" = "$repo/seats/opencode/agentboard-mcp.sh"
