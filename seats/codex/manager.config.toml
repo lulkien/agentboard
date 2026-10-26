@@ -4,8 +4,15 @@
 # pre-approves every board tool.
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
-model = "gpt-6-sol"
+model = "gpt-6-luna"
 model_reasoning_effort = "high"
+developer_instructions = """
+Prefer MCP over shell for reading and searching: codebase-memory-mcp for symbols,
+callers and file outlines; git-mcp-rs for git reads; ferris-search for the web; the
+agentboard tools for the board; the file tools for files. The shell is the
+exception, for herdr and what no MCP tool answers (rg for plain text search). If an
+MCP call fails, say which call failed and what you did instead.
+"""
 
 [mcp_servers.git-mcp-rs]
 command = "git-mcp-rs"

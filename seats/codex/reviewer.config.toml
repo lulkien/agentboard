@@ -13,6 +13,11 @@
 # "approve"; only task_add stays "auto", so it cannot file work.
 approval_policy = "never"
 sandbox_mode = "read-only"
+developer_instructions = """
+Read code through MCP: codebase-memory-mcp for symbols, callers and file outlines;
+git-mcp-rs for git reads; the agentboard tools for the board; the file tools for
+files. If an MCP call fails, say which call failed and what you did instead.
+"""
 
 [features]
 shell_tool = false

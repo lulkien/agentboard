@@ -10,6 +10,13 @@
 # tree.
 approval_policy = "never"
 sandbox_mode = "workspace-write"
+developer_instructions = """
+Prefer MCP over shell for reading and searching: codebase-memory-mcp for symbols,
+callers and file outlines; git-mcp-rs for git reads; ferris-search for the web; the
+agentboard tools for the board; the file tools for files. The shell is the
+exception, for what no MCP tool answers (rg for plain text search). If an MCP call
+fails, say which call failed and what you did instead.
+"""
 
 [mcp_servers.git-mcp-rs]
 command = "git-mcp-rs"
@@ -38,7 +45,7 @@ task_epic = { approval_mode = "auto" }       # show an epic’s child-task progr
 task_update = { approval_mode = "approve" }  # change task fields, status, or owner
 task_claim = { approval_mode = "approve" }   # claim a ready task
 task_comment = { approval_mode = "approve" } # add a comment
-board_feed = { approval_mode = "auto" }      # read board events
-board_brief = { approval_mode = "auto" }     # show active work and status counts
+board_feed = { approval_mode = "approve" }   # read board events
+board_brief = { approval_mode = "approve" }  # show active work and status counts
 board_agents = { approval_mode = "approve" } # list registered actors
 

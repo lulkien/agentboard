@@ -29,12 +29,6 @@ you did not run.
 GIT AND THE TREE. Never commit, push, tag, reset, checkout, clean or stash: the
 owner commits. Never install the binary or reset a live board. Never write outside
 the repository, and never edit a path this row does not own.
-
-BOARD. Board writes go through the agentboard MCP tools only, never the binary.
-One row at a time: task_get(id, full=true) for the spec, task_comment for what
-changed and the exact output, then task_update(id, if_revision, status="reviewing",
-assignee="reviewer"). Do not paste a report where a comment belongs, and do not
-close your own row.
 """
 
 # The shell is on (owner correction 2026-10-23: prefer MCP, do not ban the shell;
@@ -59,15 +53,15 @@ default_tools_approval_mode = "auto"
 AGENTBOARD_ACTOR = "coder"
 
 [mcp_servers.agentboard.tools]
-task_add = { approval_mode = "auto" }       # create a task
+task_add = { approval_mode = "auto" }        # create a task
 task_list = { approval_mode = "approve" }    # list tasks by status, owner, parent, or path
 task_get = { approval_mode = "approve" }     # read a task, optionally with full details
-task_epic = { approval_mode = "auto" }      # show an epic’s child-task progress
+task_epic = { approval_mode = "auto" }       # show an epic’s child-task progress
 task_update = { approval_mode = "approve" }  # change task fields, status, or owner
 task_claim = { approval_mode = "approve" }   # claim a ready task
 task_comment = { approval_mode = "approve" } # add a comment
-board_feed = { approval_mode = "auto" }     # read board events
-board_brief = { approval_mode = "auto" }    # show active work and status counts
+board_feed = { approval_mode = "approve" }   # read board events
+board_brief = { approval_mode = "approve" }  # show active work and status counts
 board_agents = { approval_mode = "approve" } # list registered actors
 
 [notice]
