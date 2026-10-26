@@ -811,6 +811,128 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
 }
 
 #[test]
+fn reopening_under_terminal_parent_is_atomic() {
+    for status in [Status::Done, Status::Canceled] {
+        for force in [false, true] {
+            let scratch = Scratch::new();
+            let board = Board::open_with_options(scratch.path(), options()).unwrap();
+            let parent = board
+                .add("manager", draft("parent", Status::Todo, 0, None), false, 0)
+                .unwrap()
+                .task;
+            let mut input = draft("child", Status::Done, 0, None);
+            input.parent_id = Some(parent.id);
+            let child = board.add("manager", input, false, 0).unwrap().task;
+            let update = |id, expected_revision, patch: &TaskPatch, force: bool, comment| {
+                board.update(UpdateInput {
+                    id,
+                    actor: "manager",
+                    expected_revision,
+                    patch,
+                    force,
+                    force_reason: force.then_some("override"),
+                    new_actor: true,
+                    comment,
+                    now_ms: 1,
+                })
+            };
+            update(parent.id, 1, &status_patch(status), false, None).unwrap();
+            let reopen = |open| TaskPatch {
+                status: Some(open),
+                assignee: Some(Some("coder".into())),
+                ..TaskPatch::default()
+            };
+            for open in [
+                Status::Todo,
+                Status::InProgress,
+                Status::Blocked,
+                Status::Review,
+            ] {
+                let before = board.metadata().unwrap();
+                let roster = board.agents().unwrap();
+                let tasks = board.list(&list_all()).unwrap().tasks;
+                let error =
+                    update(child.id, 1, &reopen(open), force, Some("must not land")).unwrap_err();
+                assert!(matches!(
+                    error,
+                    Error::ReopenUnderTerminalParent { id: 2, parent: 1, status: s } if s == status
+                ));
+                assert_eq!(
+                    error.to_string(),
+                    format!(
+                        "parent T1 is {}; reopen it before reopening T2",
+                        status.as_str()
+                    )
+                );
+                assert_eq!(board.metadata().unwrap(), before);
+                assert_eq!(board.agents().unwrap(), roster);
+                assert_eq!(board.list(&list_all()).unwrap().tasks, tasks);
+                assert!(board.event(before.next_event_seq).unwrap().is_none());
+            }
+            // Still legal under a closed parent: done to canceled, edits, clearing
+            // the link while reopening.
+            update(child.id, 1, &status_patch(Status::Canceled), false, None).unwrap();
+            let edit = TaskPatch {
+                title: Some("renamed".into()),
+                ..TaskPatch::default()
+            };
+            update(child.id, 2, &edit, false, None).unwrap();
+            // Parent first, then the child.
+            update(parent.id, 2, &status_patch(Status::Todo), false, None).unwrap();
+            update(child.id, 3, &reopen(Status::Todo), force, None).unwrap();
+        }
+    }
+}
+
+#[test]
+fn reopening_walks_nested_parents_top_down() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let mut parent = None;
+    for title in ["grand", "parent", "child"] {
+        let mut input = draft(title, Status::Todo, 0, None);
+        input.parent_id = parent;
+        parent = Some(board.add("manager", input, false, 0).unwrap().task.id);
+    }
+    let close = |id| {
+        board.update(UpdateInput {
+            id,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &status_patch(Status::Done),
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 1,
+        })
+    };
+    for id in [3, 2, 1] {
+        close(id).unwrap();
+    }
+    let reopen = |id| {
+        board.update(UpdateInput {
+            id,
+            actor: "manager",
+            expected_revision: 2,
+            patch: &status_patch(Status::Todo),
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 2,
+        })
+    };
+    for id in [3, 2] {
+        let error = reopen(id).unwrap_err();
+        assert!(matches!(error, Error::ReopenUnderTerminalParent { parent: p, .. } if p == id - 1));
+    }
+    for id in [1, 2, 3] {
+        reopen(id).unwrap();
+    }
+}
+
+#[test]
 fn terminal_parent_attachments_are_atomic() {
     for status in [Status::Done, Status::Canceled] {
         let scratch = Scratch::new();
@@ -871,6 +993,7 @@ fn terminal_parent_attachments_are_atomic() {
                 )
             );
             let patch = TaskPatch {
+                status: Some(Status::Todo),
                 parent_id: Some(Some(parent.id)),
                 assignee: Some(Some("new-target".into())),
                 ..TaskPatch::default()
@@ -1049,7 +1172,6 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
         for force in [false, true] {
             let patch = TaskPatch {
                 status: Some(status),
-                assignee: Some(Some("new-target".into())),
                 ..TaskPatch::default()
             };
             let error = board

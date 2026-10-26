@@ -39,6 +39,9 @@ row. Reopening means reusing the row, never filing a second one.
    individual panes while the board is moving. Before creating or reparenting a
    child under a closed umbrella, the manager explicitly reopens the parent, then
    retries. The board refuses the attachment and never auto-reopens the parent.
+   Handing out a done or canceled row works the same way: reopen the ancestors
+   from the top, then change the row's status and assignee in one update. An
+   assignee change that leaves the row closed is refused.
 
 ## Waiting without spinning
 

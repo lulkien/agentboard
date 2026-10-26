@@ -269,6 +269,64 @@ for status in done canceled; do
     has "$status reopened reparent parent" "parent T1" "$out"
 done
 
+# --- a closed task refuses an owner change; reopening and assigning is one write ---
+for status in done canceled; do
+    fresh "closed-$status"
+    "$B" add held --status "$status" --assignee alice --new-actor >/dev/null
+    want="agentboard: $status task cannot change assignee; reopen it with an open status in the same update"
+    before=$("$B" ls --all; "$B" get 1; "$B" feed --after 0)
+    for args in "--assignee coder --new-actor" "--clear-assignee" "--assignee coder --new-actor --force --reason quota"; do
+        # shellcheck disable=SC2086
+        out=$("$B" update 1 --if-revision 1 $args 2>"$S/refusal"); code=$?
+        check "$status owner change ($args) exit" 1 "$code"
+        check "$status owner change ($args) stdout" "" "$out"
+        check "$status owner change ($args) refusal" "$want" "$(cat "$S/refusal")"
+        check "$status owner change ($args) unchanged" "$before" "$("$B" ls --all; "$B" get 1; "$B" feed --after 0)"
+    done
+    out=$("$B" update 1 --if-revision 1 --title renamed); code=$?
+    check "$status closed edit exit" 0 "$code"
+    out=$("$B" update 1 --if-revision 2 --status todo --assignee coder --new-actor); code=$?
+    check "$status reopen and assign exit" 0 "$code"
+    has "$status reopen and assign record" "T1 todo" "$out"
+    out=$("$B" claim 1 --actor coder); code=$?
+    check "$status claim after reopen exit" 0 "$code"
+    has "$status claim after reopen status" "T1 in_progress" "$out"
+done
+fresh closing
+"$B" add working --status in_progress --assignee alice --new-actor >/dev/null
+out=$(AGENTBOARD_ACTOR=alice "$B" update 1 --if-revision 1 --status done --assignee coder --new-actor 2>&1); code=$?
+check "close and hand over exit" 1 "$code"
+has "close and hand over text" "done task cannot change assignee" "$out"
+
+# --- a closed child reopens only after its closed parent, top-down ---------
+for status in done canceled; do
+    fresh "reopen-$status"
+    "$B" add parent >/dev/null
+    "$B" add child --parent 1 --status done >/dev/null
+    "$B" update 1 --if-revision 1 --status "$status" >/dev/null
+    before=$("$B" ls --all; "$B" get 1; "$B" get 2; "$B" feed --after 0)
+    # Assign-only trips the owner rule first; reopen-and-assign trips the parent rule.
+    out=$("$B" update 2 --if-revision 1 --assignee coder --new-actor 2>"$S/refusal"); code=$?
+    check "$status closed pair assign-only exit" 1 "$code"
+    check "$status closed pair assign-only refusal" "agentboard: done task cannot change assignee; reopen it with an open status in the same update" "$(cat "$S/refusal")"
+    for flags in "" "--force --reason override"; do
+        # shellcheck disable=SC2086
+        out=$("$B" update 2 --if-revision 1 --status todo --assignee coder --new-actor --comment "must not land" $flags 2>"$S/refusal"); code=$?
+        check "$status reopen under closed parent exit" 1 "$code"
+        check "$status reopen under closed parent stdout" "" "$out"
+        check "$status reopen under closed parent refusal" "agentboard: parent T1 is $status; reopen it before reopening T2" "$(cat "$S/refusal")"
+        check "$status reopen under closed parent unchanged" "$before" "$("$B" ls --all; "$B" get 1; "$B" get 2; "$B" feed --after 0)"
+    done
+    out=$("$B" update 2 --if-revision 1 --status canceled); code=$?
+    check "$status done to canceled under closed parent exit" 0 "$code"
+    "$B" update 1 --if-revision 2 --status todo >/dev/null
+    out=$("$B" update 2 --if-revision 2 --status todo --assignee coder --new-actor); code=$?
+    check "$status parent first then child exit" 0 "$code"
+    out=$("$B" claim 2 --actor coder); code=$?
+    check "$status claim reopened child exit" 0 "$code"
+    has "$status claim reopened child status" "T2 in_progress" "$out"
+done
+
 # --- wait: a typed verdict about the rows you name -------------------------
 fresh wait
 "$B" add "already done" --status done >/dev/null

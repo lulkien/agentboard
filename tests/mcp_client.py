@@ -287,6 +287,55 @@ def main():
                 check("reopened reparent succeeds", False, error)
                 has("reopened reparent link", "parent T1", body)
 
+        for status in ["done", "canceled"]:
+            with Server(os.path.join(scratch, "closed-" + status), "manager") as closed:
+                closed.start()
+                closed.call("task_add", {"title": "held", "status": status, "assignee": "alice", "new_actor": True})
+                _, task_before = closed.call("task_get", {"id": 1})
+                _, feed_before = closed.call("board_feed", {"after": "0"})
+                text = status + " task cannot change assignee; reopen it with an open status in the same update"
+                for args in [
+                    {"assignee": "coder", "new_actor": True},
+                    {"clear_assignee": True},
+                    {"assignee": "coder", "new_actor": True, "force": True, "reason": "quota"},
+                ]:
+                    reply = closed.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 1, **args}})
+                    check("closed owner change code", -32602, reply.get("error", {}).get("code"))
+                    check("closed owner change message", text, reply.get("error", {}).get("message"))
+                    check("closed owner change task unchanged", task_before, closed.call("task_get", {"id": 1})[1])
+                    check("closed owner change no event", feed_before, closed.call("board_feed", {"after": "0"})[1])
+                error, body = closed.call("task_update", {"id": 1, "if_revision": 1, "status": "todo", "assignee": "coder", "new_actor": True})
+                check("reopen and assign succeeds", False, error)
+                has("reopen and assign record", "T1 todo", body)
+                _, feed = closed.call("board_feed", {"after": "0", "kind": "updated"})
+                has("reopen event names the recipient", "coder", feed)
+        for status in ["done", "canceled"]:
+            with Server(os.path.join(scratch, "reopen-" + status), "manager") as pair:
+                pair.start()
+                pair.call("task_add", {"title": "parent"})
+                pair.call("task_add", {"title": "child", "parent": 1, "status": "done"})
+                pair.call("task_update", {"id": 1, "if_revision": 1, "status": status})
+                _, before = pair.call("task_list", {"all": True})
+                _, feed_before = pair.call("board_feed", {"after": "0"})
+                reply = pair.send("tools/call", {"name": "task_update", "arguments": {"id": 2, "if_revision": 1, "assignee": "coder", "new_actor": True}})
+                check("closed pair assign-only message", "done task cannot change assignee; reopen it with an open status in the same update", reply.get("error", {}).get("message"))
+                for force in [False, True]:
+                    args = {"id": 2, "if_revision": 1, "status": "todo", "assignee": "coder", "new_actor": True, "comment": "must not land"}
+                    if force:
+                        args.update({"force": True, "reason": "override"})
+                    reply = pair.send("tools/call", {"name": "task_update", "arguments": args})
+                    check("reopen under closed parent code", -32602, reply.get("error", {}).get("code"))
+                    check("reopen under closed parent message", "parent T1 is " + status + "; reopen it before reopening T2", reply.get("error", {}).get("message"))
+                    check("reopen under closed parent tasks unchanged", before, pair.call("task_list", {"all": True})[1])
+                    check("reopen under closed parent no event", feed_before, pair.call("board_feed", {"after": "0"})[1])
+                error, _ = pair.call("task_update", {"id": 1, "if_revision": 2, "status": "todo"})
+                check("closed pair parent reopens first", False, error)
+                error, body = pair.call("task_update", {"id": 2, "if_revision": 1, "status": "todo", "assignee": "coder", "new_actor": True})
+                check("closed pair child then reopens", False, error)
+                has("closed pair child record", "T2 todo", body)
+                _, feed = pair.call("board_feed", {"after": "0", "kind": "updated"})
+                has("closed pair event names the recipient", "coder", feed)
+
         # task_wait: a row already wanted answers at once, a quiet board answers
         # `timeout:` as ordinary text, and refusals stay JSON-RPC errors.
         with Server(os.path.join(scratch, "wait"), "manager") as waits:

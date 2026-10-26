@@ -63,6 +63,10 @@ impl Status {
         matches!(self, Self::InProgress | Self::Blocked)
     }
 
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Done | Self::Canceled)
+    }
+
     pub const fn protects_assignee(self) -> bool {
         matches!(self, Self::InProgress | Self::Blocked | Self::Review)
     }
@@ -84,6 +88,7 @@ pub enum Error {
     Held { holder: String },
     StaleRevision { expected: u64, actual: u64 },
     NotClaimable(Status),
+    ClosedAssignee(Status),
     UnknownEventKind(String),
     NoChange,
     RevisionOverflow,
@@ -123,6 +128,11 @@ impl std::fmt::Display for Error {
                 )
             }
             Self::NotClaimable(status) => write!(f, "{} cannot be claimed", status.as_str()),
+            Self::ClosedAssignee(status) => write!(
+                f,
+                "{} task cannot change assignee; reopen it with an open status in the same update",
+                status.as_str()
+            ),
             Self::NoChange => f.write_str("task update has no field changes"),
             Self::RevisionOverflow => f.write_str("task revision overflow"),
         }
@@ -327,6 +337,9 @@ impl Task {
             next.path.clone_from(path);
         }
         next.validate()?;
+        if next.status.is_terminal() && next.assignee != self.assignee {
+            return Err(Error::ClosedAssignee(next.status));
+        }
         if next == *self {
             return Err(Error::NoChange);
         }
@@ -458,6 +471,69 @@ mod tests {
         let task = Task::new(1, "alice", draft(), 12).unwrap();
         assert_eq!(task.revision, 1);
         assert_eq!(task.reporter, "alice");
+    }
+
+    #[test]
+    fn closed_rows_refuse_owner_changes() {
+        let patch = |status: Option<Status>, assignee: Option<Option<&str>>| TaskPatch {
+            status,
+            assignee: assignee.map(|a| a.map(str::to_owned)),
+            ..TaskPatch::default()
+        };
+        for closed in [Status::Done, Status::Canceled] {
+            let mut input = draft();
+            input.status = closed;
+            input.assignee = Some("alice".into());
+            let task = Task::new(1, "manager", input, 0).unwrap();
+            for (force, reason) in [(false, None), (true, Some("quota"))] {
+                for change in [Some("bob"), None] {
+                    assert_eq!(
+                        task.apply("manager", 1, &patch(None, Some(change)), force, reason, 1),
+                        Err(Error::ClosedAssignee(closed))
+                    );
+                }
+            }
+            for open in [Status::Todo, Status::InProgress] {
+                let reopened = task
+                    .apply(
+                        "manager",
+                        1,
+                        &patch(Some(open), Some(Some("bob"))),
+                        false,
+                        None,
+                        1,
+                    )
+                    .unwrap()
+                    .task;
+                assert_eq!(reopened.status, open);
+                assert_eq!(reopened.assignee.as_deref(), Some("bob"));
+                assert_eq!(reopened.revision, 2);
+            }
+            let edit = TaskPatch {
+                title: Some("renamed".into()),
+                ..TaskPatch::default()
+            };
+            assert!(task.apply("manager", 1, &edit, false, None, 1).is_ok());
+        }
+        let mut input = draft();
+        input.status = Status::InProgress;
+        input.assignee = Some("alice".into());
+        let task = Task::new(1, "manager", input, 0).unwrap();
+        assert_eq!(
+            task.apply(
+                "alice",
+                1,
+                &patch(Some(Status::Done), Some(Some("bob"))),
+                false,
+                None,
+                1
+            ),
+            Err(Error::ClosedAssignee(Status::Done))
+        );
+        assert!(
+            task.apply("alice", 1, &patch(Some(Status::Done), None), false, None, 1)
+                .is_ok()
+        );
     }
 
     #[test]

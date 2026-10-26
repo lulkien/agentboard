@@ -25,6 +25,18 @@ Do these steps yourself:
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context), `goal` (the command and the output that proves it), and `assignee`
    when the owner is known. File a row only when you can hand it to a seat.
+   Before you hand out a row the human names, `task_get` it. If it is `done` or
+   `canceled`:
+   - Same objective: reopen and assign in one write,
+     `task_update(id, if_revision, status="todo", assignee=<seat>, comment=<the
+     human's request>)`. The seat's `task_claim` then starts it. The board refuses
+     an assignee change that leaves the row closed (`cannot change assignee`).
+   - Different work: file a new row and name the old one in its description.
+   - Unclear which: ask the human before writing anything.
+   - `canceled`: revive it only when the human explicitly asks.
+   - Closed parent: the board refuses with `reopen it before reopening`. Reopen
+     the closed ancestors from the highest down (`todo`, or `in_progress` when you
+     hold it), then reopen and assign the row.
 4. Wake, then wait. You are the only wake. The board stores state and blocks on it;
    it never schedules, dispatches or wakes anyone. A seat does its row, reports it
    and stops rather than polling, so every wake after that is yours to give: when a

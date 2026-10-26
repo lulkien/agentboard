@@ -132,12 +132,12 @@ impl Board {
             input.force_reason,
             input.now_ms,
         )?;
-        if matches!(input.patch.status, Some(Status::Done | Status::Canceled)) {
+        if input.patch.status.is_some_and(Status::is_terminal) {
             let counts = self.child_counts(&txn)?;
             let count = counts.get(&input.id).map_or(0, |counts| {
                 Status::ALL
                     .iter()
-                    .filter(|s| !matches!(s, Status::Done | Status::Canceled))
+                    .filter(|s| !s.is_terminal())
                     .map(|s| counts[keys::status_code(*s) as usize])
                     .sum()
             });
@@ -149,10 +149,20 @@ impl Board {
             }
         }
         self.check_parent_chain(&txn, &applied.task)?;
-        if applied.task.parent_id != old.parent_id
-            && let Some(parent_id) = applied.task.parent_id
-        {
-            self.check_attachment_parent(&txn, parent_id)?;
+        if let Some(parent_id) = applied.task.parent_id {
+            if applied.task.parent_id != old.parent_id {
+                self.check_attachment_parent(&txn, parent_id)?;
+            } else if old.status.is_terminal() && !applied.task.status.is_terminal() {
+                self.check_attachment_parent(&txn, parent_id)
+                    .map_err(|error| match error {
+                        Error::ParentTerminal { id, status } => Error::ReopenUnderTerminalParent {
+                            id: old.id,
+                            parent: id,
+                            status,
+                        },
+                        other => other,
+                    })?;
+            }
         }
         self.ensure_target(
             &mut txn,
@@ -184,7 +194,7 @@ impl Board {
         let old = self
             .read_task_in_txn(&txn, input.id)?
             .ok_or(Error::MissingTask(input.id))?;
-        if matches!(old.status, Status::Done | Status::Canceled) {
+        if old.status.is_terminal() {
             return Err(Error::NotReleasable {
                 id: old.id,
                 status: old.status,
@@ -401,7 +411,7 @@ impl Board {
         let parent = self
             .read_task_in_txn(txn, id)?
             .ok_or(Error::MissingParent(id))?;
-        if matches!(parent.status, Status::Done | Status::Canceled) {
+        if parent.status.is_terminal() {
             return Err(Error::ParentTerminal {
                 id,
                 status: parent.status,

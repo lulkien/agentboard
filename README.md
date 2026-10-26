@@ -100,7 +100,9 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   nested or closed task. Closing an epic as `done` or `canceled` requires every
   direct child to be `done` or `canceled`, even with force. Creating or reparenting
   a child under a terminal parent refuses. The manager explicitly reopens the
-  parent first, then retries; parents never auto-reopen.
+  parent first, then retries; parents never auto-reopen. A closed child likewise
+  waits for its closed parent before it can reopen, and a closed task takes a new
+  owner only in the update that reopens it.
 - `brief` shows all epic rows with progress first, then up to ten unparented active
   tasks, then global status counts. Each section uses `(priority, id)` order.
 - `feed` is the bus. It answers a page of events plus the cursor to pass as

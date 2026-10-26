@@ -35,15 +35,15 @@ and uses scratch boards; there is no server to start.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 83 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 86 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `207/207 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `137/137 passed (mcp, lmdb)` |
+| `bash tests/cli.sh` | `271/271 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `193/193 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 22 pages, 104 CLI names, 158 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 22 pages, 104 CLI names, 167 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 11 gates passed`; with `--full` `GATES OK: 12 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |

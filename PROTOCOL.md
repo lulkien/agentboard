@@ -141,6 +141,17 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
   task, roster, index or event. Unchanged parent links and clearing a parent stay
   allowed. The manager explicitly reopens a closed parent before retrying; no
   automatic reopening occurs.
+- An update whose result is `done` or `canceled` cannot set, switch or clear
+  `assignee`: `done task cannot change assignee; reopen it with an open status in
+  the same update`. Force does not lift it, there is no holder to take over from.
+  Handing a closed row to a seat is one write carrying an open `status` plus the
+  new `assignee`. Titles, descriptions, goals and comments on a closed row stay
+  editable, and closing a row while keeping its holder is fine.
+- Moving a closed task to an open status also looks at its direct parent in that
+  write. While the parent is closed it refuses `parent T5 is done; reopen it
+  before reopening T7` and writes nothing, force or not. Reopen ancestors from the
+  top down, then the task itself. `done` to `canceled` under a closed parent is
+  allowed.
 
 ### task_claim
 
@@ -270,6 +281,8 @@ task T7 is not an epic; an epic is a task with children
 epic T7 has 2 open children; close or drop them first
 parent T5 is done; reopen it before adding children
 parent T5 is canceled; reopen it before adding children
+parent T5 is done; reopen it before reopening T7
+done task cannot change assignee; reopen it with an open status in the same update
 task cannot be its own parent
 feed cursor belongs to a different board; reset a cursor or reset the board
 invalid feed cursor "nope"
