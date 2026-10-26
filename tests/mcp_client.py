@@ -149,7 +149,7 @@ def main():
 
         is_error, body = server.call("task_claim", {"id": 1})
         check("task_claim is not an error", False, is_error)
-        has("task_claim returns a work order", "in_progress", body)
+        has("task_claim returns a work order", "implementing", body)
         is_error, body = server.call("task_claim")
         has("an empty claim answers no work", "no ready tasks", body)
 
@@ -161,7 +161,7 @@ def main():
         has("board_feed prints a cursor", "cursor ", body)
 
         is_error, body = server.call("board_brief", {})
-        has("board_brief counts in_progress", "in_progress 1", body)
+        has("board_brief counts implementing", "implementing 1", body)
 
         is_error, body = server.call("board_agents", {})
         has("board_agents lists the actor", "worker", body)
@@ -200,7 +200,7 @@ def main():
         is_error, body = server.call("task_add", {"title": "own todo", "assignee": "worker", "new_actor": True})
         has("assigned todo created", "ok", body)
         is_error, body = server.call("task_claim", {"id": 3})
-        has("claiming your assigned todo starts it", "in_progress", body)
+        has("claiming your assigned todo starts it", "implementing", body)
         has("claiming your assigned todo bumps the revision", "revision 2", body)
         is_error, body = server.call("task_update", {"id": 3, "if_revision": 2, "comment": "only a note"})
         check("comment-only update is not an error", False, is_error)
@@ -229,11 +229,11 @@ def main():
             _, body = epics.call("task_add", {"title": "umbrella", "priority": 20})
             for status in ["todo", "done", "canceled"]:
                 epics.call("task_add", {"title": status + " child", "parent": 1, "status": status})
-            epics.call("task_add", {"title": "ordinary", "status": "review", "priority": -1})
+            epics.call("task_add", {"title": "ordinary", "status": "reviewing", "priority": -1})
             error, body = epics.call("task_epic", {"id": 1})
             check("task_epic succeeds", False, error)
             check("epic four lines", 4, len(body.splitlines()))
-            check("epic direct counts", "todo 1  in_progress 0  blocked 0  review 0  done 1  canceled 1", body.splitlines()[1])
+            check("epic direct counts", "todo 1  planning 0  implementing 0  blocked 0  reviewing 0  done 1  canceled 1", body.splitlines()[1])
             check("epic progress", "done 1/3", body.splitlines()[2])
             has("epic total cursor", "total 3 cursor ", body)
             cli = subprocess.check_output([BIN, "--db", os.path.join(scratch, "epics"), "epic", "1"], text=True)
@@ -253,7 +253,7 @@ def main():
             has("brief progress", "done 1/3", brief.splitlines()[0])
             check("brief ordinary second", "T5", brief.splitlines()[1].split()[0])
             check("brief excludes children", 3, len(brief.splitlines()))
-            check("brief global counts last", "todo 2  in_progress 0  blocked 0  review 1  done 1  canceled 1", brief.splitlines()[-1])
+            check("brief global counts last", "todo 2  planning 0  implementing 0  blocked 0  reviewing 1  done 1  canceled 1", brief.splitlines()[-1])
             epics.call("task_update", {"id": 2, "if_revision": 1, "status": "canceled"})
             error, body = epics.call("task_update", {"id": 1, "if_revision": 1, "status": "done"})
             check("all terminal epic closes", False, error)
@@ -344,7 +344,7 @@ def main():
             releases.call("task_add", {"title": "held by a dead seat"})
             releases.call(
                 "task_update",
-                {"id": 1, "if_revision": 1, "status": "in_progress", "assignee": "coder", "new_actor": True},
+                {"id": 1, "if_revision": 1, "status": "implementing", "assignee": "coder", "new_actor": True},
             )
             reply = releases.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 2, "release": True}})
             check("foreign release without force code", -32602, reply.get("error", {}).get("code"))
@@ -385,6 +385,12 @@ def main():
             )
             _, after = releases.call("task_get", {"id": 1})
             check("a release with a field flag changes nothing", before, after)
+            # planning is held work; legacy status inputs are accepted and never printed.
+            is_error, body = releases.call("task_add", {"title": "planned", "status": "planning", "assignee": "analyst", "new_actor": True})
+            check("planning with a holder is not an error", False, is_error)
+            has("planning prints its own name", "planning", body)
+            is_error, body = releases.call("task_update", {"id": 2, "if_revision": 1, "status": "review", "force": True, "reason": "test legacy input"})
+            has("legacy review input prints reviewing", "reviewing", body)
             print("task_update release: todo record, -32602 held and holder-less refusals")
     finally:
         server.close()

@@ -101,12 +101,12 @@ fn claim_walks_the_index_and_skips_foreign_rows() {
         panic!("expected a claim, got {claimed:?}");
     };
     assert_eq!(updated.task.id, free.id);
-    assert_eq!(updated.task.status, Status::InProgress);
+    assert_eq!(updated.task.status, Status::Implementing);
     assert_eq!(updated.task.assignee.as_deref(), Some("bob"));
     assert_eq!(updated.task.revision, 2);
     assert_eq!(updated.event.kind, EventKind::Claimed);
     assert_eq!(updated.event.payload["old_status"], "todo");
-    assert_eq!(updated.event.payload["new_status"], "in_progress");
+    assert_eq!(updated.event.payload["new_status"], "implementing");
     assert_eq!(board.claim("bob", None, 3).unwrap(), ClaimOutcome::NoWork);
     let alice = board.claim("alice", None, 4).unwrap();
     let ClaimOutcome::Claimed(updated) = alice else {
@@ -143,7 +143,7 @@ fn explicit_claim_refuses_held_completed_and_missing_rows() {
     let ClaimOutcome::AlreadyHeld(current) = again else {
         panic!("a held claim must be an idempotent read, got {again:?}");
     };
-    assert!(matches!(current.status, Status::InProgress));
+    assert!(matches!(current.status, Status::Implementing));
     let done = board
         .add("manager", draft("done", Status::Done, 0, None), false, 3)
         .unwrap()
@@ -175,7 +175,7 @@ fn stale_update_and_quota_takeover() {
         panic!("alice must claim her row");
     };
     assert_eq!(claimed.task.revision, 2);
-    let review = status_patch(Status::Review);
+    let review = status_patch(Status::Reviewing);
     assert!(matches!(
         board.update(UpdateInput {
             id: task.id,
@@ -264,7 +264,7 @@ fn forced_own_task_records_the_reason_without_a_handoff() {
     let task = board
         .add(
             "manager",
-            draft("work", Status::InProgress, 0, Some("alice")),
+            draft("work", Status::Implementing, 0, Some("alice")),
             true,
             0,
         )
@@ -609,7 +609,7 @@ fn list_filters_pages_and_brief_counts() {
     let review = board
         .add(
             "manager",
-            draft("review", Status::Review, 0, Some("bob")),
+            draft("review", Status::Reviewing, 0, Some("bob")),
             true,
             3,
         )
@@ -702,7 +702,7 @@ fn list_filters_pages_and_brief_counts() {
     };
     assert_eq!(count(Status::Todo), 3);
     assert_eq!(count(Status::Done), 1);
-    assert_eq!(count(Status::Review), 1);
+    assert_eq!(count(Status::Reviewing), 1);
     let active: Vec<u64> = brief.active.iter().map(|task| task.id).collect();
     assert!(active.is_empty());
     assert_eq!(brief.epics[0].task.id, review.id);
@@ -729,7 +729,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
     let before = board.metadata().unwrap();
     let agents = board.agents().unwrap();
     let epic = board.epic(root.id).unwrap();
-    assert_eq!(epic.total, 6);
+    assert_eq!(epic.total, 7);
     assert_eq!(epic.done, 1);
     assert!(epic.counts.iter().all(|(_, count)| *count == 1));
     assert_eq!(epic.cursor.seq, before.next_event_seq - 1);
@@ -740,7 +740,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
         vec![children[0].id, root.id]
     );
     assert!(brief.active.is_empty());
-    assert_eq!(brief.counts.iter().map(|(_, n)| n).sum::<u64>(), 8);
+    assert_eq!(brief.counts.iter().map(|(_, n)| n).sum::<u64>(), 9);
     assert!(matches!(board.epic(children[1].id), Err(Error::NotEpic(_))));
     assert!(matches!(board.epic(999), Err(Error::MissingTask(999))));
     assert_eq!(board.metadata().unwrap(), before);
@@ -750,14 +750,14 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
         input.parent_id = Some(root.id);
         board.add("manager", input, false, 3).unwrap();
     }
-    assert_eq!(board.epic(root.id).unwrap().total, 207);
+    assert_eq!(board.epic(root.id).unwrap().total, 208);
     let parent = TaskPatch {
         parent_id: Some(None),
         ..TaskPatch::default()
     };
     board
         .update(UpdateInput {
-            id: 8,
+            id: 9,
             actor: "manager",
             expected_revision: 1,
             patch: &parent,
@@ -772,7 +772,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
     assert_eq!(board.brief(10).unwrap().epics.len(), 1);
     // Build a legal closed epic after its children have all become terminal.
     // Terminal parents remain readable in both epic and brief.
-    for child in &children[..4] {
+    for child in &children[..5] {
         board
             .update(UpdateInput {
                 id: child.id,
@@ -804,7 +804,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
     let roster = board.agents().unwrap();
     let closed = board.epic(root.id).unwrap();
     assert_eq!(closed.task.status, Status::Done);
-    assert_eq!(closed.total, 207);
+    assert_eq!(closed.total, 208);
     assert_eq!(board.brief(0).unwrap().epics[0].task, closed.task);
     assert_eq!(board.metadata().unwrap(), before);
     assert_eq!(board.agents().unwrap(), roster);
@@ -844,9 +844,9 @@ fn reopening_under_terminal_parent_is_atomic() {
             };
             for open in [
                 Status::Todo,
-                Status::InProgress,
+                Status::Implementing,
                 Status::Blocked,
-                Status::Review,
+                Status::Reviewing,
             ] {
                 let before = board.metadata().unwrap();
                 let roster = board.agents().unwrap();
@@ -1106,9 +1106,9 @@ fn terminal_parent_attachments_are_atomic() {
 fn nonterminal_parents_accept_both_attachments() {
     for status in [
         Status::Todo,
-        Status::InProgress,
+        Status::Implementing,
         Status::Blocked,
-        Status::Review,
+        Status::Reviewing,
     ] {
         let scratch = Scratch::new();
         let board = Board::open_with_options(scratch.path(), options()).unwrap();
@@ -1154,13 +1154,18 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
     let root = board
         .add(
             "manager",
-            draft("root", Status::InProgress, 0, Some("manager")),
+            draft("root", Status::Implementing, 0, Some("manager")),
             false,
             0,
         )
         .unwrap()
         .task;
-    for status in [Status::Todo, Status::Review, Status::Done, Status::Canceled] {
+    for status in [
+        Status::Todo,
+        Status::Reviewing,
+        Status::Done,
+        Status::Canceled,
+    ] {
         let mut input = draft("child", status, 0, None);
         input.parent_id = Some(root.id);
         board.add("manager", input, false, 1).unwrap();
@@ -1561,9 +1566,9 @@ fn review_handoff_stays_on_one_task_with_generic_statuses() {
     let ClaimOutcome::Claimed(claimed) = board.claim("coder", Some(task.id), 1).unwrap() else {
         panic!("coder must claim the task");
     };
-    assert_eq!(claimed.task.status, Status::InProgress);
+    assert_eq!(claimed.task.status, Status::Implementing);
     let to_review = TaskPatch {
-        status: Some(Status::Review),
+        status: Some(Status::Reviewing),
         assignee: Some(Some("reviewer".into())),
         ..TaskPatch::default()
     };
@@ -1685,7 +1690,7 @@ fn eight_processes_claim_each_task_exactly_once() {
     }
     assert_eq!(claimed_events, 24);
     let mut filter = list_all();
-    filter.status = Some(Status::InProgress);
+    filter.status = Some(Status::Implementing);
     assert_eq!(board.list(&filter).unwrap().total, 24);
     assert!(board.claim("worker-0", None, 99).unwrap() == ClaimOutcome::NoWork);
 }
@@ -1880,7 +1885,7 @@ fn review_claim_takes_an_unassigned_row_and_keeps_the_status() {
     let task = board
         .add(
             "manager",
-            draft("review me", Status::Review, 0, None),
+            draft("review me", Status::Reviewing, 0, None),
             false,
             0,
         )
@@ -1889,10 +1894,10 @@ fn review_claim_takes_an_unassigned_row_and_keeps_the_status() {
     let ClaimOutcome::Claimed(taken) = board.claim("reviewer", Some(task.id), 1).unwrap() else {
         panic!("an unassigned review row must be claimable by an explicit ID");
     };
-    assert_eq!(taken.task.status, Status::Review);
+    assert_eq!(taken.task.status, Status::Reviewing);
     assert_eq!(taken.task.assignee.as_deref(), Some("reviewer"));
-    assert_eq!(taken.event.payload["old_status"], "review");
-    assert_eq!(taken.event.payload["new_status"], "review");
+    assert_eq!(taken.event.payload["old_status"], "reviewing");
+    assert_eq!(taken.event.payload["new_status"], "reviewing");
 }
 
 #[test]
@@ -2179,7 +2184,7 @@ fn wait_expands_an_epic_and_requeries_children_on_every_poll() {
             0,
         )
         .unwrap();
-    let mut first = draft("child one", Status::InProgress, 0, Some("manager"));
+    let mut first = draft("child one", Status::Implementing, 0, Some("manager"));
     first.parent_id = Some(1);
     board.add("manager", first, false, 1).unwrap();
     assert!(matches!(
@@ -2308,7 +2313,7 @@ fn wait_refuses_a_foreign_watermark_and_accepts_a_bare_sequence() {
 fn wait_status_csv_is_trimmed_deduplicated_and_in_board_order() {
     assert_eq!(
         parse_status_csv(" done , review,done ").unwrap(),
-        vec![Status::Review, Status::Done]
+        vec![Status::Reviewing, Status::Done]
     );
     assert!(matches!(
         parse_status_csv(""),
@@ -2352,7 +2357,7 @@ fn wait_status_csv_is_trimmed_deduplicated_and_in_board_order() {
 }
 
 fn handoff_statuses() -> [Status; 3] {
-    [Status::Review, Status::Done, Status::Blocked]
+    [Status::Reviewing, Status::Done, Status::Blocked]
 }
 
 /// The analyst -> coder handoff: only the assignee changes, status stays put.
@@ -2387,7 +2392,7 @@ fn wait_through_a_handoff(
     board
         .add(
             "analyst",
-            draft("plan me", Status::InProgress, 0, Some("analyst")),
+            draft("plan me", Status::Implementing, 0, Some("analyst")),
             true,
             0,
         )
@@ -2415,7 +2420,7 @@ fn wait_matches_a_handoff_with_status_unchanged() {
     let outcome = wait_through_a_handoff(Some(AssigneeMatch::Any), "coder", 5_000);
     assert!(outcome.matched);
     let row = &outcome.rows[0];
-    assert_eq!(row.task.status, Status::InProgress);
+    assert_eq!(row.task.status, Status::Implementing);
     assert_eq!(row.task.assignee.as_deref(), Some("coder"));
     assert_eq!(row.handed_to.as_deref(), Some("coder"));
     assert_eq!(row.last, None);
@@ -2455,7 +2460,7 @@ fn wait_assignee_ignores_handoffs_before_the_watermark_and_releases() {
     board
         .add(
             "analyst",
-            draft("plan me", Status::InProgress, 0, Some("analyst")),
+            draft("plan me", Status::Implementing, 0, Some("analyst")),
             true,
             0,
         )
@@ -2581,7 +2586,7 @@ fn wait_assignee_sees_a_handoff_past_the_event_cap() {
     board
         .add(
             "analyst",
-            draft("chatty", Status::InProgress, 0, Some("analyst")),
+            draft("chatty", Status::Implementing, 0, Some("analyst")),
             true,
             0,
         )

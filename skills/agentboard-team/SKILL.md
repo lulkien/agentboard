@@ -172,14 +172,14 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
 - If a seat must be poked outside the board, that is a herdr prompt, not a board
   write.
 - To block on named rows, use the wait instead of re-arming the feed:
-  `agentboard wait 27 --status review --timeout 300` returns the moment T27 reaches
+  `agentboard wait 27 --status reviewing --timeout 300` returns the moment T27 reaches
   review. There is no MCP wait tool; the binary is the only way to wait. An epic
   works too: `agentboard wait 12 --epic` watches its direct children and returns
   once every one of them is `done` or `canceled`. The verdict's first line is
   `matched:` (exit 0) or `timeout:` (exit 3), and it writes nothing.
 - An analyst-to-coder handoff changes the assignee and leaves the status alone, so
   a status wait never sees it. Add `--assignee` to the same wait:
-  `agentboard wait 27 --status review,done,blocked --assignee --timeout 300`. It returns on a
+  `agentboard wait 27 --status reviewing,done,blocked --assignee --timeout 300`. It returns on a
   handoff after the wait starts and says `; handoff T27 to coder` on the first line.
 - A wait wakes the manager, not the seat. It reports that the row moved; no pane
   received a prompt. The seat that must act still needs a herdr prompt.
@@ -237,7 +237,7 @@ attachment. This never happens automatically.
 A handoff is one assignment: `task_update(id, if_revision, assignee="next-actor")`.
 The event carries `recipient`, which names the next seat; nothing in the board
 wakes it — the manager prompts it. Move the status in
-the same call: `review` with `assignee="reviewer"`, `in_progress` back with
+the same call: `reviewing` with `assignee="reviewer"`, `implementing` back with
 `assignee="coder"`.
 
 When a holder is gone for good — out of quota, its seat replaced by another name —

@@ -15,23 +15,29 @@ pub fn now_ms() -> i64 {
 pub const MAX_ACTOR_CHARS: usize = 64;
 pub const MAX_TITLE_CHARS: usize = 200;
 
+/// The stored names `in_progress` and `review` are board format and stay frozen;
+/// the variants are what clients see as `implementing` and `reviewing`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Todo,
-    InProgress,
+    Planning,
+    #[serde(rename = "in_progress")]
+    Implementing,
     Blocked,
-    Review,
+    #[serde(rename = "review")]
+    Reviewing,
     Done,
     Canceled,
 }
 
 impl Status {
-    pub const ALL: [Status; 6] = [
+    pub const ALL: [Status; 7] = [
         Status::Todo,
-        Status::InProgress,
+        Status::Planning,
+        Status::Implementing,
         Status::Blocked,
-        Status::Review,
+        Status::Reviewing,
         Status::Done,
         Status::Canceled,
     ];
@@ -39,28 +45,37 @@ impl Status {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Todo => "todo",
-            Self::InProgress => "in_progress",
+            Self::Planning => "planning",
+            Self::Implementing => "implementing",
             Self::Blocked => "blocked",
-            Self::Review => "review",
+            Self::Reviewing => "reviewing",
             Self::Done => "done",
             Self::Canceled => "canceled",
         }
     }
 
+    /// The seven names, then the legacy inputs `in_progress` and `review`, which
+    /// are accepted so old scripts and live seats keep working and never printed.
     pub fn parse(value: &str) -> Result<Self, Error> {
         match value {
             "todo" => Ok(Self::Todo),
-            "in_progress" => Ok(Self::InProgress),
+            "planning" => Ok(Self::Planning),
+            "implementing" | "in_progress" => Ok(Self::Implementing),
             "blocked" => Ok(Self::Blocked),
-            "review" => Ok(Self::Review),
+            "reviewing" | "review" => Ok(Self::Reviewing),
             "done" => Ok(Self::Done),
             "canceled" => Ok(Self::Canceled),
             _ => Err(Error::UnknownStatus(value.to_owned())),
         }
     }
 
+    /// Board order, the order counts and wait verdicts print in.
+    pub fn position(self) -> usize {
+        Self::ALL.iter().position(|s| *s == self).unwrap_or(0)
+    }
+
     pub const fn requires_assignee(self) -> bool {
-        matches!(self, Self::InProgress | Self::Blocked)
+        matches!(self, Self::Planning | Self::Implementing | Self::Blocked)
     }
 
     pub const fn is_terminal(self) -> bool {
@@ -68,7 +83,10 @@ impl Status {
     }
 
     pub const fn protects_assignee(self) -> bool {
-        matches!(self, Self::InProgress | Self::Blocked | Self::Review)
+        matches!(
+            self,
+            Self::Planning | Self::Implementing | Self::Blocked | Self::Reviewing
+        )
     }
 }
 
@@ -248,7 +266,7 @@ impl Task {
         match self.status {
             Status::Todo => {
                 let patch = TaskPatch {
-                    status: Some(Status::InProgress),
+                    status: Some(Status::Implementing),
                     assignee: Some(Some(actor.to_owned())),
                     ..TaskPatch::default()
                 };
@@ -257,7 +275,7 @@ impl Task {
                         .task,
                 ))
             }
-            Status::Review if explicit && self.assignee.is_none() => {
+            Status::Reviewing if explicit && self.assignee.is_none() => {
                 let patch = TaskPatch {
                     assignee: Some(Some(actor.to_owned())),
                     ..TaskPatch::default()
@@ -267,7 +285,7 @@ impl Task {
                         .task,
                 ))
             }
-            Status::Review | Status::InProgress
+            Status::Reviewing | Status::Planning | Status::Implementing
                 if explicit && self.assignee.as_deref() == Some(actor) =>
             {
                 Ok(Claim::AlreadyHeld(self.clone()))
@@ -460,10 +478,10 @@ mod tests {
         input.title = " \n ".into();
         assert_eq!(Task::new(1, "alice", input, 0), Err(Error::EmptyTitle));
         let mut input = draft();
-        input.status = Status::InProgress;
+        input.status = Status::Implementing;
         assert_eq!(
             Task::new(1, "alice", input, 0),
-            Err(Error::MissingAssignee(Status::InProgress))
+            Err(Error::MissingAssignee(Status::Implementing))
         );
         let mut input = draft();
         input.assignee = Some("  ".into());
@@ -493,7 +511,7 @@ mod tests {
                     );
                 }
             }
-            for open in [Status::Todo, Status::InProgress] {
+            for open in [Status::Todo, Status::Implementing] {
                 let reopened = task
                     .apply(
                         "manager",
@@ -516,7 +534,7 @@ mod tests {
             assert!(task.apply("manager", 1, &edit, false, None, 1).is_ok());
         }
         let mut input = draft();
-        input.status = Status::InProgress;
+        input.status = Status::Implementing;
         input.assignee = Some("alice".into());
         let task = Task::new(1, "manager", input, 0).unwrap();
         assert_eq!(
@@ -542,7 +560,7 @@ mod tests {
         let Claim::Started(started) = task.claim("alice", false, 1).unwrap() else {
             panic!("todo claim must start work");
         };
-        assert_eq!(started.status, Status::InProgress);
+        assert_eq!(started.status, Status::Implementing);
         assert_eq!(started.assignee.as_deref(), Some("alice"));
         assert_eq!(started.revision, 2);
         assert_eq!(started.updated_at_ms, 1);
@@ -552,7 +570,7 @@ mod tests {
                 1,
                 &TaskPatch {
                     assignee: Some(Some("alice".into())),
-                    status: Some(Status::InProgress),
+                    status: Some(Status::Implementing),
                     ..TaskPatch::default()
                 },
                 false,
@@ -573,7 +591,7 @@ mod tests {
         );
         assert_eq!(
             own.claim("alice", false, 2),
-            Err(Error::NotClaimable(Status::InProgress))
+            Err(Error::NotClaimable(Status::Implementing))
         );
     }
 
@@ -586,7 +604,7 @@ mod tests {
                 1,
                 &TaskPatch {
                     assignee: Some(Some("alice".into())),
-                    status: Some(Status::InProgress),
+                    status: Some(Status::Implementing),
                     ..TaskPatch::default()
                 },
                 false,
@@ -648,7 +666,7 @@ mod tests {
                 1,
                 &TaskPatch {
                     assignee: Some(Some("alice".into())),
-                    status: Some(Status::InProgress),
+                    status: Some(Status::Implementing),
                     ..TaskPatch::default()
                 },
                 false,
@@ -669,7 +687,7 @@ mod tests {
                 None,
                 2
             ),
-            Err(Error::MissingAssignee(Status::InProgress))
+            Err(Error::MissingAssignee(Status::Implementing))
         );
         let released = held
             .apply(
@@ -700,7 +718,7 @@ mod tests {
                 "coder",
                 1,
                 &TaskPatch {
-                    status: Some(Status::InProgress),
+                    status: Some(Status::Implementing),
                     ..TaskPatch::default()
                 },
                 false,
@@ -714,7 +732,7 @@ mod tests {
                 "coder",
                 2,
                 &TaskPatch {
-                    status: Some(Status::Review),
+                    status: Some(Status::Reviewing),
                     assignee: Some(Some("reviewer".into())),
                     ..TaskPatch::default()
                 },
@@ -753,16 +771,16 @@ mod tests {
     #[test]
     fn explicit_review_claim_assigns_without_changing_status() {
         let mut input = draft();
-        input.status = Status::Review;
+        input.status = Status::Reviewing;
         let task = Task::new(4, "manager", input, 10).unwrap();
         assert_eq!(
             task.claim("reviewer", false, 11),
-            Err(Error::NotClaimable(Status::Review))
+            Err(Error::NotClaimable(Status::Reviewing))
         );
         let Claim::ReviewTaken(taken) = task.claim("reviewer", true, 11).unwrap() else {
             panic!("explicit review claim must take work");
         };
-        assert_eq!(taken.status, Status::Review);
+        assert_eq!(taken.status, Status::Reviewing);
         assert_eq!(taken.assignee.as_deref(), Some("reviewer"));
         assert_eq!(taken.revision, 2);
         assert_eq!(task.revision, 1);
@@ -812,7 +830,7 @@ mod tests {
     #[test]
     fn forced_foreign_title_edit_keeps_override_reason_without_reassignment() {
         let mut input = draft();
-        input.status = Status::InProgress;
+        input.status = Status::Implementing;
         input.assignee = Some("alice".into());
         let task = Task::new(1, "manager", input, 0).unwrap();
         let patch = TaskPatch {
@@ -830,7 +848,7 @@ mod tests {
     #[test]
     fn force_reason_on_own_task_is_audited() {
         let mut input = draft();
-        input.status = Status::InProgress;
+        input.status = Status::Implementing;
         input.assignee = Some("alice".into());
         let task = Task::new(1, "manager", input, 0).unwrap();
         let patch = TaskPatch {
@@ -850,16 +868,11 @@ mod tests {
 
     #[test]
     fn status_names_parse_through_one_shared_rule() {
-        for status in [
-            Status::Todo,
-            Status::InProgress,
-            Status::Blocked,
-            Status::Review,
-            Status::Done,
-            Status::Canceled,
-        ] {
+        for status in Status::ALL {
             assert_eq!(Status::parse(status.as_str()), Ok(status));
         }
+        assert_eq!(Status::parse("in_progress"), Ok(Status::Implementing));
+        assert_eq!(Status::parse("review"), Ok(Status::Reviewing));
         let error = Status::parse("queued").unwrap_err();
         assert_eq!(error, Error::UnknownStatus("queued".into()));
         assert_eq!(error.to_string(), "unknown task status: \"queued\"");
@@ -951,8 +964,38 @@ mod tests {
             event
         );
         assert_eq!(
-            serde_json::to_string(&Status::InProgress).unwrap(),
+            serde_json::to_string(&Status::Implementing).unwrap(),
             "\"in_progress\""
+        );
+    }
+
+    #[test]
+    fn stored_status_names_stay_frozen_and_planning_is_held_work() {
+        for (status, stored) in [
+            (Status::Planning, "\"planning\""),
+            (Status::Implementing, "\"in_progress\""),
+            (Status::Reviewing, "\"review\""),
+        ] {
+            assert_eq!(serde_json::to_string(&status).unwrap(), stored);
+            assert_eq!(serde_json::from_str::<Status>(stored).unwrap(), status);
+        }
+        assert!(Status::Planning.requires_assignee());
+        assert!(Status::Planning.protects_assignee());
+        let mut input = draft();
+        input.status = Status::Planning;
+        assert_eq!(
+            Task::new(1, "manager", input.clone(), 0),
+            Err(Error::MissingAssignee(Status::Planning))
+        );
+        input.assignee = Some("analyst".into());
+        let task = Task::new(1, "manager", input, 0).unwrap();
+        assert_eq!(
+            task.claim("analyst", false, 1),
+            Err(Error::NotClaimable(Status::Planning))
+        );
+        assert_eq!(
+            task.claim("analyst", true, 1),
+            Ok(Claim::AlreadyHeld(task.clone()))
         );
     }
 }

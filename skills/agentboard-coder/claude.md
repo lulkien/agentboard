@@ -14,7 +14,7 @@ before acting; the repo `AGENTS.md` narrows what you may run.
 3. Work only that row and the files it names, run the checks its goal names, and
    keep the real output.
 4. `task_comment(id, body=<what changed and the exact output>)`.
-5. Hand it to review: `task_update(id, if_revision, status="review",
+5. Hand it to review: `task_update(id, if_revision, status="reviewing",
    assignee="reviewer")`. Never close your own row when a reviewer is named.
 6. Missing requirement: one narrow comment, status `blocked`, then stop; the manager
    brings the answer back. No work: report and stop; the manager wakes you.

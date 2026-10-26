@@ -33,7 +33,7 @@ Do these steps yourself:
    - Unclear which: ask the human before writing anything.
    - `canceled`: revive it only when the human explicitly asks.
    - Closed parent: the board refuses with `reopen it before reopening`. Reopen
-     the closed ancestors from the highest down (`todo`, or `in_progress` when you
+     the closed ancestors from the highest down (`todo`, or `implementing` when you
      hold it), then reopen and assign the row.
 4. Wake, then wait. You are the only wake. The board stores state and blocks on it;
    it never schedules, dispatches or wakes anyone. A seat does its row, reports it
@@ -46,16 +46,16 @@ Do these steps yourself:
      it fires. A foreground sleep, a poll loop or a blocking prompt is a bug in
      the manager, not diligence.
    - Watch act-points, not the row's current state. While a coder holds a row,
-     watch `done,review,blocked`: `review` is the hand-off and the cue to prompt
-     the reviewer. Including `in_progress` here matches the coder's claim, so the
+     watch `done,reviewing,blocked`: `reviewing` is the hand-off and the cue to prompt
+     the reviewer. Including `implementing` here matches the coder's claim, so the
      watch fires immediately and tells you nothing new.
-   - While an analyst holds a row, status stays `in_progress` when they hand to
-     the coder. Arm `wait ID --status review,done,blocked --assignee --timeout 300`
+   - While an analyst holds a row (`planning`), the hand to the coder moves it to
+     `implementing` with the coder as assignee. Arm `wait ID --status reviewing,done,blocked --assignee --timeout 300`
      so that reassignment ends the wait; the
      first line then carries `; handoff T… to coder`.
    - Stage the set by phase. Once you have prompted the reviewer, add
-     `in_progress` to `done,review,blocked`: the coder has already claimed, so
-     `in_progress` now means a reopen that needs the coder prompted again.
+     `implementing` to `done,reviewing,blocked`: the coder has already claimed, so
+     `implementing` now means a reopen that needs the coder prompted again.
    - Keep one watcher per row. Kill the old arm before arming a new one, because
      two watchers wake you twice for one event.
    - Use a 300 s long-poll arm (`wait ID --status CSV --timeout 300`, and add

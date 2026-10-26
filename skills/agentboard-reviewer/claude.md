@@ -8,13 +8,13 @@ focus: $ARGUMENTS
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md`
 before acting. You read and judge; the row is your work product.
 
-1. Find the row: MCP `board_feed` unfiltered, or `task_list(status="review")`.
+1. Find the row: MCP `board_feed` unfiltered, or `task_list(status="reviewing")`.
 2. `task_get(id, full=true)` for the goal, then read the tree and the diff the row
    names. Re-run the acceptance command instead of trusting a pasted transcript.
 3. Comment findings on the same row, classified blocker, follow-up or nit, with
    `file:line` or the command that shows it.
 4. Close when proved: `task_update(id, if_revision, status="done")` with the
-   evidence. Reopen when not: `task_update(id, if_revision, status="in_progress",
+   evidence. Reopen when not: `task_update(id, if_revision, status="implementing",
    assignee="coder")` plus the findings. A task with children is an epic, and the
    board refuses to close one while a child is open; report that refusal, never
    work around it.

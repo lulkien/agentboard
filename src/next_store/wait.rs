@@ -90,7 +90,7 @@ pub fn parse_status_csv(raw: &str) -> Result<Vec<Status>> {
     if wanted.is_empty() {
         return Err(Error::WaitWithoutStatus);
     }
-    wanted.sort_by_key(|status| keys::status_code(*status));
+    wanted.sort_by_key(|status| status.position());
     Ok(wanted)
 }
 
@@ -327,7 +327,7 @@ fn index_seq(key: &[u8]) -> Result<u64> {
 
 fn ordered(statuses: &[Status]) -> Vec<Status> {
     let mut wanted: Vec<Status> = statuses.to_vec();
-    wanted.sort_by_key(|status| keys::status_code(*status));
+    wanted.sort_by_key(|status| status.position());
     wanted.dedup();
     wanted
 }

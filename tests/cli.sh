@@ -107,11 +107,27 @@ out=$("$B" update 1 --if-revision 1 --assignee bob --clear-assignee 2>&1); code=
 check "assignee and clear-assignee conflict exit" 1 "$code"
 has "assignee and clear-assignee conflict text" "not both" "$out"
 
+# --- workflow statuses: planning, legacy input names ---------------------
+fresh p
+"$B" add "staged" >/dev/null
+out=$("$B" update 1 --if-revision 1 --status planning --assignee alice --new-actor 2>&1); code=$?
+check "planning with a holder exit" 0 "$code"
+has "planning prints its own name" "T1 planning" "$out"
+out=$("$B" update 1 --if-revision 2 --status review --actor alice 2>&1); code=$?
+check "legacy review input exit" 0 "$code"
+has "legacy review input prints reviewing" "T1 reviewing" "$out"
+out=$("$B" update 1 --if-revision 3 --status in_progress --actor alice 2>&1); code=$?
+has "legacy in_progress input prints implementing" "T1 implementing" "$out"
+"$B" add "planning needs a holder" >/dev/null
+out=$("$B" update 2 --if-revision 1 --status planning 2>&1); code=$?
+check "planning without an assignee exit" 1 "$code"
+has "planning without an assignee text" "planning requires an assignee" "$out"
+
 # --- revision guard and a forced take-over -------------------------------
 fresh e
 "$B" add "guarded" >/dev/null
-out=$("$B" update 1 --if-revision 1 --status in_progress --assignee alice --new-actor)
-has "update moves status" "in_progress" "$out"
+out=$("$B" update 1 --if-revision 1 --status implementing --assignee alice --new-actor)
+has "update moves status" "implementing" "$out"
 out=$("$B" update 1 --if-revision 1 --title "stale" 2>&1); code=$?
 check "stale revision exit" 1 "$code"
 has "stale revision names both numbers" "stale task revision 1" "$out"
@@ -130,7 +146,7 @@ fresh f
 "$B" add "high" --priority 10 >/dev/null
 out=$("$B" claim)
 has "claim takes the highest priority" "high" "$out"
-has "claim moves it to in_progress" "in_progress" "$out"
+has "claim moves it to implementing" "implementing" "$out"
 out=$("$B" claim)
 has "second claim takes the next one" "low" "$out"
 out=$("$B" claim); code=$?
@@ -160,17 +176,17 @@ check "cursor from another instance exit" 1 "$code"
 # --- claim rules and comment-only updates --------------------------------
 fresh i
 "$B" add "own todo" --assignee manager --new-actor >/dev/null
-"$B" add "review row" --status review >/dev/null
+"$B" add "review row" --status reviewing >/dev/null
 "$B" add "blocked row" --status blocked --assignee manager >/dev/null
 out=$("$B" claim 1)
-has "claiming your assigned todo starts the work" "in_progress" "$out"
+has "claiming your assigned todo starts the work" "implementing" "$out"
 has "claiming your assigned todo bumps the revision" "revision 2" "$out"
 out=$("$B" claim 1)
-has "claiming a held in_progress row is idempotent" "revision 2" "$out"
+has "claiming a held implementing row is idempotent" "revision 2" "$out"
 out=$("$B" claim); code=$?
 check "id-less claim skips review and blocked rows" 3 "$code"
 out=$("$B" claim 2)
-has "an explicit claim takes a review row" "review" "$out"
+has "an explicit claim takes a review row" "reviewing" "$out"
 out=$("$B" claim 3 2>&1); code=$?
 check "blocked is never claimable" 1 "$code"
 has "blocked refusal names the status" "blocked cannot be claimed" "$out"
@@ -208,15 +224,15 @@ has "reset leaves an empty board" "total 0" "$out"
 # --- derived epics and atomic close refusals -----------------------------
 fresh epic
 "$B" add "umbrella" --priority 20 >/dev/null
-"$B" add "open child" --parent 1 --status in_progress --assignee manager >/dev/null
+"$B" add "open child" --parent 1 --status implementing --assignee manager >/dev/null
 "$B" add "done child" --parent 1 --status done >/dev/null
 "$B" add "dropped child" --parent 1 --status canceled >/dev/null
-"$B" add "ordinary active" --status review --priority -1 >/dev/null
+"$B" add "ordinary active" --status reviewing --priority -1 >/dev/null
 out=$(AGENTBOARD_ACTOR= "$B" epic 1); code=$?
 check "epic needs no actor" 0 "$code"
 check "epic has four lines" 4 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
 check "epic compact row" "$("$B" ls --all | rg '^T1 ')" "$(printf '%s\n' "$out" | head -1)"
-check "epic status counts" "todo 0  in_progress 1  blocked 0  review 0  done 1  canceled 1" "$(printf '%s\n' "$out" | sed -n '2p')"
+check "epic status counts" "todo 0  planning 0  implementing 1  blocked 0  reviewing 0  done 1  canceled 1" "$(printf '%s\n' "$out" | sed -n '2p')"
 check "epic progress" "done 1/3" "$(printf '%s\n' "$out" | sed -n '3p')"
 has "epic total and snapshot cursor" "total 3 cursor " "$out"
 out=$("$B" epic 2 2>&1); code=$?
@@ -235,7 +251,7 @@ check "brief epic first" T1 "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)"
 has "brief epic progress" "done 1/3" "$(printf '%s\n' "$out" | head -1)"
 check "brief ordinary active second" T5 "$(printf '%s\n' "$out" | sed -n '2p' | cut -d' ' -f1)"
 lacks "brief hides child rows" "T2 " "$out"
-check "brief counts last" "todo 1  in_progress 1  blocked 0  review 1  done 1  canceled 1" "$(printf '%s\n' "$out" | tail -1)"
+check "brief counts last" "todo 1  planning 0  implementing 1  blocked 0  reviewing 1  done 1  canceled 1" "$(printf '%s\n' "$out" | tail -1)"
 "$B" update 2 --if-revision 1 --status canceled >/dev/null
 out=$("$B" update 1 --if-revision 1 --status done); code=$?
 check "all terminal epic closes" 0 "$code"
@@ -290,10 +306,10 @@ for status in done canceled; do
     has "$status reopen and assign record" "T1 todo" "$out"
     out=$("$B" claim 1 --actor coder); code=$?
     check "$status claim after reopen exit" 0 "$code"
-    has "$status claim after reopen status" "T1 in_progress" "$out"
+    has "$status claim after reopen status" "T1 implementing" "$out"
 done
 fresh closing
-"$B" add working --status in_progress --assignee alice --new-actor >/dev/null
+"$B" add working --status implementing --assignee alice --new-actor >/dev/null
 out=$(AGENTBOARD_ACTOR=alice "$B" update 1 --if-revision 1 --status done --assignee coder --new-actor 2>&1); code=$?
 check "close and hand over exit" 1 "$code"
 has "close and hand over text" "done task cannot change assignee" "$out"
@@ -324,7 +340,7 @@ for status in done canceled; do
     check "$status parent first then child exit" 0 "$code"
     out=$("$B" claim 2 --actor coder); code=$?
     check "$status claim reopened child exit" 0 "$code"
-    has "$status claim reopened child status" "T2 in_progress" "$out"
+    has "$status claim reopened child status" "T2 implementing" "$out"
 done
 
 # --- wait: a typed verdict about the rows you name -------------------------
@@ -338,7 +354,7 @@ has "wait prints the watched row" "T1 done" "$out"
 has "wait labels an earlier event as last" "  last: 1 " "$out"
 has "wait prints a cursor" "cursor " "$out"
 check "wait ends with the attention line" "[ATTENTION] wait task is done, please check result" "$(printf '%s\n' "$out" | tail -1)"
-check "wait orders the wanted statuses by the board" "matched: 1 of 1 watched in review,done" "$("$B" wait 1 --status done,review | head -1)"
+check "wait orders the wanted statuses by the board" "matched: 1 of 1 watched in reviewing,done" "$("$B" wait 1 --status done,reviewing | head -1)"
 check "wait is a read and appends nothing" 2 "$("$B" feed --after 0 | grep -c ' created  T')"
 (
     sleep 0.5
@@ -380,14 +396,14 @@ check "wait epic on a leaf exit" 1 "$code"
 check "wait epic on a leaf text" "agentboard: task T1 is not an epic; an epic is a task with children" "$out"
 out=$("$B" wait 1 --status "" 2>&1); code=$?
 check "wait empty status exit" 1 "$code"
-has "wait empty status text" "wait: --status needs at least one of todo, in_progress, blocked, review, done, canceled" "$out"
+has "wait empty status text" "wait: --status needs at least one of todo, planning, implementing, blocked, reviewing, done, canceled" "$out"
 out=$("$B" wait 2>&1); code=$?
 check "wait without ids exit" 2 "$code"
 
 fresh wait-epic
 "$B" add "umbrella" >/dev/null
-"$B" add "child one" --parent 1 --status in_progress --assignee manager >/dev/null
-"$B" add "child two" --parent 1 --status in_progress --assignee manager >/dev/null
+"$B" add "child one" --parent 1 --status implementing --assignee manager >/dev/null
+"$B" add "child two" --parent 1 --status implementing --assignee manager >/dev/null
 (
     sleep 0.5
     "$B" update 2 --if-revision 1 --status done >/dev/null
@@ -406,7 +422,7 @@ lacks "epic wait hides the umbrella row itself" "T1 todo" "$out"
 # --- wait --assignee: a handoff wakes the waiter with status unchanged ------
 handoff_row() {
     fresh "$1"
-    "$B" add "handoff row" --status in_progress --assignee analyst --new-actor >/dev/null
+    "$B" add "handoff row" --status implementing --assignee analyst --new-actor >/dev/null
 }
 handoff_later() {
     (
@@ -417,31 +433,31 @@ handoff_later() {
 }
 handoff_row wait-assignee
 handoff_later
-out=$("$B" wait 1 --status review,done,blocked --assignee --timeout 5); code=$?
+out=$("$B" wait 1 --status reviewing,done,blocked --assignee --timeout 5); code=$?
 wait "$writer"
 check "wait assignee on a handoff exit" 0 "$code"
-check "wait assignee first line names the handoff" "matched: 0 of 1 watched in blocked,review,done; handoff T1 to coder" "$(printf '%s\n' "$out" | head -1)"
-has "wait assignee leaves status alone" "T1 in_progress" "$out"
+check "wait assignee first line names the handoff" "matched: 0 of 1 watched in blocked,reviewing,done; handoff T1 to coder" "$(printf '%s\n' "$out" | head -1)"
+has "wait assignee leaves status alone" "T1 implementing" "$out"
 check "wait assignee handoff ends with the matched notice" "[ATTENTION] wait task is done, please check result" "$(printf '%s\n' "$out" | tail -1)"
 has "wait assignee prints the update event" "updated  T1" "$out"
 
 handoff_row wait-assignee-off
 handoff_later
-out=$("$B" wait 1 --status review,done,blocked --timeout 1); code=$?
+out=$("$B" wait 1 --status reviewing,done,blocked --timeout 1); code=$?
 wait "$writer"
 check "wait without assignee ignores a handoff exit" 3 "$code"
-has "wait without assignee times out on status" "timeout: 0 of 1 watched in blocked,review,done" "$out"
+has "wait without assignee times out on status" "timeout: 0 of 1 watched in blocked,reviewing,done" "$out"
 
 handoff_row wait-assignee-other
 handoff_later
-out=$("$B" wait 1 --status review,done,blocked --assignee reviewer --timeout 1); code=$?
+out=$("$B" wait 1 --status reviewing,done,blocked --assignee reviewer --timeout 1); code=$?
 wait "$writer"
 check "wait assignee for another seat exit" 3 "$code"
 has "wait assignee for another seat times out" "timeout: 0 of 1 watched" "$out"
 
 handoff_row wait-assignee-named
 handoff_later
-out=$("$B" wait 1 --status review,done,blocked --assignee coder --timeout 5); code=$?
+out=$("$B" wait 1 --status reviewing,done,blocked --assignee coder --timeout 5); code=$?
 wait "$writer"
 check "wait assignee naming the new owner exit" 0 "$code"
 has "wait assignee naming the new owner text" "; handoff T1 to coder" "$out"
@@ -457,7 +473,7 @@ has "wait assignee empty name text" "actor" "$out"
 # --- release: one verb returns a dead holder's row to todo -----------------
 fresh release
 "$B" add "held by a dead seat" >/dev/null
-"$B" update 1 --if-revision 1 --status in_progress --assignee coder --new-actor >/dev/null
+"$B" update 1 --if-revision 1 --status implementing --assignee coder --new-actor >/dev/null
 out=$("$B" update 1 --if-revision 2 --release --force --reason "the coder seat hit its quota" \
       --comment "back in the pool for another seat"); code=$?
 check "forced release exit" 0 "$code"
@@ -470,7 +486,7 @@ has "forced release shows the comment in the feed" "back in the pool for another
 check "forced release leaves no assignee on the row" "T1 todo         prio  100 -          held by a dead seat" "$("$B" ls | rg '^T1 ')"
 
 "$B" add "holder releases itself" >/dev/null
-"$B" update 2 --if-revision 1 --status in_progress --assignee coder >/dev/null
+"$B" update 2 --if-revision 1 --status implementing --assignee coder >/dev/null
 out=$(AGENTBOARD_ACTOR=coder "$B" update 2 --if-revision 2 --release); code=$?
 check "holder release exit" 0 "$code"
 has "holder release returns the row" "T2 todo" "$out"
@@ -486,7 +502,7 @@ check "done row release exit" 1 "$code"
 check "done row release text" "agentboard: task T3 is done; nothing to release" "$out"
 
 "$B" add "still held" >/dev/null
-"$B" update 4 --if-revision 1 --status in_progress --assignee coder >/dev/null
+"$B" update 4 --if-revision 1 --status implementing --assignee coder >/dev/null
 out=$("$B" update 4 --if-revision 2 --release --status todo 2>&1); code=$?
 check "--release with --status exit" 1 "$code"
 has "--release with --status text" "choose --release or --status/--assignee/--clear-assignee, not both" "$out"
@@ -497,7 +513,7 @@ check "--release with --priority exit" 1 "$code"
 check "--release with --priority text" \
     "agentboard: choose --release or a field change, not both" "$out"
 check "--release with --priority changes nothing" \
-    "T4 in_progress  prio  100 coder      still held" "$("$B" ls | rg '^T4 ')"
+    "T4 implementing prio  100 coder      still held" "$("$B" ls | rg '^T4 ')"
 out=$(AGENTBOARD_ACTOR=other "$B" update 4 --if-revision 2 --title "stolen" 2>&1); code=$?
 check "foreign write on a live holder exit" 1 "$code"
 has "held refusal names both recoverable paths" \

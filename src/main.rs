@@ -444,8 +444,8 @@ fn wait_statuses(raw: Option<&str>) -> Result<Vec<Status>, String> {
     };
     parse_status_csv(raw).map_err(|error| match error {
         agentboard::store::Error::WaitWithoutStatus => {
-            "wait: --status needs at least one of todo, in_progress, blocked, review, done, canceled"
-                .to_owned()
+            let names: Vec<_> = Status::ALL.iter().map(|s| s.as_str()).collect();
+            format!("wait: --status needs at least one of {}", names.join(", "))
         }
         other => other.to_string(),
     })

@@ -18,7 +18,7 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    names and keep the real output.
 4. Comment what changed and the exact command output that proves it:
    `task_comment(id, body=...)`.
-5. Hand it to review: `task_update(id, if_revision, status="review",
+5. Hand it to review: `task_update(id, if_revision, status="reviewing",
    assignee="reviewer")`. That event carries recipient `reviewer`; no process is
    woken, so the manager prompts the reviewer or the reviewer is already watching
    its own rows.

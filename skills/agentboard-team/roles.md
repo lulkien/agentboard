@@ -46,7 +46,7 @@ Reads and judges. The review row is the work product.
 May:
 - `task_get` with `full=true`, `board_feed`, `task_list`, `board_brief`
 - `task_comment` findings, blocker by blocker
-- `task_update` the row it reviews to `done`, or back to `in_progress` with the
+- `task_update` the row it reviews to `done`, or back to `implementing` with the
   coder as assignee
 
 Never:
@@ -60,10 +60,11 @@ The seat that turns a question into a plan. The manager files the row with the
 question; the analyst reads it, plans, and hands the same row on.
 
 May:
-- `task_claim` the row assigned to it
+- read the row the manager set to `planning` with the analyst as assignee; it does
+  not `task_claim` it, because a claim starts `implementing`
 - `task_comment` the plan: files, functions, behaviour, and what not to touch
-- `task_update` the row to hand it to the coder (`assignee="coder"`, plan in the
-  comment or in the `description`), keeping the row in `in_progress`
+- `task_update` the row to hand it to the coder (`status="implementing"`,
+  `assignee="coder"`, plan in the comment or in the `description`)
 
 Never:
 - implement the plan, edit product files, or run the change

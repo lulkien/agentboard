@@ -68,7 +68,7 @@ pub struct AddArgs {
     pub description: String,
     #[serde(default)]
     pub goal: String,
-    /// todo | in_progress | blocked | review | done | canceled
+    /// todo | planning | implementing | blocked | reviewing | done | canceled
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]

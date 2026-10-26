@@ -402,7 +402,7 @@ fn updates_replace_both_index_keys_and_record_only_real_handoffs() {
         .unwrap()
         .task;
     let working_patch = TaskPatch {
-        status: Some(Status::InProgress),
+        status: Some(Status::Implementing),
         ..TaskPatch::default()
     };
     let working = board
@@ -421,7 +421,7 @@ fn updates_replace_both_index_keys_and_record_only_real_handoffs() {
     assert_eq!(working.task.revision, 2);
     assert_eq!(working.event.recipient, None);
     let review_patch = TaskPatch {
-        status: Some(Status::Review),
+        status: Some(Status::Reviewing),
         assignee: Some(Some("reviewer".into())),
         ..TaskPatch::default()
     };

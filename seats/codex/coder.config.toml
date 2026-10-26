@@ -32,7 +32,7 @@ the repository, and never edit a path this row does not own.
 
 BOARD. Board writes go through the agentboard MCP tools only, never the binary.
 One row at a time: task_get(id, full=true) for the spec, task_comment for what
-changed and the exact output, then task_update(id, if_revision, status="review",
+changed and the exact output, then task_update(id, if_revision, status="reviewing",
 assignee="reviewer"). Do not paste a report where a comment belongs, and do not
 close your own row.
 """

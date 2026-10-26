@@ -78,7 +78,8 @@ agentboard reset --yes
 agentboard serve
 ```
 
-Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
+Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `canceled`
+(the old input names `in_progress` and `review` are still accepted).
 
 - `ls` hides `done` and `canceled` unless `--all` is passed or a status is named.
 - Ordering is `(priority, id)` with the lowest number first, so `claim` with no id
@@ -114,7 +115,7 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
 - `wait` blocks until the rows you name reach a status, and answers a verdict
   instead of a page. `--status` is a CSV of wanted statuses, default
   `done,canceled`; every watched row must be in one of them, so it is an all-rows
-  predicate and `wait 27 --status review` is the everyday case. `--epic` watches
+  predicate and `wait 27 --status reviewing` is the everyday case. `--epic` watches
   the direct children of each id and re-reads them on every poll, so a child filed
   mid-wait joins the set. `--assignee` also returns when any one watched row is
   handed to a new owner after the wait starts, even with its status unchanged, which

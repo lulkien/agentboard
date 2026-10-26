@@ -13,14 +13,16 @@ pub fn event_by_task(task_id: u64, sequence: u64) -> [u8; 16] {
     key
 }
 
+/// Persisted index bytes: never renumber, only append.
 pub const fn status_code(status: Status) -> u8 {
     match status {
         Status::Todo => 0,
-        Status::InProgress => 1,
+        Status::Implementing => 1,
         Status::Blocked => 2,
-        Status::Review => 3,
+        Status::Reviewing => 3,
         Status::Done => 4,
         Status::Canceled => 5,
+        Status::Planning => 6,
     }
 }
 
@@ -69,6 +71,22 @@ mod tests {
     }
 
     #[test]
+    fn status_codes_are_persisted_and_never_renumbered() {
+        let codes: Vec<u8> = [
+            Status::Todo,
+            Status::Implementing,
+            Status::Blocked,
+            Status::Reviewing,
+            Status::Done,
+            Status::Canceled,
+            Status::Planning,
+        ]
+        .map(status_code)
+        .to_vec();
+        assert_eq!(codes, [0, 1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
     fn integer_keys_sort_numerically() {
         assert!(super::task(2) < super::task(10));
         assert!(event_by_task(1, 10) < event_by_task(2, 1));
@@ -83,18 +101,18 @@ mod tests {
             status(&task(1, Status::Todo, 0, None)),
             status(&task(3, Status::Todo, 0, None)),
             status(&task(5, Status::Todo, i32::MAX, None)),
-            status(&task(1, Status::InProgress, i32::MIN, Some("alice"))),
+            status(&task(1, Status::Implementing, i32::MIN, Some("alice"))),
         ];
         assert!(keys.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(keys[0][0], status_code(Status::Todo));
-        assert_eq!(keys[5][0], status_code(Status::InProgress));
+        assert_eq!(keys[5][0], status_code(Status::Implementing));
     }
 
     #[test]
     fn assignee_index_groups_actor_then_status_and_id() {
         let alice_1 = task(1, Status::Todo, 100, Some("alice"));
         let alice_2 = task(2, Status::Todo, 100, Some("alice"));
-        let alice_review = task(3, Status::Review, 100, Some("alice"));
+        let alice_review = task(3, Status::Reviewing, 100, Some("alice"));
         let bob = task(1, Status::Todo, 100, Some("bob"));
         let keys = [
             assignee(&alice_1).unwrap(),

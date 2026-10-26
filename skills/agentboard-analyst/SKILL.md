@@ -13,13 +13,13 @@ before acting.
 1. Find your row: `board_feed` unfiltered for the newest assignment to
    `analyst`, or `task_list(assignee="analyst")`. Read it with
    `task_get(id, full=true)`; its `description` and `goal` are the brief.
-2. Claim it: `task_claim(id)`. A ready row with no assignee can be claimed with no
-   id.
+2. Do not `task_claim`: a claim starts `implementing`. Proceed when the row is
+   `planning` and held by `analyst`; otherwise report that and stop for the manager.
 3. Read the code the row names. Plan at file, function and behaviour level: what
    changes, what must not change, and the command that will prove it.
 4. Put the plan on the row with `task_comment(id, body=...)`. A plan in a file or
    in a chat message is invisible to the seat that implements it.
-5. Hand the row to the coder: `task_update(id, if_revision, assignee="coder")`,
+5. Hand the row to the coder: `task_update(id, if_revision, status="implementing", assignee="coder")`,
    with the plan in the comment you just wrote. That event carries recipient
    `coder`, which names the next seat; nothing in the board wakes it, so the
    manager prompts it.

@@ -20,7 +20,7 @@ AGENTBOARD_ACTOR`.
 
 Lists and claim use the same order: `(priority, id)` ascending, priority
 an `i32` (lower runs first). Id-less claim walks the `todo` rows in that order and
-skips tasks assigned to another actor; it never picks up a `review` or `blocked` row.
+skips tasks assigned to another actor; it never picks up a `reviewing` or `blocked` row.
 
 ## Tasks
 
@@ -28,11 +28,16 @@ A task is a record: `id`, `title`, `description`, `goal`, `status`, `priority`,
 `assignee`, `parent_id`, `path`, `revision`, `created_at`, `updated_at`. `revision`
 starts at 1 and grows by one per accepted field change.
 
-Statuses, in board order: `todo`, `in_progress`, `blocked`, `review`, `done`,
-`canceled`. `done` and `canceled` are terminal; lists hide them unless asked.
+Statuses, in board order: `todo`, `planning`, `implementing`, `blocked`, `reviewing`,
+`done`, `canceled`. `done` and `canceled` are terminal; lists hide them unless asked.
+The legacy input names `in_progress` and `review` are still accepted as
+`implementing` and `reviewing` and are never printed. Rows written under those names
+need no migration: the stored strings and index bytes are unchanged, and `planning`
+is the only newly stored value (an older binary refuses a `planning` row; move it
+to `implementing` before reinstalling the old binary).
 
-`todo` rows can be claimed by id or by the id-less probe. `in_progress` and `review`
-rows can only be claimed by id, and only by their assignee unless the row has none.
+`todo` rows can be claimed by id or by the id-less probe. `planning`, `implementing`
+and `reviewing` rows can only be claimed by id, and only by their assignee unless the row has none.
 `blocked` is never claimable, and `done`/`canceled` are terminal: lists hide them unless
 asked, and an explicit claim of one refuses by name.
 
@@ -85,7 +90,7 @@ one read snapshot. CLI `agentboard epic ID` and this tool share exactly four lin
 
 ```text
 <compact task row>
-todo <n>  in_progress <n>  blocked <n>  review <n>  done <n>  canceled <n>
+todo <n>  planning <n>  implementing <n>  blocked <n>  reviewing <n>  done <n>  canceled <n>
 done <done>/<total>
 total <total> cursor <instance_id>:<seq>
 ```
@@ -100,7 +105,7 @@ refuses `task T7 does not exist`. Reads append no events.
 
 ```json
 {"id": 7, "if_revision": 3, "title": "...", "description": "...", "goal": "...",
- "status": "review", "priority": 20, "assignee": "...", "clear_assignee": false,
+ "status": "reviewing", "priority": 20, "assignee": "...", "clear_assignee": false,
  "parent": 2, "clear_parent": false, "path": "...", "clear_path": false,
  "release": false, "force": false, "reason": "quota", "comment": "optional",
  "new_actor": false}
@@ -110,8 +115,8 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
 
 - `if_revision` must equal the stored revision, or `stale task revision <given>; current
   revision is <stored>`.
-- Changing the protected fields of a task held by another actor in `in_progress`,
-  `blocked` or `review` needs `force` **and** a non-empty `reason`;
+- Changing the protected fields of a task held by another actor in `implementing`,
+  `blocked` or `reviewing` (also `planning`) needs `force` **and** a non-empty `reason`;
   `force` without a reason refuses, a reason without `force` refuses, and the
   reason is recorded in the event.
 - `assignee` together with `clear_assignee` refuses, and likewise for `parent` and
@@ -163,8 +168,8 @@ With no id, claims the first eligible task in `(priority, id)` order and answers
 work order, or `no ready tasks` when nothing is eligible. With an id, claims that
 task and refuses `held by NAME` when another actor holds it, `not claimable` when
 its status cannot be claimed. Claiming a `todo` row assigned to you starts the work:
-it becomes `in_progress`, the revision moves and a `claimed` event lands. Claiming a row
-you already hold in `in_progress` or `review` changes nothing and appends no event.
+it becomes `implementing`, the revision moves and a `claimed` event lands. Claiming a row
+you already hold in `implementing` or `reviewing` changes nothing and appends no event.
 
 ### task_comment
 
@@ -201,7 +206,7 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
 ### board_brief
 
 No arguments. All epic rows first, each compact task row followed by `  done D/N`,
-then up to ten unparented non-epic tasks in `blocked`, `in_progress` or `review`.
+then up to ten unparented non-epic tasks in `planning`, `implementing`, `blocked` or `reviewing`.
 Each section sorts by `(priority, id)`. Nested and terminal epics remain visible
 while they have children. The final line is the six global status counts, counting
 every task once. There are no section headings; an empty board prints just counts.

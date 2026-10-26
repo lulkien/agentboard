@@ -45,14 +45,14 @@ pub struct Epic {
     pub cursor: Cursor,
 }
 
-fn status_counts(counts: &[u64; 6]) -> Vec<(Status, u64)> {
+fn status_counts(counts: &[u64; Status::ALL.len()]) -> Vec<(Status, u64)> {
     Status::ALL
         .iter()
         .map(|s| (*s, counts[keys::status_code(*s) as usize]))
         .collect()
 }
 
-fn rollup(task: Task, counts: &[u64; 6], cursor: Cursor) -> Epic {
+fn rollup(task: Task, counts: &[u64; Status::ALL.len()], cursor: Cursor) -> Epic {
     Epic {
         task,
         counts: status_counts(counts),
@@ -64,14 +64,17 @@ fn rollup(task: Task, counts: &[u64; 6], cursor: Cursor) -> Epic {
 
 impl Board {
     /// Direct-child counts in the caller's snapshot, including write transactions.
-    pub(super) fn child_counts(&self, txn: &heed::RoTxn<'_>) -> Result<HashMap<u64, [u64; 6]>> {
+    pub(super) fn child_counts(
+        &self,
+        txn: &heed::RoTxn<'_>,
+    ) -> Result<HashMap<u64, [u64; Status::ALL.len()]>> {
         let mut counts = HashMap::new();
         for entry in self.tasks.iter(txn)? {
             let (_, raw) = entry?;
             let task: Task = serde_json::from_slice(raw)?;
             if let Some(parent) = task.parent_id {
-                counts.entry(parent).or_insert([0; 6])[keys::status_code(task.status) as usize] +=
-                    1;
+                counts.entry(parent).or_insert([0; Status::ALL.len()])
+                    [keys::status_code(task.status) as usize] += 1;
             }
         }
         Ok(counts)
@@ -135,7 +138,7 @@ impl Board {
             instance_id: metadata.instance_id,
             seq: metadata.next_event_seq.saturating_sub(1),
         };
-        let mut counts = [0_u64; 6];
+        let mut counts = [0_u64; Status::ALL.len()];
         let mut active = Vec::new();
         let mut epics = Vec::new();
         for entry in self.tasks.iter(&txn)? {
@@ -145,10 +148,8 @@ impl Board {
             if let Some(child_counts) = children.get(&task.id) {
                 epics.push(rollup(task, child_counts, cursor.clone()));
             } else if task.parent_id.is_none()
-                && matches!(
-                    task.status,
-                    Status::Blocked | Status::InProgress | Status::Review
-                )
+                && !task.status.is_terminal()
+                && task.status != Status::Todo
             {
                 active.push(task);
             }

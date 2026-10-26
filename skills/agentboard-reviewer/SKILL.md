@@ -10,7 +10,7 @@ the row.
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` in
 that directory before acting. You read and judge; the row is your work product.
 
-1. Find the row: `board_feed` unfiltered, or `task_list(status="review")`.
+1. Find the row: `board_feed` unfiltered, or `task_list(status="reviewing")`.
 2. Read it with `task_get(id, full=true)` for the goal, then read the tree and the
    diff the row names. Re-run the acceptance command rather than trusting a
    pasted transcript; a claim with no output is not evidence.
@@ -19,7 +19,7 @@ that directory before acting. You read and judge; the row is your work product.
    is a doubt, not a finding.
 4. Close when the goal is proved: `task_update(id, if_revision, status="done")`
    with the evidence comment. Reopen when it is not: `task_update(id,
-   if_revision, status="in_progress", assignee="coder")` plus the findings.
+   if_revision, status="implementing", assignee="coder")` plus the findings.
    A task with children is an epic, and the board refuses to close one while a
    child is open; that refusal is the gate working, so report it and never work
    around it.
