@@ -1,5 +1,3 @@
-//! LMDB store under construction. The current binary still uses its legacy
-//! `src/store` module until the CLI and MCP adapters cut over together.
 //! Heed permits one open environment per path in a process; share a `Board`
 //! handle when a process has multiple callers.
 

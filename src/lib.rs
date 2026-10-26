@@ -6,5 +6,4 @@ pub mod domain;
 pub mod render;
 pub mod server;
 
-#[path = "next_store/mod.rs"]
 pub mod store;

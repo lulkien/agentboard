@@ -60,7 +60,7 @@ update the expectation here.
 ## Layout
 
 - `src/domain.rs` — task, status, patch, claim and event rules; no I/O, no printing.
-- `src/next_store/` (module `store`) — the LMDB store: `open` (Board, options, reset,
+- `src/store/` — the LMDB store: `open` (Board, options, reset,
   lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/release/claim/
   comment, index upkeep, events), `feed` (cursors, filters, bounded wait), `wait` (per-row
   blocking wait that re-queries its watched set), `list` (list, brief),
