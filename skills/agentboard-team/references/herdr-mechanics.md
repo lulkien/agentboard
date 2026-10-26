@@ -35,8 +35,8 @@ herdr agent start coder --kind claude --pane "$P" -- \
   --dangerously-skip-permissions
 ```
 
-Repeat for `analyzer` and `reviewer` with their own `--label`, pane, preferred
-model, and permission mode from `SKILL.md` (analyzer/reviewer:
+Repeat for `analyst` and `reviewer` with their own `--label`, pane, preferred
+model, and permission mode from `SKILL.md` (analyst/reviewer:
 `--permission-mode dontAsk` — refuse tree writes; only coder uses
 `--dangerously-skip-permissions`). Panes inherit cwd; pass `--cwd` anyway so a
 seat never opens in the wrong tree.

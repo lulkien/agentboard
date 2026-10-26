@@ -2,7 +2,7 @@
 
 `agentboard-team/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`,
 plus `references/herdr-mechanics.md`). The four seat directories are one-page entry
-points: `manager/`, `analyzer/`, `coder/`, `reviewer/`. Each confirms the seat's
+points: `manager/`, `analyst/`, `coder/`, `reviewer/`. Each confirms the seat's
 board name, names what it may run on the board and what it never does, and ends by
 arming the feed. Their `claude.md` and `opencode.md` resources keep the proven
 command-file formats; the `SKILL.md` is what Codex and Hermes load.

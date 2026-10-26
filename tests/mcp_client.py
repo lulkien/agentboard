@@ -321,13 +321,13 @@ def main():
         def handoff_during(db, arguments, to="coder"):
             with Server(db, "manager") as waiter:
                 waiter.start()
-                waiter.call("task_add", {"title": "handoff row", "status": "in_progress", "assignee": "analyzer", "new_actor": True})
+                waiter.call("task_add", {"title": "handoff row", "status": "in_progress", "assignee": "analyst", "new_actor": True})
                 tools = waiter.send("tools/list", {})
                 schema = next(t for t in tools["result"]["tools"] if t["name"] == "task_wait")
                 check("task_wait schema has assignee", True, "assignee" in schema["inputSchema"]["properties"])
                 mover = subprocess.Popen(
                     ["sh", "-c", 'sleep 0.5; "$BIN" --db "$DB" update 1 --if-revision 1 --assignee "$TO" --new-actor'],
-                    env=dict(os.environ, BIN=BIN, DB=db, TO=to, AGENTBOARD_ACTOR="analyzer"),
+                    env=dict(os.environ, BIN=BIN, DB=db, TO=to, AGENTBOARD_ACTOR="analyst"),
                     stdout=subprocess.DEVNULL,
                 )
                 reply = waiter.send("tools/call", {"name": "task_wait", "arguments": dict(arguments, ids=[1], status="review,done,blocked")})

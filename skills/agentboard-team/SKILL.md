@@ -7,7 +7,7 @@ license: MIT
 platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [agentboard, manager, analyzer, coder, reviewer, lmdb, feed]
+    tags: [agentboard, manager, analyst, coder, reviewer, lmdb, feed]
     related_skills: [claude-code, opencode, herdr]
 ---
 # agentboard manual
@@ -20,9 +20,9 @@ Pages here:
 
 - this manual: the board, the seats, the launcher, the wake loop, the eleven tools
 - `workflow.md`: how a task moves and who moves it
-- `roles.md`: manager, analyzer, coder and reviewer: what each may run and never does
+- `roles.md`: manager, analyst, coder and reviewer: what each may run and never does
 
-Each seat has a one-page entry skill of its own: `manager`, `analyzer`, `coder`,
+Each seat has a one-page entry skill of its own: `manager`, `analyst`, `coder`,
 `reviewer`. Wire details live in `PROTOCOL.md`; changing the tree in `AGENTS.md`.
 
 ## The board
@@ -46,7 +46,7 @@ Each seat has a one-page entry skill of its own: `manager`, `analyzer`, `coder`,
 | Seat | Writes as | Entry skill | Job |
 | --- | --- | --- | --- |
 | manager | the name its client was started with (`hermes` here) | `manager` | file rows, read the board, hand rows out, quota, decide with the human |
-| analyzer | `analyzer` | `analyzer` | read and plan, hand the row to the coder |
+| analyst | `analyst` | `analyst` | read and plan, hand the row to the coder |
 | coder | `coder` | `coder` | implement one row, verify it, hand it to review |
 | reviewer | `reviewer` | `reviewer` | read the work and judge it; close or reopen the row |
 
@@ -62,26 +62,26 @@ workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
 Preferred models for worker seats (pass after `--`; herdr forwards them to the
-agent). Analyzer gets the stronger model; coder and reviewer share the cheaper
+agent). Analyst gets the stronger model; coder and reviewer share the cheaper
 one. Swap the id only when the human names a different model.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
-| analyzer | `--model claude-opus-5-5` | `-m gpt-6-sol` |
+| analyst | `--model claude-opus-5-5` | `-m gpt-6-sol` |
 | coder | `--model claude-sonnet-5-5` | `-m gpt-6-luna` |
 | reviewer | `--model claude-sonnet-5-5` | `-m gpt-6-luna` |
 
 ```bash
 export REPO=/path/to/repo
-herdr tab create --cwd "$REPO" --label analyzer
+herdr tab create --cwd "$REPO" --label analyst
 herdr pane list                                    # note the new tab's pane id
 
 # Claude seats (MCP config + preferred model + permission mode)
-# Analyzer/reviewer are read-only on the tree: dontAsk refuses file/shell
+# Analyst/reviewer are read-only on the tree: dontAsk refuses file/shell
 # writes instead of auto-approving. Coder needs unattended shell/tests → bypass.
-herdr agent start analyzer --kind claude --pane "$PANE_ANALYZER" -- \
+herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --model claude-opus-5-5 \
-  --strict-mcp-config --mcp-config ~/.claude/analyzer-mcp.json \
+  --strict-mcp-config --mcp-config ~/.claude/analyst-mcp.json \
   --permission-mode dontAsk
 herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 \
@@ -93,14 +93,14 @@ herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   --permission-mode dontAsk
 
 # Codex seats (profile + preferred model)
-herdr agent start analyzer --kind codex --pane "$PANE_ANALYZER" -- \
-  -p analyzer -m gpt-6-sol
+herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
+  -p analyst -m gpt-6-sol
 herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
   -p coder -m gpt-6-luna
 herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
   -p reviewer -m gpt-6-luna
 
-herdr agent prompt analyzer 'You are analyzer on the agentboard. Use MCP only, actor=analyzer. Load the analyzer skill, then claim your row.' --wait
+herdr agent prompt analyst 'You are analyst on the agentboard. Use MCP only, actor=analyst. Load the analyst skill, then claim your row.' --wait
 ```
 
 Start only the seats the work needs: a reviewer with nothing to review is a tab
@@ -164,7 +164,7 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   works too: `agentboard wait 12 --epic` watches its direct children and returns
   once every one of them is `done` or `canceled`. The verdict's first line is
   `matched:` (exit 0) or `timeout:` (exit 3), and it writes nothing.
-- An analyzer-to-coder handoff changes the assignee and leaves the status alone, so
+- An analyst-to-coder handoff changes the assignee and leaves the status alone, so
   a status wait never sees it. Add `--assignee` to the same wait:
   `agentboard wait 27 --status review,done,blocked --assignee --timeout 300`, or MCP
   `task_wait(ids=[27], status="review,done,blocked", assignee=true)`. It returns on a

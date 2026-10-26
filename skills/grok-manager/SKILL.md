@@ -50,9 +50,9 @@ seat that silently has no board tools.
 
 ## Launching worker seats
 
-When this seat starts analyzer / coder / reviewer, use the preferred-model table
-in `~/.agents/skills/agentboard-team/SKILL.md` (Claude: Opus 5.5 for analyzer,
-Sonnet 5.5 for coder and reviewer; Codex: `gpt-6-sol` for analyzer, `gpt-6-luna`
+When this seat starts analyst / coder / reviewer, use the preferred-model table
+in `~/.agents/skills/agentboard-team/SKILL.md` (Claude: Opus 5.5 for analyst,
+Sonnet 5.5 for coder and reviewer; Codex: `gpt-6-sol` for analyst, `gpt-6-luna`
 for coder and reviewer). Pass the flags after `--` on `herdr agent start`.
 
 ## Prompting the other seats
@@ -69,7 +69,7 @@ and stops. A doubt about a claim becomes a reviewer row, never a fix written her
     agentboard wait 27 --status review,done,blocked --assignee --timeout 300
 
 The third form also returns when a watched row is handed to a new owner and its
-status stays put (analyzer→coder). MCP: `task_wait(ids=[27], status="review,done,blocked",
+status stays put (analyst→coder). MCP: `task_wait(ids=[27], status="review,done,blocked",
 assignee=true)`. A match prints `; handoff T27 to coder` on the first line.
 
 Run it in the background, and re-arm it when it exits `3` (nothing matched). One wait

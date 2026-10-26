@@ -5,7 +5,7 @@
       "command": "agentboard",
       "args": [],
       "env": {
-        "AGENTBOARD_ACTOR": "analyzer"
+        "AGENTBOARD_ACTOR": "analyst"
       }
     },
     "git-mcp-rs": {

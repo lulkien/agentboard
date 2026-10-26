@@ -7,9 +7,9 @@ its client gets a board identity.
 
 | Path | Seat | Loaded by |
 |---|---|---|
-| `codex/<seat>.config.toml` | analyzer, coder, manager, reviewer | `codex -p <seat>` |
+| `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
-| `claude/<seat>-mcp.json` | analyzer, coder, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
+| `claude/<seat>-mcp.json` | analyst, coder, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
 | `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
 | `grok/register-mcp.sh` | grok (manager) | `grok mcp add --scope user` into `~/.grok/config.toml` |
 
@@ -41,7 +41,7 @@ destinations.
 `approval_mode = "approve"` in the base config. Under `never` a tool with no
 approval mode is a hard error, so the base lists every board tool.
 
-- analyzer: `workspace-write`, opened in a scratch directory, so it reads the repo
+- analyst: `workspace-write`, opened in a scratch directory, so it reads the repo
   and writes only its probe area.
 - coder: `danger-full-access` with `features.shell_tool = false` (owner directive:
   the codex coder is refused command execution; a build belongs to another seat).
@@ -51,7 +51,7 @@ approval mode is a hard error, so the base lists every board tool.
 ## Claude
 
 One `--mcp-config` card per seat, because a Claude seat's actor comes from that
-file. `coder-mcp.json`, `analyzer-mcp.json` and `reviewer-mcp.json` differ only in
+file. `coder-mcp.json`, `analyst-mcp.json` and `reviewer-mcp.json` differ only in
 `AGENTBOARD_ACTOR`.
 
 ## Grok

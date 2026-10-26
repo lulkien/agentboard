@@ -154,7 +154,7 @@ No file edit, no commit, no build, no install, no probe that creates state;
   `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
   canonical names. There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: eleven tools, cursors, refusals, exit codes.
-- `skills/{manager,analyzer,coder,reviewer}/` — one seat entry point each
-  (`/manager`, `/analyzer`, `/coder`, `/reviewer`; `$<seat>` under Codex).
+- `skills/{manager,analyst,coder,reviewer}/` — one seat entry point each
+  (`/manager`, `/analyst`, `/coder`, `/reviewer`; `$<seat>` under Codex).
 - `seats/` — the canonical per-seat client cards (codex profiles, claude MCP
   configs) and `seats/install.sh` to link them into a home directory.

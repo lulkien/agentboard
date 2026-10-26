@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
 
     # Every seat entry point must be one of the installed skills, so a seat can
     # never be launched into a skill that was never linked.
-    for seat in ['manager','analyzer','coder','reviewer']:
+    for seat in ['manager','analyst','coder','reviewer']:
         assert seat in skills(),seat
         for card in ('claude','opencode'):
             assert (repo/'skills'/seat/f'{card}.md').exists(),(seat,card)

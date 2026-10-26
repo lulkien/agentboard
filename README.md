@@ -116,7 +116,7 @@ Statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `canceled`.
   the direct children of each id and re-reads them on every poll, so a child filed
   mid-wait joins the set. `--assignee` also returns when any one watched row is
   handed to a new owner after the wait starts, even with its status unchanged, which
-  is how an analyzer-to-coder reassignment reaches the manager; `--assignee NAME`
+  is how an analyst-to-coder reassignment reaches the manager; `--assignee NAME`
   accepts only a handoff to that actor, and a release is never a handoff.
   `--timeout` accepts 1 to 300 seconds and defaults to 300.
   Values outside that range are rejected before waiting to bound manager waits. A match
@@ -192,5 +192,5 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
 - `AGENTS.md` — changing this tree: gates, layout, traps.
 - `skills/agentboard-team` — running a team: the board, launcher, wake, roles,
   workflow.
-- `skills/manager`, `skills/analyzer`, `skills/coder`, `skills/reviewer` — one
+- `skills/manager`, `skills/analyst`, `skills/coder`, `skills/reviewer` — one
   entry skill per seat.

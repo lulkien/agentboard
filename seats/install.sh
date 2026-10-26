@@ -24,8 +24,8 @@ check() {
     refuse=1
   fi
 }
-for seat in analyzer coder manager reviewer; do check "$codex_home/$seat.config.toml"; done
-for seat in analyzer coder reviewer; do check "$claude_home/$seat-mcp.json"; done
+for seat in analyst coder manager reviewer; do check "$codex_home/$seat.config.toml"; done
+for seat in analyst coder reviewer; do check "$claude_home/$seat-mcp.json"; done
 check "$opencode_home/agentboard-mcp.sh"
 [ "$refuse" -eq 0 ] || exit 1
 
@@ -35,10 +35,10 @@ link() {
   ln -s "$1" "$2"
   echo "linked: $2 -> $1"
 }
-for seat in analyzer coder manager reviewer; do
+for seat in analyst coder manager reviewer; do
   link "$src/codex/$seat.config.toml" "$codex_home/$seat.config.toml"
 done
-for seat in analyzer coder reviewer; do
+for seat in analyst coder reviewer; do
   link "$src/claude/$seat-mcp.json" "$claude_home/$seat-mcp.json"
 done
 link "$src/opencode/agentboard-mcp.sh" "$opencode_home/agentboard-mcp.sh"

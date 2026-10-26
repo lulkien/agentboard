@@ -1,6 +1,6 @@
 # Seats
 
-Four seats, one board: manager, analyzer, coder, reviewer. A seat is a CLI agent
+Four seats, one board: manager, analyst, coder, reviewer. A seat is a CLI agent
 process with its own `AGENTBOARD_ACTOR`, pointed at the same `AGENTBOARD_DB`.
 Nothing in the board enforces these rules; they are the team's contract, and the
 board's refusals (stale revision, held task, missing reason) are what make breaking
@@ -54,10 +54,10 @@ Never:
 - close a row it did not review
 - accept "it should work" as evidence
 
-## Analyzer
+## Analyst
 
 The seat that turns a question into a plan. The manager files the row with the
-question; the analyzer reads it, plans, and hands the same row on.
+question; the analyst reads it, plans, and hands the same row on.
 
 May:
 - `task_claim` the row assigned to it

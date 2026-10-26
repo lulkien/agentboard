@@ -2233,7 +2233,7 @@ fn handoff_statuses() -> [Status; 3] {
     [Status::Review, Status::Done, Status::Blocked]
 }
 
-/// The analyzer -> coder handoff: only the assignee changes, status stays put.
+/// The analyst -> coder handoff: only the assignee changes, status stays put.
 fn reassign(board: &Board, id: u64, actor: &str, revision: u64, to: &str) {
     board
         .update(UpdateInput {
@@ -2253,7 +2253,7 @@ fn reassign(board: &Board, id: u64, actor: &str, revision: u64, to: &str) {
         .unwrap();
 }
 
-/// A row in progress held by the analyzer, waited on with `assignee`, while a
+/// A row in progress held by the analyst, waited on with `assignee`, while a
 /// second thread hands it to `to` after 80 ms.
 fn wait_through_a_handoff(
     assignee: Option<AssigneeMatch<'_>>,
@@ -2264,8 +2264,8 @@ fn wait_through_a_handoff(
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
     board
         .add(
-            "analyzer",
-            draft("plan me", Status::InProgress, 0, Some("analyzer")),
+            "analyst",
+            draft("plan me", Status::InProgress, 0, Some("analyst")),
             true,
             0,
         )
@@ -2273,7 +2273,7 @@ fn wait_through_a_handoff(
     std::thread::scope(|scope| {
         scope.spawn(|| {
             std::thread::sleep(Duration::from_millis(80));
-            reassign(&board, 1, "analyzer", 1, to);
+            reassign(&board, 1, "analyst", 1, to);
         });
         board
             .wait_tasks(&WaitSpec {
@@ -2332,14 +2332,14 @@ fn wait_assignee_ignores_handoffs_before_the_watermark_and_releases() {
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
     board
         .add(
-            "analyzer",
-            draft("plan me", Status::InProgress, 0, Some("analyzer")),
+            "analyst",
+            draft("plan me", Status::InProgress, 0, Some("analyst")),
             true,
             0,
         )
         .unwrap();
     // Handed off before the wait starts: the watermark is after it.
-    reassign(&board, 1, "analyzer", 1, "coder");
+    reassign(&board, 1, "analyst", 1, "coder");
     let before = board
         .wait_tasks(&WaitSpec {
             ids: &[1],
@@ -2418,7 +2418,7 @@ fn wait_assignee_on_an_epic_matches_any_child() {
     let one = std::thread::scope(|scope| {
         scope.spawn(|| {
             std::thread::sleep(Duration::from_millis(80));
-            reassign(&board, 2, "manager", 1, "analyzer");
+            reassign(&board, 2, "manager", 1, "analyst");
         });
         epic_wait(&board)
     });
@@ -2428,7 +2428,7 @@ fn wait_assignee_on_an_epic_matches_any_child() {
             .iter()
             .map(|row| (row.task.id, row.task.status, row.handed_to.as_deref()))
             .collect::<Vec<_>>(),
-        vec![(2, Status::Todo, Some("analyzer")), (3, Status::Todo, None)]
+        vec![(2, Status::Todo, Some("analyst")), (3, Status::Todo, None)]
     );
     // A child filed mid-wait and then handed off joins the watched set and matches.
     let late = std::thread::scope(|scope| {
@@ -2458,8 +2458,8 @@ fn wait_assignee_sees_a_handoff_past_the_event_cap() {
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
     board
         .add(
-            "analyzer",
-            draft("chatty", Status::InProgress, 0, Some("analyzer")),
+            "analyst",
+            draft("chatty", Status::InProgress, 0, Some("analyst")),
             true,
             0,
         )
@@ -2467,10 +2467,10 @@ fn wait_assignee_sees_a_handoff_past_the_event_cap() {
     let watermark = board.cursor_now().unwrap();
     for step in 0..25 {
         board
-            .comment("analyzer", 1, &format!("note {step}"), 1 + step)
+            .comment("analyst", 1, &format!("note {step}"), 1 + step)
             .unwrap();
     }
-    reassign(&board, 1, "analyzer", 1, "coder");
+    reassign(&board, 1, "analyst", 1, "coder");
     let after = watermark.encode();
     let outcome = board
         .wait_tasks(&WaitSpec {

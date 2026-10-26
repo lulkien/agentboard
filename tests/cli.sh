@@ -344,12 +344,12 @@ lacks "epic wait hides the umbrella row itself" "T1 todo" "$out"
 # --- wait --assignee: a handoff wakes the waiter with status unchanged ------
 handoff_row() {
     fresh "$1"
-    "$B" add "handoff row" --status in_progress --assignee analyzer --new-actor >/dev/null
+    "$B" add "handoff row" --status in_progress --assignee analyst --new-actor >/dev/null
 }
 handoff_later() {
     (
         sleep 0.5
-        AGENTBOARD_ACTOR=analyzer "$B" update 1 --if-revision 1 --assignee coder --new-actor >/dev/null
+        AGENTBOARD_ACTOR=analyst "$B" update 1 --if-revision 1 --assignee coder --new-actor >/dev/null
     ) &
     writer=$!
 }
