@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 python3 - <<'PY'
 import os, pathlib, subprocess, tempfile
 repo=pathlib.Path.cwd()
-installer=repo/'skills/install.sh'
+installer=repo/'skills/install.py'
 passed=0
 RETIRED={'manager','analyst','coder','reviewer','grok-manager','analyzer'}
 

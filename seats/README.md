@@ -16,12 +16,12 @@ its client gets a board identity.
 
 ## Install
 
-    ./seats/install.sh --force
+    ./seats/install.py --force
 
 It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml` and
 each claude card to `~/.claude/<seat>-mcp.json`. The codex base config is not a
 link: it is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
-`[projects.*].trust_level`, `[notice]`) also lives. `install.sh` refuses an existing
+`[projects.*].trust_level`, `[notice]`) also lives. `install.py` refuses an existing
 file that is not a symlink into this repo, and `--force` replaces only the named
 destinations.
 

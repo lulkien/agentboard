@@ -152,7 +152,7 @@ No file edit, no commit, no build, no install, no probe that creates state;
 ## Where the rest lives
 
 - `skills/agentboard-team` — running a team: launcher, wake commands, roles,
-  workflow. `skills/install.sh --force` creates canonical repo links under
+  workflow. `skills/install.py --force` creates canonical repo links under
   `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
   canonical names. There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: ten tools, cursors, refusals, exit codes.
@@ -160,4 +160,4 @@ No file edit, no commit, no build, no install, no probe that creates state;
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
   `agentboard-manager` with its `grok.md`.
 - `seats/` — the canonical per-seat client cards (codex profiles, claude MCP
-  configs) and `seats/install.sh` to link them into a home directory.
+  configs) and `seats/install.py` to link them into a home directory.

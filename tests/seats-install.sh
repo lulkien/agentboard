@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# seats/install.sh against isolated homes: foreign links, and the managed block
+# seats/install.py against isolated homes: foreign links, and the managed block
 # it keeps inside the user's rules/default.rules. Nothing touches a real home.
 set -u
 cd "$(dirname "$0")/.."
@@ -22,7 +22,7 @@ newhome() { # newhome <name>: a clean HOME with the dirs the installer expects
   mkdir -p "$home/.claude" "$home/.config/opencode"
 }
 inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/err
-  HOME="$home" CODEX_HOME="$home/.codex" bash ./seats/install.sh "$@" >"$tmp/out" 2>"$tmp/err"
+  HOME="$home" CODEX_HOME="$home/.codex" python3 ./seats/install.py "$@" >"$tmp/out" 2>"$tmp/err"
 }
 refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-identical
   local name=$1; shift

@@ -11,7 +11,7 @@ four-line `opencode.md` that only says to load the skill.
 
 ## Install
 
-    ./skills/install.sh --force [canonical-dir]
+    ./skills/install.py --force [canonical-dir]
 
 Default canonical home: `~/.agents/skills`. Each canonical name is a symlink into
 this repo, and every agent alias points at that canonical name:
