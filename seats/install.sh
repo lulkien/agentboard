@@ -25,6 +25,7 @@ check() {
   fi
 }
 for seat in analyst coder manager reviewer; do check "$codex_home/$seat.config.toml"; done
+check "$codex_home/rules/agentboard.rules"
 for seat in analyst coder reviewer; do check "$claude_home/$seat-mcp.json"; done
 check "$opencode_home/agentboard-mcp.sh"
 [ "$refuse" -eq 0 ] || exit 1
@@ -38,6 +39,7 @@ link() {
 for seat in analyst coder manager reviewer; do
   link "$src/codex/$seat.config.toml" "$codex_home/$seat.config.toml"
 done
+link "$src/codex/rules/agentboard.rules" "$codex_home/rules/agentboard.rules"
 for seat in analyst coder reviewer; do
   link "$src/claude/$seat-mcp.json" "$claude_home/$seat-mcp.json"
 done

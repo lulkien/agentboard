@@ -8,6 +8,7 @@ its client gets a board identity.
 | Path | Seat | Loaded by |
 |---|---|---|
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
+| `codex/rules/agentboard.rules` | every codex seat | `$CODEX_HOME/rules/agentboard.rules` |
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
 | `claude/<seat>-mcp.json` | analyst, coder, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
 | `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
@@ -17,8 +18,9 @@ its client gets a board identity.
 
     ./seats/install.sh --force
 
-It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml` and each
-claude card to `~/.claude/<seat>-mcp.json`. The codex base config is not a link: it
+It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml`, the
+Codex rules file to `$CODEX_HOME/rules/agentboard.rules`, and each claude card to
+`~/.claude/<seat>-mcp.json`. The codex base config is not a link: it
 is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
 `[projects.*].trust_level`, `[notice]`) also lives. `install.sh` refuses an existing
 file that is not a symlink into this repo, and `--force` replaces only the named
