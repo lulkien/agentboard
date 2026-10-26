@@ -2,8 +2,38 @@
 # layers $CODEX_HOME/manager.config.toml over the base config.
 # approval_policy never, so the seat never stops to ask a human; the base config
 # pre-approves every board tool.
-approval_policy = "never"
+approval_policy = "on-request"
 sandbox_mode = "workspace-write"
+
+[mcp_servers.git-mcp-rs]
+command = "git-mcp-rs"
+default_tools_approval_mode = "approve"
+
+[mcp_servers.ferris-search]
+command = "ferris-search"
+default_tools_approval_mode = "approve"
+
+[mcp_servers.codebase-memory-mcp]
+command = "codebase-memory-mcp"
+default_tools_approval_mode = "approve"
+
+[mcp_servers.agentboard]
+command = "agentboard"
+default_tools_approval_mode = "auto"
 
 [mcp_servers.agentboard.env]
 AGENTBOARD_ACTOR = "manager"
+
+[mcp_servers.agentboard.tools]
+task_add = { approval_mode = "approve" }     # create a task
+task_list = { approval_mode = "approve" }    # list tasks by status, owner, parent, or path
+task_get = { approval_mode = "approve" }     # read a task, optionally with full details
+task_epic = { approval_mode = "approve" }    # show an epic’s child-task progress
+task_update = { approval_mode = "approve" }  # change task fields, status, or owner
+task_claim = { approval_mode = "approve" }   # claim a ready task
+task_comment = { approval_mode = "approve" } # add a comment
+task_wait = { approval_mode = "approve" }    # wait for selected task statuses or an assignment handoff
+board_feed = { approval_mode = "approve" }   # read board events
+board_brief = { approval_mode = "approve" }  # show active work and status counts
+board_agents = { approval_mode = "approve" } # list registered actors
+
