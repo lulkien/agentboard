@@ -10,7 +10,7 @@ its client gets a board identity.
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
 | `codex/rules/agentboard.rules` | every codex seat | a marked block inside `$CODEX_HOME/rules/default.rules` |
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
-| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
+| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | `claude --mcp-config <file>` |
 | `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
 | `grok/register-mcp.sh` | grok (manager) | `grok mcp add --scope user` into `~/.grok/config.toml` |
 
@@ -74,7 +74,7 @@ board tool.
 One `--mcp-config` card per seat, because a Claude seat's actor comes from that
 file. `analyst-mcp.json`, `coder-mcp.json`, `manager-mcp.json` and
 `reviewer-mcp.json` differ only in `AGENTBOARD_ACTOR`. A Claude manager starts with
-`claude --strict-mcp-config --mcp-config ~/.claude/manager-mcp.json`.
+`claude --mcp-config ~/.claude/manager-mcp.json`.
 
 ## Grok
 

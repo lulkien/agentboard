@@ -84,18 +84,18 @@ herdr pane list                                    # note the new tab's pane id
 # each verb is allowed. Coder needs unattended shell/tests → bypass.
 herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --model claude-opus-5-5 \
-  --strict-mcp-config --mcp-config ~/.claude/analyst-mcp.json \
+  --mcp-config ~/.claude/analyst-mcp.json \
   --permission-mode dontAsk \
   --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
   mcp__ferris-search Read Glob Grep LS 'Bash(rg:*)' 'Bash(find:*)' 'Bash(ls:*)' \
   'Bash(readlink:*)' 'Bash(git status:*)' 'Bash(git log:*)' 'Bash(git diff:*)'
 herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 \
-  --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
+  --mcp-config ~/.claude/coder-mcp.json \
   --dangerously-skip-permissions
 herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   --model claude-sonnet-5-5 \
-  --strict-mcp-config --mcp-config ~/.claude/reviewer-mcp.json \
+  --mcp-config ~/.claude/reviewer-mcp.json \
   --permission-mode dontAsk \
   --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
   mcp__ferris-search Read Glob Grep LS 'Bash(rg:*)' 'Bash(find:*)' 'Bash(ls:*)' \
@@ -137,7 +137,7 @@ once per client, with the seat's actor and the shared board:
 #   AGENTBOARD_ACTOR = "coder"
 #
 # claude: one mcp-config file per seat, named on the command line
-claude --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json
+claude --mcp-config ~/.claude/coder-mcp.json
 
 # opencode: one global config, so the seat names itself in its pane environment
 # and the config's agentboard entry runs seats/opencode/agentboard-mcp.sh.
