@@ -42,7 +42,7 @@ and uses scratch boards; there is no server to start.
 | `bash tests/cli.sh` | `283/283 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
-| `bash tests/seats-install.sh` | `111/111 passed (seats installer)` (isolated homes; no board writes) |
+| `bash tests/seats-install.sh` | `119/119 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
 | `python3 tests/doc-names.py` | `doc-names: 18 pages, 97 CLI names, 119 MCP names passed` |

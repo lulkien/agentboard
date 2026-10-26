@@ -122,6 +122,7 @@ end only|a\n$E\nb\n
 end before begin|$E\n$B\n
 indented begin|  $B\nx\n$E\n
 trailing space end|$B\nx\n$E \n
+valid pair plus indented begin|$B\nx\n$E\n  $B\n
 EOF
 
 # --- CRLF files get a CRLF block, and a rerun changes nothing ----------------
