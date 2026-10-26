@@ -18,7 +18,15 @@ repo=$(cd "$src/.." && pwd)
 refuse=0
 check() {
   if [ -L "$1" ]; then
-    case $(readlink "$1") in "$repo"/*) ;; *) echo "foreign link: $1 -> $(readlink "$1") (move it aside)" >&2; refuse=1 ;; esac
+    case $(readlink "$1") in
+      "$repo"/*) ;;
+      *)
+        if [ "$force" -eq 0 ]; then
+          echo "foreign link: $1 -> $(readlink "$1") (use --force to replace it)" >&2
+          refuse=1
+        fi
+        ;;
+    esac
   elif [ -e "$1" ] && [ "$force" -eq 0 ]; then
     echo "exists: $1 (use --force)" >&2
     refuse=1
