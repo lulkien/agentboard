@@ -41,7 +41,7 @@ AGENTBOARD_ACTOR = "analyst"
 task_add = { approval_mode = "auto" }        # create a task
 task_list = { approval_mode = "approve" }    # list tasks by status, owner, parent, or path
 task_get = { approval_mode = "approve" }     # read a task, optionally with full details
-task_epic = { approval_mode = "auto" }       # show an epic’s child-task progress
+task_epic = { approval_mode = "approve" }    # show an epic’s child-task progress
 task_update = { approval_mode = "approve" }  # change task fields, status, or owner
 task_claim = { approval_mode = "approve" }   # claim a ready task
 task_comment = { approval_mode = "approve" } # add a comment

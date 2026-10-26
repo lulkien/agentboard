@@ -10,7 +10,7 @@ its client gets a board identity.
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
 | `codex/rules/agentboard.rules` | every codex seat | a marked block inside `$CODEX_HOME/rules/default.rules` |
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
-| `claude/<seat>-mcp.json` | analyst, coder, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
+| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | `claude --strict-mcp-config --mcp-config <file>` |
 | `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
 | `grok/register-mcp.sh` | grok (manager) | `grok mcp add --scope user` into `~/.grok/config.toml` |
 
@@ -58,12 +58,14 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 
 `approval_policy = "never"` and per-role `sandbox_mode`, with the per-tool
 `approval_mode = "approve"` in the base config. Under `never` a tool with no
-approval mode is a hard error, so the base lists every board tool.
+approval mode is a hard error, and so is a tool left on `auto`: a seat's board reads
+(`board_feed`, `board_brief`, `task_epic`) must be `approve`. The base lists every
+board tool.
 
 - analyst: `workspace-write`, opened in a scratch directory, so it reads the repo
   and writes only its probe area.
-- coder: `danger-full-access` with `features.shell_tool = false` (owner directive:
-  the codex coder is refused command execution; a build belongs to another seat).
+- coder: `danger-full-access` with the shell on (owner correction 2026-10-23: builds
+  and tests are this seat's job; prefer MCP for reading and searching).
 - manager: `workspace-write`.
 - reviewer: `read-only` with no shell (owner directive: reading and judging only).
 
