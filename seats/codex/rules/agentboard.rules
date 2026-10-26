@@ -1,0 +1,4 @@
+# BEGIN AGENTBOARD RULES
+prefix_rule(pattern=["herdr"], decision="allow")
+prefix_rule(pattern=["agentboard"], decision="allow")
+# END AGENTBOARD RULES
