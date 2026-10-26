@@ -194,5 +194,15 @@ inst --force
 is "legacy regular file kept" test "$(cat "$home/.codex/rules/agentboard.rules")" = mine
 has "legacy regular file noted" 'regular file' "$tmp/err"
 
+# --- an empty rules source is refused, not a crash ---------------------------
+newhome
+mkdir -p "$tmp/fake/codex/rules"
+cp -r seats/. "$tmp/fake/"
+: >"$tmp/fake/codex/rules/agentboard.rules"
+HOME="$home" CODEX_HOME="$home/.codex" python3 "$tmp/fake/install.py" >"$tmp/out" 2>"$tmp/err"; code=$?
+is "empty rules source refused" test "$code" -eq 1
+has "empty rules source named" 'bad rules source' "$tmp/err"
+is "empty rules source links nothing" test ! -e "$home/.codex/coder.config.toml"
+
 echo "$((n - fail))/$n passed (seats installer)"
 [ "$fail" -eq 0 ]
