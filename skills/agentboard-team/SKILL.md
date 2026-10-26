@@ -22,8 +22,8 @@ Pages here:
 - `workflow.md`: how a task moves and who moves it
 - `roles.md`: manager, analyst, coder and reviewer: what each may run and never does
 
-Each seat has a one-page entry skill of its own: `manager`, `analyst`, `coder`,
-`reviewer`. Wire details live in `PROTOCOL.md`; changing the tree in `AGENTS.md`.
+Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboard-analyst`,
+`agentboard-coder`, `agentboard-reviewer`. Wire details live in `PROTOCOL.md`; changing the tree in `AGENTS.md`.
 
 ## The board
 
@@ -45,10 +45,10 @@ Each seat has a one-page entry skill of its own: `manager`, `analyst`, `coder`,
 
 | Seat | Writes as | Entry skill | Job |
 | --- | --- | --- | --- |
-| manager | the name its client was started with (`hermes` here) | `manager` | file rows, read the board, hand rows out, quota, decide with the human |
-| analyst | `analyst` | `analyst` | read and plan, hand the row to the coder |
-| coder | `coder` | `coder` | implement one row, verify it, hand it to review |
-| reviewer | `reviewer` | `reviewer` | read the work and judge it; close or reopen the row |
+| manager | the name its client was started with (`hermes` here) | `agentboard-manager` | file rows, read the board, hand rows out, quota, decide with the human |
+| analyst | `analyst` | `agentboard-analyst` | read and plan, hand the row to the coder |
+| coder | `coder` | `agentboard-coder` | implement one row, verify it, hand it to review |
+| reviewer | `reviewer` | `agentboard-reviewer` | read the work and judge it; close or reopen the row |
 
 Nothing in the binary starts processes, and nothing in the board enforces these
 roles: they are the team's contract. What the board enforces is narrower — a stale
@@ -78,11 +78,17 @@ herdr pane list                                    # note the new tab's pane id
 
 # Claude seats (MCP config + preferred model + permission mode)
 # Analyst/reviewer are read-only on the tree: dontAsk refuses file/shell
-# writes instead of auto-approving. Coder needs unattended shell/tests → bypass.
+# writes instead of auto-approving, and --allowedTools names the read tools it
+# still permits (without it the seat has no read tools). One command per Bash
+# call: under dontAsk a compound line (`cd ...; for ...`) is refused even when
+# each verb is allowed. Coder needs unattended shell/tests → bypass.
 herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --model claude-opus-5-5 \
   --strict-mcp-config --mcp-config ~/.claude/analyst-mcp.json \
-  --permission-mode dontAsk
+  --permission-mode dontAsk \
+  --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
+  mcp__ferris-search Read Glob Grep LS 'Bash(rg:*)' 'Bash(find:*)' 'Bash(ls:*)' \
+  'Bash(readlink:*)' 'Bash(git status:*)' 'Bash(git log:*)' 'Bash(git diff:*)'
 herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 \
   --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
@@ -90,7 +96,10 @@ herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
 herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   --model claude-sonnet-5-5 \
   --strict-mcp-config --mcp-config ~/.claude/reviewer-mcp.json \
-  --permission-mode dontAsk
+  --permission-mode dontAsk \
+  --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
+  mcp__ferris-search Read Glob Grep LS 'Bash(rg:*)' 'Bash(find:*)' 'Bash(ls:*)' \
+  'Bash(readlink:*)' 'Bash(git status:*)' 'Bash(git log:*)' 'Bash(git diff:*)'
 
 # Codex seats (profile + preferred model)
 herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
@@ -100,15 +109,19 @@ herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
 herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
   -p reviewer -m gpt-6-luna
 
-herdr agent prompt analyst 'You are analyst on the agentboard. Use MCP only, actor=analyst. Load the analyst skill, then claim your row.' --wait
+# First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude,
+# opencode, Hermes and Grok; $agentboard-<seat> T<id> for Codex.
+herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
+herdr agent prompt coder '$agentboard-coder T<id>' --wait   # Codex seat
 ```
 
 Start only the seats the work needs: a reviewer with nothing to review is a tab
 that idles. Pick one kind per team; do not mix Claude and Codex rows of the table
 in one launch unless the human asks.
 
-`herdr agent prompt` needs `--wait` when you want proof the prompt landed; without
-it a stalled prompt (an open overlay) goes unnoticed. If a prompt does not turn the
+A launch prompt uses `--wait` for proof it landed; without it a stalled prompt (an
+open overlay) goes unnoticed. The manager's later wake prompts go without `--wait`
+(it never blocks) and are checked with `herdr agent read <seat> --lines 40`. If a prompt does not turn the
 agent busy, read the pane: `herdr agent read coder --lines 40`.
 
 ## Register a seat's MCP server

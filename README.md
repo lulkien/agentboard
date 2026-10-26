@@ -192,5 +192,6 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
 - `AGENTS.md` — changing this tree: gates, layout, traps.
 - `skills/agentboard-team` — running a team: the board, launcher, wake, roles,
   workflow.
-- `skills/manager`, `skills/analyst`, `skills/coder`, `skills/reviewer` — one
-  entry skill per seat.
+- `skills/agentboard-manager`, `skills/agentboard-analyst`, `skills/agentboard-coder`,
+  `skills/agentboard-reviewer` — one entry skill per seat; Grok's manager recipe is
+  `skills/agentboard-manager/grok.md`.

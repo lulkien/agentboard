@@ -1,5 +1,5 @@
 ---
-name: reviewer
+name: agentboard-reviewer
 description: "Work the reviewer seat on the agentboard: read the row and the tree, judge the work, close or reopen the row."
 version: 5.0.0
 ---

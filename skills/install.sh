@@ -1,7 +1,8 @@
 #!/bin/sh
 # Canonical repo links in ~/.agents/skills, then agent aliases through that home.
 # Every skill directory that carries a claude.md or an opencode.md also gets that
-# CLI's command link, so a seat entry point is one edit in the repo.
+# CLI's command link, so a seat entry point is one edit in the repo. Links under a
+# retired name are pruned when they are exactly the link this installer wrote.
 # usage: install.sh [--force] [canonical-dir]
 set -eu
 force=0
@@ -42,6 +43,25 @@ for dir in "$src"/*/; do
   if [ -f "$dir/opencode.md" ]; then check "$opencode_commands/$name.md"; fi
 done
 [ "$refuse" -eq 0 ] || exit 1
+
+# Retired skill names. A link is removed only when it points exactly where this
+# installer pointed it; a foreign link, a real file or a real directory stays.
+retired="manager analyst coder reviewer grok-manager analyzer"
+prune() {
+  if [ -L "$1" ] && [ "$(readlink "$1")" = "$2" ]; then
+    rm -f "$1"
+    echo "pruned: $1"
+  fi
+}
+for name in $retired; do
+  [ -d "$src/$name" ] && continue
+  prune "$target/$name" "$src/$name"
+  for agent_dir in "$claude_skills" "$codex_skills" "$opencode_skills" "$hermes_skills"; do
+    [ "$agent_dir" = "$target" ] || prune "$agent_dir/$name" "$target/$name"
+  done
+  prune "$claude_commands/$name.md" "$target/$name/claude.md"
+  prune "$opencode_commands/$name.md" "$target/$name/opencode.md"
+done
 
 link() {
   mkdir -p "$(dirname "$2")"

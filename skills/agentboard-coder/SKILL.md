@@ -1,5 +1,5 @@
 ---
-name: coder
+name: agentboard-coder
 description: "Work the coder seat on the agentboard: claim one row, implement and verify it, hand it to review."
 version: 5.0.0
 ---

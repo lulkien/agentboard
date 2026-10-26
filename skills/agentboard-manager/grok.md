@@ -1,18 +1,12 @@
----
-name: grok-manager
-description: Use when running Grok Build as the agentboard manager seat. Registers the board MCP server under the grok actor, launches the seat in herdr with grok's trust and always-approve flags, and keeps the rule that the manager never blocks.
-when-to-use: starting grok as the manager, grooming the board with grok, launching seats from a grok session
-allowed-tools: Bash(agentboard:*), Bash(herdr:*), Bash(grok:*), Read
----
-
 # Grok as the manager seat
 
 Grok Build (`grok`, herdr kind `grok`) can hold the manager seat. It reads and writes
 the board over MCP, files rows, launches the other seats and wakes them by prompt.
-It writes no code and runs no build, same as every manager.
+It writes no code and runs no build, same as every manager. The steps are
+`SKILL.md`; this page only adds what is specific to Grok.
 
 Read `~/.agents/skills/agentboard-team/{SKILL.md,workflow.md,roles.md}` first: they
-are the shared manual and this page only adds what is specific to Grok.
+are the shared manual.
 
 ## One-time setup: give grok a board identity
 
@@ -35,7 +29,7 @@ seat that silently has no board tools.
     herdr tab create --cwd "$REPO" --label grok
     herdr pane list                                   # note the pane id
     herdr agent start grok --kind grok --pane "$PANE_GROK" -- --trust --always-approve
-    herdr agent prompt grok 'Load the grok-manager skill and the agentboard-team manual. You are the manager on the agentboard, actor=grok. Start with board_brief, then launch only the seats this work needs.' --wait
+    herdr agent prompt grok '/agentboard-manager focus: <what this session is for>' --wait
 
 - `--trust` is not optional if the seat must read the repo's `AGENTS.md` or its
   `.grok`, `.agents` and `.claude` project surfaces: untrusted, Grok loads no project
@@ -48,38 +42,9 @@ seat that silently has no board tools.
 - `herdr agent prompt ... --wait` is the raw herdr verb and does have `--wait`;
   nothing on the board does. Waking a seat is a herdr action, not a board write.
 
-## Launching worker seats
-
-When this seat starts analyst / coder / reviewer, use the preferred-model table
-in `~/.agents/skills/agentboard-team/SKILL.md` (Claude: Opus 5.5 for analyst,
-Sonnet 5.5 for coder and reviewer; Codex: `gpt-6-sol` for analyst, `gpt-6-luna`
-for coder and reviewer). Pass the flags after `--` on `herdr agent start`.
-
-## Prompting the other seats
-
-    herdr agent prompt coder 'row 27 is yours; claim it, report, stop' --wait
-
-Wake by name, one row per prompt, no polling loop: a seat does its row, reports it
-and stops. A doubt about a claim becomes a reviewer row, never a fix written here.
-
-## Waiting: park a wait, never block the turn
-
-    agentboard wait 27 --status review --timeout 300
-    agentboard wait 12 --epic --timeout 300
-    agentboard wait 27 --status review,done,blocked --assignee --timeout 300
-
-The third form also returns when a watched row is handed to a new owner and its
-status stays put (analyst→coder). MCP: `task_wait(ids=[27], status="review,done,blocked",
-assignee=true)`. A match prints `; handoff T27 to coder` on the first line.
-
-Run it in the background, and re-arm it when it exits `3` (nothing matched). One wait
-is at most 300 seconds — the CLI refuses `--timeout` above 300 or below 1 — so a long
-round is a chain of parked waits, not one 30-minute call. Exit `0` prints `matched:`
-with the rows; either way the manager, not the wait, is what prompts a seat.
-
 ## What grok actually reads
 
-- Skills: `~/.agents/skills/` itself (this skill, the four seats, the manual), plus
+- Skills: `~/.agents/skills/` itself (the manual, the manager and the three worker seats), plus
   `.grok/skills`, `.agents/skills` and `.claude/skills` at repo and user level.
   `grok inspect --json` lists them under `skills` — 40-odd entries on a working box.
 - Project rules: `AGENTS.md`/`CLAUDE.md` from repo root down to the cwd, but only
@@ -91,19 +56,22 @@ with the rows; either way the manager, not the wait, is what prompts a seat.
 
 ## Prove the seat is wired
 
-    grok inspect --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["projectTrusted"], [s["name"] for s in d["skills"] if "grok-manager" in s["name"]], [m["name"] for m in d["mcpServers"]])'
+    grok inspect --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["projectTrusted"], [s["name"] for s in d["skills"] if s["name"].startswith("agentboard-")], [m["name"] for m in d["mcpServers"]])'
     grok mcp doctor agentboard
     grok -p 'list the board brief with the agentboard board_brief tool' --always-approve --max-turns 3
+
+The skills list must be exactly `agentboard-team`, `agentboard-manager`,
+`agentboard-analyst`, `agentboard-coder` and `agentboard-reviewer`; an empty list
+looks like success and means the skills are not installed.
 
 The last line is a headless read-only round: it proves the model can call the board,
 not just that the server starts.
 
 ## Traps
 
-- Never install a grok command file named `manager.md`: Grok deduplicates skills and
-  commands by name, so a `manager` command beside the `manager` skill is an ambiguous
-  name and the slash key stops resolving. The grok entry point is this skill,
-  `grok-manager`.
+- Never install a grok command file whose name matches a skill: Grok deduplicates
+  skills and commands by name, so the slash key stops resolving. The grok entry
+  point is the `agentboard-manager` skill.
 - A grok seat that looks idle may be sitting on an approval prompt; check
   `herdr pane output` before re-prompting, and launch with `--always-approve`.
 - Do not use headless `-p` as a seat: it runs one prompt and exits, so there is no

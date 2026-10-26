@@ -2,7 +2,8 @@
 
 `agentboard-team/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`,
 plus `references/herdr-mechanics.md`). The four seat directories are one-page entry
-points: `manager/`, `analyst/`, `coder/`, `reviewer/`. Each confirms the seat's
+points: `agentboard-manager/`, `agentboard-analyst/`, `agentboard-coder/`,
+`agentboard-reviewer/`. Each confirms the seat's
 board name, names what it may run on the board and what it never does, and ends by
 arming the feed. Their `claude.md` and `opencode.md` resources keep the proven
 command-file formats; the `SKILL.md` is what Codex and Hermes load.
@@ -20,28 +21,30 @@ this repo, and every agent alias points at that canonical name:
     ~/.config/opencode/skills/<name> -> ~/.agents/skills/<name>
     ~/.hermes/skills/<name> -> ~/.agents/skills/<name>
 
-Six names are installed — `agentboard-team`, the four seats and `grok-manager` — so
-each run creates `6 x 5 = 30` directory links and eight command links, each printing
+Five names are installed — `agentboard-team` and the four `agentboard-<seat>` entry
+points — so each run creates `5 x 5 = 25` directory links and eight command links, each printing
 `linked:`. Only the canonical links contain the repo location; all five paths for a
 name resolve to one physical repo directory, so an edit is visible without
 reinstalling. Unrelated skills are left alone. Codex honours `CODEX_HOME`.
 
 | CLI | Entry point in repo | Installed entry point | Invocation |
 |---|---|---|---|
-| Claude Code | `<seat>/claude.md` | `~/.claude/commands/<seat>.md` → canonical `<seat>/claude.md` | `/<seat> [focus]` |
-| opencode | `<seat>/opencode.md` | `~/.config/opencode/commands/<seat>.md` → canonical `<seat>/opencode.md` | `/<seat> [focus]` |
-| Codex | `<seat>/SKILL.md` | `$CODEX_HOME/skills/<seat>` → canonical `<seat>` | `$<seat> [focus]` via `/skills` |
-| Hermes | `<seat>/SKILL.md` | `~/.hermes/skills/<seat>` → canonical `<seat>` | `/<seat> [focus]` |
-| Grok Build | `grok-manager/SKILL.md` | `~/.agents/skills/grok-manager` → canonical (no alias needed) | `/grok-manager [focus]` |
+| Claude Code | `agentboard-<seat>/claude.md` | `~/.claude/commands/agentboard-<seat>.md` → canonical `agentboard-<seat>/claude.md` | `/agentboard-<seat> [focus]` |
+| opencode | `agentboard-<seat>/opencode.md` | `~/.config/opencode/commands/agentboard-<seat>.md` → canonical `agentboard-<seat>/opencode.md` | `/agentboard-<seat> [focus]` |
+| Codex | `agentboard-<seat>/SKILL.md` | `$CODEX_HOME/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `$agentboard-<seat> [focus]` via `/skills` |
+| Hermes | `agentboard-<seat>/SKILL.md` | `~/.hermes/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `/agentboard-<seat> [focus]` |
+| Grok Build | `agentboard-manager/SKILL.md` (+ `grok.md`) | `~/.agents/skills/agentboard-manager` → canonical (no alias needed) | `/agentboard-manager [focus]` |
 
 Grok scans `~/.agents/skills` itself, at every tier, so it needs no alias directory
 of its own; the seat entry points and the manual it shares all resolve through the
 canonical links.
 
-The installer preflights all thirty-eight destinations before changing any parent.
+The installer preflights all thirty-three destinations before changing any parent.
 Without `--force`, an existing file, directory or dangling symlink prints
 `exists: <path> (use --force)` and exits 1 with no changes. `--force` replaces only
-the named destinations. Missing parents are created. A custom canonical directory
+the named destinations. Missing parents are created. Retired names (manager, analyst, coder, reviewer,
+grok-manager, analyzer) are pruned when the link is exactly one this installer wrote;
+anything else is left alone. A custom canonical directory
 redirects every alias, but the command bodies' default `~/.agents/skills` manual
 paths then need adjusting.
 
@@ -51,7 +54,7 @@ That name is what the board attributes writes to and what the feed addresses.
 `seats/` holds the canonical client cards for those entries.
 
 `tests/skills-install.sh` proves the layout in isolated homes: five canonical
-links, four aliases per skill, eight command links, one edit visible through all
+links, four aliases per skill, eight command links, retired links pruned, one edit visible through all
 four aliases, a second run that refuses without `--force` while naming every
 conflict, and the four seat entry points present with both command files.
 
@@ -69,7 +72,7 @@ conflict, and the four seat entry points present with both command files.
 - OpenCode documents scanning `~/.config/opencode/skills`; its CLI was not on this
   shell's `PATH`, so live discovery was not exercised. The command files are kept.
 - Grok Build 1.0.70 was exercised here: `grok inspect --json` lists the canonical
-  `agentboard-team`, the four seats and `grok-manager` from `~/.agents/skills`
+  `agentboard-team` and the four `agentboard-<seat>` skills from `~/.agents/skills`
   without any alias, reports `projectTrusted`, and lists the MCP servers it will
   start. Project instructions and project skills load only in a trusted folder, so a
   grok seat is launched with `--trust`; `grok mcp doctor <server>` proves the board

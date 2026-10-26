@@ -1,5 +1,5 @@
 ---
-name: analyst
+name: agentboard-analyst
 description: "Work the analyst seat on the agentboard: read the row, plan it, hand it to the coder."
 version: 5.0.0
 ---

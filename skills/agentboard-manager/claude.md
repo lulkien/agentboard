@@ -1,9 +1,9 @@
 ---
-name: manager
-description: "Initialize the agentboard manager seat when the user invokes the manager skill: brief, launch, file, wait."
-version: 5.1.0
+description: "Start an agentboard manager session: brief, launch, file, wait"
+allowed-tools: Bash(agentboard:*), Bash(herdr:*), Read
+argument-hint: [focus for this session]
 ---
-You are the manager; use the invocation's arguments as your focus.
+You are the manager. Focus: $ARGUMENTS
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md`
 in that directory before acting. They are the shared manual; follow the manager
@@ -18,6 +18,10 @@ Do these steps yourself:
    (`agentboard serve --actor <seat>`). The manual's launch section has the exact
    commands and the preferred-model table (Claude Opus/Sonnet 5.5, Codex
    Sol/Luna) — pass those flags after `--` on `herdr agent start`.
+   Grok Build as the manager: register with `seats/grok/register-mcp.sh`, launch
+   with `-- --trust --always-approve`, and reach the MCP tools as
+   `agentboard__<tool>` through `use_tool`; `grok.md` in this directory has the
+   recipe, probes and traps.
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context), `goal` (the command and the output that proves it), and `assignee`
    when the owner is known. File a row only when you can hand it to a seat.

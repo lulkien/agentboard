@@ -7,6 +7,7 @@ import os, pathlib, subprocess, tempfile
 repo=pathlib.Path.cwd()
 installer=repo/'skills/install.sh'
 passed=0
+RETIRED={'manager','analyst','coder','reviewer','grok-manager','analyzer'}
 
 def skills():
     return [d.name for d in sorted((repo/'skills').iterdir()) if (d/'SKILL.md').exists()]
@@ -46,9 +47,11 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     for directory,_,files in os.walk(home/'.hermes/skills',followlinks=True):
         if 'SKILL.md' in files:
             path=pathlib.Path(directory)/'SKILL.md'
-            if 'name: manager' in path.read_text().split('---',2)[1].splitlines():
-                assert path==home/'.hermes/skills/manager/SKILL.md',path
-    assert not (home/'.codex/prompts/manager.md').exists()
+            if 'name: agentboard-manager' in path.read_text().split('---',2)[1].splitlines():
+                assert path==home/'.hermes/skills/agentboard-manager/SKILL.md',path
+    for old in ['manager','agentboard-manager']:
+        assert not (home/f'.codex/prompts/{old}.md').exists()
+    assert not RETIRED&{p.name.removesuffix('.md') for p in expected},RETIRED
     # One edit, four readers, no reinstall. Remove the probe even on a failure.
     with tempfile.NamedTemporaryFile(dir=home/'.agents/skills/agentboard-team',prefix='.install-probe-',mode='w+') as probe:
         probe.write('one physical copy\n');probe.flush()
@@ -61,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     for path in expected: assert f'exists: {path} (use --force)' in p.stderr
     check('second run names every canonical, agent, and command conflict without writing')
 
-    conflict=root/'conflict';existing=conflict/'.config/opencode/commands/manager.md'
+    conflict=root/'conflict';existing=conflict/'.config/opencode/commands/agentboard-manager.md'
     existing.parent.mkdir(parents=True);existing.write_text('untouched')
     before=existing.stat().st_mtime_ns
     p=run(conflict)
@@ -72,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     assert not (conflict/'.config/opencode/skills').exists()
     check('a command conflict leaves all earlier parents absent and contents untouched')
 
-    broken=root/'broken';path=broken/'.codex/skills/manager'
+    broken=root/'broken';path=broken/'.codex/skills/agentboard-manager'
     path.parent.mkdir(parents=True);path.symlink_to('missing')
     p=run(broken)
     assert p.returncode==1 and str(path) in p.stderr
@@ -98,12 +101,30 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
 
     # Every seat entry point must be one of the installed skills, so a seat can
     # never be launched into a skill that was never linked.
-    for seat in ['manager','analyst','coder','reviewer']:
+    for seat in ['agentboard-manager','agentboard-analyst','agentboard-coder','agentboard-reviewer']:
         assert seat in skills(),seat
         for card in ('claude','opencode'):
             assert (repo/'skills'/seat/f'{card}.md').exists(),(seat,card)
     assert (repo/'skills/agentboard-team/SKILL.md').exists()
     check('four seat entry points and the shared manual are installed as skills')
+    # Retired names: only links this installer wrote are pruned, with no --force.
+    old=root/'retired';agents=old/'.agents/skills'
+    owned=[agents/'analyzer',old/'.claude/skills/manager',old/'.claude/commands/manager.md',old/'.config/opencode/commands/manager.md']
+    owned[0].parent.mkdir(parents=True);owned[0].symlink_to(repo/'skills/analyzer')
+    owned[1].parent.mkdir(parents=True);owned[1].symlink_to(agents/'manager')
+    owned[2].parent.mkdir(parents=True);owned[2].symlink_to(agents/'manager/claude.md')
+    owned[3].parent.mkdir(parents=True);owned[3].symlink_to(agents/'manager/opencode.md')
+    foreign=old/'.claude/skills/coder';foreign.symlink_to('/elsewhere')
+    realdir=old/'.hermes/skills/reviewer';realdir.mkdir(parents=True);(realdir/'keep').write_text('mine')
+    p=run(old);assert p.returncode==0,p.stderr
+    for path in owned:
+        assert not path.is_symlink() and not path.exists(),path
+        assert f'pruned: {path}' in p.stdout,path
+    assert foreign.is_symlink() and os.readlink(foreign)=='/elsewhere'
+    assert (realdir/'keep').read_text()=='mine' and 'pruned: '+str(realdir) not in p.stdout
+    for path,dest in destinations(old).items():
+        assert path.is_symlink() and os.readlink(path)==str(dest),path
+    check('retired links are pruned only on an exact match; foreign link and real directory stay')
 print(f'{passed}/{passed} passed (skills installer)')
 PY
 

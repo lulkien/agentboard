@@ -41,9 +41,9 @@ and uses scratch boards; there is no server to start.
 | `bash tests/cli.sh` | `207/207 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `137/137 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
-| `bash tests/skills-install.sh` | `7/7 passed (skills installer)` (isolated homes; no board writes) |
+| `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 11 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 22 pages, 102 CLI names, 160 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 22 pages, 104 CLI names, 158 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 11 gates passed`; with `--full` `GATES OK: 12 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
@@ -154,7 +154,8 @@ No file edit, no commit, no build, no install, no probe that creates state;
   `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
   canonical names. There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: eleven tools, cursors, refusals, exit codes.
-- `skills/{manager,analyst,coder,reviewer}/` — one seat entry point each
-  (`/manager`, `/analyst`, `/coder`, `/reviewer`; `$<seat>` under Codex).
+- `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each
+  (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
+  `agentboard-manager` with its `grok.md`.
 - `seats/` — the canonical per-seat client cards (codex profiles, claude MCP
   configs) and `seats/install.sh` to link them into a home directory.

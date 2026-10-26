@@ -62,7 +62,7 @@ takes its actor from that entry. `grok mcp doctor agentboard` is the proof: it s
 the server, completes the handshake and lists the tool catalog. A Grok seat needs
 `--trust` (project `AGENTS.md` and project skills load only in a trusted folder) and
 `--always-approve` (otherwise a tool call waits on a prompt nobody is watching); both
-go after herdr's `--`. The `grok-manager` skill carries the full launch recipe.
+go after herdr's `--`. `skills/agentboard-manager/grok.md` carries the full launch recipe.
 
 ## Not shipped here
 

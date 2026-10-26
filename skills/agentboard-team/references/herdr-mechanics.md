@@ -48,7 +48,7 @@ herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 \
   --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
   --dangerously-skip-permissions
-herdr agent prompt coder 'You are coder on the agentboard. MCP tools only, actor=coder. Start with task_claim.' --wait
+herdr agent prompt coder '/agentboard-coder T<id>' --wait     # Codex: '$agentboard-coder T<id>'
 ```
 
 `--kind` is the canonical kind name from `herdr agent start --help` (`claude`,
