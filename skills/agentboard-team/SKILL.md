@@ -45,7 +45,7 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
 
 | Seat | Writes as | Entry skill | Job |
 | --- | --- | --- | --- |
-| manager | the name its client was started with (`hermes` here) | `agentboard-manager` | file rows, read the board, hand rows out, quota, decide with the human |
+| manager | the name its client was started with (`manager` here) | `agentboard-manager` | file rows, read the board, hand rows out, quota, decide with the human |
 | analyst | `analyst` | `agentboard-analyst` | read and plan, hand the row to the coder |
 | coder | `coder` | `agentboard-coder` | implement one row, verify it, hand it to review |
 | reviewer | `reviewer` | `agentboard-reviewer` | read the work and judge it; close or reopen the row |

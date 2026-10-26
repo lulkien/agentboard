@@ -11,9 +11,12 @@ Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` i
 that directory before acting. You read and judge; the row is your work product.
 
 1. Find the row: `board_feed` unfiltered, or `task_list(status="reviewing")`.
-2. Read it with `task_get(id, full=true)` for the goal, then read the tree and the
-   diff the row names. Re-run the acceptance command rather than trusting a
-   pasted transcript; a claim with no output is not evidence.
+2. Read it with `task_get(id, full=true)` for the goal and `board_feed(task=<id>,
+   full=true)` for the comments, then read the tree and the diff the row names. You
+   run nothing: judge from the command output the coder pasted on the row. A claim
+   with no output is not evidence; make that a blocker. Uncommitted work shows in git
+   as deletions plus untracked files, so read the new files directly and compare
+   them with `git show HEAD:<old path>`.
 3. Comment the findings on the same row, each classified blocker, follow-up or
    nit, with `file:line` or the command that shows it. A finding without evidence
    is a doubt, not a finding.
@@ -30,7 +33,7 @@ that directory before acting. You read and judge; the row is your work product.
 
 When two seats write as the same actor (a seat re-staffed onto another client keeps
 the board name), the row alone does not say which seat wrote it: name your seat in
-every comment and verdict ("Reviewer seat (hermes actor, reviewer role)").
+every comment and verdict ("Reviewer seat (codex actor, reviewer role)").
 
 ## A row held by another name
 
@@ -44,30 +47,7 @@ read with `task_get` before commenting is still the one to pass as `if_revision`
 the status update that follows. The manual's tools table is right: `task_comment`
 never bumps the revision.
 
-## Evidence you generate yourself
 
-- Put your own run logs in a scratch directory, not in the repo's `build/`.
-- Write one independent probe for the specific blocker instead of only re-running
-  the harness: a harness the coder extended can be blind to the defect it was written
-  around. A hash-order blocker yields to `QT_HASH_SEED=1..12` across separate
-  processes; a stale-binary doubt yields to
-  `find src tests resources -newer build/qa/src/ui/hfstudio-ui`.
-- Never pass `--allow-skip`, and grep the log for `skipped`: a section that did not
-  run is not a pass.
-- Read what a gate's compare function ACTUALLY asserts before believing its verdict:
-  a "contract" comparison that only checks presence, ordering and counts passes
-  while the values differ. Then pull the values from both sides yourself (the page's
-  own snapshot vs the gate's own oracle function) and compare them.
-- Pin timing/perf evidence to the binary you measured: record its mtime and check
-  `find src tests resources -newer <binary>` FIRST and again before you write the
-  verdict. The next row's coder may start editing the same files while you review;
-  say in the verdict which build the numbers belong to.
-- Read each tool's own argument shape instead of assuming `--binary`: in hf-studio
-  `parity_trajectory_plot.py` takes the binary POSITIONALLY, and passing `--binary`
-  runs it as a program name.
-
-Never edit files, commit, install, reset a board, or create board state. Re-running
-the acceptance commands the row names is part of judging, not a build you owe the
-coder; do not widen them, and use a scratch board (`--db` or a fresh
-`AGENTBOARD_DB`) for anything that writes. Never close a row you did not review, and
-never accept "it should work" as evidence.
+Never edit files, commit, build, run tests, install, reset a board, or create board
+state. Never close a row you did not review, and never accept "it should work" as
+evidence.

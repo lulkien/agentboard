@@ -103,17 +103,18 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     # never be launched into a skill that was never linked.
     for seat in ['agentboard-manager','agentboard-analyst','agentboard-coder','agentboard-reviewer']:
         assert seat in skills(),seat
-        for card in ('claude','opencode'):
-            assert (repo/'skills'/seat/f'{card}.md').exists(),(seat,card)
+        assert (repo/'skills'/seat/'opencode.md').exists(),seat
+        assert not (repo/'skills'/seat/'claude.md').exists(),seat
     assert (repo/'skills/agentboard-team/SKILL.md').exists()
     check('four seat entry points and the shared manual are installed as skills')
     # Retired names: only links this installer wrote are pruned, with no --force.
     old=root/'retired';agents=old/'.agents/skills'
-    owned=[agents/'analyzer',old/'.claude/skills/manager',old/'.claude/commands/manager.md',old/'.config/opencode/commands/manager.md']
+    owned=[agents/'analyzer',old/'.claude/skills/manager',old/'.claude/commands/manager.md',old/'.config/opencode/commands/manager.md',old/'.claude/commands/agentboard-manager.md']
     owned[0].parent.mkdir(parents=True);owned[0].symlink_to(repo/'skills/analyzer')
     owned[1].parent.mkdir(parents=True);owned[1].symlink_to(agents/'manager')
     owned[2].parent.mkdir(parents=True);owned[2].symlink_to(agents/'manager/claude.md')
     owned[3].parent.mkdir(parents=True);owned[3].symlink_to(agents/'manager/opencode.md')
+    owned[4].symlink_to(agents/'agentboard-manager/claude.md')  # written before claude.md was removed
     foreign=old/'.claude/skills/coder';foreign.symlink_to('/elsewhere')
     realdir=old/'.hermes/skills/reviewer';realdir.mkdir(parents=True);(realdir/'keep').write_text('mine')
     p=run(old);assert p.returncode==0,p.stderr

@@ -20,11 +20,10 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    `task_comment(id, body=...)`.
 5. Hand it to review: `task_update(id, if_revision, status="reviewing",
    assignee="reviewer")`. That event carries recipient `reviewer`; no process is
-   woken, so the manager prompts the reviewer or the reviewer is already watching
-   its own rows.
+   woken, so the manager prompts the reviewer.
    Do not close your own row when a reviewer is named. A reviewer that reopens a row
-   assigns it to the SEAT name (`coder`); when your MCP server runs as another actor
-   (`hermes`), that handoff refuses with `task is held by coder` - pass `force` and a
+   assigns it to the SEAT name (`coder`); when your MCP server runs as another actor,
+   that handoff refuses with `task is held by coder` - pass `force` and a
    `reason` naming the seat mapping instead of asking the reviewer to reassign.
 6. A missing requirement is not a guess: comment one narrow question,
    `task_update` the status to `blocked`, then stop and report; the manager brings

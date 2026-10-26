@@ -1,8 +1,9 @@
 #!/bin/sh
 # Canonical repo links in ~/.agents/skills, then agent aliases through that home.
 # Every skill directory that carries a claude.md or an opencode.md also gets that
-# CLI's command link, so a seat entry point is one edit in the repo. Links under a
-# retired name are pruned when they are exactly the link this installer wrote.
+# CLI's command link, so a seat entry point is one edit in the repo (only opencode
+# needs one; Claude and Grok invoke the skill directly). Links under a retired name
+# are pruned when they are exactly the link this installer wrote.
 # usage: install.sh [--force] [canonical-dir]
 set -eu
 force=0
@@ -61,6 +62,13 @@ for name in $retired; do
   done
   prune "$claude_commands/$name.md" "$target/$name/claude.md"
   prune "$opencode_commands/$name.md" "$target/$name/opencode.md"
+done
+# Claude resolves /<skill> from the skill itself; a command link from before the
+# claude.md files were removed is dead weight.
+for dir in "$src"/*/; do
+  [ -f "$dir/SKILL.md" ] || continue
+  name=$(basename "$dir")
+  [ -f "$dir/claude.md" ] || prune "$claude_commands/$name.md" "$target/$name/claude.md"
 done
 
 link() {

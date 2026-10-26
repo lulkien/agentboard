@@ -29,25 +29,15 @@ seat.
 ```bash
 herdr tab create --cwd "$REPO" --label coder
 herdr pane list                       # find the new tab's pane id
-herdr agent start coder --kind claude --pane "$P" -- \
-  --model claude-sonnet-5-5 \
-  --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
-  --dangerously-skip-permissions
 ```
 
-Repeat for `analyst` and `reviewer` with their own `--label`, pane, preferred
-model, and permission mode from `SKILL.md` (analyst/reviewer:
-`--permission-mode dontAsk` — refuse tree writes; only coder uses
-`--dangerously-skip-permissions`). Panes inherit cwd; pass `--cwd` anyway so a
-seat never opens in the wrong tree.
+`SKILL.md` has the `herdr agent start` command for each seat, with its preferred
+model and permission mode. Panes inherit cwd; pass `--cwd` anyway so a seat never
+opens in the wrong tree.
 
 ## Start and prompt a seat
 
 ```bash
-herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
-  --model claude-sonnet-5-5 \
-  --strict-mcp-config --mcp-config ~/.claude/coder-mcp.json \
-  --dangerously-skip-permissions
 herdr agent prompt coder '/agentboard-coder T<id>' --wait     # Codex: '$agentboard-coder T<id>'
 ```
 
