@@ -23,3 +23,5 @@ debug/
 # codebase-memory-mcp index
 .codebase-memory/
 tmp-review-*.md
+# Python bytecode from scripts/*.py and tests/*.py
+__pycache__/
