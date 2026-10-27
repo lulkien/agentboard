@@ -17,6 +17,31 @@ has() { local name=$1 needle=$2 hay=$3; [[ "$hay" == *"$needle"* ]] && ok || bad
 lacks() { local name=$1 needle=$2 hay=$3; [[ "$hay" != *"$needle"* ]] && ok || bad "$name: unexpected '$needle' in '$hay'"; }
 fresh() { AGENTBOARD_DB="$S/board-$1"; export AGENTBOARD_DB; }
 
+# --- optional dashboard CLI and HTTP skeleton -----------------------------
+if "$B" dashboard --help >/dev/null 2>&1; then
+    ok # The dashboard subcommand is present in this feature-enabled binary.
+    "$B" add "dashboard test board" --db "$S/dashboard-board" >/dev/null
+    port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+    "$B" dashboard "127.0.0.1:$port" --db "$S/dashboard-board" >/dev/null 2>&1 &
+    dashboard_pid=$!
+    trap 'kill "$dashboard_pid" 2>/dev/null || true; rm -rf "$S"' EXIT
+    code=1
+    for _ in {1..30}; do
+        code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null) && break
+        sleep 0.1
+    done
+    check "dashboard GET / status" "200" "$code"
+    check "dashboard GET other path status" "404" "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/missing" 2>/dev/null)"
+    check "dashboard POST status" "405" "$(curl -s -X POST -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null)"
+    kill "$dashboard_pid" 2>/dev/null || true
+    wait "$dashboard_pid" 2>/dev/null || true
+    trap 'rm -rf "$S"' EXIT
+else
+    out=$("$B" dashboard 2>&1); code=$?
+    check "dashboard subcommand is refused without feature" 2 "$code"
+    has "feature-off refusal names dashboard" "unrecognized subcommand 'dashboard'" "$out"
+fi
+
 # --- path and add ----------------------------------------------------------
 fresh a
 out=$("$B" path) || bad "path exit"

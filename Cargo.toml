@@ -10,6 +10,10 @@ license = "MIT"
 name = "agentboard"
 path = "src/main.rs"
 
+[features]
+default = []
+dashboard = []
+
 [dependencies]
 # No colour stack: help and errors are plain text on purpose.
 clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }

@@ -49,6 +49,11 @@ with tempfile.TemporaryDirectory(prefix='agentboard-doc-names-') as scratch:
             proc.wait(timeout=5)
 
 help_cache = {}
+cli_source = (ROOT / 'src/cli.rs').read_text()
+optional_commands = set()
+if re.search(r'#\[cfg\(feature = "dashboard"\)\]\s+Dashboard\s*\{', cli_source):
+    optional_commands.add('dashboard')
+
 def commands(prefix):
     if prefix not in help_cache:
         result = subprocess.run([args.binary, *prefix, '--help'],
@@ -56,6 +61,8 @@ def commands(prefix):
         section = result.stdout.split('Commands:\n', 1)
         help_cache[prefix] = set(re.findall(r'^  ([a-z][a-z-]*)\s',
                                   section[1].split('\nOptions:', 1)[0], re.M)) if len(section) == 2 else set()
+        if not prefix:
+            help_cache[prefix].update(optional_commands)
     return help_cache[prefix]
 
 errors = []
@@ -97,8 +104,10 @@ for path in paths:
             words = re.findall(r'[a-z][a-z-]*|[^\s]+', match.group(1))
             prefix = ()
             for word in words:
+                if word.startswith(('-', '<', '[', '$')):
+                    break
                 choices = commands(prefix)
-                if not choices or word.startswith(('-', '<', '[', '$')):
+                if not choices:
                     break
                 if not re.fullmatch('[a-z][a-z-]*', word):
                     break  # prose or an argument, not a command

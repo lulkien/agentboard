@@ -2,10 +2,10 @@
 
 One board shared by a team of CLI agents. A manager adds work, workers claim it,
 everyone reads the same event feed. The board is a single LMDB directory: no
-daemon, no socket, no network, no database server. Every CLI call and every MCP
-server opens that directory and the file lock keeps them honest.
+background daemon or database server. The default CLI and MCP transport stay local;
+an optional dashboard feature serves a read-only page over HTTP.
 
-10 MCP tools, 14 CLI verbs, one store behind both.
+10 MCP tools, 14 default CLI verbs plus the optional dashboard, one store behind both.
 
 ## Why it exists
 
@@ -19,6 +19,7 @@ the process that wrote it.
 ```bash
 cargo build --release          # target/release/agentboard
 cargo install --path . --locked   # ~/.cargo/bin/agentboard
+cargo build --release --features dashboard # also enable the optional dashboard
 ```
 
 Rust 1.89 or newer, edition 2024. The only C dependency is the one `heed` builds
@@ -76,6 +77,7 @@ agentboard agents
 agentboard path
 agentboard reset --yes
 agentboard serve
+agentboard dashboard [IP:PORT] [--db PATH]
 ```
 
 Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `canceled`
@@ -141,6 +143,22 @@ agentboard: forced update requires a reason
 agentboard: unknown assignee "nobody"; use new_actor=true to register the target
 agentboard: task T7 has no holder to release
 ```
+
+## Optional dashboard
+
+The `dashboard` subcommand is available when the binary is built with the
+`dashboard` Cargo feature:
+
+```bash
+cargo build --release --features dashboard
+agentboard dashboard [ip:port] [--db PATH]
+```
+
+It defaults to `127.0.0.1:8080`; the global `--db` option works before or after
+the subcommand. The page is read-only and has no authentication. It binds only to
+loopback by default; bind a non-loopback address only deliberately. The
+`agentboard serve` command remains MCP over stdio and its 10-tool surface is
+unchanged.
 
 ## Quota take-over
 

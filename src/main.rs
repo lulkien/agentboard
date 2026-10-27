@@ -14,6 +14,9 @@ use agentboard::store::{
 };
 use agentboard::{cli, render};
 
+#[cfg(feature = "dashboard")]
+mod dashboard;
+
 fn main() -> ExitCode {
     let args = Cli::try_parse().unwrap_or_else(|error| error.exit());
     let Cli { db, actor, cmd } = args;
@@ -76,6 +79,10 @@ fn run(
     let actor = actor_name(actor);
     match cmd {
         None | Some(Cmd::Serve) => serve(path, actor),
+        #[cfg(feature = "dashboard")]
+        Some(Cmd::Dashboard { address }) => {
+            dashboard::serve(path, address).map(|()| (String::new(), ExitCode::SUCCESS))
+        }
         Some(Cmd::Path) => Ok((path.display().to_string(), ExitCode::SUCCESS)),
         Some(Cmd::Reset { yes }) => {
             if !yes {

@@ -1,5 +1,7 @@
 //! CLI types. Validation and rules live in the store; this file is argv only.
 
+#[cfg(feature = "dashboard")]
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -39,6 +41,13 @@ pub struct Cli {
 pub enum Cmd {
     /// MCP server on stdio (the default with no command)
     Serve,
+    /// Read-only dashboard over HTTP
+    #[cfg(feature = "dashboard")]
+    Dashboard {
+        /// Address to listen on
+        #[arg(value_name = "IP:PORT", default_value = "127.0.0.1:8080")]
+        address: SocketAddr,
+    },
     /// Create a task
     Add {
         #[arg(allow_hyphen_values = true)]

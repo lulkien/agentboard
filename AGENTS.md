@@ -31,7 +31,7 @@ place.
 Run these from the repo root. A change is not done until each prints what is beside
 it. `bash scripts/gate.sh` runs the whole table in order, checks each line, and stops
 at the first failure; `--full` adds the ignored latency run. Everything is offline
-and uses scratch boards; there is no server to start.
+and uses scratch boards; the dashboard test starts its own local listener.
 
 | Command | Expected |
 | --- | --- |
@@ -39,15 +39,17 @@ and uses scratch boards; there is no server to start.
 | `cargo test --offline --lib` | `test result: ok. 88 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `283/283 passed (cli, lmdb)` |
+| `bash tests/cli.sh` | `285/285 passed (cli, lmdb)` |
+| `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/seats-install.sh` | `119/119 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 18 pages, 97 CLI names, 119 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 18 pages, 104 CLI names, 119 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 12 gates passed`; with `--full` `GATES OK: 13 gates passed` |
+| `bash scripts/gate.sh --features dashboard` | `GATES OK: 14 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 
 `AGENTBOARD_TEST_BIN` points any suite at another binary; the suites never touch a
@@ -72,6 +74,7 @@ update the expectation here.
   roster, index and event writes; no epic flag or database is stored.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
+- `src/dashboard.rs` — optional, feature-gated, read-only HTTP dashboard adapter.
 - `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.

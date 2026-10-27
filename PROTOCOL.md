@@ -16,6 +16,15 @@ Identity comes from the process environment (`AGENTBOARD_ACTOR`) or from
 actor fails with `actor required: start the server with --actor or set
 AGENTBOARD_ACTOR`.
 
+## Optional dashboard
+
+The separate `agentboard dashboard [ip:port] [--db PATH]` subcommand is available
+in builds made with `cargo build --release --features dashboard`. It defaults to
+`127.0.0.1:8080`. Put `--db PATH` before or after this command to select a board.
+Requests can only read; credentials are not checked. To expose the page on another
+interface, choose a non-loopback address explicitly. `serve` stays MCP over stdio,
+with the same 10 tools.
+
 ## Ordering
 
 Lists and claim use the same order: `(priority, id)` ascending, priority
