@@ -129,6 +129,39 @@ impl Board {
         })
     }
 
+    /// Dashboard page ordered by descending task id, without retaining the full
+    /// filtered result in memory. The task database key is the task id in
+    /// big-endian order, so its reverse iterator is newest-first.
+    pub fn list_newest(&self, filter: &ListFilter<'_>) -> Result<TaskPage> {
+        let txn = self.env.read_txn()?;
+        let metadata = self.checked_metadata(&txn)?;
+        let limit = filter.limit.clamp(1, MAX_LIST_LIMIT);
+        let mut total = 0usize;
+        let mut tasks = Vec::with_capacity(limit);
+        for entry in self.tasks.rev_iter(&txn)? {
+            let (_, raw) = entry?;
+            let task: Task = serde_json::from_slice(raw)?;
+            if !keep(filter, &task) {
+                continue;
+            }
+            if total >= filter.offset && tasks.len() < limit {
+                tasks.push(task);
+            }
+            total += 1;
+        }
+        let offset = filter.offset.min(total);
+        let more = offset.saturating_add(tasks.len()) < total;
+        Ok(TaskPage {
+            tasks,
+            total,
+            more,
+            cursor: Cursor {
+                instance_id: metadata.instance_id,
+                seq: metadata.next_event_seq.saturating_sub(1),
+            },
+        })
+    }
+
     /// Derived epic progress and unparented active work, with global counts.
     pub fn brief(&self, active_limit: usize) -> Result<Brief> {
         let txn = self.env.read_txn()?;

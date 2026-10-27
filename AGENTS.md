@@ -36,10 +36,11 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 88 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 90 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `285/285 passed (cli, lmdb)` |
+| `bash tests/cli.sh` (default binary) | `285/285 passed (cli, lmdb)` |
+| `AGENTBOARD_TEST_BIN=target/release/agentboard` with `bash tests/cli.sh` (dashboard-feature binary) | `287/287 passed (cli, lmdb)` |
 | `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
@@ -64,7 +65,8 @@ update the expectation here.
 - `src/domain.rs` — task, status, patch, claim and event rules; no I/O, no printing.
 - `src/store/` — the LMDB store: `open` (Board, options, reset,
   lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/release/claim/
-  comment, index upkeep, events), `feed` (cursors, filters, bounded wait), `wait` (per-row
+  comment, index upkeep, events), `feed` (cursors, filters, bounded older-page read,
+  wait), `wait` (per-row
   blocking wait that re-queries its watched set), `list` (list, brief),
   `tests`/`m3_tests` (store proofs).
 - `src/render.rs` — the only place compact text is built, including the `…`
@@ -74,7 +76,9 @@ update the expectation here.
   roster, index and event writes; no epic flag or database is stored.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
-- `src/dashboard.rs` — optional, feature-gated, read-only HTTP dashboard adapter.
+- `src/dashboard.rs` and `src/dashboard/` — optional, feature-gated, read-only HTTP
+  dashboard adapter, route/query parsing, page rendering, shared HTML helpers and
+  embedded CSS/theme assets.
 - `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.

@@ -107,7 +107,7 @@ want '^test result: ok\. [0-9]+ passed; 0 failed'
 
 if [ "$dashboard_feature" -eq 1 ]; then
   gate cargo test --offline --bin agentboard --features dashboard
-  want '^test result: ok\. 2 passed; 0 failed; 0 ignored'
+  want '^test result: ok\. 1 passed; 0 failed; 0 ignored'
 fi
 
 if [ "$dashboard_feature" -eq 1 ]; then

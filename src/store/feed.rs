@@ -65,6 +65,23 @@ pub struct FeedPage {
     pub older: bool,
 }
 
+/// A page of matching events strictly before a caller-supplied cursor.
+pub struct OlderFeedPage {
+    pub events: Vec<Event>,
+    /// Cursor at the first returned event, for the next older-page request.
+    pub before: Cursor,
+    /// Matching events remain strictly before `before`.
+    pub older: bool,
+}
+
+fn checked_cursor(raw: &str, instance_id: &str) -> Result<Cursor> {
+    let cursor = Cursor::parse(raw)?;
+    if !cursor.instance_id.is_empty() && cursor.instance_id != instance_id {
+        return Err(Error::CursorInstanceMismatch);
+    }
+    Ok(cursor)
+}
+
 impl Board {
     /// The newest page of matching events, plus whether older matches remain.
     /// Walks backwards so a filtered read cannot fall into a window of unrelated
@@ -133,10 +150,7 @@ impl Board {
         .clamp(1, MAX_PAGE);
         let start = match filter.after {
             Some(raw) => {
-                let cursor = Cursor::parse(raw)?;
-                if !cursor.instance_id.is_empty() && cursor.instance_id != metadata.instance_id {
-                    return Err(Error::CursorInstanceMismatch);
-                }
+                let cursor = checked_cursor(raw, &metadata.instance_id)?;
                 // A cursor is the last sequence the caller saw, so resume after it.
                 cursor.seq.saturating_add(1)
             }
@@ -190,6 +204,33 @@ impl Board {
             },
             more,
             older: false,
+        })
+    }
+
+    /// One bounded page of matching events strictly before an opaque cursor.
+    /// Results remain in ascending event order; `older` says whether another
+    /// previous page can be fetched with the returned `before` cursor.
+    pub fn feed_before(&self, filter: &FeedFilter<'_>, before: &str) -> Result<OlderFeedPage> {
+        let txn = self.env.read_txn()?;
+        let metadata = self.checked_metadata(&txn)?;
+        let cursor = checked_cursor(before, &metadata.instance_id)?;
+        let high = metadata.next_event_seq.saturating_sub(1);
+        let limit = if filter.limit == 0 {
+            DEFAULT_PAGE
+        } else {
+            filter.limit
+        }
+        .clamp(1, MAX_PAGE);
+        let upper = cursor.seq.saturating_sub(1).min(high);
+        let (events, older) = self.newest_matching(&txn, filter, limit, upper)?;
+        let before = Cursor {
+            instance_id: metadata.instance_id,
+            seq: events.first().map_or(cursor.seq, |event| event.seq),
+        };
+        Ok(OlderFeedPage {
+            events,
+            before,
+            older,
         })
     }
 

@@ -158,7 +158,14 @@ It defaults to `127.0.0.1:8080`; the global `--db` option works before or after
 the subcommand. The page is read-only and has no authentication. It binds only to
 loopback by default; bind a non-loopback address only deliberately. The
 `agentboard serve` command remains MCP over stdio and its 10-tool surface is
-unchanged.
+unchanged. The dashboard routes are `/` and `/epics` (epic overview), `/tasks`
+(filtered and paged task list), `/tasks/ID` (task details and recent activity),
+and `/feed` (board event history). `/assets/dashboard.css` and
+`/assets/theme.js` are embedded dashboard assets. The theme button cycles through
+light, dark and system appearance, saving a manual choice in local storage.
+Every route is GET-only; other methods receive `405 Method Not Allowed`. The feed
+shows the newest 20 matching events and uses its opaque `before` cursor to page
+toward older events while retaining task and event-kind filters.
 
 ## Quota take-over
 

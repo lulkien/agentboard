@@ -655,7 +655,37 @@ fn list_filters_pages_and_brief_counts() {
     );
     assert!(page.more);
     filter.offset = 0;
+    let newest = board.list_newest(&filter).unwrap();
+    assert_eq!(newest.total, 5);
+    assert_eq!(
+        newest.tasks.iter().map(|task| task.id).collect::<Vec<_>>(),
+        vec![child.id, review.id]
+    );
+    assert!(newest.more);
+    filter.offset = 2;
+    let newest_second = board.list_newest(&filter).unwrap();
+    assert_eq!(
+        newest_second
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
+        vec![closed.id, middle.id]
+    );
+    filter.offset = 0;
     filter.limit = 50;
+    filter.status = Some(Status::Todo);
+    assert_eq!(
+        board
+            .list_newest(&filter)
+            .unwrap()
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
+        vec![child.id, middle.id, low.id]
+    );
+    filter.status = None;
     filter.assignee = Some("alice");
     assert_eq!(
         board
@@ -1876,6 +1906,115 @@ fn filtered_feed_without_a_cursor_returns_the_newest_match() {
         .unwrap();
     assert_eq!(filtered.events.len(), 3);
     assert!(filtered.older, "older created events must be reported");
+}
+
+#[test]
+fn feed_before_pages_filtered_matches_without_gaps_or_boundary_duplicates() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let task = board
+        .add(
+            "manager",
+            draft("comments", Status::Todo, 0, None),
+            false,
+            0,
+        )
+        .unwrap()
+        .task;
+    board.comment("manager", task.id, "first", 1).unwrap();
+    let patch = TaskPatch {
+        priority: Some(1),
+        ..TaskPatch::default()
+    };
+    board
+        .update(UpdateInput {
+            id: task.id,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &patch,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 2,
+        })
+        .unwrap();
+    board.comment("manager", task.id, "second", 3).unwrap();
+    board
+        .add(
+            "manager",
+            draft("unrelated", Status::Todo, 0, None),
+            false,
+            4,
+        )
+        .unwrap();
+    board.comment("manager", task.id, "third", 5).unwrap();
+    board.comment("manager", task.id, "fourth", 6).unwrap();
+
+    let filter = FeedFilter {
+        task: Some(task.id),
+        kind: Some(EventKind::Commented),
+        recipient: None,
+        after: None,
+        limit: 2,
+    };
+    let newest = board.feed(&filter).unwrap();
+    assert_eq!(
+        newest
+            .events
+            .iter()
+            .map(|event| event.seq)
+            .collect::<Vec<_>>(),
+        [6, 7]
+    );
+    assert!(newest.older);
+
+    let boundary = board
+        .feed_before(&filter, &newest.events[0].seq.to_string())
+        .unwrap();
+    assert_eq!(
+        boundary
+            .events
+            .iter()
+            .map(|event| event.seq)
+            .collect::<Vec<_>>(),
+        [2, 4]
+    );
+    assert!(!boundary.older);
+    assert_eq!(boundary.before.seq, 2);
+    assert!(
+        boundary
+            .events
+            .iter()
+            .all(|event| event.seq < newest.events[0].seq)
+    );
+}
+
+#[test]
+fn feed_before_validates_cursor_syntax_and_board_instance() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let filter = FeedFilter {
+        task: None,
+        kind: None,
+        recipient: None,
+        after: None,
+        limit: 10,
+    };
+    assert!(matches!(
+        board.feed_before(&filter, "invalid"),
+        Err(Error::InvalidCursor(_))
+    ));
+    assert!(matches!(
+        board.feed_before(&filter, "another-board:1"),
+        Err(Error::CursorInstanceMismatch)
+    ));
+    board
+        .add("manager", draft("task", Status::Todo, 0, None), false, 0)
+        .unwrap();
+    let numeric = board.feed_before(&filter, "1").unwrap();
+    assert!(numeric.events.is_empty());
+    assert!(!numeric.older);
 }
 
 #[test]
