@@ -271,6 +271,7 @@ def main():
     if not grok_only:
         for seat in SEATS:
             check(f"{claude_home}/{seat}-mcp.json")
+        check(f"{home}/.local/bin/start-agentboard-manager")
     if refuse:
         sys.exit(1)
 
@@ -329,6 +330,7 @@ def main():
         remove_legacy_rules_link()
         for seat in SEATS:
             link(f"{src}/claude/{seat}-mcp.json", f"{claude_home}/{seat}-mcp.json")
+        link(f"{src}/start-agentboard-manager", f"{home}/.local/bin/start-agentboard-manager")
         install_grok_block()
     finally:
         if os.path.lexists(rules_tmp):

@@ -11,6 +11,11 @@ role, which writes no code and runs no build.
 
 Do these steps yourself:
 
+When starting yourself from a herdr pane at its shell prompt, use the installed
+`start-agentboard-manager claude|codex|grok` helper. It renames the tab and starts
+the selected manager after the pane is ready; `seats/README.md` documents the
+requirements and launch behavior.
+
 1. Confirm the board: MCP `board_brief` and `board_agents`. An empty board is
    information, not an error.
 2. Launch only the seats this work needs, one herdr tab per seat and never split

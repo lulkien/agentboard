@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo 'usage: start-agentboard-manager {claude|codex|grok}' >&2
+  exit 1
+}
+
+[[ $# -eq 1 ]] || usage
+KIND=$1
+case "$KIND" in
+  claude|codex|grok) ;;
+  *) usage ;;
+esac
+
+for command in herdr jq setsid; do
+  command -v "$command" >/dev/null 2>&1 || { echo "start-agentboard-manager: required command not found: $command" >&2; exit 1; }
+done
+[[ -n ${HERDR_PANE_ID:-} && -n ${HERDR_TAB_ID:-} ]] || {
+  echo 'start-agentboard-manager: HERDR_PANE_ID and HERDR_TAB_ID are required' >&2
+  exit 1
+}
+
+case "$KIND" in
+  claude)
+    args=(--model claude-sonnet-5-5 --mcp-config "$HOME/.claude/manager-mcp.json" --dangerously-skip-permissions -- /agentboard-manager)
+    ;;
+  codex)
+    args=(--profile manager --model gpt-6-luna -- '$agentboard-manager')
+    ;;
+  grok)
+    args=(--trust --always-approve)
+    ;;
+esac
+
+log=${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log
+herdr tab rename "$HERDR_TAB_ID" manager
+setsid bash -c '
+  pane=$1 kind=$2
+  shift 2
+  for _ in {1..50}; do
+    if herdr pane process-info --pane "$pane" | jq -e ".result.process_info // {} | (.shell_pid != null and .foreground_process_group_id != null and .foreground_process_group_id == .shell_pid)" >/dev/null; then
+      herdr agent start manager --kind "$kind" --pane "$pane" -- "$@"
+      if [[ $kind == grok ]]; then
+        herdr agent prompt manager /agentboard-manager --wait
+      fi
+      exit
+    fi
+    sleep 0.2
+  done
+  echo "timed out waiting for shell prompt in pane $pane" >&2
+  exit 1
+' _ "$HERDR_PANE_ID" "$KIND" "${args[@]}" >>"$log" 2>&1 </dev/null &

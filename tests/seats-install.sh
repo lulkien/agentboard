@@ -5,6 +5,7 @@ set -u
 cd "$(dirname "$0")/.."
 repo=$(pwd)
 src=$repo/seats/codex/rules/agentboard.rules
+launcher=$repo/seats/start-agentboard-manager
 grok_src=$repo/seats/grok/agentboard-mcp.toml
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -58,10 +59,27 @@ done
 newhome
 inst; code=$?
 is "fresh install exit" test "$code" -eq 0
+is "manager launcher linked" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = "$launcher"
 same "fresh default.rules is the source block" "$src" "$rules"
 is "no separate agentboard.rules" test ! -e "$home/.codex/rules/agentboard.rules"
 has "fresh install says added" "added: $rules" "$tmp/out"
 has "done line kept" "done: the codex base config is merged by hand" "$tmp/out"
+
+# --- manager launcher link follows the same foreign-link rules ---------------
+newhome
+mkdir -p "$home/.local/bin"
+ln -s /old/checkout/start-agentboard-manager "$home/.local/bin/start-agentboard-manager"
+inst; code=$?
+is "foreign launcher link refused" test "$code" -eq 1
+has "foreign launcher link diagnosed" 'foreign link:' "$tmp/err"
+is "foreign launcher link preserved" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = /old/checkout/start-agentboard-manager
+inst --force
+is "force replaces launcher link" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = "$launcher"
+
+# --- grok-only does not manage the PATH launcher ------------------------------
+newhome
+grok_inst
+is "grok-only leaves manager launcher alone" test ! -e "$home/.local/bin/start-agentboard-manager"
 
 # --- user rules, no trailing newline: original bytes stay the prefix ---------
 newhome

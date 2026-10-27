@@ -22,7 +22,21 @@ each claude card to `~/.claude/<seat>-mcp.json`. The codex base config is not a
 link: it is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
 `[projects.*].trust_level`, `[notice]`) also lives. `install.py` refuses an existing
 file that is not a symlink into this repo, and `--force` replaces only the named
-destinations.
+destinations. A full install also links `seats/start-agentboard-manager` to
+`~/.local/bin/start-agentboard-manager`; `--grok-only` manages only the Grok MCP
+block and does not install the launcher.
+
+## Start the manager in the current pane
+
+From a herdr pane at its shell prompt, run:
+
+    start-agentboard-manager {claude|codex|grok}
+
+The command renames the current tab to `manager`, then waits in the background
+until the pane returns to its shell prompt before starting the selected manager.
+It requires `HERDR_PANE_ID`, `HERDR_TAB_ID`, `herdr`, `jq` and `setsid`. Start
+details and the Grok first prompt are recorded in
+`${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`.
 
 The Codex rules are a block, not a link, because Codex appends its own allowed
 commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of

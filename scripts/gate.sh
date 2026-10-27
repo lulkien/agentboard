@@ -144,6 +144,9 @@ want '^[0-9]+/[0-9]+ passed \(skills installer\)$'
 gate bash tests/seats-install.sh
 want '^[0-9]+/[0-9]+ passed \(seats installer\)$'
 
+gate bash tests/start-agentboard-manager.sh
+want '^[0-9]+/[0-9]+ passed \(manager launcher\)$'
+
 gate python3 scripts/sync-tool-count.py --check
 want '^MCP router: [0-9]+ tools; published counts match$'
 

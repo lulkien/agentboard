@@ -35,6 +35,12 @@ that fails to start shows there, not in a seat that silently has no board tools.
 
 ## Launch
 
+When the manager's current herdr pane is already at its shell prompt, the
+installed `start-agentboard-manager grok` helper renames that tab, starts Grok
+with `--trust --always-approve`, then sends `/agentboard-manager` with `--wait`.
+See `seats/README.md` for its requirements. The manual launch below still applies
+when creating a fresh Grok tab or when the session needs a focus prompt.
+
     herdr tab create --cwd "$REPO" --label grok
     herdr pane list                                   # note the pane id
     herdr agent start grok --kind grok --pane "$PANE_GROK" -- --trust --always-approve

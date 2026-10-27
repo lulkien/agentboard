@@ -44,13 +44,14 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
-| `bash tests/seats-install.sh` | `218/218 passed (seats installer)` (isolated homes; no board writes) |
+| `bash tests/seats-install.sh` | `224/224 passed (seats installer)` (isolated homes; no board writes) |
+| `bash tests/start-agentboard-manager.sh` | `16/16 passed (manager launcher)` (stub herdr; no live pane) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
 | `python3 tests/doc-names.py` | `doc-names: 14 pages, 104 CLI names, 119 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
-| `bash scripts/gate.sh` | `GATES OK: 12 gates passed`; with `--full` `GATES OK: 13 gates passed` |
-| `bash scripts/gate.sh --features dashboard` | `GATES OK: 14 gates passed` |
+| `bash scripts/gate.sh` | `GATES OK: 13 gates passed`; with `--full` `GATES OK: 14 gates passed` |
+| `bash scripts/gate.sh --features dashboard` | `GATES OK: 15 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 
 `AGENTBOARD_TEST_BIN` points any suite at another binary; the suites never touch a
