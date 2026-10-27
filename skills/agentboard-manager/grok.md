@@ -5,6 +5,9 @@ the board over MCP, files rows, launches the other seats and wakes them by promp
 It writes no code and runs no build, same as every manager. The steps are
 `SKILL.md`; this page only adds what is specific to Grok.
 
+The shared `start-agentboard-manager` helper also supports Hermes; its host MCP
+configuration and actor setup are documented in `seats/README.md`.
+
 Read `~/.agents/skills/agentboard-team/{SKILL.md,workflow.md,roles.md}` first: they
 are the shared manual.
 

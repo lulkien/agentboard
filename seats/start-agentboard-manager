@@ -2,14 +2,14 @@
 set -euo pipefail
 
 usage() {
-  echo 'usage: start-agentboard-manager {claude|codex|grok}' >&2
+  echo 'usage: start-agentboard-manager {claude|codex|grok|hermes}' >&2
   exit 1
 }
 
 [[ $# -eq 1 ]] || usage
 KIND=$1
 case "$KIND" in
-  claude|codex|grok) ;;
+  claude|codex|grok|hermes) ;;
   *) usage ;;
 esac
 
@@ -31,6 +31,9 @@ case "$KIND" in
   grok)
     args=(--trust --always-approve)
     ;;
+  hermes)
+    args=(--yolo)
+    ;;
 esac
 
 log=${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log
@@ -41,7 +44,7 @@ setsid bash -c '
   for _ in {1..50}; do
     if herdr pane process-info --pane "$pane" | jq -e ".result.process_info // {} | (.shell_pid != null and .foreground_process_group_id != null and .foreground_process_group_id == .shell_pid)" >/dev/null; then
       herdr agent start manager --kind "$kind" --pane "$pane" -- "$@"
-      if [[ $kind == grok ]]; then
+      if [[ $kind == grok || $kind == hermes ]]; then
         herdr agent prompt manager /agentboard-manager --wait
       fi
       exit

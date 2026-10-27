@@ -12,7 +12,7 @@ role, which writes no code and runs no build.
 Do these steps yourself:
 
 When starting yourself from a herdr pane at its shell prompt, use the installed
-`start-agentboard-manager claude|codex|grok` helper. It renames the tab and starts
+`start-agentboard-manager claude|codex|grok|hermes` helper. It renames the tab and starts
 the selected manager after the pane is ready; `seats/README.md` documents the
 requirements and launch behavior.
 
@@ -29,6 +29,9 @@ requirements and launch behavior.
    with `-- --trust --always-approve`, and reach the MCP tools as
    `agentboard__<tool>` through `use_tool`; `grok.md` in this directory has the
    recipe, probes and traps.
+   Hermes uses the host MCP configuration in `~/.hermes/config.yaml` (see
+   `seats/README.md`); configure its agentboard actor as `manager`. The launcher
+   starts Hermes with `--yolo` and sends `/agentboard-manager` through herdr.
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context), `goal` (the command and the output that proves it), and `assignee`
    when the owner is known. File a row only when you can hand it to a seat.

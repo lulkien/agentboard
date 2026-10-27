@@ -62,7 +62,7 @@ workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
 To start the manager in the current herdr pane, run the installed
-`start-agentboard-manager claude|codex|grok` helper from its shell prompt. It
+`start-agentboard-manager claude|codex|grok|hermes` helper from its shell prompt. It
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 

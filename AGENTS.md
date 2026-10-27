@@ -45,7 +45,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/seats-install.sh` | `224/224 passed (seats installer)` (isolated homes; no board writes) |
-| `bash tests/start-agentboard-manager.sh` | `16/16 passed (manager launcher)` (stub herdr; no live pane) |
+| `bash tests/start-agentboard-manager.sh` | `19/19 passed (manager launcher)` (stub herdr; no live pane) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
 | `python3 tests/doc-names.py` | `doc-names: 14 pages, 104 CLI names, 119 MCP names passed` |

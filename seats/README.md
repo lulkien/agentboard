@@ -30,12 +30,12 @@ block and does not install the launcher.
 
 From a herdr pane at its shell prompt, run:
 
-    start-agentboard-manager {claude|codex|grok}
+    start-agentboard-manager {claude|codex|grok|hermes}
 
 The command renames the current tab to `manager`, then waits in the background
 until the pane returns to its shell prompt before starting the selected manager.
 It requires `HERDR_PANE_ID`, `HERDR_TAB_ID`, `herdr`, `jq` and `setsid`. Start
-details and the Grok first prompt are recorded in
+details and the Grok/Hermes first prompts are recorded in
 `${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`.
 
 The Codex rules are a block, not a link, because Codex appends its own allowed
@@ -117,7 +117,21 @@ go after herdr's `--`. `skills/agentboard-manager/grok.md` carries the full laun
 ## Not shipped here
 
 - The Hermes manager reads `~/.hermes/config.yaml`, which is host state: it holds
-  model providers and keys as well as MCP servers.
+  model providers and keys as well as MCP servers. Configure its `agentboard`
+  server with an explicit manager actor, for example:
+
+  ```yaml
+  mcp_servers:
+    agentboard:
+      command: agentboard
+      args: [serve, --actor, manager]
+      enabled: true
+  ```
+
+  Alternatively, use `args: [serve]` and set `env: {AGENTBOARD_ACTOR: manager}`
+  on that server entry. Do not leave both actor sources unset; the server refuses
+  to start without `--actor` or `AGENTBOARD_ACTOR`. This config stays in the
+  human's home directory and agentboard does not ship or install a Hermes card.
 
 ## Verified or not
 

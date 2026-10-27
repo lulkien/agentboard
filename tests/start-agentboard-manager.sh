@@ -41,16 +41,19 @@ run_kind() {
   done
   is "$kind command starts manager" grep -Fq "$expected" "$HERDR_LOG"
   is "$kind renames tab" grep -Fq 'CALL <tab> <rename> <tab-3> <manager>' "$HERDR_LOG"
+  if [[ $kind == grok || $kind == hermes ]]; then
+    for _ in {1..50}; do
+      grep -qF 'CALL <agent> <prompt>' "$HERDR_LOG" && break
+      sleep 0.02
+    done
+    has "$HERDR_LOG" 'CALL <agent> <prompt> <manager> </agentboard-manager> <--wait>' "$kind sends the first prompt"
+  fi
 }
 repo=$(pwd)
 run_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--mcp-config> <'$HOME'/.claude/manager-mcp.json> <--dangerously-skip-permissions> <--> </agentboard-manager>'
 run_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--profile> <manager> <--model> <gpt-6-luna> <--> <$agentboard-manager>'
 run_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
-for _ in {1..50}; do
-  grep -qF 'CALL <agent> <prompt>' "$HERDR_LOG" && break
-  sleep 0.02
-done
-has "$HERDR_LOG" 'CALL <agent> <prompt> <manager> </agentboard-manager> <--wait>' 'grok sends the first prompt'
+run_kind hermes 'CALL <agent> <start> <manager> <--kind> <hermes> <--pane> <pane-7> <--> <--yolo>'
 
 run_not_ready() {
   local mode=$1
@@ -71,10 +74,10 @@ run_not_ready mismatch
 if "$repo/seats/start-agentboard-manager" >"$tmp/out" 2>"$tmp/no-kind"; then bad 'no kind unexpectedly succeeded'; else
   is 'no kind exits 1' test "$?" -eq 1
 fi
-has "$tmp/no-kind" 'usage: start-agentboard-manager {claude|codex|grok}' 'no kind reports usage'
+has "$tmp/no-kind" 'usage: start-agentboard-manager {claude|codex|grok|hermes}' 'no kind reports usage'
 is 'unknown kind exits 1' bash -c '"$1" invalid >/dev/null 2>&1; [[ $? -eq 1 ]]' _ "$repo/seats/start-agentboard-manager"
 if "$repo/seats/start-agentboard-manager" invalid >"$tmp/out" 2>"$tmp/usage"; then bad 'unknown kind unexpectedly succeeded'; else ok; fi
-has "$tmp/usage" 'usage: start-agentboard-manager {claude|codex|grok}' 'unknown kind reports usage'
+has "$tmp/usage" 'usage: start-agentboard-manager {claude|codex|grok|hermes}' 'unknown kind reports usage'
 
 echo "$((n - fail))/$n passed (manager launcher)"
 [[ $fail -eq 0 ]]
