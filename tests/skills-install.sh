@@ -14,19 +14,19 @@ def skills():
 
 def run(home,*args,**overrides):
     env=dict(os.environ,HOME=str(home))
-    for key in ['CODEX_HOME','AGENTBOARD_CLAUDE_COMMANDS','AGENTBOARD_OPENCODE_COMMANDS']:
+    for key in ['CODEX_HOME','AGENTBOARD_CLAUDE_COMMANDS']:
         env.pop(key,None)
     env.update({k:str(v) for k,v in overrides.items()})
     return subprocess.run([str(installer),*map(str,args)],env=env,capture_output=True,text=True)
 
-def destinations(home,canonical=None,codehome=None,claude=None,opencode=None):
+def destinations(home,canonical=None,codehome=None,claude=None):
     canonical=canonical or home/'.agents/skills'
     paths={}
     for name in skills():
         paths[canonical/name]=repo/'skills'/name
-        for parent in [home/'.claude/skills',(codehome or home/'.codex')/'skills',home/'.config/opencode/skills',home/'.hermes/skills']:
+        for parent in [home/'.claude/skills',(codehome or home/'.codex')/'skills',home/'.hermes/skills']:
             paths[parent/name]=canonical/name
-        for card,root in (('claude',claude or home/'.claude/commands'),('opencode',opencode or home/'.config/opencode/commands')):
+        for card,root in (('claude',claude or home/'.claude/commands'),):
             if (repo/'skills'/name/f'{card}.md').exists():
                 paths[root/f'{name}.md']=canonical/name/f'{card}.md'
     return paths
@@ -52,28 +52,28 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     for old in ['manager','agentboard-manager']:
         assert not (home/f'.codex/prompts/{old}.md').exists()
     assert not RETIRED&{p.name.removesuffix('.md') for p in expected},RETIRED
-    # One edit, four readers, no reinstall. Remove the probe even on a failure.
+    # One edit, three readers, no reinstall. Remove the probe even on a failure.
     with tempfile.NamedTemporaryFile(dir=home/'.agents/skills/agentboard-team',prefix='.install-probe-',mode='w+') as probe:
         probe.write('one physical copy\n');probe.flush()
-        for agent in ['.claude','.codex','.config/opencode','.hermes']:
+        for agent in ['.claude','.codex','.hermes']:
             alias=home/agent/'skills/agentboard-team'/pathlib.Path(probe.name).name
             assert alias.read_text()=='one physical copy\n'
-    check(f'canonical repo links, four indirect aliases per skill, live edit visibility, {len(expected)} destinations')
+    check(f'canonical repo links, three indirect aliases per skill, live edit visibility, {len(expected)} destinations')
 
     p=run(home);assert p.returncode==1 and not p.stdout,p
     for path in expected: assert f'exists: {path} (use --force)' in p.stderr
-    check('second run names every canonical, agent, and command conflict without writing')
+    check('second run names every canonical and agent conflict without writing')
 
-    conflict=root/'conflict';existing=conflict/'.config/opencode/commands/agentboard-manager.md'
+    conflict=root/'conflict';existing=conflict/'.claude/skills/agentboard-manager'
     existing.parent.mkdir(parents=True);existing.write_text('untouched')
     before=existing.stat().st_mtime_ns
     p=run(conflict)
     assert p.returncode==1 and str(existing) in p.stderr and not p.stdout
     assert existing.read_text()=='untouched' and existing.stat().st_mtime_ns==before
-    for parent in ['.agents','.claude','.codex','.hermes']:
+    for parent in ['.agents','.codex','.hermes']:
         assert not (conflict/parent).exists(),parent
-    assert not (conflict/'.config/opencode/skills').exists()
-    check('a command conflict leaves all earlier parents absent and contents untouched')
+    assert existing.is_file() and existing.read_text()=='untouched'
+    check('an agent alias conflict leaves other parents absent and contents untouched')
 
     broken=root/'broken';path=broken/'.codex/skills/agentboard-manager'
     path.parent.mkdir(parents=True);path.symlink_to('missing')
@@ -89,11 +89,11 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     check('force replaces conflicts while retaining canonical indirection')
 
     custom=root/'custom';target=root/'canonical home';codehome=root/'code home'
-    claude=root/'claude commands';opencode=root/'opencode commands'
+    claude=root/'claude commands'
     (target/'commands').mkdir(parents=True);(target/'commands/keep').write_text('untouched')
-    p=run(custom,target,CODEX_HOME=codehome,AGENTBOARD_CLAUDE_COMMANDS=claude,AGENTBOARD_OPENCODE_COMMANDS=opencode)
+    p=run(custom,target,CODEX_HOME=codehome,AGENTBOARD_CLAUDE_COMMANDS=claude)
     assert p.returncode==0,p.stderr
-    for path,dest in destinations(custom,target,codehome,claude,opencode).items():
+    for path,dest in destinations(custom,target,codehome,claude).items():
         assert path.is_symlink() and os.readlink(path)==str(dest),(path,dest)
     assert (target/'commands/keep').read_text()=='untouched'
     assert not (custom/'.agents').exists() and not (custom/'.codex').exists()
@@ -103,18 +103,16 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     # never be launched into a skill that was never linked.
     for seat in ['agentboard-manager','agentboard-analyst','agentboard-coder','agentboard-reviewer']:
         assert seat in skills(),seat
-        assert (repo/'skills'/seat/'opencode.md').exists(),seat
         assert not (repo/'skills'/seat/'claude.md').exists(),seat
     assert (repo/'skills/agentboard-team/SKILL.md').exists()
     check('four seat entry points and the shared manual are installed as skills')
     # Retired names: only links this installer wrote are pruned, with no --force.
     old=root/'retired';agents=old/'.agents/skills'
-    owned=[agents/'analyzer',old/'.claude/skills/manager',old/'.claude/commands/manager.md',old/'.config/opencode/commands/manager.md',old/'.claude/commands/agentboard-manager.md']
+    owned=[agents/'analyzer',old/'.claude/skills/manager',old/'.claude/commands/manager.md',old/'.claude/commands/agentboard-manager.md']
     owned[0].parent.mkdir(parents=True);owned[0].symlink_to(repo/'skills/analyzer')
     owned[1].parent.mkdir(parents=True);owned[1].symlink_to(agents/'manager')
     owned[2].parent.mkdir(parents=True);owned[2].symlink_to(agents/'manager/claude.md')
-    owned[3].parent.mkdir(parents=True);owned[3].symlink_to(agents/'manager/opencode.md')
-    owned[4].symlink_to(agents/'agentboard-manager/claude.md')  # written before claude.md was removed
+    owned[3].symlink_to(agents/'agentboard-manager/claude.md')  # written before claude.md was removed
     foreign=old/'.claude/skills/coder';foreign.symlink_to('/elsewhere')
     realdir=old/'.hermes/skills/reviewer';realdir.mkdir(parents=True);(realdir/'keep').write_text('mine')
     p=run(old);assert p.returncode==0,p.stderr

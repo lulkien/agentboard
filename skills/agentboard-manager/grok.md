@@ -10,12 +10,15 @@ are the shared manual.
 
 ## One-time setup: give grok a board identity
 
-    seats/grok/register-mcp.sh                 # actor "grok"
-    seats/grok/register-mcp.sh --actor manager # or present as "manager"
+    seats/install.py                         # actor "grok", installs all seat cards
+    seats/install.py --actor manager         # use the manager actor for Grok
+    seats/grok/register-mcp.sh --actor grok  # compatibility wrapper, Grok only
 
-That runs `grok mcp add --scope user agentboard -e AGENTBOARD_ACTOR=<actor> --
-<abs path to agentboard> serve`, so the server is the board with that actor and the
-registration lives in `~/.grok/config.toml`. Check it:
+The installer manages the marked block in `~/.grok/config.toml` from
+`seats/grok/agentboard-mcp.toml`; it uses `command = "agentboard"`, so the binary
+must resolve on Grok's PATH. It preserves host config and the existing actor when
+`--actor` is omitted. An unmarked `[mcp_servers.agentboard]` entry is refused, even
+with `--force`; review and remove or convert it manually before installing. Check it:
 
     grok mcp list                    # agentboard, stdio, enabled
     grok mcp doctor agentboard       # handshake + catalog keys, no model turn

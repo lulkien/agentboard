@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Link the seat cards into their client homes: one physical copy, in this repo.
 The Codex rules are not a link: they are a marked block inside the user's own
-rules/default.rules, which Codex also appends to.
-usage: install.py [--force]
+rules/default.rules, which Codex also appends to. Grok uses a marked block in its
+user config as well.
+usage: install.py [--force] [--actor NAME] [--grok-only]
 """
+import json
 import os
 import shutil
 import sys
+import tomllib
 
 SEATS = ["analyst", "coder", "manager", "reviewer"]
 BEGIN = b"# BEGIN AGENTBOARD RULES"
 END = b"# END AGENTBOARD RULES"
+GROK_BEGIN = b"# BEGIN AGENTBOARD MCP"
+GROK_END = b"# END AGENTBOARD MCP"
 
 
 def split_lines(data):
@@ -32,7 +37,7 @@ def strip_cr(line):
     return line[:-1] if line.endswith(b"\r") else line
 
 
-def rules_scan(data):
+def marked_scan(data, begin, end):
     """("none",), ("ok", begin_line, end_line) or ("bad", "3,5").
     A marker is a whole line, ignoring one trailing CR; a line that matches only
     after trimming space and tab counts as a broken marker, never as a marker."""
@@ -41,15 +46,15 @@ def rules_scan(data):
     for nr, raw in enumerate(split_lines(data), 1):
         line = strip_cr(raw)
         t = line.strip(b" \t")
-        if line == BEGIN:
+        if line == begin:
             nb += 1
             fb = fb or nr
             found.append(nr)
-        elif line == END:
+        elif line == end:
             ne += 1
             fe = fe or nr
             found.append(nr)
-        elif t == BEGIN or t == END:
+        elif t == begin or t == end:
             bad += 1
             found.append(nr)
     if nb + ne + bad == 0:
@@ -59,10 +64,14 @@ def rules_scan(data):
     return ("ok", fb, fe)
 
 
-def source_ok(data):
+def rules_scan(data):
+    return marked_scan(data, BEGIN, END)
+
+
+def source_ok(data, begin=BEGIN, end=END):
     lines = [strip_cr(x) for x in split_lines(data)]
-    markers = sum(1 for x in lines if x.strip(b" \t") in (BEGIN, END))
-    return markers == 2 and lines[0] == BEGIN and lines[-1] == END
+    markers = sum(1 for x in lines if x.strip(b" \t") in (begin, end))
+    return markers == 2 and lines[0] == begin and lines[-1] == end
 
 
 def read(path):
@@ -70,25 +79,149 @@ def read(path):
         return f.read()
 
 
+def block_bytes(source, begin, end, nl):
+    return b"".join(strip_cr(x) + nl for x in split_lines(source))
+
+
+def marked_candidate(before, exists, state, source, begin, end):
+    first = before.find(b"\n")
+    nl = b"\r\n" if first > 0 and before[first - 1 : first] == b"\r" else b"\n"
+    block = block_bytes(source, begin, end, nl)
+    if not exists:
+        return block
+    if state[0] == "ok":
+        raw = raw_lines(before)
+        return b"".join(raw[: state[1] - 1]) + block + b"".join(raw[state[2] :])
+    sep = nl if before and not before.endswith(b"\n") else b""
+    return before + sep + block
+
+
+def install_marked_block(path, source, begin, end, force, label, tmp=None, changed_context="client"):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    exists = os.path.isfile(path)
+    before = read(path) if exists else b""
+    state = marked_scan(before, begin, end) if exists else ("missing",)
+    ok = state[0] == "ok"
+    if ok and not force:
+        print(f"unchanged: {path} ({label} block present; --force rewrites it)")
+        lines = split_lines(before)
+        existing = b"\n".join(lines[state[1] - 1 : state[2]]).replace(b"\r", b"")
+        if existing.rstrip(b"\n") != source.replace(b"\r", b"").rstrip(b"\n"):
+            print(f"note: {label} block in {path} differs from the repo; use --force", file=sys.stderr)
+        return
+    verb = "replaced" if ok else "added"
+    new = marked_candidate(before, exists, state, source, begin, end)
+    tmp = tmp or f"{path}.agentboard.{os.getpid()}"
+    if exists:
+        shutil.copy2(path, tmp)
+    with open(tmp, "wb") as f:
+        f.write(new)
+    if exists and new == before:
+        os.unlink(tmp)
+        print(f"unchanged: {path} ({label} block already current)")
+        return
+    if exists and read(path) != before:
+        print(f"{path} changed during install; rerun with no {changed_context} open", file=sys.stderr)
+        sys.exit(1)
+    os.replace(tmp, path)
+    print(f"{verb}: {path} ({label} block)")
+
+
+def grok_actor(source):
+    try:
+        data = tomllib.loads(source.decode("utf-8"))
+        actor = data["mcp_servers"]["agentboard"]["env"]["AGENTBOARD_ACTOR"]
+        return actor if isinstance(actor, str) and actor else None
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError):
+        return None
+
+
+def render_grok_source(source, actor):
+    if not actor or any(ord(c) < 0x20 or ord(c) == 0x7f for c in actor):
+        raise ValueError("actor must be a nonempty string without control characters")
+    encoded = json.dumps(actor, ensure_ascii=False).encode("utf-8")
+    return source.replace(b'AGENTBOARD_ACTOR = "grok"', b"AGENTBOARD_ACTOR = " + encoded)
+
+
+def grok_preflight(path, source):
+    if os.path.islink(path):
+        print(f"{path} is a symlink; the installer edits only a regular file", file=sys.stderr)
+        return False, None
+    if os.path.exists(path) and not os.path.isfile(path):
+        print(f"{path} is not a regular file; the installer edits only a regular file", file=sys.stderr)
+        return False, None
+    if not source_ok(source, GROK_BEGIN, GROK_END):
+        print(f"bad Grok MCP source (must start/end with markers): {path}", file=sys.stderr)
+        return False, None
+    try:
+        tomllib.loads(source.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        print(f"invalid TOML in Grok MCP source: {exc}", file=sys.stderr)
+        return False, None
+    if not os.path.isfile(path):
+        return True, ("missing",)
+    before = read(path)
+    scan = marked_scan(before, GROK_BEGIN, GROK_END)
+    if scan[0] == "bad":
+        print(f"malformed agentboard block in {path} (marker lines {scan[1]}); fix it by hand", file=sys.stderr)
+        return False, None
+    try:
+        tomllib.loads(before.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        print(f"invalid TOML in {path}: {exc}", file=sys.stderr)
+        return False, None
+    outside = before
+    if scan[0] == "ok":
+        raw = raw_lines(before)
+        outside = b"".join(raw[: scan[1] - 1]) + b"".join(raw[scan[2] :])
+    try:
+        parsed = tomllib.loads(outside.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        print(f"invalid TOML in {path} outside the marked agentboard block: {exc}", file=sys.stderr)
+        return False, None
+    servers = parsed.get("mcp_servers", {})
+    if "mcp_servers" in parsed and not isinstance(servers, dict):
+        print(f"invalid mcp_servers table in {path}; review it by hand", file=sys.stderr)
+        return False, None
+    if isinstance(servers, dict) and "agentboard" in servers:
+        print(
+            f"unmarked [mcp_servers.agentboard] entry in {path}; review and remove or convert it by hand",
+            file=sys.stderr,
+        )
+        return False, None
+    return True, scan
+
+
 def main():
     force = False
-    for arg in sys.argv[1:]:
+    grok_only = False
+    actor_arg = None
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
         if arg == "--force":
             force = True
+        elif arg == "--grok-only":
+            grok_only = True
+        elif arg == "--actor" and i + 1 < len(sys.argv):
+            actor_arg = sys.argv[i + 1]
+            i += 1
         else:
-            print("usage: install.py [--force]", file=sys.stderr)
+            print("usage: install.py [--force] [--actor NAME] [--grok-only]", file=sys.stderr)
             sys.exit(2)
+        i += 1
     src = os.path.dirname(os.path.abspath(__file__))
     home = os.environ["HOME"]
     codex_home = os.environ.get("CODEX_HOME") or f"{home}/.codex"
     claude_home = f"{home}/.claude"
-    opencode_home = f"{home}/.config/opencode"
     repo = os.path.dirname(src)
 
     rules_src = f"{src}/codex/rules/agentboard.rules"
     rules_dir = f"{codex_home}/rules"
     rules_file = f"{rules_dir}/default.rules"
     rules_tmp = f"{rules_dir}/.default.rules.agentboard.{os.getpid()}"
+    grok_source_path = f"{src}/grok/agentboard-mcp.toml"
+    grok_file = f"{home}/.grok/config.toml"
 
     refuse = False
 
@@ -103,27 +236,28 @@ def main():
             print(f"exists: {p} (use --force)", file=sys.stderr)
             refuse = True
 
-    for seat in SEATS:
-        check(f"{codex_home}/{seat}.config.toml")
+    if not grok_only:
+        for seat in SEATS:
+            check(f"{codex_home}/{seat}.config.toml")
 
     # default.rules is judged here, with the other checks, so a refusal links nothing.
-    if not source_ok(read(rules_src)):
+    if not grok_only and not source_ok(read(rules_src)):
         print(
             f"bad rules source: {rules_src} (must start with BEGIN, end with END, "
             "and hold no other marker)",
             file=sys.stderr,
         )
         refuse = True
-    elif os.path.islink(rules_file):
+    elif not grok_only and os.path.islink(rules_file):
         print(f"{rules_file} is a symlink; the installer edits only a regular file", file=sys.stderr)
         refuse = True
-    elif os.path.exists(rules_file) and not os.path.isfile(rules_file):
+    elif not grok_only and os.path.exists(rules_file) and not os.path.isfile(rules_file):
         print(
             f"{rules_file} is not a regular file; the installer edits only a regular file",
             file=sys.stderr,
         )
         refuse = True
-    elif os.path.isfile(rules_file):
+    elif not grok_only and os.path.isfile(rules_file):
         scan = rules_scan(read(rules_file))
         if scan[0] == "bad":
             print(
@@ -132,9 +266,42 @@ def main():
                 file=sys.stderr,
             )
             refuse = True
-    for seat in SEATS:
-        check(f"{claude_home}/{seat}-mcp.json")
-    check(f"{opencode_home}/agentboard-mcp.sh")
+    grok_source = read(grok_source_path)
+    grok_ok, grok_state = grok_preflight(grok_file, grok_source)
+    if not grok_ok:
+        refuse = True
+    grok_actor_name = actor_arg or "grok"
+    if grok_state and grok_state[0] == "ok" and actor_arg is None:
+        lines = split_lines(read(grok_file))
+        current_block = b"\n".join(lines[grok_state[1] - 1 : grok_state[2]])
+        grok_actor_name = grok_actor(current_block) or "grok"
+    grok_rendered = None
+    try:
+        grok_rendered = render_grok_source(grok_source, grok_actor_name)
+    except ValueError as exc:
+        print(f"invalid Grok actor: {exc}", file=sys.stderr)
+        refuse = True
+    if grok_ok and grok_rendered is not None:
+        current = read(grok_file) if os.path.isfile(grok_file) else b""
+        if grok_state[0] == "ok" and not force:
+            candidate = current
+        else:
+            candidate = marked_candidate(
+                current,
+                os.path.isfile(grok_file),
+                grok_state,
+                grok_rendered,
+                GROK_BEGIN,
+                GROK_END,
+            )
+        try:
+            tomllib.loads(candidate.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            print(f"invalid TOML in rendered Grok config {grok_file}: {exc}", file=sys.stderr)
+            refuse = True
+    if not grok_only:
+        for seat in SEATS:
+            check(f"{claude_home}/{seat}-mcp.json")
     if refuse:
         sys.exit(1)
 
@@ -147,53 +314,26 @@ def main():
         os.symlink(s, d)
         print(f"linked: {d} -> {s}")
 
+    def install_grok_block():
+        install_marked_block(grok_file, grok_rendered, GROK_BEGIN, GROK_END, force, "agentboard MCP")
+
+    if grok_only:
+        install_grok_block()
+        return
+
     # Put the repo's block into default.rules: append when absent, replace in place
     # only under --force, never touch anything outside the marker lines.
     def install_rules_block():
-        os.makedirs(rules_dir, exist_ok=True)
-        exists = os.path.isfile(rules_file)
-        before = read(rules_file) if exists else b""
-        state = rules_scan(before) if exists else ("missing",)
-        first = before.find(b"\n")
-        nl = b"\r\n" if first > 0 and before[first - 1 : first] == b"\r" else b"\n"
-        src_data = read(rules_src)
-        block = b"".join(strip_cr(x) + nl for x in split_lines(src_data))
-        ok = state[0] == "ok"
-        if ok and not force:
-            print(f"unchanged: {rules_file} (agentboard block present; --force rewrites it)")
-            lines = split_lines(before)
-            existing = b"\n".join(lines[state[1] - 1 : state[2]]).replace(b"\r", b"")
-            if existing.rstrip(b"\n") != src_data.replace(b"\r", b"").rstrip(b"\n"):
-                print(
-                    f"note: agentboard block in {rules_file} differs from the repo; use --force",
-                    file=sys.stderr,
-                )
-            return
-        verb = "replaced" if ok else "added"
-        if not exists:
-            new = block
-        elif ok:
-            raw = raw_lines(before)
-            new = b"".join(raw[: state[1] - 1]) + block + b"".join(raw[state[2] :])
-        else:
-            sep = nl if before and not before.endswith(b"\n") else b""
-            new = before + sep + block
-        if exists:
-            shutil.copy2(rules_file, rules_tmp)  # cp -p: keep the file's mode
-        with open(rules_tmp, "wb") as f:
-            f.write(new)
-        if exists and new == before:
-            os.unlink(rules_tmp)
-            print(f"unchanged: {rules_file} (agentboard block already current)")
-            return
-        if exists and read(rules_file) != before:
-            print(
-                f"{rules_file} changed during install; rerun with no Codex session open",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        os.replace(rules_tmp, rules_file)
-        print(f"{verb}: {rules_file} (agentboard block)")
+        install_marked_block(
+            rules_file,
+            read(rules_src),
+            BEGIN,
+            END,
+            force,
+            "agentboard",
+            rules_tmp,
+            "Codex session",
+        )
 
     # The old install linked rules/agentboard.rules; Codex would load it as well.
     def remove_legacy_rules_link():
@@ -220,7 +360,7 @@ def main():
         remove_legacy_rules_link()
         for seat in SEATS:
             link(f"{src}/claude/{seat}-mcp.json", f"{claude_home}/{seat}-mcp.json")
-        link(f"{src}/opencode/agentboard-mcp.sh", f"{opencode_home}/agentboard-mcp.sh")
+        install_grok_block()
     finally:
         if os.path.lexists(rules_tmp):
             os.unlink(rules_tmp)

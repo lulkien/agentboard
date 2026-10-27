@@ -30,6 +30,8 @@ GIT AND THE TREE. Never commit, push, tag, reset, checkout, clean or stash: the
 owner commits. Never install the binary or reset a live board. Never write outside
 the repository, and never edit a path this row does not own.
 """
+model = "gpt-6-luna"
+model_reasoning_effort = "medium"
 
 # The shell is on (owner correction 2026-10-23: prefer MCP, do not ban the shell;
 # reduce grep/cat/sed). A build or a suite is this seat's job again.

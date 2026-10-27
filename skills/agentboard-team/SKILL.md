@@ -8,7 +8,7 @@ platforms: [linux, macos]
 metadata:
   hermes:
     tags: [agentboard, manager, analyst, coder, reviewer, lmdb, feed]
-    related_skills: [claude-code, opencode, herdr]
+    related_skills: [claude-code, herdr]
 ---
 # agentboard manual
 
@@ -61,15 +61,15 @@ One agent per tab. Never two agents as split panes of one tab: a tab is one seat
 workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
-Preferred models for worker seats (pass after `--`; herdr forwards them to the
-agent). Analyst gets the stronger model; coder and reviewer share the cheaper
-one. Swap the id only when the human names a different model.
+Analyst and reviewer judge, so they use the stronger model at high effort; the
+coder executes their guidance, so that seat uses the cheaper model at medium
+effort. Swap the id only when the human names a different model.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
-| analyst | `--model claude-opus-5-5` | `-m gpt-6-sol` |
-| coder | `--model claude-sonnet-5-5` | `-m gpt-6-luna` |
-| reviewer | `--model claude-sonnet-5-5` | `-m gpt-6-luna` |
+| analyst | `--model claude-opus-5-5 --effort high` | `-m gpt-6-sol` (profile: high) |
+| coder | `--model claude-sonnet-5-5 --effort medium` | `-m gpt-6-luna` (profile: medium) |
+| reviewer | `--model claude-opus-5-5 --effort high` | `-m gpt-6-sol` (profile: high) |
 
 ```bash
 export REPO=/path/to/repo
@@ -84,6 +84,7 @@ herdr pane list                                    # note the new tab's pane id
 # each verb is allowed. Coder needs unattended shell/tests → bypass.
 herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --model claude-opus-5-5 \
+  --effort high \
   --mcp-config ~/.claude/analyst-mcp.json \
   --permission-mode dontAsk \
   --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
@@ -91,10 +92,12 @@ herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   'Bash(readlink:*)' 'Bash(git status:*)' 'Bash(git log:*)' 'Bash(git diff:*)'
 herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 \
+  --effort medium \
   --mcp-config ~/.claude/coder-mcp.json \
   --dangerously-skip-permissions
 herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
-  --model claude-sonnet-5-5 \
+  --model claude-opus-5-5 \
+  --effort high \
   --mcp-config ~/.claude/reviewer-mcp.json \
   --permission-mode dontAsk \
   --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
@@ -107,10 +110,10 @@ herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
 herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
   -p coder -m gpt-6-luna
 herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
-  -p reviewer -m gpt-6-luna
+  -p reviewer -m gpt-6-sol
 
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude,
-# opencode, Hermes and Grok; $agentboard-<seat> T<id> for Codex.
+# Hermes and Grok; $agentboard-<seat> T<id> for Codex.
 herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
 herdr agent prompt coder '$agentboard-coder T<id>' --wait   # Codex seat
 ```
@@ -139,11 +142,7 @@ once per client, with the seat's actor and the shared board:
 # claude: one mcp-config file per seat, named on the command line
 claude --mcp-config ~/.claude/coder-mcp.json
 
-# opencode: one global config, so the seat names itself in its pane environment
-# and the config's agentboard entry runs seats/opencode/agentboard-mcp.sh.
-# --standalone gives the seat its own server, which is what inherits that env.
-herdr tab create --label coder --env AGENTBOARD_SEAT=coder --env AGENTBOARD_ACTOR=coder
-herdr agent start coder --kind opencode --pane "$PANE" -- --standalone
+
 ```
 
 The repo's `seats/` directory is the canonical copy of those cards, and

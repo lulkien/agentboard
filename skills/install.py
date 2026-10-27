@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Canonical repo links in ~/.agents/skills, then agent aliases through that home.
-Every skill directory that carries a claude.md or an opencode.md also gets that
-CLI's command link, so a seat entry point is one edit in the repo (only opencode
-needs one; Claude and Grok invoke the skill directly). Links under a retired name
-are pruned when they are exactly the link this installer wrote.
+Links under a retired name are pruned when they are exactly the link this installer wrote.
 usage: install.py [--force] [canonical-dir]
 """
 import os
@@ -30,13 +27,9 @@ def main():
     agent_dirs = [
         f"{home}/.claude/skills",
         f"{codex_home}/skills",
-        f"{home}/.config/opencode/skills",
         f"{home}/.hermes/skills",
     ]
     claude_commands = os.environ.get("AGENTBOARD_CLAUDE_COMMANDS") or f"{home}/.claude/commands"
-    opencode_commands = (
-        os.environ.get("AGENTBOARD_OPENCODE_COMMANDS") or f"{home}/.config/opencode/commands"
-    )
     names = sorted(
         n
         for n in os.listdir(src)
@@ -60,8 +53,6 @@ def main():
             check(f"{d}/{name}")
         if os.path.isfile(f"{src}/{name}/claude.md"):
             check(f"{claude_commands}/{name}.md")
-        if os.path.isfile(f"{src}/{name}/opencode.md"):
-            check(f"{opencode_commands}/{name}.md")
     if refuse:
         sys.exit(1)
 
@@ -79,7 +70,6 @@ def main():
         for d in others:
             prune(f"{d}/{name}", f"{target}/{name}")
         prune(f"{claude_commands}/{name}.md", f"{target}/{name}/claude.md")
-        prune(f"{opencode_commands}/{name}.md", f"{target}/{name}/opencode.md")
     # Claude resolves /<skill> from the skill itself; a command link from before the
     # claude.md files were removed is dead weight.
     for name in names:
@@ -101,8 +91,6 @@ def main():
             link(f"{target}/{name}", f"{d}/{name}")
         if os.path.isfile(f"{src}/{name}/claude.md"):
             link(f"{target}/{name}/claude.md", f"{claude_commands}/{name}.md")
-        if os.path.isfile(f"{src}/{name}/opencode.md"):
-            link(f"{target}/{name}/opencode.md", f"{opencode_commands}/{name}.md")
 
 
 main()

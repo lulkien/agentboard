@@ -5,6 +5,7 @@ set -u
 cd "$(dirname "$0")/.."
 repo=$(pwd)
 src=$repo/seats/codex/rules/agentboard.rules
+grok_src=$repo/seats/grok/agentboard-mcp.toml
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 n=0 fail=0
@@ -19,10 +20,13 @@ newhome() { # newhome <name>: a clean HOME with the dirs the installer expects
   cases=$((cases + 1))
   home=$tmp/h$cases
   rules=$home/.codex/rules/default.rules
-  mkdir -p "$home/.claude" "$home/.config/opencode"
+  mkdir -p "$home/.claude"
 }
 inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/err
   HOME="$home" CODEX_HOME="$home/.codex" python3 ./seats/install.py "$@" >"$tmp/out" 2>"$tmp/err"
+}
+grok_inst() { # grok_inst [args]: Grok-only install into the isolated home
+  HOME="$home" python3 ./seats/install.py --grok-only "$@" >"$tmp/out" 2>"$tmp/err"
 }
 refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-identical
   local name=$1; shift
@@ -34,13 +38,12 @@ refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-
   if [ -f "$rules" ] && [ ! -L "$rules" ]; then same "$name unchanged" "$before" "$rules"; fi
 }
 
-# --- foreign claude/opencode links are refused, then --force replaces them ---
+# --- foreign claude links are refused, then --force replaces them ---
 newhome
 mkdir -p "$home/.codex/rules"
 for seat in analyst coder manager reviewer; do
   ln -s "/old/checkout/seats/claude/$seat-mcp.json" "$home/.claude/$seat-mcp.json"
 done
-ln -s /old/checkout/seats/opencode/agentboard-mcp.sh "$home/.config/opencode/agentboard-mcp.sh"
 inst; code=$?
 is "foreign links refused" test "$code" -eq 1
 has "foreign link text" 'use --force to replace it' "$tmp/err"
@@ -50,7 +53,6 @@ inst --force
 for seat in analyst coder manager reviewer; do
   is "force relinks $seat" test "$(readlink "$home/.claude/$seat-mcp.json")" = "$repo/seats/claude/$seat-mcp.json"
 done
-is "force relinks opencode" test "$(readlink "$home/.config/opencode/agentboard-mcp.sh")" = "$repo/seats/opencode/agentboard-mcp.sh"
 
 # --- missing rules dir: the block alone, no second rules file ---------------
 newhome
@@ -204,6 +206,203 @@ HOME="$home" CODEX_HOME="$home/.codex" python3 "$tmp/fake/install.py" >"$tmp/out
 is "empty rules source refused" test "$code" -eq 1
 has "empty rules source named" 'bad rules source' "$tmp/err"
 is "empty rules source links nothing" test ! -e "$home/.codex/coder.config.toml"
+
+# --- managed Grok block: fresh, idempotent, actor and force behavior --------
+newhome
+grok=$home/.grok/config.toml
+grok_inst; code=$?
+is "fresh Grok install exit" test "$code" -eq 0
+same "fresh Grok config is the source block" "$grok_src" "$grok"
+has "fresh Grok install says added" "added: $grok" "$tmp/out"
+is "Grok-only install leaves Codex links alone" test ! -e "$home/.codex/coder.config.toml"
+cp "$grok" "$tmp/grok-before"
+grok_inst
+same "Grok rerun is byte-identical" "$tmp/grok-before" "$grok"
+has "Grok rerun says unchanged" 'unchanged:' "$tmp/out"
+grok_inst --force
+same "Grok force on current source is byte-identical" "$tmp/grok-before" "$grok"
+
+newhome
+grok=$home/.grok/config.toml
+grok_inst --actor manager
+has "Grok actor override rendered" 'AGENTBOARD_ACTOR = "manager"' "$grok"
+cp "$grok" "$tmp/grok-manager"
+grok_inst
+same "Grok actor omitted preserves manager" "$tmp/grok-manager" "$grok"
+grok_inst --force
+same "Grok force without actor preserves manager" "$tmp/grok-manager" "$grok"
+grok_inst --actor grok
+same "Grok explicit changed actor without force is kept" "$tmp/grok-manager" "$grok"
+has "Grok changed actor reports difference" 'differs from the repo' "$tmp/err"
+grok_inst --force --actor grok
+has "Grok forced actor change replaces" 'AGENTBOARD_ACTOR = "grok"' "$grok"
+has "Grok forced actor change says replaced" 'replaced:' "$tmp/out"
+grok_inst
+has "Grok default actor rerun is stable" 'unchanged:' "$tmp/out"
+
+newhome
+grok=$home/.grok/config.toml
+grok_inst --actor 'seat"alias'
+has "Grok actor escapes TOML strings" 'AGENTBOARD_ACTOR = "seat\"alias"' "$grok"
+cp "$grok" "$tmp/grok-escaped-actor"
+grok_inst --force
+same "Grok force preserves escaped actor" "$tmp/grok-escaped-actor" "$grok"
+
+# --- preserve existing config bytes, other tables, CRLF and file mode -------
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+printf '[ui]\ntheme = "dark"\n\n[mcp_servers.other]\ncommand = "other"' >"$grok"
+cp "$grok" "$tmp/grok-prefix"
+grok_inst
+is "Grok append preserves no-final-LF prefix" cmp -s -n "$(wc -c <"$tmp/grok-prefix")" "$tmp/grok-prefix" "$grok"
+is "Grok leaves other MCP table" grep -qF '[mcp_servers.other]' "$grok"
+sum=$(cksum <"$grok")
+grok_inst
+is "Grok config rerun remains stable with other tables" test "$(cksum <"$grok")" = "$sum"
+
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+printf '[ui]\r\ntheme = "dark"\r\n' >"$grok"
+chmod 640 "$grok"
+grok_inst
+is "Grok CRLF prefix preserved" grep -q $'theme = "dark"\r$' "$grok"
+is "Grok appended block uses CRLF" test "$(grep -c $'\r$' "$grok")" -eq "$(wc -l <"$grok")"
+is "Grok config mode preserved" test "$(stat -c %a "$grok")" = 640
+sum=$(cksum <"$grok")
+grok_inst --force
+is "Grok CRLF force is byte-stable" test "$(cksum <"$grok")" = "$sum"
+is "Grok temp file removed" test -z "$(ls "$home/.grok" | grep -F .agentboard || true)"
+
+# --- marked block force behavior and malformed marker refusals --------------
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+{
+  echo '[ui]'
+  echo 'theme = "light"'
+  sed 's/AGENTBOARD_ACTOR = "grok"/AGENTBOARD_ACTOR = "edited"/' "$grok_src"
+  echo '[mcp_servers.other]'
+  echo 'command = "other"'
+} >"$grok"
+cp "$grok" "$tmp/grok-edited"
+grok_inst --actor manager
+same "Grok plain run leaves edited block" "$tmp/grok-edited" "$grok"
+has "Grok plain run notes edited block" 'differs from the repo' "$tmp/err"
+grok_inst --force --actor grok
+has "Grok force replaces marked block" 'replaced:' "$tmp/out"
+is "Grok force keeps neighboring tables" grep -qF '[mcp_servers.other]' "$grok"
+has "Grok force restores source actor" 'AGENTBOARD_ACTOR = "grok"' "$grok"
+
+GB='# BEGIN AGENTBOARD MCP'
+GE='# END AGENTBOARD MCP'
+for kind in duplicate_begin duplicate_end begin_only end_before_begin padded; do
+  case $kind in
+    duplicate_begin) printf '%s\nx\n%s\n%s\n' "$GB" "$GB" "$GE" >"$tmp/body" ;;
+    duplicate_end) printf '%s\n%s\n%s\n' "$GB" "$GE" "$GE" >"$tmp/body" ;;
+    begin_only) printf '[ui]\n%s\nx\n' "$GB" >"$tmp/body" ;;
+    end_before_begin) printf '%s\n%s\n' "$GE" "$GB" >"$tmp/body" ;;
+    padded) printf ' %s\nx\n%s\n' "$GB" "$GE" >"$tmp/body" ;;
+  esac
+  for args in "" "--force"; do
+    newhome
+    grok=$home/.grok/config.toml
+    mkdir -p "$home/.grok"
+    cp "$tmp/body" "$grok"
+    cp "$grok" "$tmp/grok-before"
+    grok_inst $args; code=$?
+    is "Grok malformed $kind ${args:-plain} refused" test "$code" -eq 1
+    same "Grok malformed $kind ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
+    has "Grok malformed $kind ${args:-plain} diagnosed" 'malformed agentboard block' "$tmp/err"
+  done
+done
+
+# --- unmarked tables, malformed TOML and unsafe destinations refuse --------
+for args in "" "--force"; do
+  newhome
+  grok=$home/.grok/config.toml
+  mkdir -p "$home/.grok"
+  printf '[mcp_servers.agentboard]\ncommand = "grok mcp add"\n' >"$grok"
+  cp "$grok" "$tmp/grok-before"
+  grok_inst $args; code=$?
+  is "Grok unmarked table ${args:-plain} refused" test "$code" -eq 1
+  same "Grok unmarked table ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
+  has "Grok unmarked table ${args:-plain} manual repair" 'remove or convert it by hand' "$tmp/err"
+done
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+printf '[ui\n' >"$grok"
+grok_inst; code=$?
+is "Grok malformed TOML refused" test "$code" -eq 1
+has "Grok malformed TOML named" 'invalid TOML' "$tmp/err"
+
+# A valid marker pair does not make invalid TOML inside the block safe to keep.
+for args in "" "--force"; do
+  newhome
+  grok=$home/.grok/config.toml
+  mkdir -p "$home/.grok" "$home/.codex/rules" "$home/.claude"
+  printf '[ui]\ntheme = "dark"\n# BEGIN AGENTBOARD MCP\n[mcp_servers.agentboard]\nargs = [\n# END AGENTBOARD MCP\n' >"$grok"
+  cp "$grok" "$tmp/grok-before"
+  inst $args; code=$?
+  is "Grok malformed TOML inside block ${args:-plain} refused" test "$code" -eq 1
+  same "Grok malformed TOML inside block ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
+  has "Grok malformed TOML inside block ${args:-plain} diagnosed" 'invalid TOML' "$tmp/err"
+  is "Grok inside-block refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
+  is "Grok inside-block refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
+  is "Grok inside-block refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
+done
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+printf 'target\n' >"$home/target"
+ln -s "$home/target" "$grok"
+grok_inst --force; code=$?
+is "Grok symlink refused" test "$code" -eq 1
+is "Grok symlink target untouched" test "$(cat "$home/target")" = target
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$grok"
+grok_inst --force; code=$?
+is "Grok directory refused" test "$code" -eq 1
+has "Grok directory refusal named" 'not a regular file' "$tmp/err"
+
+# An inline mcp_servers table is valid alone but cannot accept an appended table.
+for args in "" "--force"; do
+  newhome
+  grok=$home/.grok/config.toml
+  mkdir -p "$home/.grok" "$home/.codex/rules" "$home/.claude"
+  printf 'mcp_servers = { other = { command = "other" } }\n' >"$grok"
+  cp "$grok" "$tmp/grok-before"
+  inst $args; code=$?
+  is "Grok inline mcp_servers ${args:-plain} refused" test "$code" -eq 1
+  same "Grok inline mcp_servers ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
+  has "Grok inline mcp_servers ${args:-plain} candidate diagnosed" 'invalid TOML in rendered Grok config' "$tmp/err"
+  is "Grok inline refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
+  is "Grok inline refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
+  is "Grok inline refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
+done
+
+# --- Grok preflight runs before other installer destinations are written ----
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok" "$home/.codex/rules" "$home/.claude"
+printf '[mcp_servers.agentboard]\ncommand = "manual"\n' >"$grok"
+cp "$grok" "$tmp/grok-before"
+inst --force; code=$?
+is "full install refuses unmarked Grok table" test "$code" -eq 1
+same "full install refusal preserves Grok config" "$tmp/grok-before" "$grok"
+is "Grok preflight refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
+is "Grok preflight refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
+is "Grok preflight refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
+
+# --- compatibility wrapper installs only the Grok block --------------------
+newhome
+HOME="$home" ./seats/grok/register-mcp.sh --actor manager >"$tmp/out" 2>"$tmp/err"; code=$?
+is "Grok wrapper succeeds" test "$code" -eq 0
+has "Grok wrapper passes actor" 'AGENTBOARD_ACTOR = "manager"' "$home/.grok/config.toml"
+is "Grok wrapper leaves other cards alone" test ! -e "$home/.codex/coder.config.toml"
 
 echo "$((n - fail))/$n passed (seats installer)"
 [ "$fail" -eq 0 ]

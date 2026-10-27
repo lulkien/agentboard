@@ -44,10 +44,10 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
-| `bash tests/seats-install.sh` | `119/119 passed (seats installer)` (isolated homes; no board writes) |
+| `bash tests/seats-install.sh` | `222/222 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 18 pages, 104 CLI names, 119 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 104 CLI names, 119 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 12 gates passed`; with `--full` `GATES OK: 13 gates passed` |
 | `bash scripts/gate.sh --features dashboard` | `GATES OK: 14 gates passed` |
@@ -160,7 +160,7 @@ No file edit, no commit, no build, no install, no probe that creates state;
 
 - `skills/agentboard-team` — running a team: launcher, wake commands, roles,
   workflow. `skills/install.py --force` creates canonical repo links under
-  `~/.agents/skills`, then links Claude, Codex, opencode and Hermes skills to those
+  `~/.agents/skills`, then links Claude, Codex and Hermes skills to those
   canonical names. There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: ten tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each

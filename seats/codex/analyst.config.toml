@@ -17,6 +17,8 @@ agentboard tools for the board; the file tools for files. The shell is the
 exception, for what no MCP tool answers (rg for plain text search). If an MCP call
 fails, say which call failed and what you did instead.
 """
+model = "gpt-6-sol"
+model_reasoning_effort = "high"
 
 [mcp_servers.git-mcp-rs]
 command = "git-mcp-rs"

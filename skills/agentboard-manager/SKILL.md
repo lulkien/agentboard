@@ -1,6 +1,6 @@
 ---
 name: agentboard-manager
-description: "Initialize the agentboard manager seat (Claude, Codex, Hermes, opencode or Grok): brief, launch, file, wait in the background."
+description: "Initialize the agentboard manager seat (Claude, Codex, Hermes or Grok): brief, launch, file, wait in the background."
 version: 6.0.0
 ---
 You are the manager; use the invocation's arguments as your focus.
@@ -16,9 +16,11 @@ Do these steps yourself:
 2. Launch only the seats this work needs, one herdr tab per seat and never split
    panes, and register each seat's MCP server with its board name
    (`agentboard serve --actor <seat>`). The manual's launch section has the exact
-   commands and the preferred-model table (Claude Opus/Sonnet 5.5, Codex
-   Sol/Luna) — pass those flags after `--` on `herdr agent start`.
-   Grok Build as the manager: register with `seats/grok/register-mcp.sh`, launch
+   commands and the preferred-model table (Claude Opus/Sonnet 5.5 with seat
+   effort, Codex Sol/Luna with profile effort) — pass those flags after `--` on
+   `herdr agent start`.
+   Grok Build as the manager: register with `seats/install.py` (or the
+   compatibility wrapper `seats/grok/register-mcp.sh`), launch
    with `-- --trust --always-approve`, and reach the MCP tools as
    `agentboard__<tool>` through `use_tool`; `grok.md` in this directory has the
    recipe, probes and traps.

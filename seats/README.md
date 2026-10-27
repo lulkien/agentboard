@@ -11,8 +11,7 @@ its client gets a board identity.
 | `codex/rules/agentboard.rules` | every codex seat | a marked block inside `$CODEX_HOME/rules/default.rules` |
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
 | `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | `claude --mcp-config <file>` |
-| `opencode/agentboard-mcp.sh` | any opencode seat | the global opencode config's `agentboard` entry |
-| `grok/register-mcp.sh` | grok (manager) | `grok mcp add --scope user` into `~/.grok/config.toml` |
+| `grok/agentboard-mcp.toml` | grok (manager) | managed block in `~/.grok/config.toml` by `install.py` |
 
 ## Install
 
@@ -78,21 +77,27 @@ file. `analyst-mcp.json`, `coder-mcp.json`, `manager-mcp.json` and
 
 ## Grok
 
-`grok/register-mcp.sh` writes the server into `~/.grok/config.toml` with
-`AGENTBOARD_ACTOR=<actor>` (default `grok`), because Grok keeps one user config and
-takes its actor from that entry. `grok mcp doctor agentboard` is the proof: it starts
-the server, completes the handshake and lists the tool catalog. A Grok seat needs
+`./seats/install.py` installs the marked block from `seats/grok/agentboard-mcp.toml`
+into `~/.grok/config.toml`. The command is the portable `agentboard` and must be on
+the PATH Grok inherits. The actor defaults to `grok`; pass `--actor manager` to the
+installer to use the manager identity. With an existing marked block, omitting
+`--actor` retains its actor, including under `--force`.
+
+The installer preserves the rest of the Grok config, its line endings and mode. It
+refuses malformed TOML, malformed markers, symlinked/non-regular config, and an
+unmarked `[mcp_servers.agentboard]` table (including one written by `grok mcp add`),
+even with `--force`. Review and remove or convert that table by hand before retrying;
+the installer never removes user text. `seats/grok/register-mcp.sh` remains a
+compatibility wrapper around `install.py --grok-only`.
+
+`grok mcp doctor agentboard` is the proof: it starts the server, completes the
+handshake and lists the tool catalog. A Grok seat needs
 `--trust` (project `AGENTS.md` and project skills load only in a trusted folder) and
 `--always-approve` (otherwise a tool call waits on a prompt nobody is watching); both
 go after herdr's `--`. `skills/agentboard-manager/grok.md` carries the full launch recipe.
 
 ## Not shipped here
 
-- `opencode` keeps one global `~/.config/opencode/opencode.json`, so it can carry
-  only one board actor. Its `agentboard` entry therefore runs
-  `opencode/agentboard-mcp.sh`, which takes the actor from `AGENTBOARD_SEAT` in the
-  pane environment (`herdr tab create --env AGENTBOARD_SEAT=coder`) and falls back
-  to `opencode`. A seat started without that variable writes as `opencode`.
 - The Hermes manager reads `~/.hermes/config.yaml`, which is host state: it holds
   model providers and keys as well as MCP servers.
 
