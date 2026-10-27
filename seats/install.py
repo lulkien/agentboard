@@ -3,9 +3,8 @@
 The Codex rules are not a link: they are a marked block inside the user's own
 rules/default.rules, which Codex also appends to. Grok uses a marked block in its
 user config as well.
-usage: install.py [--force] [--actor NAME] [--grok-only]
+usage: install.py [--force] [--grok-only]
 """
-import json
 import os
 import shutil
 import sys
@@ -127,22 +126,6 @@ def install_marked_block(path, source, begin, end, force, label, tmp=None, chang
     print(f"{verb}: {path} ({label} block)")
 
 
-def grok_actor(source):
-    try:
-        data = tomllib.loads(source.decode("utf-8"))
-        actor = data["mcp_servers"]["agentboard"]["env"]["AGENTBOARD_ACTOR"]
-        return actor if isinstance(actor, str) and actor else None
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError):
-        return None
-
-
-def render_grok_source(source, actor):
-    if not actor or any(ord(c) < 0x20 or ord(c) == 0x7f for c in actor):
-        raise ValueError("actor must be a nonempty string without control characters")
-    encoded = json.dumps(actor, ensure_ascii=False).encode("utf-8")
-    return source.replace(b'AGENTBOARD_ACTOR = "grok"', b"AGENTBOARD_ACTOR = " + encoded)
-
-
 def grok_preflight(path, source):
     if os.path.islink(path):
         print(f"{path} is a symlink; the installer edits only a regular file", file=sys.stderr)
@@ -195,7 +178,6 @@ def grok_preflight(path, source):
 def main():
     force = False
     grok_only = False
-    actor_arg = None
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -203,11 +185,8 @@ def main():
             force = True
         elif arg == "--grok-only":
             grok_only = True
-        elif arg == "--actor" and i + 1 < len(sys.argv):
-            actor_arg = sys.argv[i + 1]
-            i += 1
         else:
-            print("usage: install.py [--force] [--actor NAME] [--grok-only]", file=sys.stderr)
+            print("usage: install.py [--force] [--grok-only]", file=sys.stderr)
             sys.exit(2)
         i += 1
     src = os.path.dirname(os.path.abspath(__file__))
@@ -270,18 +249,8 @@ def main():
     grok_ok, grok_state = grok_preflight(grok_file, grok_source)
     if not grok_ok:
         refuse = True
-    grok_actor_name = actor_arg or "grok"
-    if grok_state and grok_state[0] == "ok" and actor_arg is None:
-        lines = split_lines(read(grok_file))
-        current_block = b"\n".join(lines[grok_state[1] - 1 : grok_state[2]])
-        grok_actor_name = grok_actor(current_block) or "grok"
-    grok_rendered = None
-    try:
-        grok_rendered = render_grok_source(grok_source, grok_actor_name)
-    except ValueError as exc:
-        print(f"invalid Grok actor: {exc}", file=sys.stderr)
-        refuse = True
-    if grok_ok and grok_rendered is not None:
+    grok_rendered = grok_source
+    if grok_ok:
         current = read(grok_file) if os.path.isfile(grok_file) else b""
         if grok_state[0] == "ok" and not force:
             candidate = current

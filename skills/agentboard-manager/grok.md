@@ -8,24 +8,30 @@ It writes no code and runs no build, same as every manager. The steps are
 Read `~/.agents/skills/agentboard-team/{SKILL.md,workflow.md,roles.md}` first: they
 are the shared manual.
 
-## One-time setup: give grok a board identity
+## One-time setup: install the manager MCP entry
 
-    seats/install.py                         # actor "grok", installs all seat cards
-    seats/install.py --actor manager         # use the manager actor for Grok
-    seats/grok/register-mcp.sh --actor grok  # compatibility wrapper, Grok only
+    seats/install.py                         # installs all seat cards
+    seats/grok/register-mcp.sh               # compatibility wrapper, Grok only
 
 The installer manages the marked block in `~/.grok/config.toml` from
 `seats/grok/agentboard-mcp.toml`; it uses `command = "agentboard"`, so the binary
-must resolve on Grok's PATH. It preserves host config and the existing actor when
-`--actor` is omitted. An unmarked `[mcp_servers.agentboard]` entry is refused, even
+must resolve on Grok's PATH. Its actor comes from `${AGENTBOARD_SEAT:-manager}`:
+unset uses `manager`, while a supplied value is passed through. Never set
+`AGENTBOARD_SEAT` to an empty string. Grok is manager-only. To run another manager
+name, create its pane with `herdr tab create --env AGENTBOARD_SEAT=<name>`.
+An empty `AGENTBOARD_SEAT` passes through as empty, and agentboard refuses to write
+with `actor required: pass --actor or set AGENTBOARD_ACTOR`.
+
+The installer writes the marked block byte-for-byte from the repo source. It
+preserves host config and refuses an unmarked `[mcp_servers.agentboard]` entry, even
 with `--force`; review and remove or convert it manually before installing. Check it:
 
     grok mcp list                    # agentboard, stdio, enabled
     grok mcp doctor agentboard       # handshake + catalog keys, no model turn
 
-`grok mcp doctor` is the honest proof: it starts the server, completes the MCP
-handshake and lists the tools. A server that fails to start shows there, not in a
-seat that silently has no board tools.
+Only `grok mcp doctor` has been proven: it starts the server, completes the MCP
+handshake and lists the tools. A real session load has not been proven. A server
+that fails to start shows there, not in a seat that silently has no board tools.
 
 ## Launch
 

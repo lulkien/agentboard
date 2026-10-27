@@ -5,5 +5,5 @@ args = ["serve"]
 enabled = true
 
 [mcp_servers.agentboard.env]
-AGENTBOARD_ACTOR = "grok"
+AGENTBOARD_ACTOR = "${AGENTBOARD_SEAT:-manager}"
 # END AGENTBOARD MCP

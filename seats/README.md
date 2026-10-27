@@ -79,9 +79,12 @@ file. `analyst-mcp.json`, `coder-mcp.json`, `manager-mcp.json` and
 
 `./seats/install.py` installs the marked block from `seats/grok/agentboard-mcp.toml`
 into `~/.grok/config.toml`. The command is the portable `agentboard` and must be on
-the PATH Grok inherits. The actor defaults to `grok`; pass `--actor manager` to the
-installer to use the manager identity. With an existing marked block, omitting
-`--actor` retains its actor, including under `--force`.
+the PATH Grok inherits. Its actor comes from `${AGENTBOARD_SEAT:-manager}`: unset
+uses `manager`, and a supplied value passes through unchanged. Never set
+`AGENTBOARD_SEAT` to an empty string. Grok is manager-only; to run a second manager
+name a pane with `herdr tab create --env AGENTBOARD_SEAT=<name>`.
+An empty `AGENTBOARD_SEAT` passes through as empty, and agentboard refuses to write
+with `actor required: pass --actor or set AGENTBOARD_ACTOR`.
 
 The installer preserves the rest of the Grok config, its line endings and mode. It
 refuses malformed TOML, malformed markers, symlinked/non-regular config, and an
@@ -90,8 +93,9 @@ even with `--force`. Review and remove or convert that table by hand before retr
 the installer never removes user text. `seats/grok/register-mcp.sh` remains a
 compatibility wrapper around `install.py --grok-only`.
 
-`grok mcp doctor agentboard` is the proof: it starts the server, completes the
-handshake and lists the tool catalog. A Grok seat needs
+Only `grok mcp doctor agentboard` has been proven: it starts the server, completes
+the handshake and lists the tool catalog. A real session load has not been proven.
+A Grok seat needs
 `--trust` (project `AGENTS.md` and project skills load only in a trusted folder) and
 `--always-approve` (otherwise a tool call waits on a prompt nobody is watching); both
 go after herdr's `--`. `skills/agentboard-manager/grok.md` carries the full launch recipe.

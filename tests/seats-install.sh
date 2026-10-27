@@ -207,7 +207,7 @@ is "empty rules source refused" test "$code" -eq 1
 has "empty rules source named" 'bad rules source' "$tmp/err"
 is "empty rules source links nothing" test ! -e "$home/.codex/coder.config.toml"
 
-# --- managed Grok block: fresh, idempotent, actor and force behavior --------
+# --- managed Grok block: source bytes, idempotence and force behavior --------
 newhome
 grok=$home/.grok/config.toml
 grok_inst; code=$?
@@ -219,34 +219,22 @@ cp "$grok" "$tmp/grok-before"
 grok_inst
 same "Grok rerun is byte-identical" "$tmp/grok-before" "$grok"
 has "Grok rerun says unchanged" 'unchanged:' "$tmp/out"
+is "Grok rerun has no differs note" test ! -s "$tmp/err"
 grok_inst --force
 same "Grok force on current source is byte-identical" "$tmp/grok-before" "$grok"
 
 newhome
 grok=$home/.grok/config.toml
-grok_inst --actor manager
-has "Grok actor override rendered" 'AGENTBOARD_ACTOR = "manager"' "$grok"
-cp "$grok" "$tmp/grok-manager"
+mkdir -p "$home/.grok"
+sed 's/AGENTBOARD_SEAT:-manager/manager/' "$grok_src" >"$grok"
+cp "$grok" "$tmp/grok-literal-actor"
 grok_inst
-same "Grok actor omitted preserves manager" "$tmp/grok-manager" "$grok"
+same "Grok plain run leaves a different literal actor" "$tmp/grok-literal-actor" "$grok"
+has "Grok different literal actor reports difference" 'differs from the repo' "$tmp/err"
+has "Grok different literal actor says unchanged" 'unchanged:' "$tmp/out"
 grok_inst --force
-same "Grok force without actor preserves manager" "$tmp/grok-manager" "$grok"
-grok_inst --actor grok
-same "Grok explicit changed actor without force is kept" "$tmp/grok-manager" "$grok"
-has "Grok changed actor reports difference" 'differs from the repo' "$tmp/err"
-grok_inst --force --actor grok
-has "Grok forced actor change replaces" 'AGENTBOARD_ACTOR = "grok"' "$grok"
-has "Grok forced actor change says replaced" 'replaced:' "$tmp/out"
-grok_inst
-has "Grok default actor rerun is stable" 'unchanged:' "$tmp/out"
-
-newhome
-grok=$home/.grok/config.toml
-grok_inst --actor 'seat"alias'
-has "Grok actor escapes TOML strings" 'AGENTBOARD_ACTOR = "seat\"alias"' "$grok"
-cp "$grok" "$tmp/grok-escaped-actor"
-grok_inst --force
-same "Grok force preserves escaped actor" "$tmp/grok-escaped-actor" "$grok"
+has "Grok force replaces the literal actor" 'AGENTBOARD_ACTOR = "${AGENTBOARD_SEAT:-manager}"' "$grok"
+has "Grok force on literal actor says replaced" 'replaced:' "$tmp/out"
 
 # --- preserve existing config bytes, other tables, CRLF and file mode -------
 newhome
@@ -282,18 +270,18 @@ mkdir -p "$home/.grok"
 {
   echo '[ui]'
   echo 'theme = "light"'
-  sed 's/AGENTBOARD_ACTOR = "grok"/AGENTBOARD_ACTOR = "edited"/' "$grok_src"
+  sed 's/AGENTBOARD_SEAT:-manager/edited/' "$grok_src"
   echo '[mcp_servers.other]'
   echo 'command = "other"'
 } >"$grok"
 cp "$grok" "$tmp/grok-edited"
-grok_inst --actor manager
+grok_inst
 same "Grok plain run leaves edited block" "$tmp/grok-edited" "$grok"
 has "Grok plain run notes edited block" 'differs from the repo' "$tmp/err"
-grok_inst --force --actor grok
+grok_inst --force
 has "Grok force replaces marked block" 'replaced:' "$tmp/out"
 is "Grok force keeps neighboring tables" grep -qF '[mcp_servers.other]' "$grok"
-has "Grok force restores source actor" 'AGENTBOARD_ACTOR = "grok"' "$grok"
+has "Grok force restores source actor" 'AGENTBOARD_ACTOR = "${AGENTBOARD_SEAT:-manager}"' "$grok"
 
 GB='# BEGIN AGENTBOARD MCP'
 GE='# END AGENTBOARD MCP'
@@ -399,9 +387,9 @@ is "Grok preflight refusal links no Claude card" test ! -e "$home/.claude/coder-
 
 # --- compatibility wrapper installs only the Grok block --------------------
 newhome
-HOME="$home" ./seats/grok/register-mcp.sh --actor manager >"$tmp/out" 2>"$tmp/err"; code=$?
+HOME="$home" ./seats/grok/register-mcp.sh >"$tmp/out" 2>"$tmp/err"; code=$?
 is "Grok wrapper succeeds" test "$code" -eq 0
-has "Grok wrapper passes actor" 'AGENTBOARD_ACTOR = "manager"' "$home/.grok/config.toml"
+same "Grok wrapper installs the source block" "$grok_src" "$home/.grok/config.toml"
 is "Grok wrapper leaves other cards alone" test ! -e "$home/.codex/coder.config.toml"
 
 echo "$((n - fail))/$n passed (seats installer)"
