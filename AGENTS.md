@@ -36,7 +36,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 90 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 93 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` (default binary) | `285/285 passed (cli, lmdb)` |

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use crate::domain::{Event, EventKind};
 
 use super::keys;
-use super::open::{Board, Error, Result};
+use super::open::{Board, Error, ReadTxn, Result, read_txn};
 
 /// The longest a single `wait` call blocks, per the spec.
 pub const WAIT_MAX_MS: u64 = 300_000;
@@ -88,7 +88,7 @@ impl Board {
     /// global sequences and come back empty.
     fn newest_matching(
         &self,
-        txn: &heed::RoTxn<'_>,
+        txn: &ReadTxn<'_>,
         filter: &FeedFilter<'_>,
         limit: usize,
         high: u64,
@@ -118,7 +118,7 @@ impl Board {
 
     fn any_match_at_or_below(
         &self,
-        txn: &heed::RoTxn<'_>,
+        txn: &ReadTxn<'_>,
         filter: &FeedFilter<'_>,
         from: u64,
     ) -> Result<bool> {
@@ -139,7 +139,7 @@ impl Board {
     /// same read snapshot the rows came from, so a caller can list and then wait
     /// without missing a handoff committed in between.
     pub fn feed(&self, filter: &FeedFilter<'_>) -> Result<FeedPage> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let high = metadata.next_event_seq.saturating_sub(1);
         let limit = if filter.limit == 0 {
@@ -211,7 +211,7 @@ impl Board {
     /// Results remain in ascending event order; `older` says whether another
     /// previous page can be fetched with the returned `before` cursor.
     pub fn feed_before(&self, filter: &FeedFilter<'_>, before: &str) -> Result<OlderFeedPage> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let cursor = checked_cursor(before, &metadata.instance_id)?;
         let high = metadata.next_event_seq.saturating_sub(1);
@@ -236,7 +236,7 @@ impl Board {
 
     /// The current snapshot position, for a caller that wants to wait from "now".
     pub fn cursor_now(&self) -> Result<Cursor> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         Ok(Cursor {
             instance_id: metadata.instance_id,

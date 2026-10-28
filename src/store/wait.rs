@@ -8,7 +8,7 @@ use crate::domain::{Event, EventKind, Status, Task, validate_actor};
 
 use super::feed::Cursor;
 use super::keys;
-use super::open::{Board, Error, Result};
+use super::open::{Board, Error, ReadTxn, Result, read_txn};
 
 /// How often a parked waiter re-queries the rows it watches.
 const POLL_INTERVAL_MS: u64 = 25;
@@ -157,7 +157,7 @@ impl Board {
             return self.cursor_now();
         };
         let cursor = Cursor::parse(raw)?;
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         if !cursor.instance_id.is_empty() && cursor.instance_id != metadata.instance_id {
             return Err(Error::CursorInstanceMismatch);
@@ -171,7 +171,7 @@ impl Board {
     /// One snapshot: the watched set, the verdict, and — on a match only — the
     /// events that explain it.
     fn wait_poll(&self, since: &Cursor, spec: &WaitSpec<'_>, wanted: &[Status]) -> Result<Poll> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let mut rows = Vec::new();
         // The status branch is ALL rows; the handoff branch is ANY row, because
@@ -217,7 +217,7 @@ impl Board {
     }
 
     /// The rows this poll watches: the ids themselves, or their direct children.
-    fn watched_ids(&self, txn: &heed::RoTxn<'_>, spec: &WaitSpec<'_>) -> Result<Vec<u64>> {
+    fn watched_ids(&self, txn: &ReadTxn<'_>, spec: &WaitSpec<'_>) -> Result<Vec<u64>> {
         let mut ids = Vec::new();
         for &id in spec.ids {
             if self.read_task_in_txn(txn, id)?.is_none() {
@@ -246,7 +246,7 @@ impl Board {
     }
 
     /// Fill a row's events after the watermark, or its newest event at or below it.
-    fn wait_events(&self, txn: &heed::RoTxn<'_>, row: &mut WaitRow, since: &Cursor) -> Result<()> {
+    fn wait_events(&self, txn: &ReadTxn<'_>, row: &mut WaitRow, since: &Cursor) -> Result<()> {
         let mut fresh = Vec::new();
         let mut newest_below = None;
         for entry in self
@@ -283,7 +283,7 @@ impl Board {
     /// window, so a handoff behind a burst of comments still counts.
     fn handoff(
         &self,
-        txn: &heed::RoTxn<'_>,
+        txn: &ReadTxn<'_>,
         id: u64,
         since: &Cursor,
         target: AssigneeMatch<'_>,
@@ -309,7 +309,7 @@ impl Board {
         Ok(None)
     }
 
-    fn wait_event(&self, txn: &heed::RoTxn<'_>, sequence: u64) -> Result<Event> {
+    fn wait_event(&self, txn: &ReadTxn<'_>, sequence: u64) -> Result<Event> {
         self.read_event_in_txn(txn, sequence)?
             .ok_or(Error::Corrupt("event index points to a missing event"))
     }

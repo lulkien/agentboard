@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Barrier, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::{NewTask, Status, TaskPatch};
@@ -342,6 +343,128 @@ fn hold_board_worker() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     panic!("hold worker did not receive release signal");
+}
+
+#[cfg(unix)]
+#[test]
+fn opening_board_reclaims_reader_slots_from_killed_processes() {
+    const READERS: usize = 256;
+    let scratch = Scratch::new();
+    let board_path = scratch.path().join("board");
+    let board = Board::open_with_options(&board_path, options()).unwrap();
+    board.add("manager", draft(None), false, 0).unwrap();
+
+    let mut children = Vec::with_capacity(READERS);
+    for reader in 0..READERS {
+        let ready = scratch.path().join(format!("reader-ready-{reader}"));
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "store::tests::killed_reader_worker",
+                "--nocapture",
+            ])
+            .env("AGENTBOARD_KILLED_READER_PATH", &board_path)
+            .env("AGENTBOARD_KILLED_READER_READY", &ready)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut appeared = false;
+        for _ in 0..1000 {
+            if ready.exists() {
+                appeared = true;
+                break;
+            }
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!("reader {reader} exited before reading the board: {status}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(appeared, "reader {reader} did not signal after reading");
+        children.push((reader, child));
+    }
+    assert!(matches!(board.get(1), Err(Error::ReadersFull)));
+    for (reader, mut child) in children {
+        child.kill().unwrap();
+        let status = child.wait().unwrap();
+        assert!(!status.success(), "reader {reader} was not killed");
+    }
+
+    assert!(board.get(1).unwrap().is_some());
+
+    // Cross the configured slot count in total while retaining the parent Env.
+    let ready = scratch.path().join("reader-ready-256");
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "store::tests::killed_reader_worker",
+            "--nocapture",
+        ])
+        .env("AGENTBOARD_KILLED_READER_PATH", &board_path)
+        .env("AGENTBOARD_KILLED_READER_READY", &ready)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    for _ in 0..1000 {
+        if ready.exists() {
+            child.kill().unwrap();
+            assert!(!child.wait().unwrap().success());
+            assert!(board.get(1).unwrap().is_some());
+            return;
+        }
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!("reader 256 exited before reading the board: {status}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("reader 256 did not signal after reading");
+}
+
+#[test]
+fn persistent_reader_threads_release_slots_after_each_read() {
+    const THREADS: usize = 257;
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board.add("manager", draft(None), false, 0).unwrap();
+    let gate = Mutex::new(());
+    let barrier = Barrier::new(THREADS + 1);
+
+    std::thread::scope(|scope| {
+        let workers = (0..THREADS)
+            .map(|_| {
+                scope.spawn(|| {
+                    let guard = gate.lock().unwrap();
+                    let result = board.get(1);
+                    drop(guard);
+                    barrier.wait();
+                    result
+                })
+            })
+            .collect::<Vec<_>>();
+
+        barrier.wait();
+        for worker in workers {
+            assert!(worker.join().unwrap().unwrap().is_some());
+        }
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn killed_reader_worker() {
+    let Ok(path) = std::env::var("AGENTBOARD_KILLED_READER_PATH") else {
+        return;
+    };
+    let ready = std::env::var("AGENTBOARD_KILLED_READER_READY").unwrap();
+    let board = Board::open_with_options(path, options()).unwrap();
+    assert!(board.get(1).unwrap().is_some());
+    let txn = board.env.read_txn().unwrap();
+    assert_eq!(board.tasks.len(&txn).unwrap(), 1);
+    fs::write(ready, b"read").unwrap();
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 }
 
 #[test]

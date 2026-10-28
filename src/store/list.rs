@@ -6,7 +6,7 @@ use crate::domain::{Status, Task};
 
 use super::feed::Cursor;
 use super::keys;
-use super::open::{Board, Error, Result};
+use super::open::{Board, Error, ReadTxn, Result, read_txn};
 
 pub const DEFAULT_LIST_LIMIT: usize = 20;
 pub const MAX_LIST_LIMIT: usize = 200;
@@ -66,7 +66,7 @@ impl Board {
     /// Direct-child counts in the caller's snapshot, including write transactions.
     pub(super) fn child_counts(
         &self,
-        txn: &heed::RoTxn<'_>,
+        txn: &ReadTxn<'_>,
     ) -> Result<HashMap<u64, [u64; Status::ALL.len()]>> {
         let mut counts = HashMap::new();
         for entry in self.tasks.iter(txn)? {
@@ -81,7 +81,7 @@ impl Board {
     }
 
     pub fn epic(&self, id: u64) -> Result<Epic> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let task = self
             .read_task_in_txn(&txn, id)?
@@ -100,7 +100,7 @@ impl Board {
     /// Filtered page ordered by `(priority, id)`. The status or assignee index picks
     /// the candidates; the remaining filters run on the decoded task.
     pub fn list(&self, filter: &ListFilter<'_>) -> Result<TaskPage> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let mut tasks = Vec::new();
         for id in self.candidate_ids(&txn, filter)? {
@@ -133,7 +133,7 @@ impl Board {
     /// filtered result in memory. The task database key is the task id in
     /// big-endian order, so its reverse iterator is newest-first.
     pub fn list_newest(&self, filter: &ListFilter<'_>) -> Result<TaskPage> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let limit = filter.limit.clamp(1, MAX_LIST_LIMIT);
         let mut total = 0usize;
@@ -164,7 +164,7 @@ impl Board {
 
     /// Derived epic progress and unparented active work, with global counts.
     pub fn brief(&self, active_limit: usize) -> Result<Brief> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let children = self.child_counts(&txn)?;
         let cursor = Cursor {
@@ -197,7 +197,7 @@ impl Board {
         })
     }
 
-    fn candidate_ids(&self, txn: &heed::RoTxn<'_>, filter: &ListFilter<'_>) -> Result<Vec<u64>> {
+    fn candidate_ids(&self, txn: &ReadTxn<'_>, filter: &ListFilter<'_>) -> Result<Vec<u64>> {
         let mut ids = Vec::new();
         if let Some(status) = filter.status {
             let prefix = [keys::status_code(status)];

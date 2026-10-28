@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{self, Event, EventKind, NewTask, Status, Task, TaskPatch, validate_actor};
 
 use super::keys;
-use super::open::{Board, Error, Metadata, Result, write_metadata};
+use super::open::{Board, Error, Metadata, ReadTxn, Result, read_txn, write_metadata};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Agent {
@@ -283,7 +283,7 @@ impl Board {
     }
 
     pub fn get(&self, id: u64) -> Result<Option<Task>> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;
         let Some(raw) = self.tasks.get(&txn, &keys::task(id))? else {
             return Ok(None);
@@ -300,13 +300,13 @@ impl Board {
     /// index under its write transaction before changing task ownership.
     pub fn next_claimable_id(&self, actor: &str) -> Result<Option<u64>> {
         validate_actor(actor)?;
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;
         Ok(self.next_claimable_in_txn(&txn, actor)?.map(|task| task.id))
     }
 
     pub fn event(&self, sequence: u64) -> Result<Option<Event>> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;
         let Some(raw) = self.events.get(&txn, &keys::task(sequence))? else {
             return Ok(None);
@@ -319,7 +319,7 @@ impl Board {
     }
 
     pub fn agent(&self, name: &str) -> Result<Option<Agent>> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;
         let Some(raw) = self.agents.get(&txn, name.as_bytes())? else {
             return Ok(None);
@@ -334,7 +334,7 @@ impl Board {
     /// The roster, newest activity first; names that never acted (`last_seen_ms`
     /// absent) sort last.
     pub fn agents(&self) -> Result<Vec<Agent>> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;
         let mut agents = Vec::new();
         for entry in self.agents.iter(&txn)? {
@@ -350,7 +350,7 @@ impl Board {
         Ok(agents)
     }
 
-    pub(super) fn read_task_in_txn(&self, txn: &heed::RoTxn<'_>, id: u64) -> Result<Option<Task>> {
+    pub(super) fn read_task_in_txn(&self, txn: &ReadTxn<'_>, id: u64) -> Result<Option<Task>> {
         let Some(raw) = self.tasks.get(txn, &keys::task(id))? else {
             return Ok(None);
         };
@@ -364,7 +364,7 @@ impl Board {
 
     pub(super) fn read_event_in_txn(
         &self,
-        txn: &heed::RoTxn<'_>,
+        txn: &ReadTxn<'_>,
         sequence: u64,
     ) -> Result<Option<Event>> {
         let Some(raw) = self.events.get(txn, &keys::task(sequence))? else {
@@ -377,7 +377,7 @@ impl Board {
         Ok(Some(event))
     }
 
-    fn next_claimable_in_txn(&self, txn: &heed::RoTxn<'_>, actor: &str) -> Result<Option<Task>> {
+    fn next_claimable_in_txn(&self, txn: &ReadTxn<'_>, actor: &str) -> Result<Option<Task>> {
         let prefix = [keys::status_code(Status::Todo)];
         for entry in self.tasks_by_status.prefix_iter(txn, &prefix)? {
             let (key, _) = entry?;
@@ -407,7 +407,7 @@ impl Board {
         Ok(None)
     }
 
-    fn check_attachment_parent(&self, txn: &heed::RoTxn<'_>, id: u64) -> Result<()> {
+    fn check_attachment_parent(&self, txn: &ReadTxn<'_>, id: u64) -> Result<()> {
         let parent = self
             .read_task_in_txn(txn, id)?
             .ok_or(Error::MissingParent(id))?;
@@ -420,7 +420,7 @@ impl Board {
         Ok(())
     }
 
-    fn check_parent_chain(&self, txn: &heed::RoTxn<'_>, task: &Task) -> Result<()> {
+    fn check_parent_chain(&self, txn: &ReadTxn<'_>, task: &Task) -> Result<()> {
         let mut seen = HashSet::new();
         let mut parent_id = task.parent_id;
         while let Some(id) = parent_id {

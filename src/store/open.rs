@@ -3,12 +3,14 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use heed::types::Bytes;
-use heed::{CommitOrAbort, Database, Env, EnvOpenOptions, MdbError};
+use heed::{CommitOrAbort, Database, Env, EnvOpenOptions, MdbError, WithoutTls};
 use serde::{Deserialize, Serialize};
 
 use crate::domain;
 
 pub(super) type Db = Database<'static, Bytes, Bytes>;
+pub(super) type StoreEnv = Env<WithoutTls>;
+pub(super) type ReadTxn<'env> = heed::RoTxn<'env, WithoutTls>;
 pub(super) const FORMAT_VERSION: u32 = 1;
 const APPLICATION: &str = "agentboard-lmdb";
 const ENVELOPE_KEY: &[u8] = b"envelope";
@@ -212,8 +214,19 @@ impl From<domain::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+pub(super) fn read_txn(env: &StoreEnv) -> Result<ReadTxn<'_>> {
+    match env.read_txn() {
+        Ok(txn) => Ok(txn),
+        Err(heed::Error::Mdb(MdbError::ReadersFull)) => {
+            env.clear_stale_readers()?;
+            env.read_txn().map_err(Error::from)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub struct Board {
-    pub(super) env: Env,
+    pub(super) env: StoreEnv,
     pub(super) meta: Db,
     pub(super) tasks: Db,
     pub(super) events: Db,
@@ -301,7 +314,7 @@ impl Board {
                 }
             }
         }
-        let mut builder = EnvOpenOptions::new();
+        let mut builder = EnvOpenOptions::new().read_txn_without_tls();
         builder.max_dbs(7).max_readers(256);
         if fresh {
             builder.map_size(options.map_size_bytes()?);
@@ -340,7 +353,7 @@ impl Board {
                 })?
                 .unwrap_commit()
             } else {
-                let rtxn = env.read_txn()?;
+                let rtxn = read_txn(&env)?;
                 env.open_databases_and_commit(rtxn, |opener, txn| -> Result<_> {
                     let meta = opener
                         .open_database::<Bytes, Bytes>(txn, Some("meta"))?
@@ -402,11 +415,11 @@ impl Board {
     }
 
     pub fn metadata(&self) -> Result<Metadata> {
-        let txn = self.env.read_txn()?;
+        let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)
     }
 
-    pub(super) fn checked_metadata(&self, txn: &heed::RoTxn<'_>) -> Result<Metadata> {
+    pub(super) fn checked_metadata(&self, txn: &ReadTxn<'_>) -> Result<Metadata> {
         let metadata = read_metadata(self.meta, txn)?;
         let actual_map_size = self.env.info().map_size;
         let actual_map_mb = actual_map_size / (1024 * 1024);
@@ -465,7 +478,7 @@ impl Board {
     }
 }
 
-pub(super) fn read_metadata(db: Db, txn: &heed::RoTxn<'_>) -> Result<Metadata> {
+pub(super) fn read_metadata(db: Db, txn: &ReadTxn<'_>) -> Result<Metadata> {
     let raw = db
         .get(txn, ENVELOPE_KEY)?
         .ok_or(Error::Corrupt("missing metadata envelope"))?;
@@ -559,11 +572,11 @@ fn inspect_for_reset(path: &Path) -> Result<Option<String>> {
         refuse_unknown_entries(path)?;
         return Ok(None);
     }
-    let mut builder = EnvOpenOptions::new();
+    let mut builder = EnvOpenOptions::new().read_txn_without_tls();
     builder.max_dbs(7).max_readers(256);
     // This inspection environment is dropped before any LMDB file is removed.
     let env = unsafe { builder.open(path) }?;
-    let txn = env.read_txn()?;
+    let txn = read_txn(&env)?;
     let meta = env
         .open_databases_and_commit(txn, |opener, txn| {
             opener
@@ -572,7 +585,7 @@ fn inspect_for_reset(path: &Path) -> Result<Option<String>> {
         })?
         .unwrap_commit()
         .ok_or(Error::Unstamped)?;
-    let txn = env.read_txn()?;
+    let txn = read_txn(&env)?;
     let raw = meta.get(&txn, ENVELOPE_KEY)?.ok_or(Error::Unstamped)?;
     let metadata: serde_json::Value = serde_json::from_slice(raw)?;
     if metadata
