@@ -224,4 +224,4 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
   workflow.
 - `skills/agentboard-manager`, `skills/agentboard-analyst`, `skills/agentboard-coder`,
   `skills/agentboard-reviewer` — one entry skill per seat; Grok's manager recipe is
-  `skills/agentboard-manager/grok.md`.
+  in `skills/agentboard-manager/SKILL.md`.

@@ -104,15 +104,14 @@ The installer preserves the rest of the Grok config, its line endings and mode. 
 refuses malformed TOML, malformed markers, symlinked/non-regular config, and an
 unmarked `[mcp_servers.agentboard]` table (including one written by `grok mcp add`),
 even with `--force`. Review and remove or convert that table by hand before retrying;
-the installer never removes user text. `seats/grok/register-mcp.sh` remains a
-compatibility wrapper around `install.py --grok-only`.
+the installer never removes user text.
 
 Only `grok mcp doctor agentboard` has been proven: it starts the server, completes
 the handshake and lists the tool catalog. A real session load has not been proven.
 A Grok seat needs
 `--trust` (project `AGENTS.md` and project skills load only in a trusted folder) and
 `--always-approve` (otherwise a tool call waits on a prompt nobody is watching); both
-go after herdr's `--`. `skills/agentboard-manager/grok.md` carries the full launch recipe.
+go after herdr's `--`. `skills/agentboard-manager/SKILL.md` carries the full launch recipe.
 
 ## Not shipped here
 

@@ -403,12 +403,5 @@ is "Grok preflight refusal links no Codex card" test ! -e "$home/.codex/coder.co
 is "Grok preflight refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
 is "Grok preflight refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
 
-# --- compatibility wrapper installs only the Grok block --------------------
-newhome
-HOME="$home" ./seats/grok/register-mcp.sh >"$tmp/out" 2>"$tmp/err"; code=$?
-is "Grok wrapper succeeds" test "$code" -eq 0
-same "Grok wrapper installs the source block" "$grok_src" "$home/.grok/config.toml"
-is "Grok wrapper leaves other cards alone" test ! -e "$home/.codex/coder.config.toml"
-
 echo "$((n - fail))/$n passed (seats installer)"
 [ "$fail" -eq 0 ]

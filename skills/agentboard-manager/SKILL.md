@@ -27,11 +27,6 @@ requirements and launch behavior.
    commands and the preferred-model table (Claude Opus/Sonnet 5.5 with seat
    effort, Codex Sol/Luna with profile effort) — pass those flags after `--` on
    `herdr agent start`.
-   Grok Build as the manager: register with `seats/install.py` (or the
-   compatibility wrapper `seats/grok/register-mcp.sh`), launch
-   with `-- --trust --always-approve`, and reach the MCP tools as
-   `agentboard__<tool>` through `use_tool`; `grok.md` in this directory has the
-   recipe, probes and traps.
    Hermes uses the host MCP configuration in `~/.hermes/config.yaml` (see
    `seats/README.md`); configure its agentboard actor as `manager`. The launcher
    starts Hermes with `--yolo` and sends `/agentboard-manager` through herdr.
@@ -100,3 +95,43 @@ requirements and launch behavior.
    When an epic completes, end its seats' agent sessions before the next epic
    starts and never carry their conversations over. Start fresh sessions only
    for the seats the next epic needs, one tab per seat; leave the others stopped.
+
+## Grok Build manager
+
+Install the seat cards and launcher with `./seats/install.py`, or manage only the
+Grok MCP entry with `./seats/install.py --grok-only`. The installer writes the
+marked block from `seats/grok/agentboard-mcp.toml` to `~/.grok/config.toml`; the
+`agentboard` command must be on Grok's PATH. The actor defaults to `manager` via
+`${AGENTBOARD_SEAT:-manager}`. To use another manager name, create its pane with
+`herdr tab create --env AGENTBOARD_SEAT=<name>`; never set it to an empty value. The
+installer refuses an unmarked `[mcp_servers.agentboard]` table even with `--force`;
+review and remove or convert that entry by hand.
+
+From a herdr manager pane at its shell prompt, `start-agentboard-manager grok`
+starts Grok with `--trust --always-approve` and prompts `/agentboard-manager`.
+For a fresh tab, use:
+
+    herdr tab create --cwd "$REPO" --label grok
+    herdr pane list
+    herdr agent start grok --kind grok --pane "$PANE_GROK" -- --trust --always-approve
+    herdr agent prompt grok '/agentboard-manager focus: <purpose>' --wait
+
+Grok flags go after herdr's `--`. `--trust` loads project instructions and skills
+only for trusted folders; Grok scans the canonical `~/.agents/skills` directory.
+`--always-approve` prevents tool calls from waiting for an unattended prompt. For
+board tools, use `use_tool` with catalog keys such as `agentboard__task_add`; bare
+`task_add` is not a catalog key. Row waits use the CLI `agentboard wait` in the
+background; there is no MCP wait tool.
+
+Check setup with `grok inspect --json` (confirm `projectTrusted`, the skills
+`agentboard-team`, `agentboard-manager`, `agentboard-analyst`, `agentboard-coder`
+and `agentboard-reviewer`, and the MCP servers), `grok mcp list`, and
+`grok mcp doctor agentboard`. The doctor handshake and tool catalog are proven; a
+live session load is not. An optional headless read-only probe is:
+
+    grok -p 'list the board brief with the agentboard board_brief tool' --always-approve --max-turns 3
+
+Keep `agentboard-manager` as the slash entry point; do not add a Grok command with
+the same name as a skill. If a Grok pane looks idle, inspect its output for an
+approval prompt. Headless `-p` is for probes, not a seat. Avoid project-scoped
+`grok mcp add`, which writes one actor into shared repository configuration.

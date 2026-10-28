@@ -30,7 +30,7 @@ skills are left alone. Codex honours `CODEX_HOME`.
 | Claude Code | `agentboard-<seat>/SKILL.md` | `~/.claude/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `/agentboard-<seat> [focus]` |
 | Codex | `agentboard-<seat>/SKILL.md` | `$CODEX_HOME/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `$agentboard-<seat> [focus]` via `/skills` |
 | Hermes | `agentboard-<seat>/SKILL.md` | `~/.hermes/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `/agentboard-<seat> [focus]` |
-| Grok Build | `agentboard-manager/SKILL.md` (+ `grok.md`) | `~/.agents/skills/agentboard-manager` → canonical (no alias needed) | `/agentboard-manager [focus]` |
+| Grok Build | `agentboard-manager/SKILL.md` | `~/.agents/skills/agentboard-manager` → canonical (no alias needed) | `/agentboard-manager [focus]` |
 
 Grok scans `~/.agents/skills` itself, at every tier, so it needs no alias directory
 of its own; the seat entry points and the manual it shares all resolve through the
