@@ -92,7 +92,7 @@ herdr tab create --cwd "$REPO" --label analyst
 herdr pane list                                    # note the new tab's pane id
 
 # Claude seats (MCP config + preferred model + permission mode)
-# Analyst/reviewer are read-only on the tree: dontAsk refuses file/shell
+# Claude analyst/reviewer are read-only on the tree: dontAsk refuses file/shell
 # writes instead of auto-approving, and --allowedTools names the read tools it
 # still permits (without it the seat has no read tools). One command per Bash
 # call: under dontAsk a compound line (`cd ...; for ...`) is refused even when
@@ -120,6 +120,9 @@ herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   'Bash(readlink:*)' 'Bash(git status:*)' 'Bash(git log:*)' 'Bash(git diff:*)'
 
 # Codex seats (profile + preferred model)
+# Analyst's permission profile allows writes only in this scratch directory;
+# keep the pane rooted in the repository so it can read source files there.
+install -d -m 700 /tmp/agentboard/scratch
 herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
   -p analyst -m gpt-6-sol
 herdr agent start coder --kind codex --pane "$PANE_CODER" -- \

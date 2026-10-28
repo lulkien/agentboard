@@ -3,13 +3,10 @@
 # approval_policy never, so the seat never stops to ask a human; the base config
 # pre-approves every board tool, because "never" turns an unapproved tool into a
 # hard error instead of a prompt.
-# workspace-write, with the pane rooted in a scratch directory rather than the
-# checkout: writes are confined to the working directory plus /tmp, so a probe
-# fixture and the CLI's own session state work while the repository answers
-# read-only filesystem. Rooted in the repo this mode would hand the analyst the
-# tree.
+# The named permission profile keeps the checkout readable and limits writes to
+# /tmp/agentboard/scratch. The pane can stay rooted in the repository.
 approval_policy = "never"
-sandbox_mode = "workspace-write"
+default_permissions = "seat-scratch"
 developer_instructions = """
 Prefer MCP over shell for reading and searching: codebase-memory-mcp for symbols,
 callers and file outlines; git-mcp-rs for git reads; ferris-search for the web; the
@@ -19,6 +16,13 @@ fails, say which call failed and what you did instead.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "high"
+
+[permissions.seat-scratch.filesystem]
+":minimal" = "read"
+"/tmp/agentboard/scratch" = "write"
+
+[permissions.seat-scratch.filesystem.":workspace_roots"]
+"." = "read"
 
 [mcp_servers.git-mcp-rs]
 command = "git-mcp-rs"

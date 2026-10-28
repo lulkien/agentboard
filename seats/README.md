@@ -69,14 +69,16 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 
 ## Codex
 
-`approval_policy = "never"` and per-role `sandbox_mode`, with the per-tool
+`approval_policy = "never"` and per-role filesystem permissions, configured with
+`sandbox_mode` or a named permissions profile, plus per-tool
 `approval_mode = "approve"` in the base config. Under `never` a tool with no
 approval mode is a hard error, and so is a tool left on `auto`: a seat's board reads
 (`board_feed`, `board_brief`, `task_epic`) must be `approve`. The base lists every
 board tool.
 
-- analyst: `workspace-write`, opened in a scratch directory, so it reads the repo
-  and writes only its probe area.
+- analyst: the `seat-scratch` permission profile keeps the repository readable
+  and permits writes only under `/tmp/agentboard/scratch`; create that directory
+  with mode `700` before launching the seat, which stays rooted in the repository.
 - coder: `danger-full-access` with the shell on (owner correction 2026-10-23: builds
   and tests are this seat's job; prefer MCP for reading and searching).
 - manager: `workspace-write`.
