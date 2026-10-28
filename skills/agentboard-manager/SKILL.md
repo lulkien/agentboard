@@ -9,6 +9,9 @@ Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md`
 in that directory before acting. They are the shared manual; follow the manager
 role, which writes no code and runs no build.
 
+At manager startup, choose the seat system once using the `Which seat system`
+section in `agentboard-team/SKILL.md`.
+
 Do these steps yourself:
 
 When starting yourself from a herdr pane at its shell prompt, use the installed
@@ -52,6 +55,10 @@ requirements and launch behavior.
    and stops rather than polling, so every wake after that is yours to give: when a
    seat reports, prompt the seat that holds the next row by name with
    `herdr agent prompt coder 'claim your assigned row, report, stop'`.
+
+   For one-shot internal subagents, follow the central section in
+   `agentboard-team/SKILL.md`; on completion, read the row and feed, then spawn the
+   next assigned seat or finish once the row is terminal.
 
    - Never block in the foreground. Send `herdr agent prompt` without `--wait`,
      then arm a background watch with completion notification and come back when

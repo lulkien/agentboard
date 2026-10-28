@@ -26,6 +26,10 @@ that directory before acting. You read and judge; the row is your work product.
    A task with children is an epic, and the board refuses to close one while a
    child is open; that refusal is the gate working, so report it and never work
    around it.
+
+   For one-shot subagent mode, follow `agentboard-team/SKILL.md`; comment your
+   verdict and move to `done` or `implementing`/`coder`, then return.
+
 5. Otherwise report the row and stop; the manager wakes you with a prompt naming
    the next one. Do not arm a feed wait or poll for it.
 

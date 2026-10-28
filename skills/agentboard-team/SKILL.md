@@ -55,6 +55,16 @@ roles: they are the team's contract. What the board enforces is narrower — a s
 revision, a row held by someone else, a forced write with no reason — and each
 refusal is what makes a broken contract visible. `roles.md` has the detail.
 
+## Which seat system
+
+The manager checks `HERDR_ENV` once at startup to choose the seat workflow. When
+`HERDR_ENV=1`, the manager is inside herdr: use herdr tabs and panes, one per seat,
+with the agent kind the user specified. If the kind is not specified, ask; use
+the launch table's seat-specific model and effort defaults for Claude or Codex.
+When `HERDR_ENV=0` or unset, use host builtin subagents as one-shot seats, following
+the internal subagent section below. The launch and wake instructions for the
+herdr workflow remain as written.
+
 ## Launch a team (herdr, one agent per tab)
 
 One agent per tab. Never two agents as split panes of one tab: a tab is one seat's
@@ -187,6 +197,37 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   handoff after the wait starts and says `; handoff T27 to coder` on the first line.
 - A wait wakes the manager, not the seat. It reports that the row moved; no pane
   received a prompt. The seat that must act still needs a herdr prompt.
+
+## Internal subagent seats (when HERDR_ENV is not 1)
+
+This is the one-shot path for internal subagents; the herdr pane path above stays
+available for dedicated CLI seats. Give each subagent its seat name, task ID, the
+shared board directory, and that seat's entry skill. Spawning the subagent is the
+wake. It works one row and returns; its completion notice tells the manager to
+read the row and its feed, then spawn the next assigned seat or finish if the row
+is terminal. In this mode, do not create a herdr pane, wait on the board, poll, or
+keep a per-seat queue.
+
+The host session's agentboard MCP server keeps its configured actor, often
+`manager`. A subagent sharing that session must use the CLI for mutations with its
+own seat actor and the manager's board directory. This is the subagent exception
+to the general rule below to write through MCP:
+
+```bash
+agentboard --db DIR --actor coder comment ID --body "text"
+AGENTBOARD_DB=DIR AGENTBOARD_ACTOR=coder agentboard comment ID --body-file PATH
+AGENTBOARD_DB=DIR AGENTBOARD_ACTOR=coder agentboard comment ID --body-file -
+```
+
+`--body-file -` reads the comment from stdin. A positional comment body is not
+accepted. Reads may use the shared MCP server, but a full-text task lookup shows
+stored task fields only; it does not show comments. Before reviewing or resuming
+work, read the task's complete event history and coder evidence with the CLI feed,
+following the printed cursor while `more true`:
+
+```bash
+agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
+```
 
 ## Ten tools, same store as the CLI
 

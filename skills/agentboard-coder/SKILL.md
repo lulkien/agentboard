@@ -25,6 +25,11 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    assigns it to the SEAT name (`coder`); when your MCP server runs as another actor,
    that handoff refuses with `task is held by coder` - pass `force` and a
    `reason` naming the seat mapping instead of asking the reviewer to reassign.
+
+   For one-shot subagent mode, follow `agentboard-team/SKILL.md`; comment exact
+   proof and move to `reviewing`/`reviewer` (or `done` if no reviewer is named),
+   then return.
+
 6. A missing requirement is not a guess: comment one narrow question,
    `task_update` the status to `blocked`, then stop and report; the manager brings
    the answer back.

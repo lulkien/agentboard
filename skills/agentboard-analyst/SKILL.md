@@ -23,6 +23,10 @@ before acting.
    with the plan in the comment you just wrote. That event carries recipient
    `coder`, which names the next seat; nothing in the board wakes it, so the
    manager prompts it.
+
+   In one-shot subagent mode, follow `agentboard-team/SKILL.md`; comment your plan,
+   hand the row to `implementing`/`coder`, then return.
+
 6. Report the row and stop; the manager wakes you with a prompt naming the next
    one. Do not arm a feed wait or poll for it.
 
