@@ -211,6 +211,22 @@ read the row and its feed, then spawn the next assigned seat or finish if the ro
 is terminal. In this mode, do not create a herdr pane, wait on the board, poll, or
 keep a per-seat queue.
 
+Supervise the subagents in prose; the binary adds no lease, heartbeat, stuck
+timeout or auto-retry.
+
+- Spawn each seat with the launch table's model and effort (the Agent call's
+  `model`/`effort` for Claude; the documented profile and model for Codex).
+- Spawn a fresh subagent on every wake. The row is the whole scope: no pasted
+  chat history.
+- Judge stalls by side effects: `board_agents` last activity, the row's feed, and
+  `git status`. Pane or transcript text alone is not evidence. Account for every
+  seat you spawned.
+- If a subagent returns and the row did not move and carries no handoff comment,
+  comment a failure note on the row (what you saw, the likely cause) and retry by
+  cause: the same brief after a drop, a narrower row after a context limit,
+  another model after a tool error. After 2 retries set the row `blocked` with
+  the question for the human.
+
 The host session's agentboard MCP server keeps its configured actor, often
 `manager`. A subagent sharing that session must use the CLI for mutations with its
 own seat actor and the manager's board directory. This is the subagent exception

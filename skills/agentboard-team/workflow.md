@@ -46,8 +46,11 @@ The names `in_progress` and `review` are still accepted as input and read as
 ## The loop
 
 1. Manager files one row per unit of work: `task_add` with a title, a `description`
-   (context), a `goal` (the command and the output that proves it), and an
-   assignee when the owner is known.
+   (context, plus the paths the seat may touch and the paths or actions it must
+   not), a `goal` (the command and the output line that proves it), and an
+   assignee when the owner is known. If the evidence cannot be named yet, the row
+   does not go to the coder: it goes to the analyst (`planning`) or stays with the
+   manager until the goal is falsifiable.
 2. The seat claims it: `task_claim(id)`. The row now reads `implementing` and that
    seat's name.
 3. The seat works, then comments what it changed and what it verified. Comments are
@@ -122,6 +125,11 @@ Follow-ups: <optional>
   `Commit` naming the SHA, or the uncommitted paths, it judged. A verdict holds for
   that tree only: a reopen followed by new edits voids it, and the next review
   judges and names the new tree.
+- Reviewer `Status` maps to the move: `done` closes the row, `partial` reopens it
+  to `implementing`/`coder`, `blocked` is a blocker that needs the human or the
+  manager.
+- A reviewer runs nothing, so its `Verified` is `not-verified` and names the
+  coder's level it accepted, for example `not-verified (accepted coder ran-goal)`.
 - An analyst's plan comment is not a handoff of finished work. It lists `Files`,
   `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
   line that proves it).

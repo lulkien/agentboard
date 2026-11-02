@@ -27,6 +27,9 @@ that directory before acting. You read and judge; the row is your work product.
    Write the verdict in the handoff shape from `workflow.md` (Evidence), with
    `Commit:` naming the SHA, or the uncommitted paths, you judged. A reopen plus
    new edits voids that verdict; the next review judges the new tree and names it.
+   `Status` is `done` (close), `partial` (reopen) or `blocked` (needs the human or
+   manager); `Verified` is `not-verified (accepted coder <level>)`, since you run
+   nothing.
    A task with children is an epic, and the board refuses to close one while a
    child is open; that refusal is the gate working, so report it and never work
    around it.

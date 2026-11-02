@@ -31,8 +31,11 @@ requirements and launch behavior.
    `seats/README.md`); configure its agentboard actor as `manager`. The launcher
    starts Hermes with `--yolo` and sends `/agentboard-manager` through herdr.
 3. File one row per unit of work with MCP `task_add`: title, `description`
-   (context), `goal` (the command and the output that proves it), and `assignee`
-   when the owner is known. File a row only when you can hand it to a seat.
+   (context, plus the paths the seat may touch and the paths or actions it must
+   not), `goal` (the command and the output line that proves it), and `assignee`
+   when the owner is known. File a row only when you can hand it to a seat. If the
+   evidence cannot be named yet, do not hand the row to the coder: assign the
+   analyst (`planning`) or keep it yourself until the goal is falsifiable.
    Before you hand out a row the human names, `task_get` it. If it is `done` or
    `canceled`:
    - Same objective: reopen and assign in one write,
@@ -53,7 +56,9 @@ requirements and launch behavior.
 
    For one-shot internal subagents, follow the central section in
    `agentboard-team/SKILL.md`; on completion, read the row and feed, then spawn the
-   next assigned seat or finish once the row is terminal.
+   next assigned seat or finish once the row is terminal. That section also holds
+   the per-seat model, fresh-per-wake, failure-note/retry and stall rules; apply
+   them when you judge a returned subagent.
 
    - Never block in the foreground. Send `herdr agent prompt` without `--wait`,
      then arm a background watch with completion notification and come back when
