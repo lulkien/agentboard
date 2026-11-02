@@ -55,3 +55,6 @@ board_feed = { approval_mode = "approve" }   # read board events
 board_brief = { approval_mode = "approve" }  # show active work and status counts
 board_agents = { approval_mode = "approve" } # list registered actors
 
+[notice]
+hide_rate_limit_model_nudge = true
+

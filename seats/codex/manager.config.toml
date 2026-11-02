@@ -4,8 +4,8 @@
 # pre-approves every board tool.
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
-model = "gpt-6-luna"
-model_reasoning_effort = "high"
+model = "gpt-6-sol"
+model_reasoning_effort = "medium"
 developer_instructions = """
 Prefer MCP over shell for reading and searching: codebase-memory-mcp for symbols,
 callers and file outlines; git-mcp-rs for git reads; ferris-search for the web; the
