@@ -224,8 +224,10 @@ timeout or auto-retry.
 - If a subagent returns and the row did not move and carries no handoff comment,
   comment a failure note on the row (what you saw, the likely cause) and retry by
   cause: the same brief after a drop, a narrower row after a context limit,
-  another model after a tool error. After 2 retries set the row `blocked` with
-  the question for the human.
+  another model after a tool error ("another model" is the other kind's row of
+  the launch table). After 2 retries set the row `blocked` with the question for
+  the human, using `force` and the retry history as the `reason`: a plain status
+  write refuses while the seat still holds the row.
 
 The host session's agentboard MCP server keeps its configured actor, often
 `manager`. A subagent sharing that session must use the CLI for mutations with its
@@ -326,3 +328,9 @@ agentboard update 12 --if-revision 3 --assignee coder-2 --force --reason quota
 The displaced holder's field writes refuse and its comments still land. Stop or
 isolate the old process before the replacement edits the same working tree, and
 tell the replacement which artifact to resume from.
+
+A seat that must stop before its handoff comments a resume note first: state, what
+is verified, next step, uncommitted paths, and what a replacement must not redo.
+A replacement reads `board_feed(task=ID, after="0", full=true)` (CLI `feed --task
+ID --after 0 --full`) before acting and does not redo steps already marked
+verified.

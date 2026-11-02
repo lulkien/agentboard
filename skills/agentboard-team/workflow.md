@@ -139,3 +139,11 @@ Follow-ups: <optional>
 When a holder disappears, the manager reassigns with `force` and a reason, and the
 row keeps its comments so the replacement can resume. See the manual's handoff
 section for the exact call.
+
+A seat that must stop before its handoff (quota, compaction, told to stop) first
+comments a resume note on the row: the state, what is verified, the next step, the
+uncommitted paths, and anything a replacement must not redo.
+
+A replacement, or a fresh wake on the same row, reads
+`board_feed(task=<id>, after="0", full=true)` first and does not redo a step the
+resume note or the feed marks verified.
