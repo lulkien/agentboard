@@ -84,7 +84,7 @@ effort. Swap the id only when the human names a different model.
 | --- | --- | --- |
 | analyst | `--model claude-opus-5-5 --effort high` | `-m gpt-6-sol` (profile: high) |
 | coder | `--model claude-sonnet-5-5 --effort medium` | `-m gpt-6-luna` (profile: medium) |
-| reviewer | `--model claude-opus-5-5 --effort high` | `-m gpt-6-sol` (profile: high) |
+| reviewer | `--model claude-opus-5-5 --effort high` | `-m gpt-6-luna` (profile: high) |
 
 ```bash
 export REPO=/path/to/repo
@@ -128,7 +128,7 @@ herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
 herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
   -p coder -m gpt-6-luna
 herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
-  -p reviewer -m gpt-6-sol
+  -p reviewer -m gpt-6-luna
 
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude,
 # Hermes and Grok; $agentboard-<seat> T<id> for Codex.
