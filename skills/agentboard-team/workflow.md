@@ -104,6 +104,28 @@ A missing requirement is not a guess:
 the line it printed in a comment, in the same call that moves the status when the
 tool allows a comment. A claim without evidence is a reopened row later.
 
+Every handoff and verdict comment uses one shape, one field per line:
+
+```text
+Status: done | partial | blocked
+Commit: <SHA>, or uncommitted: <paths>
+Changed: <files>
+Evidence: <command> -> <the line it printed>
+Verified: ran-goal | targeted-test | build-only | not-verified
+Follow-ups: <optional>
+```
+
+- `Verified` says how far the proof went: `ran-goal` is the goal's own command,
+  `targeted-test` a narrower check, `build-only` a compile with no behavioural
+  check, `not-verified` nothing ran. Anything but `ran-goal` states why.
+- A reviewer's verdict uses the same shape with `Status` read as its judgement and
+  `Commit` naming the SHA, or the uncommitted paths, it judged. A verdict holds for
+  that tree only: a reopen followed by new edits voids it, and the next review
+  judges and names the new tree.
+- An analyst's plan comment is not a handoff of finished work. It lists `Files`,
+  `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
+  line that proves it).
+
 ## Quota
 
 When a holder disappears, the manager reassigns with `force` and a reason, and the

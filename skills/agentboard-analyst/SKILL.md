@@ -17,8 +17,10 @@ before acting.
    `planning` and held by `analyst`; otherwise report that and stop for the manager.
 3. Read the code the row names. Plan at file, function and behaviour level: what
    changes, what must not change, and the command that will prove it.
-4. Put the plan on the row with `task_comment(id, body=...)`. A plan in a file or
-   in a chat message is invisible to the seat that implements it.
+4. Put the plan on the row with `task_comment(id, body=...)`, as `Files`,
+   `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
+   line that proves it). A plan in a file or in a chat message is invisible to the
+   seat that implements it.
 5. Hand the row to the coder: `task_update(id, if_revision, status="implementing", assignee="coder")`,
    with the plan in the comment you just wrote. That event carries recipient
    `coder`, which names the next seat; nothing in the board wakes it, so the

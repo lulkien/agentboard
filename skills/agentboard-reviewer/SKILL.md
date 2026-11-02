@@ -14,15 +14,19 @@ that directory before acting. You read and judge; the row is your work product.
 2. Read it with `task_get(id, full=true)` for the goal and `board_feed(task=<id>,
    full=true)` for the comments, then read the tree and the diff the row names. You
    run nothing: judge from the command output the coder pasted on the row. A claim
-   with no output is not evidence; make that a blocker. Uncommitted work shows in git
-   as deletions plus untracked files, so read the new files directly and compare
-   them with `git show HEAD:<old path>`.
+   with no output is not evidence; make that a blocker. The coder's comment carries
+   `Commit:`; judge that SHA, or the named uncommitted paths. Uncommitted work shows
+   in git as deletions plus untracked files, so read the new files directly and
+   compare them with `git show HEAD:<old path>`.
 3. Comment the findings on the same row, each classified blocker, follow-up or
    nit, with `file:line` or the command that shows it. A finding without evidence
    is a doubt, not a finding.
 4. Close when the goal is proved: `task_update(id, if_revision, status="done")`
    with the evidence comment. Reopen when it is not: `task_update(id,
    if_revision, status="implementing", assignee="coder")` plus the findings.
+   Write the verdict in the handoff shape from `workflow.md` (Evidence), with
+   `Commit:` naming the SHA, or the uncommitted paths, you judged. A reopen plus
+   new edits voids that verdict; the next review judges the new tree and names it.
    A task with children is an epic, and the board refuses to close one while a
    child is open; that refusal is the gate working, so report it and never work
    around it.

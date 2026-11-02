@@ -16,8 +16,11 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    spec; do not widen it, and do not start a second row.
 3. Work only that row and only the files it names, then run the checks its goal
    names and keep the real output.
-4. Comment what changed and the exact command output that proves it:
-   `task_comment(id, body=...)`.
+4. Comment what changed and the exact command output that proves it, in the
+   handoff shape from `workflow.md` (Evidence): `Status`, `Commit` (SHA, or
+   `uncommitted: <paths>`), `Changed`, `Evidence` (`command -> the line it
+   printed`), `Verified` (`ran-goal`, `targeted-test`, `build-only` or
+   `not-verified`) and optional `Follow-ups`: `task_comment(id, body=...)`.
 5. Hand it to review: `task_update(id, if_revision, status="reviewing",
    assignee="reviewer")`. That event carries recipient `reviewer`; no process is
    woken, so the manager prompts the reviewer.
