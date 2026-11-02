@@ -145,6 +145,22 @@ open overlay) goes unnoticed. The manager's later wake prompts go without `--wai
 (it never blocks) and are checked with `herdr agent read <seat> --lines 40`. If a prompt does not turn the
 agent busy, read the pane: `herdr agent read coder --lines 40`.
 
+## Harness map
+
+An index to what is documented elsewhere, not a second copy of it. Flags are in the
+launch table above; install, cards and permissions are in `seats/README.md`.
+
+| Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
+| --- | --- | --- | --- | --- | --- |
+| Claude | all four | `herdr agent start <seat> --kind claude`, manager via `start-agentboard-manager claude` | `~/.claude/<seat>-mcp.json` via `--mcp-config` | analyst/reviewer `dontAsk` plus `--allowedTools`; coder bypass | `/agentboard-<seat>` |
+| Codex | all four | `herdr agent start <seat> --kind codex -- -p <seat>`, manager via `start-agentboard-manager codex` | `codex -p <seat>` loads `<seat>.config.toml` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
+| Grok | manager only | `start-agentboard-manager grok` | `${AGENTBOARD_SEAT:-manager}` in `~/.grok/config.toml` | `--trust --always-approve` | `/agentboard-manager` |
+| Hermes | manager only | `start-agentboard-manager hermes` | `~/.hermes/config.yaml` server entry with actor `manager` | launcher passes `--yolo` | `/agentboard-manager` |
+| Internal subagent | any seat, one-shot | the host's Agent call, when `HERDR_ENV` is not 1 | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
+
+Model and effort per seat come from the launch table for every client. Skills are
+one physical copy under `~/.agents/skills`, linked into each client.
+
 ## Register a seat's MCP server
 
 The seat's board name is not a herdr concept: the MCP server carries it. Register
@@ -332,5 +348,5 @@ tell the replacement which artifact to resume from.
 A seat that must stop before its handoff comments a resume note first: state, what
 is verified, next step, uncommitted paths, and what a replacement must not redo.
 A replacement reads `board_feed(task=ID, after="0", full=true)` (CLI `feed --task
-ID --after 0 --full`) before acting and does not redo steps already marked
-verified.
+ID --after 0 --full`) before acting, follows the printed cursor while `more` is
+true, and does not redo steps already marked verified.

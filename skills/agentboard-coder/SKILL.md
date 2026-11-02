@@ -36,12 +36,12 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
 6. A missing requirement is not a guess: comment one narrow question,
    `task_update` the status to `blocked`, then stop and report; the manager brings
    the answer back.
-   If you must stop before the handoff (quota, compaction, told to stop), comment
+7. If you must stop before the handoff (quota, compaction, told to stop), comment
    a resume note first: state, what is verified, next step, uncommitted paths, and
    what a replacement must not redo. When you resume or replace another seat on
-   a row, read `board_feed(task=<id>, after="0", full=true)` first and do not redo
-   verified steps.
-7. Report the row and stop; the manager wakes you with a prompt naming the next
+   a row, read `board_feed(task=<id>, after="0", full=true)` first, follow the
+   printed cursor while `more` is true, and do not redo verified steps.
+8. Report the row and stop; the manager wakes you with a prompt naming the next
    one. With no work you do not poll the board and do not arm a feed wait.
 
 Never push. Commit only when the row or the owner says so, and leave the tree

@@ -145,5 +145,6 @@ comments a resume note on the row: the state, what is verified, the next step, t
 uncommitted paths, and anything a replacement must not redo.
 
 A replacement, or a fresh wake on the same row, reads
-`board_feed(task=<id>, after="0", full=true)` first and does not redo a step the
-resume note or the feed marks verified.
+`board_feed(task=<id>, after="0", full=true)` first, follows the printed cursor
+while `more` is true so it never resumes from a truncated history, and does not
+redo a step the resume note or the feed marks verified.
