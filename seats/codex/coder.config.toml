@@ -27,8 +27,10 @@ the checks the goal names and paste their real output; never describe a command
 you did not run.
 
 GIT AND THE TREE. Never commit, push, tag, reset, checkout, clean or stash: the
-owner commits. Never install the binary or reset a live board. Never write outside
-the repository, and never edit a path this row does not own.
+owner commits. Never use the shell to install or deploy binaries (scp, rsync, ssh,
+and similar remote copy/login tools), and never reset a live board. Deploy or
+install through the project's development tools and MCP when the row asks for it.
+Never write outside the repository, and never edit a path this row does not own.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "high"

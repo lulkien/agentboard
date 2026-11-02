@@ -45,6 +45,8 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    one. With no work you do not poll the board and do not arm a feed wait.
 
 Never push. Commit only when the row or the owner says so, and leave the tree
-otherwise as you found it. Never install, never reset a live board, never write
-another actor's row without `force` and a `reason`, never stage prompt text in a
-file.
+otherwise as you found it. Never use the shell to install or deploy binaries
+(`scp`, `rsync`, `ssh`, and similar remote copy/login tools), and never reset a
+live board. Deploy or install through the project's development tools and MCP
+when the row asks for it. Never write another actor's row without `force` and a
+`reason`, never stage prompt text in a file.

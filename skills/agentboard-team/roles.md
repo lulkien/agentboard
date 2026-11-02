@@ -32,11 +32,15 @@ May:
 - `task_comment` progress, decisions and evidence
 - `task_update` its own row: status, fields, and the handoff to review
 - run builds, tests and board probes inside the repo the task names
+- deploy or install through the project's development tools and MCP when the row
+  asks for it
 
 Never:
 - write to another actor's row without `force`+`reason`
 - close its own row when the task names a reviewer
-- install, push, or reset a live board
+- push, or reset a live board
+- use the shell to install or deploy binaries (`scp`, `rsync`, `ssh`, and similar
+  remote copy/login tools)
 - stage prompt text in files
 
 ## Reviewer
