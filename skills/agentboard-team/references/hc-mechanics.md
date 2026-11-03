@@ -40,19 +40,19 @@ starts is addressable.
 
 ```bash
 hc wait coder                                               # until it reports; before then it is working
-hc send --if idle --wait coder '/agentboard-coder T<id>'   # Codex: '$agentboard-coder T<id>'
+hc send --wait coder '/agentboard-coder T<id>'   # Codex: '$agentboard-coder T<id>'
 hc read --lines 40 coder                                   # screen plus history
 hc get coder                                               # state, status, exit_code
 hc ls                                                      # the roster
 ```
 
-A terminal that has not reported yet is working, so `hc send --if idle` to a booting
-seat is refused with exit 10 `status_mismatch`: nothing is typed and the seat never
-wakes. Wait first. A `started:false` reply is a different outcome: the text went in
+A terminal that has not reported yet is working, so `hc wait <seat>` before the first
+send. A `started:false` reply is a different outcome: the text went in
 and the program did not start working.
 
-`hc send --if idle` refuses any terminal that is not exactly idle, a seat that is
-mid-turn included: queue its row and prompt it later. `--force` overrides a `blocked`
+Plain `hc send` waits for the program to pause, which is what keeps a live turn from
+being interrupted. Do not use `--if idle`: it accepts only `idle` or `working`, and a
+seat that finished a turn reports `done`, so it is refused with exit 10. `--force` overrides a `blocked`
 terminal (exit 9 otherwise) and is not a manager verb: a blocked seat waits on a
 person, so read the screen and ask.
 

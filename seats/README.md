@@ -26,15 +26,29 @@ destinations. A full install also links `seats/start-agentboard-manager` to
 `~/.local/bin/start-agentboard-manager`; `--grok-only` manages only the Grok MCP
 block and does not install the launcher.
 
-## Start the manager in the current terminal
+## Start the manager in the current pane or terminal
 
-From an hc terminal at its shell prompt, run:
+From a herdr pane or an hc terminal at its shell prompt, run:
 
     start-agentboard-manager {claude|codex|grok}
 
+The launcher picks by environment: herdr when `HERDR_ENV=1` (it wins when both
+worlds are present), else hc when any `HC_*` variable is set, else it refuses and
+starts nothing.
+
+### herdr
+
+The command renames the current tab to `manager`, then waits in the background
+until the pane returns to its shell prompt before starting the selected manager
+with `herdr agent start`. It requires `HERDR_ENV=1`, `HERDR_PANE_ID`, `HERDR_TAB_ID`, `herdr`,
+`jq` and `setsid`. Start details and the Grok first prompt are recorded in
+`${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`.
+
+### hc
+
 The command starts the selected manager as a new hc terminal named `manager` in
 the current directory, then prints `manager <address>`. It requires
-`HC_TERMINAL_ID` (set inside hc), `hc` and `jq`; it needs no window and never calls
+an `HC_*` variable (set inside hc), `hc` and `jq`; it needs no window and never calls
 `herdr-app`. Grok cannot take its entry prompt in argv, so the launcher waits for
 that terminal and sends `/agentboard-manager`; a reply that is refused or not
 started is written to `${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log` and is
@@ -105,8 +119,9 @@ file. `analyst-mcp.json`, `coder-mcp.json`, `manager-mcp.json` and
 into `~/.grok/config.toml`. The command is the portable `agentboard` and must be on
 the PATH Grok inherits. Its actor comes from `${AGENTBOARD_SEAT:-manager}`: unset
 uses `manager`, and a supplied value passes through unchanged. Never set
-`AGENTBOARD_SEAT` to an empty string. Grok is manager-only; a second manager name
-rides the argv of its own terminal, because `hc run` has no environment flag:
+`AGENTBOARD_SEAT` to an empty string. Grok is manager-only. In herdr, name a second manager's pane with
+`herdr tab create --env AGENTBOARD_SEAT=<name>`. In hc the name rides the argv of
+its own terminal, because `hc run` has no environment flag:
 
     hc run --bg --name manager-2 -- env AGENTBOARD_SEAT=<name> grok --trust --always-approve
 
@@ -124,7 +139,7 @@ the handshake and lists the tool catalog. A real session load has not been prove
 A Grok seat needs
 `--trust` (project `AGENTS.md` and project skills load only in a trusted folder) and
 `--always-approve` (otherwise a tool call waits on a prompt nobody is watching); both
-come after the `--` that ends `hc run`'s own options.
+go after herdr's `--` or the `--` that ends `hc run`'s own options.
 `skills/agentboard-manager/SKILL.md` carries the full launch recipe.
 
 ## Verified or not

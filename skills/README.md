@@ -1,7 +1,7 @@
 # skills
 
 `agentboard-team/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`,
-plus `references/hc-mechanics.md`). The four seat directories are one-page entry
+plus `references/herdr-mechanics.md` and `references/hc-mechanics.md`). The four seat directories are one-page entry
 points: `agentboard-manager/`, `agentboard-analyst/`, `agentboard-coder/`,
 `agentboard-reviewer/`. Each confirms the seat's
 board name, names what it may run on the board and what it never does, and ends by

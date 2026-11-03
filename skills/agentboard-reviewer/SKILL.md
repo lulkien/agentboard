@@ -40,6 +40,14 @@ that directory before acting. You read and judge; the row is your work product.
 5. Otherwise report the row and stop; the manager wakes you with a prompt naming
    the next one. Do not arm a feed wait or poll for it.
 
+## Unnecessary or verbose comments are defects
+
+An unnecessary comment restates its row, repeats what the diff shows, pads Evidence
+with narration, or is longer than the facts it carries. Name it in the verdict with
+the existing scheme: a handoff or evidence comment whose length buries or blurs the
+claimed fact is a blocker; padding that hides no fact is a follow-up. Your own
+verdict obeys the same rule: one field per line, no restatement, no narration.
+
 ## Seats that share one actor name
 
 When two seats write as the same actor (a seat re-staffed onto another client keeps

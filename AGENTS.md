@@ -19,7 +19,7 @@ Keep the loop in three parts, and keep each part small.
   row a dead holder left comes back. The board never schedules work, dispatches
   it, or wakes anybody.
 - The manager is the only wake. It reads the board, blocks on the rows it cares
-  about, and prompts the next seat by name with `hc`, outside this binary.
+  about, and prompts the next seat by name with `herdr` or `hc`, outside this binary.
 - A seat does one row, reports it, and stops. It does not poll for its next row.
 
 Do not add delivery, a lease, a scheduler or a per-seat queue. Each one makes the
@@ -45,10 +45,10 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/seats-install.sh` | `221/221 passed (seats installer)` (isolated homes; no board writes) |
-| `bash tests/start-agentboard-manager.sh` | `26/26 passed (manager launcher)` (stub `hc`; no live terminal) |
+| `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 13 pages, 103 CLI names, 124 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 104 CLI names, 126 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 13 gates passed`; with `--full` `GATES OK: 14 gates passed` |
 | `bash scripts/gate.sh --features dashboard` | `GATES OK: 15 gates passed` |

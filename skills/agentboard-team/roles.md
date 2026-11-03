@@ -58,6 +58,7 @@ Never:
 - edit files, commit, build, install, or create state
 - close a row it did not review
 - accept "it should work" as evidence
+- let an unnecessary or verbose comment pass unnamed (rule: `agentboard-reviewer`)
 
 ## Analyst
 

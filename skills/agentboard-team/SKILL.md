@@ -52,15 +52,97 @@ refusal is what makes a broken contract visible. `roles.md` has the detail.
 
 ## Which seat system
 
-The platform answers this, and the manager reads it once at startup. `HC_TERMINAL_ID`
-is exported inside an hc terminal and unset outside one. When it is set, the manager
-is inside hc: each seat becomes its own named terminal, with the agent kind the user
-specified. If the kind is not specified, ask; use the launch table's seat-specific
-model and effort defaults for Claude or Codex. When `HC_TERMINAL_ID` is unset, use
-host builtin subagents as one-shot seats, following the internal subagent section
-below. No variable of our own chooses the seat system, and `herdr-app status` only
-says whether the person's window is open — a question for watching, not for picking
-a workflow.
+The platform answers this, and the manager reads it once at startup, in this order:
+
+1. `HERDR_ENV=1`: the manager is inside herdr. Use herdr tabs and panes, one agent
+   per tab.
+2. Else any `HC_*` variable is set: the manager is inside hc. Each seat becomes its own
+   named terminal.
+3. Else use host builtin subagents as one-shot seats, following the internal
+   subagent section below.
+
+In herdr or hc, use the agent kind the user specified. If the kind is not
+specified, ask; use the launch table's seat-specific model and effort defaults for
+Claude or Codex. No variable of our own chooses the seat system, and `herdr-app
+status` only says whether the person's window is open — a question for watching,
+not for picking a workflow.
+
+## Launch a team (herdr, one agent per tab)
+
+One agent per tab. Never two agents as split panes of one tab: a tab is one seat's
+workspace, and a split puts two agents on one screen and one set of keys. The
+manager keeps its own tab; every worker gets a fresh tab.
+
+To start the manager in the current herdr pane, run the installed
+`start-agentboard-manager claude|codex|grok` helper from its shell prompt. It
+renames that tab to `manager`, waits until the prompt is ready, and starts the
+selected manager; `seats/README.md` documents its setup and prerequisites.
+
+Analyst and reviewer judge, so they use the stronger model at high effort; the
+coder executes their guidance, so that seat uses the cheaper model at medium
+effort. Swap the id only when the human names a different model.
+
+| Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
+| --- | --- | --- |
+| analyst | `--model claude-opus-5-5 --effort high` | `-m gpt-6-sol` (profile: high) |
+| coder | `--model claude-sonnet-5-5 --effort medium` | `-m gpt-6-luna` (profile: medium) |
+| reviewer | `--model claude-opus-5-5 --effort high` | `-m gpt-6-luna` (profile: high) |
+
+```bash
+export REPO=/path/to/repo
+herdr tab create --cwd "$REPO" --label analyst
+herdr pane list                                    # note the new tab's pane id
+
+# Claude seats (MCP config + preferred model + permission mode)
+# Analyst and reviewer skip permission prompts and deny the four file-mutation
+# tools, so they read and run the shell but cannot edit. The coder denies nothing:
+# it edits and runs the gate.
+herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
+  --model claude-opus-5-5 \
+  --effort high \
+  --mcp-config ~/.claude/analyst-mcp.json \
+  --dangerously-skip-permissions \
+  --disallowedTools Edit Write MultiEdit NotebookEdit
+herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
+  --model claude-sonnet-5-5 \
+  --effort medium \
+  --mcp-config ~/.claude/coder-mcp.json \
+  --dangerously-skip-permissions
+herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
+  --model claude-opus-5-5 \
+  --effort high \
+  --mcp-config ~/.claude/reviewer-mcp.json \
+  --dangerously-skip-permissions \
+  --disallowedTools Edit Write MultiEdit NotebookEdit
+
+# Codex seats (profile + preferred model)
+# Analyst's permission profile allows writes only in this scratch directory;
+# keep the pane rooted in the repository so it can read source files there.
+install -d -m 700 /tmp/agentboard/scratch
+herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
+  -p analyst -m gpt-6-sol
+herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
+  -p coder -m gpt-6-luna
+herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
+  -p reviewer -m gpt-6-luna
+
+# First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
+# and Grok; $agentboard-<seat> T<id> for Codex.
+herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
+herdr agent prompt coder '$agentboard-coder T<id>' --wait   # Codex seat
+```
+
+Start only the seats the work needs: a reviewer with nothing to review is a tab
+that idles. Pick one kind per team; do not mix Claude and Codex rows of the table
+in one launch unless the human asks.
+
+The deny list removes the four file-mutation tools only; the shell stays open, and
+the seat's own rules (never commit, build or install) are what cover it.
+
+A launch prompt uses `--wait` for proof it landed; without it a stalled prompt (an
+open overlay) goes unnoticed. The manager's later wake prompts go without `--wait`
+(it never blocks) and are checked with `herdr agent read <seat> --lines 40`. If a
+prompt does not turn the agent busy, read the pane: `herdr agent read coder --lines 40`.
 
 ## Launch a team (hc, one terminal per seat)
 
@@ -87,19 +169,15 @@ effort. Swap the id only when the human names a different model.
 export REPO=/path/to/repo
 
 # Claude seats (MCP config + preferred model + permission mode)
-# Claude analyst/reviewer are read-only on the tree: dontAsk refuses file/shell
-# writes instead of auto-approving, and --allowedTools names the read tools it
-# still permits (without it the seat has no read tools). One command per Bash
-# call: under dontAsk a compound line (`cd ...; for ...`) is refused even when
-# each verb is allowed. Coder needs unattended shell/tests → bypass.
+# Analyst and reviewer skip permission prompts and deny the four file-mutation
+# tools, so they read and run the shell but cannot edit. The coder denies nothing:
+# it edits and runs the gate.
 hc run --bg --name analyst --cwd "$REPO" -- \
   claude --model claude-opus-5-5 \
   --effort high \
   --mcp-config ~/.claude/analyst-mcp.json \
-  --permission-mode dontAsk \
-  --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
-  mcp__ferris-search Read Glob Grep LS 'Bash(rg:*)' 'Bash(find:*)' 'Bash(ls:*)' \
-  'Bash(readlink:*)' 'Bash(git status:*)' 'Bash(git log:*)' 'Bash(git diff:*)'
+  --dangerously-skip-permissions \
+  --disallowedTools Edit Write MultiEdit NotebookEdit
 hc run --bg --name coder --cwd "$REPO" -- \
   claude --model claude-sonnet-5-5 \
   --effort medium \
@@ -109,10 +187,8 @@ hc run --bg --name reviewer --cwd "$REPO" -- \
   claude --model claude-opus-5-5 \
   --effort high \
   --mcp-config ~/.claude/reviewer-mcp.json \
-  --permission-mode dontAsk \
-  --allowedTools mcp__agentboard mcp__codebase-memory-mcp mcp__git-mcp-rs \
-  mcp__ferris-search Read Glob Grep LS 'Bash(rg:*)' 'Bash(find:*)' 'Bash(ls:*)' \
-  'Bash(readlink:*)' 'Bash(git status:*)' 'Bash(git log:*)' 'Bash(git diff:*)'
+  --dangerously-skip-permissions \
+  --disallowedTools Edit Write MultiEdit NotebookEdit
 
 # Codex seats (profile + preferred model). --no-daemon is mandatory: without it the
 # seat's own commands run outside hc and nothing it starts is addressable.
@@ -128,17 +204,22 @@ hc run --bg --name reviewer --cwd "$REPO" -- codex --no-daemon -p reviewer -m gp
 hc wait analyst
 hc wait coder
 hc wait reviewer
-hc send --if idle --wait analyst '/agentboard-analyst T<id>'
-hc send --if idle --wait coder '$agentboard-coder T<id>'   # Codex seat
+hc send --wait analyst '/agentboard-analyst T<id>'
+hc send --wait coder '$agentboard-coder T<id>'   # Codex seat
 ```
 
 Start only the seats the work needs: a reviewer with nothing to review is a
 terminal that idles. Pick one kind per team; do not mix Claude and Codex rows of the
 table in one launch unless the human asks.
 
-A seat counts as working until it reports, so `hc send --if idle` to a booting seat
-is refused with exit 10 `status_mismatch`: nothing is typed and the seat never wakes.
-`hc wait <seat>` first, then send with `--if idle --wait`, as proof it landed. A
+The deny list removes the four file-mutation tools only; the shell stays open, and
+the seat's own rules (never commit, build or install) are what cover it.
+
+Wake every seat with a plain `hc send`, never `--if idle`: it accepts only `idle` or
+`working`, and a seat that finished a turn reports `done`, so it is refused with exit
+10 and nothing is typed. Plain `hc send` waits for the program to pause, which is what
+keeps a live turn from being interrupted. `hc wait <seat>` first on a booting seat,
+then send with `--wait`, as proof it landed. A
 `started:false` reply is the other case: the text went in and the program did not
 start working. The manager's later wake prompts go without `--wait` (it never
 blocks) and are checked with `hc read --lines 40 <seat>`. If a prompt does not turn
@@ -156,17 +237,17 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all four | `hc run --bg --name <seat> -- claude`, manager via `start-agentboard-manager claude` | `~/.claude/<seat>-mcp.json` via `--mcp-config` | analyst/reviewer `dontAsk` plus `--allowedTools`; coder bypass | `/agentboard-<seat>` |
-| Codex | all four | `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`, manager via `start-agentboard-manager codex` | `codex -p <seat>` loads `<seat>.config.toml` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
-| Grok | manager only | `start-agentboard-manager grok` | `${AGENTBOARD_SEAT:-manager}` in `~/.grok/config.toml` | `--trust --always-approve` | `/agentboard-manager` |
-| Internal subagent | any seat, one-shot | the host's Agent call, when `HC_TERMINAL_ID` is unset | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
+| Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config` | bypass; analyst/reviewer add a four-tool edit deny list | `/agentboard-<seat>` |
+| Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
+| Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `${AGENTBOARD_SEAT:-manager}` in `~/.grok/config.toml` | `--trust --always-approve` | `/agentboard-manager` |
+| Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
 Model and effort per seat come from the launch table for every client. Skills are
 one physical copy under `~/.agents/skills`, linked into each client.
 
 ## Register a seat's MCP server
 
-The seat's board name is not an hc concept: the MCP server carries it. Register
+The seat's board name is not a herdr or hc concept: the MCP server carries it. Register
 once per client, with the seat's actor and the shared board:
 
 ```bash
@@ -205,8 +286,8 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   `task_add` that names one. A comment or a status move lands in the feed with no
   recipient, so a waiter filtered by `--recipient` never sees it. Wait unfiltered, or
   wake the seat by assigning it.
-- If a seat must be poked outside the board, that is an `hc send --if idle` to that
-  seat, not a board write.
+- If a seat must be poked outside the board, that is a prompt (`herdr agent
+  prompt` or `hc send`) to that seat, not a board write.
 - To block on named rows, use the wait instead of re-arming the feed:
   `agentboard wait 27 --status reviewing --timeout 300` returns the moment T27 reaches
   review. There is no MCP wait tool; the binary is the only way to wait. An epic
@@ -217,7 +298,7 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   a status wait never sees it. Add `--assignee` to the same wait:
   `agentboard wait 27 --status reviewing,done,blocked --assignee --timeout 300`. It returns on a
   handoff after the wait starts and says `; handoff T27 to coder` on the first line.
-- Park a long wait in an hc terminal of its own, so the manager stays reachable:
+- In hc, park a long wait in a terminal of its own, so the manager stays reachable:
   `hc run --bg --name watch-27 --cwd "$REPO" agentboard wait 27 --status
   reviewing,done,blocked --assignee --timeout 300` returns at once, and the watch's
   exit arrives as a note in the manager's terminal. Read the verdict with
@@ -225,17 +306,18 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   terminals, so clear the old arm before arming the new one — `hc rm watch-27` once
   it has finished, because `hc kill` on a finished terminal answers exit 11
   `finished`, or `hc kill watch-27; hc rm watch-27` while it is still live.
-- A wait wakes the manager, not the seat. It reports that the row moved; no terminal
-  received a prompt. The seat that must act still needs an `hc send --if idle`.
+- A wait wakes the manager, not the seat. It reports that the row moved; no pane or
+  terminal received a prompt. The seat that must act still needs a `herdr agent
+  prompt` or an `hc send`.
 
-## Internal subagent seats (when HC_TERMINAL_ID is unset)
+## Internal subagent seats (outside herdr and hc)
 
-This is the one-shot path for internal subagents; the hc terminal path above stays
+This is the one-shot path for internal subagents; the herdr and hc paths above stay
 available for dedicated CLI seats. Give each subagent its seat name, task ID, the
 shared board directory, and that seat's entry skill. Spawning the subagent is the
 wake. It works one row and returns; its completion notice tells the manager to
 read the row and its feed, then spawn the next assigned seat or finish if the row
-is terminal. In this mode, do not start a terminal for the seat, wait on the board,
+is terminal. In this mode, do not start a tab or terminal for the seat, wait on the board,
 poll, or keep a per-seat queue.
 
 Supervise the subagents in prose; the binary adds no lease, heartbeat, stuck
@@ -246,7 +328,7 @@ timeout or auto-retry.
 - Spawn a fresh subagent on every wake. The row is the whole scope: no pasted
   chat history.
 - Judge stalls by side effects: `board_agents` last activity, the row's feed, and
-  `git status`. Terminal output alone is not evidence (see `references/hc-mechanics.md`). Account for every
+  `git status`. Pane or terminal output alone is not evidence (see `references/herdr-mechanics.md`, `references/hc-mechanics.md`). Account for every
   seat you spawned.
 - If a subagent returns and the row did not move and carries no handoff comment,
   comment a failure note on the row (what you saw, the likely cause) and retry by
