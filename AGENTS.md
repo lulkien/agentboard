@@ -19,7 +19,7 @@ Keep the loop in three parts, and keep each part small.
   row a dead holder left comes back. The board never schedules work, dispatches
   it, or wakes anybody.
 - The manager is the only wake. It reads the board, blocks on the rows it cares
-  about, and prompts the next seat by name — herdr, outside this binary.
+  about, and prompts the next seat by name with `hc`, outside this binary.
 - A seat does one row, reports it, and stops. It does not poll for its next row.
 
 Do not add delivery, a lease, a scheduler or a per-seat queue. Each one makes the
@@ -45,10 +45,10 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `python3 tests/mcp_client.py` | `170/170 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/seats-install.sh` | `221/221 passed (seats installer)` (isolated homes; no board writes) |
-| `bash tests/start-agentboard-manager.sh` | `19/19 passed (manager launcher)` (stub herdr; no live pane) |
+| `bash tests/start-agentboard-manager.sh` | `26/26 passed (manager launcher)` (stub `hc`; no live terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 13 pages, 104 CLI names, 119 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 13 pages, 103 CLI names, 124 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 13 gates passed`; with `--full` `GATES OK: 14 gates passed` |
 | `bash scripts/gate.sh --features dashboard` | `GATES OK: 15 gates passed` |
@@ -161,7 +161,7 @@ No file edit, no commit, no build, no install, no probe that creates state;
 
 - `skills/agentboard-team` — running a team: launcher, wake commands, roles,
   workflow. `skills/install.py --force` creates canonical repo links under
-  `~/.agents/skills`, then links Claude, Codex and Hermes skills to those
+  `~/.agents/skills`, then links Claude and Codex skills to those
   canonical names. There is one physical copy: never copy over the installed links.
 - `PROTOCOL.md` — the wire surface: ten tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each

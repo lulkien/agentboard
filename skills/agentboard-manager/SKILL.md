@@ -1,6 +1,6 @@
 ---
 name: agentboard-manager
-description: "Initialize the agentboard manager seat (Claude, Codex, Hermes or Grok): brief, launch, file, wait in the background."
+description: "Initialize the agentboard manager seat (Claude, Codex or Grok): brief, launch, file, wait in the background."
 version: 6.0.0
 ---
 You are the manager; use the invocation's arguments as your focus.
@@ -14,22 +14,21 @@ section in `agentboard-team/SKILL.md`.
 
 Do these steps yourself:
 
-When starting yourself from a herdr pane at its shell prompt, use the installed
-`start-agentboard-manager claude|codex|grok|hermes` helper. It renames the tab and starts
-the selected manager after the pane is ready; `seats/README.md` documents the
-requirements and launch behavior.
+When starting yourself from an hc terminal at its shell prompt, use the installed
+`start-agentboard-manager claude|codex|grok` helper. It starts the selected manager
+as a new terminal named `manager` and prints its address; `seats/README.md`
+documents the requirements and launch behavior.
 
 1. Confirm the board: MCP `board_brief` and `board_agents`. An empty board is
    information, not an error.
-2. Launch only the seats this work needs, one herdr tab per seat and never split
-   panes, and register each seat's MCP server with its board name
-   (`agentboard serve --actor <seat>`). The manual's launch section has the exact
-   commands and the preferred-model table (Claude Opus/Sonnet 5.5 with seat
+2. Launch only the seats this work needs, one named hc terminal per seat and never
+   two agents in one terminal, and register each seat's MCP server with its board
+   name (`agentboard serve --actor <seat>`). The manual's launch section has the
+   exact commands and the preferred-model table (Claude Opus/Sonnet 5.5 with seat
    effort, Codex Sol/Luna with profile effort) — pass those flags after `--` on
-   `herdr agent start`.
-   Hermes uses the host MCP configuration in `~/.hermes/config.yaml` (see
-   `seats/README.md`); configure its agentboard actor as `manager`. The launcher
-   starts Hermes with `--yolo` and sends `/agentboard-manager` through herdr.
+   `hc run`. Seats start hidden and no launch adds a label: when the human wants to
+   watch one, give its terminal `--label herdr.space=<space-id>` at launch, or add
+   that label afterwards with `hc label <address> herdr.space=<space-id>`.
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context, plus the paths the seat may touch and the paths or actions it must
    not), `goal` (the command and the output line that proves it), and `assignee`
@@ -52,7 +51,7 @@ requirements and launch behavior.
    it never schedules, dispatches or wakes anyone. A seat does its row, reports it
    and stops rather than polling, so every wake after that is yours to give: when a
    seat reports, prompt the seat that holds the next row by name with
-   `herdr agent prompt coder 'claim your assigned row, report, stop'`.
+   `hc send --if idle coder 'claim your assigned row, report, stop'`.
 
    For one-shot internal subagents, follow the central section in
    `agentboard-team/SKILL.md`; on completion, read the row and feed, then spawn the
@@ -60,10 +59,14 @@ requirements and launch behavior.
    the per-seat model, fresh-per-wake, failure-note/retry and stall rules; apply
    them when you judge a returned subagent.
 
-   - Never block in the foreground. Send `herdr agent prompt` without `--wait`,
-     then arm a background watch with completion notification and come back when
-     it fires. A foreground sleep, a poll loop or a blocking prompt is a bug in
-     the manager, not diligence.
+   - Never block in the foreground. Send `hc send --if idle` without `--wait`, then park the
+     board wait in a terminal of its own (`hc run --bg --name watch-<id> agentboard
+     wait <id> …`) and come back when its exit note arrives; collect it with
+     `hc read --lines 5 watch-<id>`. A foreground sleep, a poll loop or a blocking
+     prompt is a bug in the manager, not diligence.
+   - `hc send --if idle` is how "never prompt a seat mid-turn" is enforced: exit 10
+     means the seat is busy, so queue the row and prompt later. Never `hc send
+     --force`: exit 9 means the seat is blocked and a person must decide.
    - Watch act-points, not the row's current state. While a coder holds a row,
      watch `done,reviewing,blocked`: `reviewing` is the hand-off and the cue to prompt
      the reviewer. Including `implementing` here matches the coder's claim, so the
@@ -75,8 +78,10 @@ requirements and launch behavior.
    - Stage the set by phase. Once you have prompted the reviewer, add
      `implementing` to `done,reviewing,blocked`: the coder has already claimed, so
      `implementing` now means a reopen that needs the coder prompted again.
-   - Keep one watcher per row. Kill the old arm before arming a new one, because
-     two watchers wake you twice for one event.
+   - Keep one watcher per row. Clear the old arm before arming a new one, because
+     two watchers wake you twice for one event: remove a finished arm with
+     `hc rm watch-<id>` (`hc kill` on it answers exit 11 `finished`), and a live one
+     with `hc kill watch-<id>; hc rm watch-<id>`.
    - Use a 300 s long-poll arm (`wait ID --status CSV --timeout 300`, and add
      `--assignee` when the act-point is a handoff) in the background. Exit 3 means
      nothing matched; re-arm. Exit 0 means the row reached an act-point. The CLI
@@ -99,7 +104,7 @@ requirements and launch behavior.
    child is open.
    When an epic completes, end its seats' agent sessions before the next epic
    starts and never carry their conversations over. Start fresh sessions only
-   for the seats the next epic needs, one tab per seat; leave the others stopped.
+   for the seats the next epic needs, one terminal per seat; leave the others stopped.
 
 ## Grok Build manager
 
@@ -107,26 +112,26 @@ Install the seat cards and launcher with `./seats/install.py`, or manage only th
 Grok MCP entry with `./seats/install.py --grok-only`. The installer writes the
 marked block from `seats/grok/agentboard-mcp.toml` to `~/.grok/config.toml`; the
 `agentboard` command must be on Grok's PATH. The actor defaults to `manager` via
-`${AGENTBOARD_SEAT:-manager}`. To use another manager name, create its pane with
-`herdr tab create --env AGENTBOARD_SEAT=<name>`; never set it to an empty value. The
-installer refuses an unmarked `[mcp_servers.agentboard]` table even with `--force`;
-review and remove or convert that entry by hand.
+`${AGENTBOARD_SEAT:-manager}`. To use another manager name, carry it in argv, since
+`hc run` has no environment flag: `hc run --bg --name manager-2 -- env
+AGENTBOARD_SEAT=<name> grok --trust --always-approve`; never set it to an empty
+value. The installer refuses an unmarked `[mcp_servers.agentboard]` table even with
+`--force`; review and remove or convert that entry by hand.
 
-From a herdr manager pane at its shell prompt, `start-agentboard-manager grok`
-starts Grok with `--trust --always-approve` and prompts `/agentboard-manager`.
-For a fresh tab, use:
+From an hc terminal at its shell prompt, `start-agentboard-manager grok` starts Grok
+with `--trust --always-approve` and sends `/agentboard-manager`. For a fresh
+terminal, use:
 
-    herdr tab create --cwd "$REPO" --label grok
-    herdr pane list
-    herdr agent start grok --kind grok --pane "$PANE_GROK" -- --trust --always-approve
-    herdr agent prompt grok '/agentboard-manager focus: <purpose>' --wait
+    hc run --bg --name grok --cwd "$REPO" -- grok --trust --always-approve
+    hc wait grok
+    hc send --if idle --wait grok '/agentboard-manager focus: <purpose>'
 
-Grok flags go after herdr's `--`. `--trust` loads project instructions and skills
-only for trusted folders; Grok scans the canonical `~/.agents/skills` directory.
-`--always-approve` prevents tool calls from waiting for an unattended prompt. For
-board tools, use `use_tool` with catalog keys such as `agentboard__task_add`; bare
-`task_add` is not a catalog key. Row waits use the CLI `agentboard wait` in the
-background; there is no MCP wait tool.
+Grok flags go after the `--` that ends `hc run`'s own options. `--trust` loads
+project instructions and skills only for trusted folders; Grok scans the canonical
+`~/.agents/skills` directory. `--always-approve` prevents tool calls from waiting
+for an unattended prompt. For board tools, use `use_tool` with catalog keys such as
+`agentboard__task_add`; bare `task_add` is not a catalog key. Row waits use the CLI
+`agentboard wait` in the background; there is no MCP wait tool.
 
 Check setup with `grok inspect --json` (confirm `projectTrusted`, the skills
 `agentboard-team`, `agentboard-manager`, `agentboard-analyst`, `agentboard-coder`
@@ -137,6 +142,6 @@ live session load is not. An optional headless read-only probe is:
     grok -p 'list the board brief with the agentboard board_brief tool' --always-approve --max-turns 3
 
 Keep `agentboard-manager` as the slash entry point; do not add a Grok command with
-the same name as a skill. If a Grok pane looks idle, inspect its output for an
+the same name as a skill. If a Grok terminal looks idle, inspect its output for an
 approval prompt. Headless `-p` is for probes, not a seat. Avoid project-scoped
 `grok mcp add`, which writes one actor into shared repository configuration.

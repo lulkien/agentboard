@@ -8,7 +8,7 @@ them visible. Each seat also has a one-page entry skill of its own.
 
 ## Manager
 
-Runs no code beyond the board and herdr. Files work, reads the board, hands rows to
+Runs no code beyond the board and `hc`. Files work, reads the board, hands rows to
 seats, handles quota, and decides with the human.
 
 May:
@@ -16,7 +16,8 @@ May:
 - `task_list`, `task_get`, `task_epic`, `board_brief`, `board_agents`, `board_feed`
 - `task_comment` to record a decision
 - `task_update` with `force`+`reason` to reassign a stalled or quota-exhausted row
-- herdr: create the worker tab and panes, start agents, prompt them, read panes
+- `hc`: start one named terminal per seat, send it its first prompt, read it, and
+  kill and remove only the terminals it started
 
 Never:
 - claim a task or write product code

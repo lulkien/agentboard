@@ -27,7 +27,6 @@ def main():
     agent_dirs = [
         f"{home}/.claude/skills",
         f"{codex_home}/skills",
-        f"{home}/.hermes/skills",
     ]
     claude_commands = os.environ.get("AGENTBOARD_CLAUDE_COMMANDS") or f"{home}/.claude/commands"
     names = sorted(

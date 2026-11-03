@@ -62,7 +62,7 @@ The names `in_progress` and `review` are still accepted as input and read as
 6. Manager reads `board_brief` for groups and counts, `task_epic` for an umbrella's
    direct-child progress, and `task_list` for what is where. Close or drop the
    direct children before closing their umbrella. The manager does not chase
-   individual panes while the board is moving. Before creating or reparenting a
+   individual terminals while the board is moving. Before creating or reparenting a
    child under a closed umbrella, the manager explicitly reopens the parent, then
    retries. The board refuses the attachment and never auto-reopens the parent.
    Handing out a done or canceled row works the same way: reopen the ancestors

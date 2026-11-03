@@ -24,7 +24,7 @@ def destinations(home,canonical=None,codehome=None,claude=None):
     paths={}
     for name in skills():
         paths[canonical/name]=repo/'skills'/name
-        for parent in [home/'.claude/skills',(codehome or home/'.codex')/'skills',home/'.hermes/skills']:
+        for parent in [home/'.claude/skills',(codehome or home/'.codex')/'skills']:
             paths[parent/name]=canonical/name
         for card,root in (('claude',claude or home/'.claude/commands'),):
             if (repo/'skills'/name/f'{card}.md').exists():
@@ -44,21 +44,16 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
         assert path.is_symlink() and os.readlink(path)==str(target),(path,target)
         assert path.resolve()==target.resolve(),path
     assert p.stdout.count('linked: ')==len(expected),p.stdout
-    for directory,_,files in os.walk(home/'.hermes/skills',followlinks=True):
-        if 'SKILL.md' in files:
-            path=pathlib.Path(directory)/'SKILL.md'
-            if 'name: agentboard-manager' in path.read_text().split('---',2)[1].splitlines():
-                assert path==home/'.hermes/skills/agentboard-manager/SKILL.md',path
     for old in ['manager','agentboard-manager']:
         assert not (home/f'.codex/prompts/{old}.md').exists()
     assert not RETIRED&{p.name.removesuffix('.md') for p in expected},RETIRED
-    # One edit, three readers, no reinstall. Remove the probe even on a failure.
+    # One edit, two readers, no reinstall. Remove the probe even on a failure.
     with tempfile.NamedTemporaryFile(dir=home/'.agents/skills/agentboard-team',prefix='.install-probe-',mode='w+') as probe:
         probe.write('one physical copy\n');probe.flush()
-        for agent in ['.claude','.codex','.hermes']:
+        for agent in ['.claude','.codex']:
             alias=home/agent/'skills/agentboard-team'/pathlib.Path(probe.name).name
             assert alias.read_text()=='one physical copy\n'
-    check(f'canonical repo links, three indirect aliases per skill, live edit visibility, {len(expected)} destinations')
+    check(f'canonical repo links, two indirect aliases per skill, live edit visibility, {len(expected)} destinations')
 
     p=run(home);assert p.returncode==1 and not p.stdout,p
     for path in expected: assert f'exists: {path} (use --force)' in p.stderr
@@ -70,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     p=run(conflict)
     assert p.returncode==1 and str(existing) in p.stderr and not p.stdout
     assert existing.read_text()=='untouched' and existing.stat().st_mtime_ns==before
-    for parent in ['.agents','.codex','.hermes']:
+    for parent in ['.agents','.codex']:
         assert not (conflict/parent).exists(),parent
     assert existing.is_file() and existing.read_text()=='untouched'
     check('an agent alias conflict leaves other parents absent and contents untouched')
@@ -114,7 +109,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     owned[2].parent.mkdir(parents=True);owned[2].symlink_to(agents/'manager/claude.md')
     owned[3].symlink_to(agents/'agentboard-manager/claude.md')  # written before claude.md was removed
     foreign=old/'.claude/skills/coder';foreign.symlink_to('/elsewhere')
-    realdir=old/'.hermes/skills/reviewer';realdir.mkdir(parents=True);(realdir/'keep').write_text('mine')
+    realdir=old/'.claude/skills/reviewer';realdir.mkdir(parents=True);(realdir/'keep').write_text('mine')
     p=run(old);assert p.returncode==0,p.stderr
     for path in owned:
         assert not path.is_symlink() and not path.exists(),path

@@ -1,11 +1,11 @@
 # skills
 
 `agentboard-team/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`,
-plus `references/herdr-mechanics.md`). The four seat directories are one-page entry
+plus `references/hc-mechanics.md`). The four seat directories are one-page entry
 points: `agentboard-manager/`, `agentboard-analyst/`, `agentboard-coder/`,
 `agentboard-reviewer/`. Each confirms the seat's
 board name, names what it may run on the board and what it never does, and ends by
-reporting and stopping. The `SKILL.md` is the one source: Claude, Codex, Hermes and Grok load it directly.
+reporting and stopping. The `SKILL.md` is the one source: Claude, Codex and Grok load it directly.
 
 ## Install
 
@@ -17,11 +17,10 @@ this repo, and every agent alias points at that canonical name:
     ~/.agents/skills/<name> -> <repo>/skills/<name>
     ~/.claude/skills/<name> -> ~/.agents/skills/<name>
     ~/.codex/skills/<name> -> ~/.agents/skills/<name>
-    ~/.hermes/skills/<name> -> ~/.agents/skills/<name>
 
 Five names are installed — `agentboard-team` and the four `agentboard-<seat>` entry
-points — so each run creates `5 x 4 = 20` directory links, each printing `linked:`.
-Only the canonical links contain the repo location; all four paths for a name resolve
+points — so each run creates `5 x 3 = 15` directory links, each printing `linked:`.
+Only the canonical links contain the repo location; all three paths for a name resolve
 to one physical repo directory, so an edit is visible without reinstalling. Unrelated
 skills are left alone. Codex honours `CODEX_HOME`.
 
@@ -29,14 +28,13 @@ skills are left alone. Codex honours `CODEX_HOME`.
 |---|---|---|---|
 | Claude Code | `agentboard-<seat>/SKILL.md` | `~/.claude/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `/agentboard-<seat> [focus]` |
 | Codex | `agentboard-<seat>/SKILL.md` | `$CODEX_HOME/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `$agentboard-<seat> [focus]` via `/skills` |
-| Hermes | `agentboard-<seat>/SKILL.md` | `~/.hermes/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `/agentboard-<seat> [focus]` |
 | Grok Build | `agentboard-manager/SKILL.md` | `~/.agents/skills/agentboard-manager` → canonical (no alias needed) | `/agentboard-manager [focus]` |
 
 Grok scans `~/.agents/skills` itself, at every tier, so it needs no alias directory
 of its own; the seat entry points and the manual it shares all resolve through the
 canonical links.
 
-The installer preflights all twenty destinations before changing any parent.
+The installer preflights all fifteen destinations before changing any parent.
 Without `--force`, an existing file, directory or dangling symlink prints
 `exists: <path> (use --force)` and exits 1 with no changes. `--force` replaces only
 the named destinations. Missing parents are created. Retired names (manager, analyst, coder, reviewer,
@@ -51,8 +49,8 @@ That name is what the board attributes writes to and what the feed addresses.
 `seats/` holds the canonical client cards for those entries.
 
 `tests/skills-install.sh` proves the layout in isolated homes: five canonical
-links, three aliases per skill, retired links pruned, one edit visible through all
-three aliases, a second run that refuses without `--force` while naming every
+links, two aliases per skill, retired links pruned, one edit visible through both
+aliases, a second run that refuses without `--force` while naming every
 conflict, and the four seat entry points present as skills.
 
 ## Discovery notes (2026-10-22)
@@ -64,8 +62,6 @@ conflict, and the four seat entry points present as skills.
   ([custom prompts are deprecated](https://learn.chatgpt.com/docs/custom-prompts);
   Codex uses the [skill picker](https://learn.chatgpt.com/docs/build-skills)), so
   no `~/.codex/prompts/` file is installed.
-- Hermes' installed loader finds one catalog row per name, resolves each slash key,
-  and loads the body through both symlink hops.
 - Grok Build 1.0.70 was exercised here: `grok inspect --json` lists the canonical
   `agentboard-team` and the four `agentboard-<seat>` skills from `~/.agents/skills`
   without any alias, reports `projectTrusted`, and lists the MCP servers it will

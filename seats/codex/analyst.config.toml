@@ -4,7 +4,7 @@
 # pre-approves every board tool, because "never" turns an unapproved tool into a
 # hard error instead of a prompt.
 # The named permission profile keeps the checkout readable and limits writes to
-# /tmp/agentboard/scratch. The pane can stay rooted in the repository.
+# /tmp/agentboard/scratch. The seat can stay rooted in the repository.
 approval_policy = "never"
 default_permissions = "seat-scratch"
 developer_instructions = """
