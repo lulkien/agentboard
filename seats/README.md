@@ -106,9 +106,11 @@ board tool.
   creates its task branch and makes the one commit that branch carries; it never
   pushes or merges into the working branch.
 - manager: `workspace-write`.
-- reviewer: `read-only` with the shell on for git reads only (`git show`, `git log`,
-  `git diff`); the `git` prefix rule allows those and every other command is
-  refused.
+- reviewer: `read-only` with the shell on for git reads only. The rule block allows
+  `git diff`, `git log`, `git show` and `git status`; the sandbox refuses every
+  write. Rules live per `CODEX_HOME`, not per profile, so the coder and manager's
+  git write subcommands are in the same file; the reviewer cannot use them because
+  its sandbox is read-only.
 
 ## Claude
 

@@ -17,10 +17,10 @@ sandbox_mode = "read-only"
 developer_instructions = """
 Read code through MCP: codebase-memory-mcp for symbols, callers and file outlines;
 the agentboard tools for the board; the file tools for files. Read git with the
-`git` command: `git show`, `git log`, `git diff`, `git status`. The shell exists
-for those reads and no other command; a build, a test, a script or a write is
-refused by policy, so do not try. If a call fails, say which call failed and what
-you did instead.
+`git` command, and only these reads: `git diff`, `git log`, `git show`,
+`git status`. The shell exists for those and for nothing else; a build, a test, a
+script or a write is refused, so do not try. If a call fails, say which call failed
+and what you did instead.
 """
 model = "gpt-6-luna"
 model_reasoning_effort = "high"

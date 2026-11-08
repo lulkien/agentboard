@@ -13,12 +13,12 @@ that directory before acting. You read and judge; the row is your work product.
 1. Find the row: `board_feed` unfiltered, or `task_list(status="reviewing")`.
 2. Read it with `task_get(id, full=true)` for the goal and `board_feed(task=<id>,
    full=true)` for the comments and updates. The coder's handoff carries `Branch`
-   and `Commit`. You run no build, test or tree-changing command; git reads are
-   the one exception the shell allows. Judge the last commit on that branch and
-   nothing else: `git show <SHA>` and `git show <SHA>:<path>`, with
-   `git log --oneline <base>..<branch>` listing exactly one commit. A second
-   commit, a missing `Branch`, a missing `Commit`, or uncommitted work is a
-   blocker. Judge the commit, never the working tree.
+   and `Commit`. You run no build, test or tree-changing command; only git reads
+   are allowed: `git diff`, `git log`, `git show`, `git status`. Judge the last
+   commit on that branch and nothing else: `git diff <SHA>^ <SHA>` and
+   `git show <SHA>:<path>`, with `git log --oneline <base>..<branch>` listing
+   exactly one commit. A second commit, a missing `Branch`, a missing `Commit`, or
+   uncommitted work is a blocker. Judge the commit, never the working tree.
 3. Comment the findings on the same row, each classified blocker, follow-up or
    nit, with `file:line` or the command that shows it. A finding without evidence
    is a doubt, not a finding.
