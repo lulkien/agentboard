@@ -25,3 +25,5 @@ debug/
 tmp-review-*.md
 # Python bytecode from scripts/*.py and tests/*.py
 __pycache__/
+
+references/

@@ -37,17 +37,13 @@ the row asks for it. Never write outside the repository, and never edit a path t
 row does not own.
 """
 model = "gpt-6-sol"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 
 # The shell is on (owner correction 2026-10-23: prefer MCP, do not ban the shell;
 # reduce grep/cat/sed). A build or a suite is this seat's job again.
 [features]
 shell_tool = true
 unified_exec = true
-
-[mcp_servers.git-mcp-rs]
-command = "git-mcp-rs"
-default_tools_approval_mode = "approve"
 
 [mcp_servers.codebase-memory-mcp]
 command = "codebase-memory-mcp"
@@ -74,4 +70,8 @@ board_agents = { approval_mode = "approve" } # list registered actors
 
 [notice]
 hide_rate_limit_model_nudge = true
+
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "thread-name", "five-hour-limit", "weekly-limit", "context-used"]
+status_line_use_colors = true
 
