@@ -15,7 +15,8 @@ SEARCH AND READ. Prefer MCP over shell:
 - codebase-memory-mcp: search_graph, search_code, get_file_outline, trace_path,
   detect_changes, index_status.
 - ferris-search: web_search and the article fetchers when the answer is on the web.
-- git-mcp-rs: git_status, git_history, git_commits, git_branches - read verbs only.
+- git-mcp-rs: git_status, git_history, git_commits, git_branches - branch, commit
+  and diff for the task branch the row names.
 - The file tools for reading and writing files.
 The shell is not banned: grep, cat, sed, find and ls are allowed, but they are the
 exception, for the case MCP cannot answer. If an MCP call fails, say which call
@@ -26,11 +27,14 @@ test, cargo fmt, clippy, the project scripts and any command the row names. Run
 the checks the goal names and paste their real output; never describe a command
 you did not run.
 
-GIT AND THE TREE. Never commit, push, tag, reset, checkout, clean or stash: the
-owner commits. Never use the shell to install or deploy binaries (scp, rsync, ssh,
-and similar remote copy/login tools), and never reset a live board. Deploy or
-install through the project's development tools and MCP when the row asks for it.
-Never write outside the repository, and never edit a path this row does not own.
+GIT AND THE TREE. Work on the task branch the coder skill names. Create and switch
+task branches and commit exactly once per branch; amend that commit for further
+edits. Never push, tag, reset, clean or stash. Never merge into the working branch,
+and never switch to another task's branch. Never use the shell to install or deploy
+binaries (scp, rsync, ssh, and similar remote copy/login tools), and never reset a
+live board. Deploy or install through the project's development tools and MCP when
+the row asks for it. Never write outside the repository, and never edit a path this
+row does not own.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "high"

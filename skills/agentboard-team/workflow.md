@@ -19,7 +19,39 @@ stale writes, so two agents cannot silently overwrite each other.
 A coder never closes its own work when the task names a reviewer; it moves the row
 to `reviewing` and assigns the reviewer. A reviewer either closes the row or moves it
 back to `implementing` and assigns the coder, with findings in a comment on the same
-row. Reopening means reusing the row, never filing a second one.
+row; at the implement cap it moves the row to `planning` and assigns the analyst
+instead. Reopening means reusing the row, never filing a second one.
+
+## Branches and turns
+
+Every implementation attempt is a branch, never a commit on the working branch:
+
+```text
+task-<id>-analyst-<analyst_turn>-implement-<implement_turn>
+```
+
+- The working branch is the branch the repository is on when the manager files the
+  row; the manager names it in the row description. A task branch is never the
+  working branch.
+- `analyst_turn` counts the analyst plans on the row: `1` for the first plan, `0`
+  when the row went straight from `todo` to the coder, and one more for each return
+  to the analyst.
+- `implement_turn` starts at `1` and rises by one for each reopen. The first branch
+  is based on the working branch; every later branch is based on the previous
+  implement branch, so it carries exactly one new commit.
+- One commit per implement branch. If the work needs another edit before handoff,
+  amend that commit; never add a second one. The reviewer reads the last commit
+  only, so a second commit is unreviewed work.
+- Never push a task branch.
+- The cap is three implement turns. After `implement-3` is reviewed and found
+  short, the coder does not open `implement-4`: the reviewer sends the row back to
+  the analyst (`planning`, `analyst`) with the findings. The next plan raises
+  `analyst_turn` by one, and the coder starts
+  `task-<id>-analyst-<analyst_turn>-implement-1` from the last implement branch.
+  This cap is the team's contract, not a board refusal.
+- When the reviewer closes the row, the manager squash-merges the last branch into
+  the working branch as one commit and deletes every `task-<id>-*` branch. The
+  human pushes; no seat pushes.
 
 ## Transitions
 
@@ -34,7 +66,8 @@ this contract, not a store check.
 | `todo` to `implementing` | coder | `task_claim` |
 | `implementing` to `reviewing` | coder, or manager with `force`+`reason` | `task_update(status="reviewing", assignee="reviewer")` |
 | `reviewing` to `done` | reviewer | `task_update(status="done")` |
-| `reviewing` to `implementing` | reviewer (reopen) | `task_update(status="implementing", assignee="coder")` |
+| `reviewing` to `implementing` | reviewer (reopen), while `implement_turn` is below 3 | `task_update(status="implementing", assignee="coder")` |
+| `reviewing` to `planning` | reviewer (implement cap reached) | `task_update(status="planning", assignee="analyst")` |
 | `planning`/`implementing`/`reviewing` to `blocked` | the holder | comment the question, then `status="blocked"` |
 | `blocked` to its stage | manager after the answer | `task_update(status=<stage>)` |
 | open to `todo` | the holder, or manager with `release`+`force`+`reason` | `release` |
@@ -53,12 +86,15 @@ The names `in_progress` and `review` are still accepted as input and read as
    manager until the goal is falsifiable.
 2. The seat claims it: `task_claim(id)`. The row now reads `implementing` and that
    seat's name.
-3. The seat works, then comments what it changed and what it verified. Comments are
-   cheap; the row is the audit trail.
+3. The coder creates its task branch from the base the turn rules name, works on
+   it, and commits once. Then it comments what it changed, the branch, the commit
+   and what it verified. Comments are cheap; the row is the audit trail.
 4. Handoff: `task_update(id, if_revision, status="reviewing", assignee="reviewer")`.
    The event carries `recipient`, which wakes the reviewer.
-5. Reviewer reads the work, then either `status="done"` with the evidence comment or
-   `status="implementing"`, `assignee="coder"` and its findings.
+5. Reviewer reads the last commit on the branch, then either `status="done"` with
+   the evidence comment, `status="implementing"`, `assignee="coder"` and its
+   findings (below the cap), or `status="planning"`, `assignee="analyst"` when
+   the implement cap is reached.
 6. Manager reads `board_brief` for groups and counts, `task_epic` for an umbrella's
    direct-child progress, and `task_list` for what is where. Close or drop the
    direct children before closing their umbrella. The manager does not chase
@@ -111,20 +147,25 @@ Every handoff and verdict comment uses one shape, one field per line:
 
 ```text
 Status: done | partial | blocked
-Commit: <SHA>, or uncommitted: <paths>
+Branch: task-<id>-analyst-<n>-implement-<m>, from <base>
+Commit: <SHA>
 Changed: <files>
 Evidence: <command> -> <the line it printed>
 Verified: ran-goal | targeted-test | build-only | not-verified
 Follow-ups: <optional>
 ```
 
+- `Branch` and `Commit` name the one commit the reviewer judges. Work without a
+  branch or a commit is not ready for review.
 - `Verified` says how far the proof went: `ran-goal` is the goal's own command,
   `targeted-test` a narrower check, `build-only` a compile with no behavioural
   check, `not-verified` nothing ran. Anything but `ran-goal` states why.
 - A reviewer's verdict uses the same shape with `Status` read as its judgement and
-  `Commit` naming the SHA, or the uncommitted paths, it judged. A verdict holds for
-  that tree only: a reopen followed by new edits voids it, and the next review
-  judges and names the new tree.
+  `Branch` plus `Commit` naming the one commit it judged. A verdict holds for that
+  commit only: a reopen followed by new edits voids it, and the next review judges
+  and names the next branch and commit. A verdict that reopens the row names the
+  branch the coder must create next, or that the cap returns the row to the
+  analyst.
 - Reviewer `Status` maps to the move: `done` closes the row, `partial` reopens it
   to `implementing`/`coder`, `blocked` is a blocker that needs the human or the
   manager.
@@ -132,7 +173,8 @@ Follow-ups: <optional>
   coder's level it accepted, for example `not-verified (accepted coder ran-goal)`.
 - An analyst's plan comment is not a handoff of finished work. It lists `Files`,
   `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
-  line that proves it).
+  line that proves it). It also names its analyst turn (`Turn: analyst <n>`) so
+  the coder builds the branch name from a stated number, not a guess.
 
 ## Quota
 
@@ -141,8 +183,9 @@ row keeps its comments so the replacement can resume. See the manual's handoff
 section for the exact call.
 
 A seat that must stop before its handoff (quota, compaction, told to stop) first
-comments a resume note on the row: the state, what is verified, the next step, the
-uncommitted paths, and anything a replacement must not redo.
+comments a resume note on the row: current state, branch and commit, proof already
+obtained, the next action, uncommitted paths, and the work a replacement must
+skip.
 
 A replacement, or a fresh wake on the same row, reads
 `board_feed(task=<id>, after="0", full=true)` first, follows the printed cursor

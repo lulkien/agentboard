@@ -7,7 +7,8 @@ You are the manager; use the invocation's arguments as your focus.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md`
 in that directory before acting. They are the shared manual; follow the manager
-role, which writes no code and runs no build.
+role, which writes no product code, runs no build, and makes one git action: the
+squash-merge that lands a closed row.
 
 At manager startup, choose the seat system once using the `Which seat system`
 section in `agentboard-team/SKILL.md`.
@@ -38,11 +39,12 @@ seat is a named terminal and `hc send` waits for the program to pause.
      `--label herdr.space=<space-id>` at launch, or add that label afterwards with
      `hc label <address> herdr.space=<space-id>`.
 3. File one row per unit of work with MCP `task_add`: title, `description`
-   (context, plus the paths the seat may touch and the paths or actions it must
-   not), `goal` (the command and the output line that proves it), and `assignee`
-   when the owner is known. File a row only when you can hand it to a seat. If the
-   evidence cannot be named yet, do not hand the row to the coder: assign the
-   analyst (`planning`) or keep it yourself until the goal is falsifiable.
+   (context, the working branch, the paths the seat may touch and the paths or
+   actions it must not), `goal` (the command and the output line that proves it),
+   and `assignee` when the owner is known. File a row only when you can hand it to
+   a seat. If the evidence cannot be named yet, do not hand the row to the coder:
+   assign the analyst (`planning`) or keep it yourself until the goal is
+   falsifiable.
    Before you hand out a row the human names, `task_get` it. If it is `done` or
    `canceled`:
    - Same objective: reopen and assign in one write,
@@ -112,7 +114,20 @@ seat is a named terminal and `hc send` waits for the program to pause.
    quota.
 5. Judge a claim from the seat's reported output plus the board and git state.
    Send a doubt to the reviewer as a row; never fix it yourself and never close a
-   reviewer's row. Commit locally only when the owner says so, and never push.
+   reviewer's row. Never push.
+
+   When the reviewer closes a row, land its branch chain as one commit:
+   - `git switch <working>`; squash-merge the last task branch:
+     `git_workspace(action="merge", merge_squash=true, merge_refs=["<branch>"])`,
+     then commit once:
+     `git_commits(action="commit", message="<row title> (T<id>)")`.
+   - The working tree must be clean before the squash; if it is not, stop and ask
+     the human.
+   - List `git_branches(action="list")` and delete every `task-<id>-*` branch
+     (`git_branches(action="delete", name=<branch>, force=true)`).
+   - One commit per closed row; the human pushes it.
+   - A canceled row merges nothing: delete its branches.
+   - If the squash conflicts, stop and ask the human. Never resolve product code.
 6. A big goal is an umbrella row: file it assigned to yourself, file its children
    with `parent`, read its progress with MCP `task_epic` (CLI `epic ID`), and close
    it only when every child is terminal. The board refuses an epic close while a

@@ -137,7 +137,8 @@ that idles. Pick one kind per team; do not mix Claude and Codex rows of the tabl
 in one launch unless the human asks.
 
 The deny list removes the four file-mutation tools only; the shell stays open, and
-the seat's own rules (never commit, build or install) are what cover it.
+the seat's own rules (analyst and reviewer never commit, build or install; the
+coder commits only on its task branch) are what cover it.
 
 A launch prompt uses `--wait` for proof it landed; without it a stalled prompt (an
 open overlay) goes unnoticed. The manager's later wake prompts go without `--wait`
@@ -213,7 +214,8 @@ terminal that idles. Pick one kind per team; do not mix Claude and Codex rows of
 table in one launch unless the human asks.
 
 The deny list removes the four file-mutation tools only; the shell stays open, and
-the seat's own rules (never commit, build or install) are what cover it.
+the seat's own rules (analyst and reviewer never commit, build or install; the
+coder commits only on its task branch) are what cover it.
 
 Wake every seat with a plain `hc send`, never `--if idle`: it accepts only `idle` or
 `working`, and a seat that finished a turn reports `done`, so it is refused with exit
@@ -405,7 +407,11 @@ attachment. This never happens automatically.
 - Touch only your task. Do not run suites or installs the goal does not name.
 - A probe that touches a board uses a scratch one:
   `AGENTBOARD_DB=$(mktemp -d)/b agentboard ...`.
-- Never push. Commits are local and the owner decides when they leave.
+- Implementation lives on `task-<id>-analyst-<n>-implement-<m>`, one commit per
+  branch. A reopened row gets a new branch from the previous implement branch, and
+  there is no `implement-4`: the cap returns the row to the analyst.
+- Never push. The manager squash-merges a done row's chain into the working
+  branch as one commit and deletes the task branches; the owner pushes.
 
 ## Handoff and quota
 
@@ -413,7 +419,9 @@ A handoff is one assignment: `task_update(id, if_revision, assignee="next-actor"
 The event carries `recipient`, which names the next seat; nothing in the board
 wakes it — the manager prompts it. Move the status in
 the same call: `reviewing` with `assignee="reviewer"`, `implementing` back with
-`assignee="coder"`.
+`assignee="coder"` below the cap, or `planning` with `assignee="analyst"` when the
+third implement turn is found short. The coder's branch is
+`task-<id>-analyst-<n>-implement-<m>`; the handoff names it and its one commit.
 
 When a holder is gone for good — out of quota, its seat replaced by another name —
 send the row back instead of handing it over:
@@ -438,8 +446,9 @@ The displaced holder's field writes refuse and its comments still land. Stop or
 isolate the old process before the replacement edits the same working tree, and
 tell the replacement which artifact to resume from.
 
-A seat that must stop before its handoff comments a resume note first: state, what
-is verified, next step, uncommitted paths, and what a replacement must not redo.
-A replacement reads `board_feed(task=ID, after="0", full=true)` (CLI `feed --task
-ID --after 0 --full`) before acting, follows the printed cursor while `more` is
-true, and does not redo steps already marked verified.
+A seat that must stop before its handoff comments a resume note first: state, the
+task branch and its commit, what is verified, next step, any uncommitted paths, and
+what a replacement must not redo. A replacement reads
+`board_feed(task=ID, after="0", full=true)` (CLI `feed --task ID --after 0
+--full`) before acting, follows the printed cursor while `more` is true, and does
+not redo steps already marked verified.

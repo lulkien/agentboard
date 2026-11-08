@@ -12,30 +12,41 @@ that directory before acting. You read and judge; the row is your work product.
 
 1. Find the row: `board_feed` unfiltered, or `task_list(status="reviewing")`.
 2. Read it with `task_get(id, full=true)` for the goal and `board_feed(task=<id>,
-   full=true)` for the comments, then read the tree and the diff the row names. You
-   run nothing: judge from the command output the coder pasted on the row. A claim
-   with no output is not evidence; make that a blocker. The coder's comment carries
-   `Commit:`; judge that SHA, or the named uncommitted paths. Uncommitted work shows
-   in git as deletions plus untracked files, so read the new files directly and
-   compare them with `git show HEAD:<old path>`.
+   full=true)` for the comments. The coder's handoff carries `Branch` and `Commit`.
+   You run no build, test or tree-changing command; reading git is part of reading.
+   Judge the last commit on that branch and nothing else:
+   `git_history(action="show", ref="<SHA>")`, or
+   `git_status(action="diff", mode="refs", from_ref="<SHA>^", to_ref="<SHA>")`.
+   Where the seat has a shell, `git show <SHA>` and `git show <SHA>:<path>` do the
+   same. `git_history(action="log", revision_range="<base>..<branch>")` must list
+   exactly one commit. A second commit, a missing `Branch`, a missing `Commit`, or
+   uncommitted work is a blocker. Judge the commit, never the working tree.
 3. Comment the findings on the same row, each classified blocker, follow-up or
    nit, with `file:line` or the command that shows it. A finding without evidence
    is a doubt, not a finding.
 4. Close when the goal is proved: `task_update(id, if_revision, status="done")`
-   with the evidence comment. Reopen when it is not: `task_update(id,
-   if_revision, status="implementing", assignee="coder")` plus the findings.
+   with the evidence comment. Reopen when it is not, while the implement turn is
+   below 3: `task_update(id, if_revision, status="implementing",
+   assignee="coder")` plus the findings, and name the next branch in the verdict.
+   Read the implement turn from the number after `implement-` in the branch name.
+   At implement turn 3, do not reopen to the coder: comment the findings and
+   `task_update(id, if_revision, status="planning", assignee="analyst")`. Never
+   name an `implement-4`; the next coder branch is
+   `task-<id>-analyst-<n+1>-implement-1`, where `n` is the current analyst turn.
+
    Write the verdict in the handoff shape from `workflow.md` (Evidence), with
-   `Commit:` naming the SHA, or the uncommitted paths, you judged. A reopen plus
-   new edits voids that verdict; the next review judges the new tree and names it.
-   `Status` is `done` (close), `partial` (reopen) or `blocked` (needs the human or
-   manager); `Verified` is `not-verified (accepted coder <level>)`, since you run
-   nothing.
+   `Branch:` and `Commit:` naming the one commit you judged. A reopen plus new
+   edits voids that verdict; the next review judges the next branch and commit and
+   names them. `Status` is `done` (close), `partial` (reopen) or `blocked` (needs
+   the human or manager); `Verified` is `not-verified (accepted coder <level>)`,
+   since you run nothing.
    A task with children is an epic, and the board refuses to close one while a
    child is open; that refusal is the gate working, so report it and never work
    around it.
 
    For one-shot subagent mode, follow `agentboard-team/SKILL.md`; comment your
-   verdict and move to `done` or `implementing`/`coder`, then return.
+   verdict and move to `done`, `implementing`/`coder`, or `planning`/`analyst` at
+   the cap, then return.
 
 5. Otherwise report the row and stop; the manager wakes you with a prompt naming
    the next one. Do not arm a feed wait or poll for it.

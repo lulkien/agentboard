@@ -18,10 +18,13 @@ May:
 - `task_update` with `force`+`reason` to reassign a stalled or quota-exhausted row
 - `hc`: start one named terminal per seat, send it its first prompt, read it, and
   kill and remove only the terminals it started
+- squash-merge a `done` row's branch chain into the working branch as one commit,
+  and delete that row's task branches
 
 Never:
 - claim a task or write product code
 - close a reviewer's row
+- push, or resolve a conflicted squash by editing product code
 - restart an agent that is mid-write without stopping it first
 
 ## Coder
@@ -32,6 +35,7 @@ May:
 - `task_claim` its assigned or ready work
 - `task_comment` progress, decisions and evidence
 - `task_update` its own row: status, fields, and the handoff to review
+- create and switch its task branch, and commit once on that branch
 - run builds, tests and board probes inside the repo the task names
 - deploy or install through the project's development tools and MCP when the row
   asks for it
@@ -39,7 +43,9 @@ May:
 Never:
 - write to another actor's row without `force`+`reason`
 - close its own row when the task names a reviewer
-- push, or reset a live board
+- push, merge into the working branch, or switch to another task's branch
+- open `implement-4`; the cap returns the row to the analyst
+- reset a live board
 - use the shell to install or deploy binaries (`scp`, `rsync`, `ssh`, and similar
   remote copy/login tools)
 - stage prompt text in files
@@ -50,12 +56,13 @@ Reads and judges. The review row is the work product.
 
 May:
 - `task_get` with `full=true`, `board_feed`, `task_list`, `board_brief`
+- read the row's branch, its last commit and its diff through git reads
 - `task_comment` findings, blocker by blocker
-- `task_update` the row it reviews to `done`, or back to `implementing` with the
-  coder as assignee
+- `task_update` the row it reviews to `done`, back to `implementing` with the
+  coder as assignee below the cap, or to `planning` with the analyst at the cap
 
 Never:
-- edit files, commit, build, install, or create state
+- edit files, commit, build, run tests, install, or create state
 - close a row it did not review
 - accept "it should work" as evidence
 - let an unnecessary or verbose comment pass unnamed (rule: `agentboard-reviewer`)

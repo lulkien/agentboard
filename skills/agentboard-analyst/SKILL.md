@@ -21,6 +21,11 @@ before acting.
    `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
    line that proves it). A plan in a file or in a chat message is invisible to the
    seat that implements it.
+
+   Name the analyst turn in the plan: `Turn: analyst <n>`, one more than the
+   plans already on the row (`1` for the first). A return after three implement
+   turns is a new analyst turn; the coder starts
+   `task-<id>-analyst-<n>-implement-1` from the last implement branch.
 5. Hand the row to the coder: `task_update(id, if_revision, status="implementing", assignee="coder")`,
    with the plan in the comment you just wrote. That event carries recipient
    `coder`, which names the next seat; nothing in the board wakes it, so the
