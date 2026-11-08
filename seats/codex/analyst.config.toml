@@ -54,3 +54,7 @@ board_agents = { approval_mode = "approve" } # list registered actors
 [notice]
 hide_rate_limit_model_nudge = true
 
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "thread-name", "five-hour-limit", "weekly-limit", "context-used"]
+status_line_use_colors = true
+
