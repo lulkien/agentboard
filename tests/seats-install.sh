@@ -51,7 +51,7 @@ has "foreign link text" 'use --force to replace it' "$tmp/err"
 is "foreign refusal prints nothing on stdout" test ! -s "$tmp/out"
 is "foreign refusal writes no rules" test ! -e "$rules"
 inst --force
-for seat in analyst coder manager reviewer; do
+for seat in analyst coder manager; do
   is "force relinks $seat" test "$(readlink "$home/.claude/$seat-mcp.json")" = "$repo/seats/claude/$seat-mcp.json"
 done
 

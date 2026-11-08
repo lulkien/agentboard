@@ -34,7 +34,7 @@ failed=0
 for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
 [ "$failed" -eq 0 ] || { echo "FAIL: a worker exited non-zero"; cat "$S"/fail-* 2>/dev/null; exit 1; }
 
-cat "$S"/claims-* | rg -o '^T[0-9]+$' | sort > "$S/claimed"
+cat "$S"/claims-* | rtk rg -o '^T[0-9]+$' | sort > "$S/claimed"
 total=$(wc -l < "$S/claimed")
 unique=$(sort -u "$S/claimed" | wc -l)
 if [ "$total" -ne "$TASKS" ]; then
@@ -43,7 +43,7 @@ fi
 if [ "$unique" -ne "$TASKS" ]; then
   echo "FAIL: $unique distinct tasks claimed, expected $TASKS (a task was claimed twice)"; exit 1
 fi
-claimed_events=$(AGENTBOARD_ACTOR=manager "$B" feed --kind claimed --limit 500 | rg -c ' claimed  T' )
+claimed_events=$(AGENTBOARD_ACTOR=manager "$B" feed --kind claimed --limit 500 | rtk rg -c ' claimed  T' )
 if [ "$claimed_events" -ne "$TASKS" ]; then
   echo "FAIL: feed recorded $claimed_events claimed events, expected $TASKS"; exit 1
 fi

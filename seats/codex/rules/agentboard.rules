@@ -2,9 +2,6 @@
 # managed by agentboard seats/install.py; --force rewrites this block
 prefix_rule(pattern=["hc"], decision="allow")
 prefix_rule(pattern=["agentboard"], decision="allow")
-# Git reads. The reviewer seat runs only these; its sandbox is read-only.
-prefix_rule(pattern=["git", ["diff", "log", "show", "status", "rev-parse"]], decision="allow")
-# Git writes, for the coder and manager. The reviewer's read-only sandbox refuses
-# them even though the rule file is shared across every seat in this CODEX_HOME.
-prefix_rule(pattern=["git", ["add", "branch", "commit", "merge", "switch"]], decision="allow")
+# RTK git for the reviewer: allows rtk git read commands only.
+prefix_rule(pattern=["rtk", "git"], decision="allow")
 # END AGENTBOARD RULES

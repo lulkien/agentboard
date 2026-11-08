@@ -57,7 +57,7 @@ check "lowest priority first" "T2" "$(printf '%s\n' "$out" | head -1 | cut -d' '
 has "ls prints a cursor" "cursor " "$out"
 out=$("$B" ls --status todo --limit 1)
 has "status filter keeps the row" "T2" "$out"
-check "limit one row" 1 "$(printf '%s\n' "$out" | rg -c '^T[0-9]+ ')"
+check "limit one row" 1 "$(printf '%s\n' "$out" | rtk rg -c '^T[0-9]+ ')"
 out=$("$B" ls --status done)
 check "explicit done filter lists nothing" "no tasks" "$(printf '%s\n' "$out" | head -1)"
 
@@ -117,7 +117,7 @@ indented=$'line one\n    line two'
 "$B" add "indented body" --description "$indented" >/dev/null
 out=$("$B" get 2 --full)
 has "full text keeps inner whitespace" "line two" "$out"
-check "full text keeps the indented line intact" 1 "$(printf '%s\n' "$out" | rg -c '^    line two$')"
+check "full text keeps the indented line intact" 1 "$(printf '%s\n' "$out" | rtk rg -c '^    line two$')"
 
 # --- seat reports: append, replace, file input, full read only -----------
 fresh r
@@ -159,7 +159,7 @@ has "negative priority stored" "prio   -3" "$("$B" ls)"
 out=$("$B" feed --after 0)
 first=$(printf '%s\n' "$out" | head -1)
 has "after 0 starts at the oldest event" "created" "$first"
-check "after 0 replays both creations" 2 "$(printf '%s\n' "$out" | rg -c ' created  T')"
+check "after 0 replays both creations" 2 "$(printf '%s\n' "$out" | rtk rg -c ' created  T')"
 out=$("$B" update 1 --if-revision 1 --assignee bob --clear-assignee 2>&1); code=$?
 check "assignee and clear-assignee conflict exit" 1 "$code"
 has "assignee and clear-assignee conflict text" "not both" "$out"
@@ -221,9 +221,9 @@ out=$("$B" feed --kind created)
 has "kind filter finds the creation" "created" "$out"
 out=$("$B" feed --recipient alice)
 has "recipient filter finds the handoff" "-> alice" "$out"
-cursor=$(printf '%s\n' "$out" | rg '^cursor ' | sed 's/^cursor //')
+cursor=$(printf '%s\n' "$out" | rtk rg '^cursor ' | sed 's/^cursor //')
 out=$("$B" feed --after "$cursor")
-check "resumed feed has no events" "" "$(printf '%s\n' "$out" | rg '^[0-9]+ ' || true)"
+check "resumed feed has no events" "" "$(printf '%s\n' "$out" | rtk rg '^[0-9]+ ' || true)"
 out=$("$B" feed --after "other-board:1" 2>&1); code=$?
 check "foreign cursor exit" 1 "$code"
 has "foreign cursor text" "different board" "$out"
@@ -288,7 +288,7 @@ fresh epic
 out=$(AGENTBOARD_ACTOR= "$B" epic 1); code=$?
 check "epic needs no actor" 0 "$code"
 check "epic has four lines" 4 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
-check "epic compact row" "$("$B" ls --all | rg '^T1 ')" "$(printf '%s\n' "$out" | head -1)"
+check "epic compact row" "$("$B" ls --all | rtk rg '^T1 ')" "$(printf '%s\n' "$out" | head -1)"
 check "epic status counts" "todo 0  planning 0  implementing 1  blocked 0  reviewing 0  done 1  canceled 1" "$(printf '%s\n' "$out" | sed -n '2p')"
 check "epic progress" "done 1/3" "$(printf '%s\n' "$out" | sed -n '3p')"
 has "epic total and snapshot cursor" "total 3 cursor " "$out"
@@ -540,7 +540,7 @@ check "forced release prints the todo record" \
 has "forced release bumps the revision" "revision 3" "$out"
 has "forced release prints a cursor" "cursor " "$out"
 has "forced release shows the comment in the feed" "back in the pool for another seat" "$("$B" feed --task 1 --kind updated)"
-check "forced release leaves no assignee on the row" "T1 todo         prio  100 -          held by a dead seat" "$("$B" ls | rg '^T1 ')"
+check "forced release leaves no assignee on the row" "T1 todo         prio  100 -          held by a dead seat" "$("$B" ls | rtk rg '^T1 ')"
 
 "$B" add "holder releases itself" >/dev/null
 "$B" update 2 --if-revision 1 --status implementing --assignee coder >/dev/null
@@ -570,7 +570,7 @@ check "--release with --priority exit" 1 "$code"
 check "--release with --priority text" \
     "agentboard: choose --release or a field change, not both" "$out"
 check "--release with --priority changes nothing" \
-    "T4 implementing prio  100 coder      still held" "$("$B" ls | rg '^T4 ')"
+    "T4 implementing prio  100 coder      still held" "$("$B" ls | rtk rg '^T4 ')"
 out=$(AGENTBOARD_ACTOR=other "$B" update 4 --if-revision 2 --title "stolen" 2>&1); code=$?
 check "foreign write on a live holder exit" 1 "$code"
 has "held refusal names both recoverable paths" \
