@@ -8,15 +8,11 @@ model = "gpt-6-sol"
 model_reasoning_effort = "medium"
 developer_instructions = """
 Prefer MCP over shell for reading and searching: codebase-memory-mcp for symbols,
-callers and file outlines; git-mcp-rs for git reads; ferris-search for the web; the
-agentboard tools for the board; the file tools for files. The shell is the
-exception, for hc and what no MCP tool answers (rg for plain text search). If an
+callers and file outlines; the git command for git reads; ferris-search for the web;
+the agentboard tools for the board; the file tools for files. The shell is the
+exception, for git, hc and what no MCP tool answers (rg for plain text search). If an
 MCP call fails, say which call failed and what you did instead.
 """
-
-[mcp_servers.git-mcp-rs]
-command = "git-mcp-rs"
-default_tools_approval_mode = "approve"
 
 [mcp_servers.ferris-search]
 command = "ferris-search"

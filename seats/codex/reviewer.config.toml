@@ -2,11 +2,12 @@
 # layers $CODEX_HOME/reviewer.config.toml over the base config.
 # approval_policy never, and the base config pre-approves every board tool.
 #
-# read-only over the checkout AND no shell (owner directive). The two are separate
-# walls: sandbox_mode blocks writes, it does not block execution, so a reviewer
-# with a shell could still run python, rg or a suite inside a read-only tree. The
-# review is a reading job - the verdict goes on the board row, not into a file -
-# so the shell is removed outright rather than narrowed.
+# read-only over the checkout, with the shell on for git reads only (owner
+# directive 2026-11-08: the reviewer judges a commit, so it runs `git show`,
+# `git log` and `git diff`). The sandbox blocks writes; approval_policy never
+# plus the `git` prefix rule narrows execution to that command, so a test or a
+# script is refused rather than run inside the read-only tree. The verdict goes
+# on the board row, not into a file.
 #
 # With approval_policy never, a tool left on "auto" is refused ("requires approval,
 # but approval policy is never"). Every board read the reviewer needs is therefore
@@ -15,19 +16,18 @@ approval_policy = "never"
 sandbox_mode = "read-only"
 developer_instructions = """
 Read code through MCP: codebase-memory-mcp for symbols, callers and file outlines;
-git-mcp-rs for git reads; the agentboard tools for the board; the file tools for
-files. If an MCP call fails, say which call failed and what you did instead.
+the agentboard tools for the board; the file tools for files. Read git with the
+`git` command: `git show`, `git log`, `git diff`, `git status`. The shell exists
+for those reads and no other command; a build, a test, a script or a write is
+refused by policy, so do not try. If a call fails, say which call failed and what
+you did instead.
 """
 model = "gpt-6-luna"
 model_reasoning_effort = "high"
 
 [features]
-shell_tool = false
-unified_exec = false
-
-[mcp_servers.git-mcp-rs]
-command = "git-mcp-rs"
-default_tools_approval_mode = "approve"
+shell_tool = true
+unified_exec = true
 
 [mcp_servers.codebase-memory-mcp]
 command = "codebase-memory-mcp"

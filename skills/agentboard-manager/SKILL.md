@@ -129,13 +129,12 @@ seat is a named terminal and `hc send` waits for the program to pause.
 
    When the reviewer closes a row, land its branch chain as one commit:
    - `git switch <working>`; squash-merge the last task branch:
-     `git_workspace(action="merge", merge_squash=true, merge_refs=["<branch>"])`,
-     then commit once:
-     `git_commits(action="commit", message="<row title> (T<id>)")`.
+     `git merge --squash <branch>`, then commit once:
+     `git commit -m "<row title> (T<id>)"`.
    - The working tree must be clean before the squash; if it is not, stop and ask
      the human.
-   - List `git_branches(action="list")` and delete every `task-<id>-*` branch
-     (`git_branches(action="delete", name=<branch>, force=true)`).
+   - List the task branches with `git branch --list 'task-<id>-*'` and delete every
+     one with `git branch -D <branch>`.
    - One commit per closed row; the human pushes it.
    - A canceled row merges nothing: delete its branches.
    - If the squash conflicts, stop and ask the human. Never resolve product code.

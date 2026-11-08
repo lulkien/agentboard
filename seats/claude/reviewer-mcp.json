@@ -8,11 +8,6 @@
         "AGENTBOARD_ACTOR": "reviewer"
       }
     },
-    "git-mcp-rs": {
-      "type": "stdio",
-      "command": "git-mcp-rs",
-      "args": []
-    },
     "codebase-memory-mcp": {
       "type": "stdio",
       "command": "codebase-memory-mcp",

@@ -80,7 +80,7 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 
 ## What every card carries
 
-- Commands, never home paths: `agentboard`, `git-mcp-rs`, `ferris-search`,
+- Commands, never home paths: `agentboard`, `git`, `ferris-search`,
   `codebase-memory-mcp` resolve on the seat's `PATH`. Check the one that matters
   with `readlink -f "$(command -v agentboard)"`.
 - The board tool set is the ten tools of this build: `task_add`, `task_list`,
@@ -106,7 +106,9 @@ board tool.
   creates its task branch and makes the one commit that branch carries; it never
   pushes or merges into the working branch.
 - manager: `workspace-write`.
-- reviewer: `read-only` with no shell (owner directive: reading and judging only).
+- reviewer: `read-only` with the shell on for git reads only (`git show`, `git log`,
+  `git diff`); the `git` prefix rule allows those and every other command is
+  refused.
 
 ## Claude
 

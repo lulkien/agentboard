@@ -399,11 +399,11 @@ attachment. This never happens automatically.
   Do not stage prompt text in files.
 - Write through the MCP tools, not by shelling out to `agentboard`.
 - Prefer MCP over shell for reading and searching: code through
-  `codebase-memory-mcp`, git through `git-mcp-rs`, the web through `ferris-search`,
-  the board through the agentboard tools. Shell is not banned: builds, tests,
-  installs and the commands a goal names run there, and a command with no MCP
-  equivalent is fine. Keep `grep`, `cat`, `sed`, `find` and `ls` for the cases MCP
-  cannot answer, not as the default reading path.
+  `codebase-memory-mcp`, git through the `git` command, the web through
+  `ferris-search`, the board through the agentboard tools. Shell is not banned:
+  builds, tests, installs and the commands a goal names run there, and a command
+  with no MCP equivalent is fine. Keep `grep`, `cat`, `sed`, `find` and `ls` for
+  the cases MCP cannot answer, not as the default reading path.
 - Never guess a missing requirement: comment one narrow question, set status
   `blocked`, then stop and report; the manager brings the answer back.
 - `done` means verified. Put the real command output in the coder report, not in a
