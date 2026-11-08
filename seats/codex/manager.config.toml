@@ -41,3 +41,7 @@ board_feed = { approval_mode = "approve" }   # read board events
 board_brief = { approval_mode = "approve" }  # show active work and status counts
 board_agents = { approval_mode = "approve" } # list registered actors
 
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "thread-name", "context-used", "five-hour-limit", "weekly-limit"]
+status_line_use_colors = true
+
