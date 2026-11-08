@@ -15,6 +15,10 @@ pub fn now_ms() -> i64 {
 pub const MAX_ACTOR_CHARS: usize = 64;
 pub const MAX_TITLE_CHARS: usize = 200;
 
+/// Joins two report sections. The seat writes its own heading; the board only
+/// separates sections, so a report stays readable without relying on blank lines.
+pub const REPORT_SEPARATOR: &str = "\n\n---\n\n";
+
 /// The stored names `in_progress` and `review` are board format and stay frozen;
 /// the variants are what clients see as `implementing` and `reviewing`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -99,6 +103,7 @@ pub enum Error {
     EmptyTitle,
     InvalidTitle,
     UnknownStatus(String),
+    EmptyReport,
     SelfParent,
     MissingAssignee(Status),
     MissingForceReason,
@@ -128,6 +133,7 @@ impl std::fmt::Display for Error {
                 "task title must be trimmed, have no control characters, and be at most {MAX_TITLE_CHARS} characters"
             ),
             Self::UnknownStatus(value) => write!(f, "unknown task status: {value:?}"),
+            Self::EmptyReport => f.write_str("report body must be nonempty when appending"),
             Self::UnknownEventKind(value) => write!(f, "unknown event kind: {value:?}"),
             Self::SelfParent => f.write_str("task cannot be its own parent"),
             Self::MissingAssignee(status) => {
@@ -178,6 +184,14 @@ pub struct Task {
     pub title: String,
     pub description: String,
     pub goal: String,
+    /// Per-seat long-form notes. Old boards have no such field, so each defaults
+    /// to empty rather than refusing to load.
+    #[serde(default)]
+    pub analyst_report: String,
+    #[serde(default)]
+    pub coder_report: String,
+    #[serde(default)]
+    pub reviewer_report: String,
     pub status: Status,
     pub priority: i32,
     pub reporter: String,
@@ -209,6 +223,9 @@ impl Task {
             title: input.title,
             description: input.description,
             goal: input.goal,
+            analyst_report: String::new(),
+            coder_report: String::new(),
+            reviewer_report: String::new(),
             status: input.status,
             priority: input.priority,
             reporter: actor.to_owned(),
@@ -354,6 +371,30 @@ impl Task {
         if let Some(path) = &patch.path {
             next.path.clone_from(path);
         }
+        let mut report_mode = None;
+        for (report, body) in [
+            (&mut next.analyst_report, patch.analyst_report.as_deref()),
+            (&mut next.coder_report, patch.coder_report.as_deref()),
+            (&mut next.reviewer_report, patch.reviewer_report.as_deref()),
+        ] {
+            let Some(body) = body else { continue };
+            report_mode = Some(if patch.replace_reports {
+                "replace"
+            } else {
+                "append"
+            });
+            if patch.replace_reports {
+                report.clear();
+                report.push_str(body);
+            } else if body.trim().is_empty() {
+                return Err(Error::EmptyReport);
+            } else if report.is_empty() {
+                report.push_str(body);
+            } else {
+                report.push_str(REPORT_SEPARATOR);
+                report.push_str(body);
+            }
+        }
         next.validate()?;
         if next.status.is_terminal() && next.assignee != self.assignee {
             return Err(Error::ClosedAssignee(next.status));
@@ -369,6 +410,7 @@ impl Task {
         Ok(Applied {
             task: next,
             force_reason: force_reason.map(str::to_owned),
+            report_mode,
         })
     }
 }
@@ -385,6 +427,8 @@ pub struct Applied {
     pub task: Task,
     /// Present for any successful field change made with `force=true`.
     pub force_reason: Option<String>,
+    /// `append` or `replace` when this patch wrote a report, else `None`.
+    pub report_mode: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -392,6 +436,11 @@ pub struct TaskPatch {
     pub title: Option<String>,
     pub description: Option<String>,
     pub goal: Option<String>,
+    pub analyst_report: Option<String>,
+    pub coder_report: Option<String>,
+    pub reviewer_report: Option<String>,
+    /// Rewrite the named reports instead of appending a section.
+    pub replace_reports: bool,
     pub status: Option<Status>,
     pub priority: Option<i32>,
     /// `None` leaves the field alone, `Some(None)` clears it.
@@ -997,5 +1046,88 @@ mod tests {
             task.claim("analyst", true, 1),
             Ok(Claim::AlreadyHeld(task.clone()))
         );
+    }
+
+    #[test]
+    fn reports_append_by_default_and_replace_on_request() {
+        let task = Task::new(1, "manager", draft(), 0).unwrap();
+        let append = |body: &str| TaskPatch {
+            coder_report: Some(body.into()),
+            ..TaskPatch::default()
+        };
+        let first = task
+            .apply(
+                "coder",
+                1,
+                &append("## Coder report 01\nbuilt"),
+                false,
+                None,
+                1,
+            )
+            .unwrap();
+        assert_eq!(first.report_mode, Some("append"));
+        assert_eq!(first.task.coder_report, "## Coder report 01\nbuilt");
+
+        let second = first
+            .task
+            .apply(
+                "coder",
+                2,
+                &append("## Coder report 02\nfixed"),
+                false,
+                None,
+                2,
+            )
+            .unwrap();
+        assert_eq!(
+            second.task.coder_report,
+            "## Coder report 01\nbuilt\n\n---\n\n## Coder report 02\nfixed"
+        );
+        assert_eq!(second.report_mode, Some("append"));
+
+        let replace = TaskPatch {
+            coder_report: Some("## Coder report 02\nrewritten".into()),
+            replace_reports: true,
+            ..TaskPatch::default()
+        };
+        let replaced = second
+            .task
+            .apply("coder", 3, &replace, false, None, 3)
+            .unwrap();
+        assert_eq!(replaced.report_mode, Some("replace"));
+        assert_eq!(replaced.task.coder_report, "## Coder report 02\nrewritten");
+
+        let clear = TaskPatch {
+            coder_report: Some(String::new()),
+            replace_reports: true,
+            ..TaskPatch::default()
+        };
+        let cleared = replaced
+            .task
+            .apply("coder", 4, &clear, false, None, 4)
+            .unwrap();
+        assert_eq!(cleared.task.coder_report, "");
+    }
+
+    #[test]
+    fn empty_report_append_refuses_and_old_json_still_loads() {
+        let task = Task::new(1, "manager", draft(), 0).unwrap();
+        let empty = TaskPatch {
+            analyst_report: Some("  \n".into()),
+            ..TaskPatch::default()
+        };
+        assert_eq!(
+            task.apply("analyst", 1, &empty, false, None, 1),
+            Err(Error::EmptyReport)
+        );
+        let mut value = serde_json::to_value(&task).unwrap();
+        let fields = value.as_object_mut().unwrap();
+        for name in ["analyst_report", "coder_report", "reviewer_report"] {
+            fields.remove(name);
+        }
+        let loaded: Task = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded.analyst_report, "");
+        assert_eq!(loaded.coder_report, "");
+        assert_eq!(loaded.reviewer_report, "");
     }
 }

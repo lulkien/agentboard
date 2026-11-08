@@ -348,14 +348,17 @@ to the general rule below to write through MCP:
 ```bash
 agentboard --db DIR --actor coder comment ID --body "text"
 AGENTBOARD_DB=DIR AGENTBOARD_ACTOR=coder agentboard comment ID --body-file PATH
-AGENTBOARD_DB=DIR AGENTBOARD_ACTOR=coder agentboard comment ID --body-file -
+AGENTBOARD_DB=DIR AGENTBOARD_ACTOR=coder agentboard update ID --if-revision N \
+  --coder-report-file PATH
 ```
 
 `--body-file -` reads the comment from stdin. A positional comment body is not
-accepted. Reads may use the shared MCP server, but a full-text task lookup shows
-stored task fields only; it does not show comments. Before reviewing or resuming
-work, read the task's complete event history and coder evidence with the CLI feed,
-following the printed cursor while `more true`:
+accepted. Long-form detail goes in the seat report through `update --<seat>-report`
+(same `--<seat>-report-file PATH|-`); a comment stays one handoff line. Reads may
+use the shared MCP server, and a full-text task lookup now shows the reports along
+with the other stored fields, but never the comments. Before reviewing or resuming
+work, read the task's complete event history with the CLI feed, following the
+printed cursor while `more true`:
 
 ```bash
 agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
@@ -367,9 +370,9 @@ agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 | --- | --- |
 | `task_add` | file work; assigns on creation when you name an assignee |
 | `task_list` | status, assignee, parent, path; `all=true` includes closed rows |
-| `task_get` | one task and its revision; `full=true` for stored text |
+| `task_get` | one task and its revision; `full=true` for stored text and reports |
 | `task_epic` | umbrella row, direct-child counts and done/total progress |
-| `task_update` | fields, status, owner; needs `if_revision`; `force`+`reason` to override; `release` to return a held row to `todo` |
+| `task_update` | fields, status, owner, reports; needs `if_revision`; `force`+`reason` to override; `release` to return a held row to `todo` |
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
@@ -403,7 +406,8 @@ attachment. This never happens automatically.
   cannot answer, not as the default reading path.
 - Never guess a missing requirement: comment one narrow question, set status
   `blocked`, then stop and report; the manager brings the answer back.
-- `done` means verified. Put the real command output in a comment on the row.
+- `done` means verified. Put the real command output in the coder report, not in a
+  comment.
 - Touch only your task. Do not run suites or installs the goal does not name.
 - A probe that touches a board uses a scratch one:
   `AGENTBOARD_DB=$(mktemp -d)/b agentboard ...`.
@@ -421,7 +425,12 @@ wakes it — the manager prompts it. Move the status in
 the same call: `reviewing` with `assignee="reviewer"`, `implementing` back with
 `assignee="coder"` below the cap, or `planning` with `assignee="analyst"` when the
 third implement turn is found short. The coder's branch is
-`task-<id>-analyst-<n>-implement-<m>`; the handoff names it and its one commit.
+`task-<id>-analyst-<n>-implement-<m>`; the handoff names it and its one commit in
+the coder report, and the comment names the report.
+
+An analyst that finds the row too big does not hand it on: it returns
+`todo`/`manager` with a split plan in the analyst report, and the manager files
+the children under that row, which stays the umbrella.
 
 When a holder is gone for good — out of quota, its seat replaced by another name —
 send the row back instead of handing it over:

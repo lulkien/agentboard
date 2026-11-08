@@ -45,6 +45,17 @@ seat is a named terminal and `hc send` waits for the program to pause.
    a seat. If the evidence cannot be named yet, do not hand the row to the coder:
    assign the analyst (`planning`) or keep it yourself until the goal is
    falsifiable.
+
+   When the analyst returns a row as `todo` with `manager` as assignee and a split
+   plan in the analyst report, file the children instead of implementing it:
+   - one `task_add` per child with `parent=<row>`, carrying the scope, allowed
+     paths and falsifiable goal the plan gives it; respect the stated order.
+   - keep the returned row as the umbrella: do not cancel it and do not hand it
+     to a coder.
+   - close the umbrella only when `task_epic` shows every direct child terminal;
+     the board refuses earlier with `epic T<id> has N open children`.
+   - hand each child out on its own; its goal decides whether it starts with the
+     analyst or the coder.
    Before you hand out a row the human names, `task_get` it. If it is `done` or
    `canceled`:
    - Same objective: reopen and assign in one write,

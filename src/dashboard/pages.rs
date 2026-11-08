@@ -244,6 +244,19 @@ fn task_detail(
         html::escape(&task.description),
         html::escape(&task.goal)
     );
+    for (heading, report) in [
+        ("Analyst report", task.analyst_report.as_str()),
+        ("Coder report", task.coder_report.as_str()),
+        ("Reviewer report", task.reviewer_report.as_str()),
+    ] {
+        if !report.is_empty() {
+            let _ = write!(
+                body,
+                "<section class=\"panel text-section\"><h2>{heading}</h2><div class=\"full-text\">{}</div></section>",
+                html::escape(report)
+            );
+        }
+    }
     if let Some(epic) = epic {
         let maximum = epic.total.max(1);
         let progress = epic.done.min(maximum);

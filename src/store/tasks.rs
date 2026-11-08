@@ -244,6 +244,7 @@ impl Board {
         let domain::Applied {
             task: next,
             force_reason,
+            report_mode,
         } = applied;
         let EventFields {
             actor,
@@ -259,6 +260,9 @@ impl Board {
         };
         let mut payload = serde_json::Map::new();
         payload.insert("changes".into(), changes(old, &next)?);
+        if let Some(mode) = report_mode {
+            payload.insert("reports".into(), report_changes(old, &next, mode));
+        }
         if let Some(reason) = force_reason {
             payload.insert("reason".into(), reason.into());
         }
@@ -647,10 +651,40 @@ fn changes(old: &Task, next: &Task) -> Result<serde_json::Value> {
     Ok(changed.into())
 }
 
+/// Report edits stay out of `changes`: the payload names the field and the size
+/// shift, never the text, so a feed read does not carry a whole plan or verdict.
+fn report_changes(old: &Task, next: &Task, mode: &str) -> serde_json::Value {
+    let mut reports = serde_json::Map::new();
+    for (field, before, after) in [
+        ("analyst_report", &old.analyst_report, &next.analyst_report),
+        ("coder_report", &old.coder_report, &next.coder_report),
+        (
+            "reviewer_report",
+            &old.reviewer_report,
+            &next.reviewer_report,
+        ),
+    ] {
+        if before != after {
+            reports.insert(
+                field.into(),
+                serde_json::json!({
+                    "mode": mode,
+                    "old_chars": before.chars().count(),
+                    "new_chars": after.chars().count(),
+                }),
+            );
+        }
+    }
+    reports.into()
+}
+
 fn patch_is_empty(patch: &crate::domain::TaskPatch) -> bool {
     patch.title.is_none()
         && patch.description.is_none()
         && patch.goal.is_none()
+        && patch.analyst_report.is_none()
+        && patch.coder_report.is_none()
+        && patch.reviewer_report.is_none()
         && patch.status.is_none()
         && patch.priority.is_none()
         && patch.assignee.is_none()

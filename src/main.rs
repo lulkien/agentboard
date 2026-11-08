@@ -190,6 +190,13 @@ fn run(
             title,
             description,
             goal,
+            analyst_report,
+            analyst_report_file,
+            coder_report,
+            coder_report_file,
+            reviewer_report,
+            reviewer_report_file,
+            replace_report,
             status,
             priority,
             assignee,
@@ -226,6 +233,12 @@ fn run(
                 && (title.is_some()
                     || description.is_some()
                     || goal.is_some()
+                    || analyst_report.is_some()
+                    || analyst_report_file.is_some()
+                    || coder_report.is_some()
+                    || coder_report_file.is_some()
+                    || reviewer_report.is_some()
+                    || reviewer_report_file.is_some()
                     || priority.is_some()
                     || parent.is_some()
                     || clear_parent
@@ -256,10 +269,19 @@ fn run(
                     ExitCode::SUCCESS,
                 ));
             }
+            let analyst_report =
+                merge_report("analyst-report", analyst_report, analyst_report_file)?;
+            let coder_report = merge_report("coder-report", coder_report, coder_report_file)?;
+            let reviewer_report =
+                merge_report("reviewer-report", reviewer_report, reviewer_report_file)?;
             let patch = TaskPatch {
                 title,
                 description,
                 goal,
+                analyst_report,
+                coder_report,
+                reviewer_report,
+                replace_reports: replace_report,
                 status,
                 priority,
                 assignee: if clear_assignee {
@@ -419,20 +441,36 @@ fn serve(path: PathBuf, actor: Option<String>) -> Result<(String, ExitCode), Str
     })
 }
 
+fn read_source(path: &str) -> Result<String, String> {
+    if path == "-" {
+        let mut text = String::new();
+        std::io::stdin()
+            .read_to_string(&mut text)
+            .map_err(|e| e.to_string())?;
+        Ok(text)
+    } else {
+        std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
+    }
+}
+
+/// One report body from `--<flag>`, `--<flag>-file`, or neither.
+fn merge_report(
+    flag: &str,
+    body: Option<String>,
+    file: Option<String>,
+) -> Result<Option<String>, String> {
+    match (body, file) {
+        (Some(_), Some(_)) => Err(format!("choose --{flag} or --{flag}-file, not both")),
+        (Some(text), None) => Ok(Some(text)),
+        (None, Some(path)) => Ok(Some(read_source(&path)?)),
+        (None, None) => Ok(None),
+    }
+}
+
 fn read_body(body: Option<String>, file: Option<String>) -> Result<String, String> {
     match (body, file) {
         (Some(text), None) => Ok(text),
-        (None, Some(path)) => {
-            let mut text = String::new();
-            if path == "-" {
-                std::io::stdin()
-                    .read_to_string(&mut text)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
-            }
-            Ok(text)
-        }
+        (None, Some(path)) => read_source(&path),
         (Some(_), Some(_)) => Err("choose --body or --body-file, not both".into()),
         (None, None) => Err("comment needs --body or --body-file".into()),
     }

@@ -66,6 +66,10 @@ agentboard epic ID
 agentboard update ID --if-revision N
               [--title|--description|--goal|--status|--priority|--assignee|
                --clear-assignee|--parent|--clear-parent|--path|--clear-path]
+              [--analyst-report TEXT|--analyst-report-file PATH|-]
+              [--coder-report TEXT|--coder-report-file PATH|-]
+              [--reviewer-report TEXT|--reviewer-report-file PATH|-]
+              [--replace-report]
               [--release] [--force --reason R] [--comment TEXT] [--new-actor]
 agentboard claim [ID]
 agentboard comment ID (--body TEXT | --body-file PATH|-)
@@ -92,11 +96,16 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   value refuses and prints both numbers. Changing another actor's task requires
   `--force` and a non-empty `--reason`; force without a reason refuses, and a
   reason without force refuses.
+- `update --analyst-report`, `--coder-report` and `--reviewer-report` append a
+  section to that seat's report; `--replace-report` rewrites it instead. Give text
+  or a file (or `-` for stdin) per report, not both. The seat writes its own
+  heading; the board joins sections with `---`. Reports print only from
+  `get --full` and the dashboard detail, and the event carries sizes, not text.
 - `update --release` sends a held row back to `todo` with no owner, in one write:
   one revision bump and one `updated` event carrying `--reason` and `--comment`.
   No field flag rides along: `--status`, `--assignee`, `--clear-assignee`,
   `--title`, `--description`, `--goal`, `--priority`, `--parent`, `--clear-parent`,
-  `--path` or `--clear-path` beside it refuses; pick one or the other.
+  `--path`, `--clear-path` or a report flag beside it refuses; pick one or the other.
 - `comment` appends an event and never moves the revision.
 - `epic` shows a task's direct-child status counts and done/total progress. Epics
   are derived from parent links; any task with children is an epic, including a

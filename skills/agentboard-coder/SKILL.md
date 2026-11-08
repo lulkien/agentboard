@@ -34,13 +34,16 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    branch, and never switch to another task's branch.
 
    Then run the checks its goal names and keep the real output.
-4. Comment what changed and the exact command output that proves it, in the
-   handoff shape from `workflow.md` (Evidence): `Status`, `Branch` (name and
-   base), `Commit` (SHA), `Changed`, `Evidence` (`command -> the line it
-   printed`), `Verified` (`ran-goal`, `targeted-test`, `build-only` or
-   `not-verified`) and optional `Follow-ups`: `task_comment(id, body=...)`.
+4. Write the coder report and the short comment in the same call:
+   `task_update(id, if_revision, coder_report=..., comment=...)`. The report
+   carries the handoff shape from `workflow.md` (Reports and evidence): `Status`,
+   `Branch` (name and base), `Commit` (SHA), `Changed`, `Evidence` (`command ->
+   the line it printed`), `Verified` (`ran-goal`, `targeted-test`, `build-only` or
+   `not-verified`) and optional `Follow-ups`. The comment is one line naming the
+   branch and commit; long detail belongs in the report.
 5. Hand it to review: `task_update(id, if_revision, status="reviewing",
-   assignee="reviewer")`. That event carries recipient `reviewer`; no process is
+   assignee="reviewer")`, using the revision the report write returned. That event
+   carries recipient `reviewer`; no process is
    woken, so the manager prompts the reviewer. The reviewer judges the single
    commit on your branch, not the working tree.
    Do not close your own row when a reviewer is named. A reviewer that reopens a row

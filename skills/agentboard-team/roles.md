@@ -12,7 +12,8 @@ Runs no code beyond the board and `hc`. Files work, reads the board, hands rows 
 seats, handles quota, and decides with the human.
 
 May:
-- `task_add` to file work, including the assignee
+- `task_add` to file work, including the assignee, and to file the children of an
+  analyst split plan under the returned row
 - `task_list`, `task_get`, `task_epic`, `board_brief`, `board_agents`, `board_feed`
 - `task_comment` to record a decision
 - `task_update` with `force`+`reason` to reassign a stalled or quota-exhausted row
@@ -33,8 +34,8 @@ Owns implementation rows.
 
 May:
 - `task_claim` its assigned or ready work
-- `task_comment` progress, decisions and evidence
-- `task_update` its own row: status, fields, and the handoff to review
+- `task_comment` the short handoff line; long progress and evidence go in its report
+- `task_update` its own row: status, fields, the coder report, and the handoff to review
 - create and switch its task branch, and commit once on that branch
 - run builds, tests and board probes inside the repo the task names
 - deploy or install through the project's development tools and MCP when the row
@@ -57,9 +58,10 @@ Reads and judges. The review row is the work product.
 May:
 - `task_get` with `full=true`, `board_feed`, `task_list`, `board_brief`
 - read the row's branch, its last commit and its diff through git reads
-- `task_comment` findings, blocker by blocker
-- `task_update` the row it reviews to `done`, back to `implementing` with the
-  coder as assignee below the cap, or to `planning` with the analyst at the cap
+- `task_comment` findings as a short verdict line
+- `task_update` the row it reviews, with the reviewer report: `done`, back to
+  `implementing` with the coder below the cap, or `planning` with the analyst at
+  the cap
 
 Never:
 - edit files, commit, build, run tests, install, or create state
@@ -75,9 +77,11 @@ question; the analyst reads it, plans, and hands the same row on.
 May:
 - read the row the manager set to `planning` with the analyst as assignee; it does
   not `task_claim` it, because a claim starts `implementing`
-- `task_comment` the plan: files, functions, behaviour, and what not to touch
-- `task_update` the row to hand it to the coder (`status="implementing"`,
-  `assignee="coder"`, plan in the comment or in the `description`)
+- `task_comment` one short line naming the analyst turn; the plan goes in the
+  analyst report
+- `task_update` the row to write its report and hand it to the coder
+  (`status="implementing"`, `assignee="coder"`), or to return an oversized row to
+  the manager (`status="todo"`, `assignee="manager"`) with a split plan
 
 Never:
 - implement the plan, edit product files, or run the change

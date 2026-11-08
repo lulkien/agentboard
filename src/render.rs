@@ -77,6 +77,18 @@ pub fn task_record(task: &Task, full: bool) -> String {
             ));
         }
     }
+    // Reports are long-form detail; only a full read prints them.
+    if full {
+        for (name, value) in [
+            ("analyst_report", task.analyst_report.as_str()),
+            ("coder_report", task.coder_report.as_str()),
+            ("reviewer_report", task.reviewer_report.as_str()),
+        ] {
+            if !value.is_empty() {
+                lines.push(format!("{name} {value}"));
+            }
+        }
+    }
     lines.join("\n")
 }
 

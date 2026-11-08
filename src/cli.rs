@@ -38,6 +38,9 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+// `Update` carries every optional field flag, so one variant is much larger than
+// the rest. The argv value lives for one parse; boxing it only adds indirection.
+#[allow(clippy::large_enum_variant)]
 pub enum Cmd {
     /// MCP server on stdio (the default with no command)
     Serve,
@@ -113,6 +116,27 @@ pub enum Cmd {
         description: Option<String>,
         #[arg(long, allow_hyphen_values = true)]
         goal: Option<String>,
+        /// Append to the analyst report, or replace it with --replace-report
+        #[arg(long, allow_hyphen_values = true, value_name = "TEXT")]
+        analyst_report: Option<String>,
+        /// Read the analyst report from a file, or - for stdin
+        #[arg(long, value_name = "PATH")]
+        analyst_report_file: Option<String>,
+        /// Append to the coder report, or replace it with --replace-report
+        #[arg(long, allow_hyphen_values = true, value_name = "TEXT")]
+        coder_report: Option<String>,
+        /// Read the coder report from a file, or - for stdin
+        #[arg(long, value_name = "PATH")]
+        coder_report_file: Option<String>,
+        /// Append to the reviewer report, or replace it with --replace-report
+        #[arg(long, allow_hyphen_values = true, value_name = "TEXT")]
+        reviewer_report: Option<String>,
+        /// Read the reviewer report from a file, or - for stdin
+        #[arg(long, value_name = "PATH")]
+        reviewer_report_file: Option<String>,
+        /// Rewrite the given reports instead of appending a new section
+        #[arg(long)]
+        replace_report: bool,
         #[arg(long)]
         status: Option<String>,
         #[arg(long, allow_hyphen_values = true)]

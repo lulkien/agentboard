@@ -748,3 +748,77 @@ fn indexed_claim_probe_skips_foreign_assignee_and_preserves_order() {
     assert_eq!(board.next_claimable_id("bob").unwrap(), Some(2));
     assert_eq!(board.next_claimable_id("charlie").unwrap(), Some(3));
 }
+
+#[test]
+fn report_handoff_lands_in_one_revision_with_a_lean_event_marker() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board.add("manager", draft(Some("coder")), true, 0).unwrap();
+    let first_body = "## Coder report 01\nimplemented";
+    let patch = TaskPatch {
+        status: Some(Status::Implementing),
+        coder_report: Some(first_body.into()),
+        ..TaskPatch::default()
+    };
+    let first = board
+        .update(UpdateInput {
+            id: 1,
+            actor: "coder",
+            expected_revision: 1,
+            patch: &patch,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 1,
+        })
+        .unwrap();
+    assert_eq!(first.task.revision, 2);
+    assert_eq!(first.task.status, Status::Implementing);
+    assert_eq!(first.task.coder_report, first_body);
+    assert_eq!(
+        first.event.payload["changes"]["status"]["new"],
+        "in_progress"
+    );
+    assert!(first.event.payload["changes"].get("coder_report").is_none());
+    let marker = &first.event.payload["reports"]["coder_report"];
+    assert_eq!(marker["mode"], "append");
+    assert_eq!(marker["old_chars"], 0);
+    assert_eq!(marker["new_chars"], first_body.chars().count());
+    assert!(
+        !serde_json::to_string(&first.event.payload)
+            .unwrap()
+            .contains("implemented")
+    );
+
+    let second_body = "## Additional coder report\nfixed";
+    let patch = TaskPatch {
+        coder_report: Some(second_body.into()),
+        ..TaskPatch::default()
+    };
+    let second = board
+        .update(UpdateInput {
+            id: 1,
+            actor: "coder",
+            expected_revision: 2,
+            patch: &patch,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: Some("hand off"),
+            now_ms: 2,
+        })
+        .unwrap();
+    assert_eq!(
+        second.task.coder_report,
+        format!("{first_body}\n\n---\n\n{second_body}")
+    );
+    assert_eq!(
+        second.event.payload["reports"]["coder_report"]["mode"],
+        "append"
+    );
+    assert_eq!(
+        second.event.payload["reports"]["coder_report"]["new_chars"],
+        second.task.coder_report.chars().count()
+    );
+}

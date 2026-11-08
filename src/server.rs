@@ -127,6 +127,18 @@ pub struct UpdateArgs {
     pub description: Option<String>,
     #[serde(default)]
     pub goal: Option<String>,
+    /// Append a section to the analyst report
+    #[serde(default)]
+    pub analyst_report: Option<String>,
+    /// Append a section to the coder report
+    #[serde(default)]
+    pub coder_report: Option<String>,
+    /// Append a section to the reviewer report
+    #[serde(default)]
+    pub reviewer_report: Option<String>,
+    /// Rewrite the given reports instead of appending
+    #[serde(default)]
+    pub replace_report: bool,
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
@@ -367,6 +379,9 @@ impl Board {
             && (args.title.is_some()
                 || args.description.is_some()
                 || args.goal.is_some()
+                || args.analyst_report.is_some()
+                || args.coder_report.is_some()
+                || args.reviewer_report.is_some()
                 || args.priority.is_some()
                 || args.parent.is_some()
                 || args.clear_parent
@@ -405,6 +420,10 @@ impl Board {
             title: args.title,
             description: args.description,
             goal: args.goal,
+            analyst_report: args.analyst_report,
+            coder_report: args.coder_report,
+            reviewer_report: args.reviewer_report,
+            replace_reports: args.replace_report,
             status,
             priority: args.priority,
             assignee: if args.clear_assignee {

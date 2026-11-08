@@ -43,9 +43,11 @@ skips tasks assigned to another actor; it never picks up a `reviewing` or `block
 
 ## Tasks
 
-A task is a record: `id`, `title`, `description`, `goal`, `status`, `priority`,
-`assignee`, `parent_id`, `path`, `revision`, `created_at`, `updated_at`. `revision`
-starts at 1 and grows by one per accepted field change.
+A task is a record: `id`, `title`, `description`, `goal`, `analyst_report`,
+`coder_report`, `reviewer_report`, `status`, `priority`, `assignee`, `parent_id`,
+`path`, `revision`, `created_at`, `updated_at`. `revision` starts at 1 and grows by
+one per accepted field change. The three reports are long-form seat notes; a board
+written before they existed loads with each one empty.
 
 Statuses, in board order: `todo`, `planning`, `implementing`, `blocked`, `reviewing`,
 `done`, `canceled`. `done` and `canceled` are terminal; lists hide them unless asked.
@@ -95,7 +97,7 @@ it is terminal.
 
 The record with its revision. Compact reads collapse whitespace and cut titles at
 72 and fields at 160 characters with `…`. `full: true` prints the title on its own
-line and every field exactly as stored.
+line and every field exactly as stored, including the three seat reports.
 
 ### task_epic
 
@@ -124,6 +126,8 @@ refuses `task T7 does not exist`. Reads append no events.
 
 ```json
 {"id": 7, "if_revision": 3, "title": "...", "description": "...", "goal": "...",
+ "analyst_report": "...", "coder_report": "...", "reviewer_report": "...",
+ "replace_report": false,
  "status": "reviewing", "priority": 20, "assignee": "...", "clear_assignee": false,
  "parent": 2, "clear_parent": false, "path": "...", "clear_path": false,
  "release": false, "force": false, "reason": "quota", "comment": "optional",
@@ -152,6 +156,14 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
   row.
 - A comment with no field change is a comment: it lands as a `commented` event and the
   revision stays put, so a displaced holder can still leave notes.
+- `analyst_report`, `coder_report` and `reviewer_report` append a section by default:
+  an empty report takes the body verbatim, a non-empty one gets `\n\n---\n\n` before
+  it. `replace_report: true` rewrites the named reports instead. A whitespace-only
+  append refuses with `report body must be nonempty when appending`; a replace with
+  an empty string clears the report. The seat writes its own heading. The `updated`
+  event carries `reports`, naming each changed field with `mode`, `old_chars` and
+  `new_chars`; the text itself never enters the event or the feed. Only
+  `task_get(full=true)` prints reports.
 - No field change and no comment is `task update has no field changes`.
 - An unknown target assignee needs `new_actor`.
 - An explicit `done` or `canceled` status update checks direct children in the

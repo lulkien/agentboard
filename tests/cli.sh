@@ -119,6 +119,38 @@ out=$("$B" get 2 --full)
 has "full text keeps inner whitespace" "line two" "$out"
 check "full text keeps the indented line intact" 1 "$(printf '%s\n' "$out" | rg -c '^    line two$')"
 
+# --- seat reports: append, replace, file input, full read only -----------
+fresh r
+"$B" add "report row" >/dev/null
+"$B" update 1 --if-revision 1 --coder-report $'## Coder report 01\nbuilt' >/dev/null
+out=$("$B" get 1)
+lacks "compact record hides the coder report" "## Coder report 01" "$out"
+out=$("$B" get 1 --full)
+has "full record shows the coder report" "## Coder report 01" "$out"
+out=$("$B" update 1 --if-revision 2 --coder-report $'## Coder report 02\nfixed')
+has "report update moves the revision" "revision 3" "$out"
+out=$("$B" get 1 --full)
+has "a second report keeps the first" "## Coder report 01" "$out"
+has "a second report appends a section marker" "---" "$out"
+has "a second report is present" "## Coder report 02" "$out"
+"$B" update 1 --if-revision 3 --coder-report "short" --replace-report >/dev/null
+out=$("$B" get 1 --full)
+lacks "replace drops the old sections" "## Coder report 01" "$out"
+has "replace stores the new body" "coder_report short" "$out"
+printf '## Reviewer report 01\nverdict' > "$S/review-report.md"
+"$B" update 1 --if-revision 4 --reviewer-report-file "$S/review-report.md" >/dev/null
+out=$("$B" get 1 --full)
+has "report file is read" "## Reviewer report 01" "$out"
+out=$("$B" update 1 --if-revision 5 --analyst-report "text" --analyst-report-file "$S/review-report.md" 2>&1); code=$?
+check "report text and file conflict exit" 1 "$code"
+has "report text and file conflict text" "not both" "$out"
+printf '## Coder report 03\nfrom stdin' | "$B" update 1 --if-revision 5 --coder-report-file - >/dev/null
+out=$("$B" get 1 --full)
+has "report stdin is read" "## Coder report 03" "$out"
+out=$("$B" update 1 --if-revision 6 --analyst-report " " 2>&1); code=$?
+check "empty report append exit" 1 "$code"
+has "empty report append text" "report body must be nonempty when appending" "$out"
+
 # --- a negative priority is a value, and history is reachable -------------
 fresh d3
 "$B" add "urgent" --priority -3 >/dev/null

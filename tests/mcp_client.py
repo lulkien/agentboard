@@ -196,6 +196,42 @@ def main():
         _, body = server.call("task_get", {"id": 2, "full": True})
         has("full task_get returns the whole title", long_title, body)
 
+        # Reports append by default, replace on request, and only full reads show them.
+        _, body = server.call(
+            "task_update",
+            {"id": 2, "if_revision": 1, "coder_report": "## Coder report 01\nbuilt"},
+        )
+        has("report update moves the revision", "revision 2", body)
+        _, body = server.call("task_get", {"id": 2})
+        check("compact task_get hides reports", False, "## Coder report 01" in body)
+        _, body = server.call("task_get", {"id": 2, "full": True})
+        has("full task_get shows the report", "## Coder report 01", body)
+        _, body = server.call(
+            "task_update",
+            {"id": 2, "if_revision": 2, "coder_report": "## Coder report 02\nfixed"},
+        )
+        _, body = server.call("task_get", {"id": 2, "full": True})
+        has("a second report keeps the first", "## Coder report 01", body)
+        has("a second report adds a section marker", "\n\n---\n\n", body)
+        _, body = server.call(
+            "task_update",
+            {
+                "id": 2,
+                "if_revision": 3,
+                "coder_report": "short",
+                "replace_report": True,
+            },
+        )
+        has("replace report moves the revision", "revision 4", body)
+        _, body = server.call("task_get", {"id": 2, "full": True})
+        check("replace drops the old sections", False, "## Coder report 01" in body)
+        has("replace stores the new body", "coder_report short", body)
+        is_error, body = server.call(
+            "task_update", {"id": 2, "if_revision": 4, "analyst_report": "  "}
+        )
+        check("empty report append is an error", True, is_error)
+        has("empty report append names the rule", "report body must be nonempty", body)
+
         # A comment with no field change is a comment; claiming your own todo starts it.
         is_error, body = server.call("task_add", {"title": "own todo", "assignee": "worker", "new_actor": True})
         has("assigned todo created", "ok", body)

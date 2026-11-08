@@ -53,6 +53,24 @@ task-<id>-analyst-<analyst_turn>-implement-<implement_turn>
   the working branch as one commit and deletes every `task-<id>-*` branch. The
   human pushes; no seat pushes.
 
+## Oversized rows
+
+The analyst decides whether a row is one unit of work. It is too big when it
+cannot be one branch, one commit, one review, or one falsifiable goal; tedious
+work that still meets that test stays whole. There is no file or line threshold.
+
+For a row that fails the test, the analyst writes a split plan in the analyst
+report and returns the row: `task_update(status="todo", assignee="manager")`. The
+plan states why the row is too big, the child titles, each child's scope and
+paths, each child's falsifiable goal, and the order or dependencies. The analyst
+files nothing.
+
+The manager files one child per plan item with `task_add(parent=<row>, ...)` and
+hands each child out on its own. The returned row stays as the umbrella: it is
+not canceled and not handed to a coder. The manager closes it only when
+`task_epic` shows every direct child terminal; the board refuses a close while
+one is open. Closing the umbrella lands no branch of its own.
+
 ## Transitions
 
 The board enforces only the revision guard, the holder rule and the assignee rule
@@ -63,6 +81,7 @@ this contract, not a store check.
 | --- | --- | --- |
 | `todo` to `planning` | manager, when it starts the analyst | `task_update(status="planning", assignee="analyst")` |
 | `planning` to `implementing` | analyst, or manager | `task_update(status="implementing", assignee="coder")` |
+| `planning` to `todo` | analyst, returning an oversized row | `task_update(status="todo", assignee="manager")` |
 | `todo` to `implementing` | coder | `task_claim` |
 | `implementing` to `reviewing` | coder, or manager with `force`+`reason` | `task_update(status="reviewing", assignee="reviewer")` |
 | `reviewing` to `done` | reviewer | `task_update(status="done")` |
@@ -87,14 +106,15 @@ The names `in_progress` and `review` are still accepted as input and read as
 2. The seat claims it: `task_claim(id)`. The row now reads `implementing` and that
    seat's name.
 3. The coder creates its task branch from the base the turn rules name, works on
-   it, and commits once. Then it comments what it changed, the branch, the commit
-   and what it verified. Comments are cheap; the row is the audit trail.
+   it, and commits once. Then it writes the coder report (branch, commit, changed
+   files, evidence) and one short comment naming the branch and commit. The report
+   holds the detail; the row stays the audit trail.
 4. Handoff: `task_update(id, if_revision, status="reviewing", assignee="reviewer")`.
    The event carries `recipient`, which wakes the reviewer.
 5. Reviewer reads the last commit on the branch, then either `status="done"` with
-   the evidence comment, `status="implementing"`, `assignee="coder"` and its
-   findings (below the cap), or `status="planning"`, `assignee="analyst"` when
-   the implement cap is reached.
+   the verdict in its reviewer report, `status="implementing"`, `assignee="coder"`
+   and its findings (below the cap), or `status="planning"`, `assignee="analyst"`
+   when the implement cap is reached.
 6. Manager reads `board_brief` for groups and counts, `task_epic` for an umbrella's
    direct-child progress, and `task_list` for what is where. Close or drop the
    direct children before closing their umbrella. The manager does not chase
@@ -137,15 +157,23 @@ A missing requirement is not a guess:
 3. report and stop; the manager brings the answer back as a comment from the owner
    of the decision, and wakes you to continue.
 
-## Evidence
+## Reports and evidence
 
-`done` means a named check ran and its output is on the row. Put the command and
-the line it printed in a comment, in the same call that moves the status when the
-tool allows a comment. A claim without evidence is a reopened row later.
+`done` means a named check ran and its output is on the row. Long-form work goes in
+the seat's report, not in a comment: `task_update(id, if_revision,
+analyst_report=..., coder_report=..., reviewer_report=...)` appends a section, and
+`replace_report=true` rewrites it. The seat writes the heading, for example
+`## Coder report 02 - flaky check corrected`; the board joins sections with `---`.
+Only `task_get(full=true)` and the dashboard print reports, and the event records
+sizes, not text.
 
-Every handoff and verdict comment uses one shape, one field per line:
+A comment stays short: the handoff line the next seat acts on, or a question and a
+blocker. Everything a later seat must read goes in the report.
+
+The coder report carries one handoff section per attempt:
 
 ```text
+## Coder report <n> - <summary>
 Status: done | partial | blocked
 Branch: task-<id>-analyst-<n>-implement-<m>, from <base>
 Commit: <SHA>
@@ -160,18 +188,18 @@ Follow-ups: <optional>
 - `Verified` says how far the proof went: `ran-goal` is the goal's own command,
   `targeted-test` a narrower check, `build-only` a compile with no behavioural
   check, `not-verified` nothing ran. Anything but `ran-goal` states why.
-- A reviewer's verdict uses the same shape with `Status` read as its judgement and
-  `Branch` plus `Commit` naming the one commit it judged. A verdict holds for that
-  commit only: a reopen followed by new edits voids it, and the next review judges
-  and names the next branch and commit. A verdict that reopens the row names the
-  branch the coder must create next, or that the cap returns the row to the
-  analyst.
+- A reviewer's verdict uses the same shape in the reviewer report, with `Status`
+  read as its judgement and `Branch` plus `Commit` naming the one commit it judged.
+  A verdict holds for that commit only: a reopen followed by new edits voids it,
+  and the next review judges and names the next branch and commit. A verdict that
+  reopens the row names the branch the coder must create next, or that the cap
+  returns the row to the analyst.
 - Reviewer `Status` maps to the move: `done` closes the row, `partial` reopens it
   to `implementing`/`coder`, `blocked` is a blocker that needs the human or the
   manager.
 - A reviewer runs nothing, so its `Verified` is `not-verified` and names the
   coder's level it accepted, for example `not-verified (accepted coder ran-goal)`.
-- An analyst's plan comment is not a handoff of finished work. It lists `Files`,
+- The analyst's report is not a handoff of finished work. It lists `Files`,
   `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
   line that proves it). It also names its analyst turn (`Turn: analyst <n>`) so
   the coder builds the branch name from a stated number, not a guess.

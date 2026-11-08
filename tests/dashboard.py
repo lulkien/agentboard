@@ -94,6 +94,8 @@ def main() -> int:
             goal,
         )
         run_cli(db, "update", "3", "--if-revision", "1", "--priority", "-7")
+        coder_report = "Coder <b>&\nsecond line"
+        run_cli(db, "update", "3", "--if-revision", "2", "--coder-report", coder_report)
         comment = 'Comment "quoted" <b>&\nsecond line'
         run_cli(db, "comment", "3", "--body", comment)
         run_cli(db, "add", "Planning child", "--parent", "1", "--status", "planning", "--assignee", "manager")
@@ -157,6 +159,8 @@ def main() -> int:
             assert 'href="/tasks/1"' in detail and "Parent" in detail, "parent link is missing"
             assert "updated" in detail and "commented" in detail and "<time datetime=" in detail, "activity event kind or timestamp is missing"
             assert "Comment &quot;quoted&quot; &lt;b&gt;&amp;\nsecond line" in detail, "comment text was not escaped/preserved"
+            assert "Coder report" in detail and "Coder &lt;b&gt;&amp;\nsecond line" in detail, "report section was not escaped/preserved"
+            assert "Analyst report" not in detail and "Reviewer report" not in detail, "empty report sections were printed"
             assert 'href="/feed?task=3"' in detail, "older activity link is missing"
 
             status, epic_detail = request(port, "GET", "/tasks/1")
