@@ -50,6 +50,8 @@ Never:
 - push, merge into the working branch, or switch to another task's branch
 - open `implement-4`; the cap returns the row to the analyst
 - reset a live board
+- write outside the repo except under `/tmp/agentboard/scratch/` for scratch
+  boards, logs and screenshots
 - use the shell to install or deploy binaries (`scp`, `rsync`, `ssh`, and similar
   remote copy/login tools)
 - stage prompt text in files

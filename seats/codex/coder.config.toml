@@ -33,8 +33,9 @@ edits. Never push, tag, reset, clean or stash. Never merge into the working bran
 and never switch to another task's branch. Never use the shell to install or deploy
 binaries (scp, rsync, ssh, and similar remote copy/login tools), and never reset a
 live board. Deploy or install through the project's development tools and MCP when
-the row asks for it. Never write outside the repository, and never edit a path this
-row does not own.
+the row asks for it. Never write outside the repo except under
+/tmp/agentboard/scratch/ for scratch boards, logs and screenshots, and never edit a
+path this row does not own.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "medium"

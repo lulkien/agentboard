@@ -102,7 +102,9 @@ board tool.
   and permits writes only under `/tmp/agentboard/scratch`; create that directory
   with mode `700` before launching the seat, which stays rooted in the repository.
 - coder: `danger-full-access` with the shell on (owner correction 2026-10-23: builds
-  and tests are this seat's job; prefer MCP for reading and searching). It also
+  and tests are this seat's job; prefer MCP for reading and searching). Writes
+  outside the repo are limited to `/tmp/agentboard/scratch/` for scratch
+  boards, logs and screenshots. It also
   creates its task branch and makes the one commit that branch carries; it never
   pushes or merges into the working branch.
 - manager: `workspace-write`.

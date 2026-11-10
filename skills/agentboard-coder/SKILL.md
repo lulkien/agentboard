@@ -72,7 +72,9 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    one. With no work you do not poll the board and do not arm a feed wait.
 
 Never push or merge into the working branch. Commit only on your task branch,
-once per branch, and leave the tree otherwise as you found it. Never use the shell
+once per branch, and leave the tree otherwise as you found it.
+Never write outside the repo except under `/tmp/agentboard/scratch/` for scratch
+boards, logs and screenshots. Never use the shell
 to install or deploy binaries
 (`scp`, `rsync`, `ssh`, and similar remote copy/login tools), and never reset a
 live board. Deploy or install through the project's development tools and MCP
