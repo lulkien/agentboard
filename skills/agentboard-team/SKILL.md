@@ -81,15 +81,15 @@ To start the manager in the current herdr pane, run the installed
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
-For Claude, analyst and reviewer use Opus at high effort and coder uses Sonnet at
-medium effort. Codex loads each seat's model and effort from its profile. Swap a
-model only when the human names a different one.
+For Claude, analyst use Opus at high effort, coder uses Sonnet at medium effort,
+reviewer use Sonnet at medium effort. Codex loads each seat's model and effort
+from its profile. Swap a model only when the human names a different one.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
 | analyst | `--model claude-opus-5-5 --effort high` | `-p analyst` (profile: gpt-6-sol, high) |
-| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-sol, medium) |
-| reviewer | `--model claude-opus-5-5 --effort high` | `-p reviewer` (profile: gpt-6-sol, medium) |
+| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-luna, medium) |
+| reviewer | `--model claude-sonnet-5-5 --effort medium` | `-p reviewer` (profile: gpt-6-sol, medium) |
 
 ```bash
 export REPO=/path/to/repo
@@ -97,7 +97,7 @@ herdr tab create --cwd "$REPO" --label analyst
 herdr pane list                                    # note the new tab's pane id
 
 # Claude seats (MCP config + preferred model + permission mode)
-# Analyst and reviewer skip permission prompts and deny the four file-mutation
+# Analyst and reviewer skip permission prompts and deny the three file-mutation
 # tools, so they read and run the shell but cannot edit. The coder denies nothing:
 # it edits and runs the gate.
 herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
@@ -105,7 +105,7 @@ herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --effort high \
   --mcp-config ~/.claude/analyst-mcp.json \
   --dangerously-skip-permissions \
-  --disallowedTools Edit Write MultiEdit NotebookEdit
+  --disallowedTools Edit Write NotebookEdit
 herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 \
   --effort medium \
@@ -116,7 +116,7 @@ herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   --effort high \
   --mcp-config ~/.claude/reviewer-mcp.json \
   --dangerously-skip-permissions \
-  --disallowedTools Edit Write MultiEdit NotebookEdit
+  --disallowedTools Edit Write NotebookEdit
 
 # Codex seats (profile + preferred model)
 # Analyst's permission profile allows writes only in this scratch directory;
@@ -139,7 +139,7 @@ Start only the seats the work needs: a reviewer with nothing to review is a tab
 that idles. Pick one kind per team; do not mix Claude and Codex rows of the table
 in one launch unless the human asks.
 
-The deny list removes the four file-mutation tools only; the shell stays open, and
+The deny list removes the three file-mutation tools only; the shell stays open, and
 the seat's own rules (analyst never commits, builds or installs; reviewer never
 commits, builds or installs; the
 coder commits only on its task branch) are what cover it.
@@ -174,7 +174,7 @@ model only when the human names a different one.
 export REPO=/path/to/repo
 
 # Claude seats (MCP config + preferred model + permission mode)
-# Analyst and reviewer skip permission prompts and deny the four file-mutation
+# Analyst and reviewer skip permission prompts and deny the three file-mutation
 # tools, so they read and run the shell but cannot edit. The coder denies nothing:
 # it edits and runs the gate.
 hc run --bg --name analyst --cwd "$REPO" -- \
@@ -182,7 +182,7 @@ hc run --bg --name analyst --cwd "$REPO" -- \
   --effort high \
   --mcp-config ~/.claude/analyst-mcp.json \
   --dangerously-skip-permissions \
-  --disallowedTools Edit Write MultiEdit NotebookEdit
+  --disallowedTools Edit Write NotebookEdit
 hc run --bg --name coder --cwd "$REPO" -- \
   claude --model claude-sonnet-5-5 \
   --effort medium \
@@ -193,7 +193,7 @@ hc run --bg --name reviewer --cwd "$REPO" -- \
   --effort high \
   --mcp-config ~/.claude/reviewer-mcp.json \
   --dangerously-skip-permissions \
-  --disallowedTools Edit Write MultiEdit NotebookEdit
+  --disallowedTools Edit Write NotebookEdit
 
 # Codex seats (the profile supplies the model and effort). --no-daemon is mandatory: without it the
 # seat's own commands run outside hc and nothing it starts is addressable.
@@ -217,7 +217,7 @@ Start only the seats the work needs: a reviewer with nothing to review is a
 terminal that idles. Pick one kind per team; do not mix Claude and Codex rows of the
 table in one launch unless the human asks.
 
-The deny list removes the four file-mutation tools only; the shell stays open, and
+The deny list removes the three file-mutation tools only; the shell stays open, and
 the seat's own rules (analyst never commits, builds or installs; reviewer never
 commits, builds or installs; the
 coder commits only on its task branch) are what cover it.
@@ -244,7 +244,7 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a four-tool edit deny list | `/agentboard-<seat>` |
+| Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
 | Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml`, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
 | Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `~/.grok/config.toml`, URL `/mcp/${AGENTBOARD_SEAT:-manager}` | `--trust --always-approve` | `/agentboard-manager` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |

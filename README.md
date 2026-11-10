@@ -194,7 +194,7 @@ streamable HTTP at `/mcp/<actor>`. The URL segment is the seat's name, so one
 process serves every seat and each write is attributed to its URL name. The
 project is the tool argument, else `?project=ID` on the MCP URL, else the whole
 board; the daemon's own environment and working directory are never read. The
-startup line and `GET /api/health` print the resolved board path and instance id.
+startup line and `GET /api/health` print the resolved board path and instance id. The dashboard footer has an off-by-default **Live update** toggle that polls its `cursor` every 5 s and reloads the page when it moves.
 While it runs it holds the board open, so `reset` and migration refuse until it
 is stopped. See `PROTOCOL.md` for the guard and the stateless mode.
 
