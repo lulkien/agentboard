@@ -141,7 +141,21 @@ def compare_baseline(db: Path, current_port: int, baseline: str) -> None:
         )
         assert len(targets) == 30, f"baseline URL list changed: expected 30, got {len(targets)}"
 
+        surveyed_paths = {
+            "/tasks",
+            "/tasks?status=todo",
+            "/tasks?offset=20",
+            "/tasks?parent=1",
+            "/tasks?assignee=alice%3C%26",
+            "/tasks/3",
+        }
+        surveyed_paths.update(
+            f"{page}{'&' if '?' in page else '?'}project=1" for page in list(surveyed_paths)
+        )
+        compared = 0
         for target in targets:
+            if target in surveyed_paths:
+                continue
             actual_status, actual_body, actual_headers = request(current_port, "GET", target)
             baseline_status, baseline_body, baseline_headers = request(
                 baseline_port, "GET", target
@@ -158,6 +172,7 @@ def compare_baseline(db: Path, current_port: int, baseline: str) -> None:
                         f"baseline mismatch for {target}: {header} differs "
                         f"({actual_headers.get(header)!r} != {baseline_headers.get(header)!r})"
                     )
+            compared += 1
     finally:
         server.terminate()
         try:
@@ -166,7 +181,7 @@ def compare_baseline(db: Path, current_port: int, baseline: str) -> None:
             server.kill()
             server.wait(timeout=3)
 
-    print("dashboard: 30 pages byte-identical to baseline")
+    print(f"dashboard: {compared} pages byte-identical to baseline; 12 surveyed task display paths excluded")
 
 
 def feed_cursor(db: Path) -> str:
@@ -264,7 +279,7 @@ def main() -> int:
             run_cli(db, "add", long_spaced_title)
             project_name = '<b>p&"</b>'
             run_cli(db, "project", "add", "--name", project_name, "--path", "/other-dashboard")
-            run_cli(db, "add", "Other project row", "--project", "2")
+            other_project_task = run_cli(db, "add", "Other project row", "--project", "2").split()[1].removeprefix("T")
             escaped_epic_id = run_cli(db, "add", escaped_epic_title).split()[1].removeprefix("T")
             run_cli(db, "add", "Escaped epic child", "--parent", escaped_epic_id, "--status", "done")
             run_cli(db, "update", escaped_epic_id, "--if-revision", "1", "--status", "canceled")
@@ -391,6 +406,7 @@ def main() -> int:
 
             status, tasks, _headers = request(port, "GET", "/tasks")
             assert status == 200 and 'class="active" href="/tasks"' in tasks, "tasks tab is missing or inactive"
+            assert '<td class="path">&lt;b&gt;p&amp;&quot;&lt;/b&gt;</td>' in tasks and '<td class="path">2</td>' not in tasks, "tasks table project column shows a project id instead of its name"
             assert escaped_unbroken_title in tasks and long_spaced_title in tasks, "long titles are missing from the tasks table"
             assert re.search(r"\.strip-list\s*>\s*li\s*\{[^}]*min-width:0", dashboard_css), "strip list items keep their intrinsic min-content width"
             assert re.search(r"\.strip-title\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "strip titles do not permit long words to shrink"
@@ -415,6 +431,13 @@ def main() -> int:
 
             status, detail, _headers = request(port, "GET", "/tasks/3")
             assert status == 200, f"task detail returned {status}"
+            assert '<dt>Project</dt><dd><a href="/tasks?project=1" title="/dashboard">dashboard</a></dd>' in detail, "task detail project name, link, or path title is wrong"
+            assert '<dt>Project</dt><dd>1</dd>' not in detail, "task detail still shows the project id"
+            other_status, other_detail, _headers = request(port, "GET", f"/tasks/{other_project_task}")
+            assert other_status == 200 and '&lt;b&gt;p&amp;&quot;&lt;/b&gt;' in other_detail and 'title="/other-dashboard"' in other_detail, "project name or path was not escaped in task detail"
+            assert f'href="/tasks?project=2"' in other_detail, "project link does not use the task project id"
+            no_project_status, no_project_detail, _headers = request(port, "GET", "/tasks/2")
+            assert no_project_status == 200 and '<dt>Project</dt><dd>—</dd>' in no_project_detail, "projectless task did not retain the empty project value"
             status, long_detail, _headers = request(port, "GET", "/tasks/51")
             assert status == 200 and escaped_unbroken_title in long_detail, "long unbroken title is missing from task detail"
             status, spaced_detail, _headers = request(port, "GET", "/tasks/52")
@@ -466,6 +489,9 @@ def main() -> int:
             second_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', second_page)]
             assert second_ids == list(range(35, 15, -1)), f"task page 2 has a gap, duplicate, or wrong order: {second_ids}"
             assert not set(first_ids) & set(second_ids) and first_ids[-1] - 1 == second_ids[0], "task pages overlap or have a gap"
+            run_cli(db, "update", other_project_task, "--if-revision", "1", "--project", "1")
+            change_status, change_detail, _headers = request(port, "GET", f"/tasks/{other_project_task}")
+            assert change_status == 200 and "<strong>project_id</strong>: &lt;b&gt;p&amp;&quot;&lt;/b&gt; → dashboard" in change_detail, "activity project change values still show ids or were not escaped"
 
             query = urlencode({"assignee": "alice<&"})
             status, filtered, _headers = request(port, "GET", f"/tasks?{query}")

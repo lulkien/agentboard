@@ -71,6 +71,10 @@ const METADATA: Template = Template::new(
     "metadata-row",
     include_str!("../templates/metadata-row.html"),
 );
+const PROJECT_LINK: Template = Template::new(
+    "detail-project-link",
+    include_str!("../templates/detail-project-link.html"),
+);
 const PRIORITY: Template = Template::new(
     "detail-priority",
     include_str!("../templates/detail-priority.html"),
@@ -207,7 +211,7 @@ fn task_detail(
     });
 
     let history_href = html::url(&format!("/feed?task={}", task.id), project);
-    let activity_content = activity_content(events);
+    let activity_content = activity_content(events, projects);
     let activity = ACTIVITY.fill(&[
         ("href", text(history_href)),
         ("content", html_slot(activity_content)),
@@ -232,13 +236,18 @@ fn task_detail(
             html_slot(PARENT.fill(&[("href", text(href)), ("parent", text(parent))])),
         ));
     }
-    metadata.push(metadata_row(
-        "Project",
-        text(
-            task.project_id
-                .map_or_else(|| "—".to_owned(), |id| id.to_string()),
-        ),
-    ));
+    let project_value = task.project_id.map_or_else(
+        || text("—"),
+        |id| match projects.iter().find(|item| item.project_id == id) {
+            Some(item) => html_slot(PROJECT_LINK.fill(&[
+                ("href", text(html::url("/tasks", Some(id)))),
+                ("name", text(&item.project_name)),
+                ("path", text(&item.project_path)),
+            ])),
+            None => text(id),
+        },
+    );
+    metadata.push(metadata_row("Project", project_value));
     metadata.push(metadata_row("Revision", text(task.revision)));
     let created = format_timestamp(task.created_at_ms);
     metadata.push(metadata_row(
@@ -274,7 +283,7 @@ fn task_detail(
     )
 }
 
-fn activity_content(events: &[Event]) -> Fragment {
+fn activity_content(events: &[Event], projects: &[Project]) -> Fragment {
     if events.is_empty() {
         return NO_ACTIVITY.fill(&[]);
     }
@@ -294,7 +303,7 @@ fn activity_content(events: &[Event]) -> Fragment {
                 }) {
                 EVENT_TEXT.fill(&[("text", text(payload_text))])
             } else if event.kind == EventKind::Updated {
-                updated_changes(event)
+                updated_changes(event, projects)
             } else {
                 Fragment::empty()
             };
@@ -309,7 +318,7 @@ fn activity_content(events: &[Event]) -> Fragment {
     EVENTS.fill(&[("items", html_slot(items))])
 }
 
-fn updated_changes(event: &Event) -> Fragment {
+fn updated_changes(event: &Event, projects: &[Project]) -> Fragment {
     let changes: Vec<_> = event
         .payload
         .get("changes")
@@ -317,8 +326,14 @@ fn updated_changes(event: &Event) -> Fragment {
         .into_iter()
         .flat_map(|values| values.iter())
         .map(|(field, pair)| {
-            let old = pair.get("old").map(display_value).unwrap_or_default();
-            let new = pair.get("new").map(display_value).unwrap_or_default();
+            let old = pair
+                .get("old")
+                .map(|v| display_change_value(field, v, projects))
+                .unwrap_or_default();
+            let new = pair
+                .get("new")
+                .map(|v| display_change_value(field, v, projects))
+                .unwrap_or_default();
             (field.clone(), old, new)
         })
         .collect();
@@ -337,6 +352,18 @@ fn updated_changes(event: &Event) -> Fragment {
             .collect();
         CHANGES.fill(&[("rows", html_slot(rows))])
     }
+}
+
+fn display_change_value(field: &str, value: &serde_json::Value, projects: &[Project]) -> String {
+    if field == "project_id"
+        && let Some(id) = value.as_u64()
+    {
+        return projects
+            .iter()
+            .find(|project| project.project_id == id)
+            .map_or_else(|| id.to_string(), |project| project.project_name.clone());
+    }
+    display_value(value)
 }
 
 fn metadata_row(label: &str, value: Slot) -> Fragment {

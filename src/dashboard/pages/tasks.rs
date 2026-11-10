@@ -133,7 +133,7 @@ pub(super) fn tasks(
     let rows: Fragment = page
         .tasks
         .iter()
-        .map(|task| render_task_row(task, filters))
+        .map(|task| render_task_row(task, filters, projects))
         .collect();
     let page_count = page.total.div_ceil(PAGE_SIZE).max(1);
     let page_number = (offset / PAGE_SIZE + 1) as u64;
@@ -195,10 +195,16 @@ pub(super) fn tasks(
     html::shell("Tasks", Page::Tasks, body, filters.project, projects)
 }
 
-fn render_task_row(task: &Task, filters: &Filters) -> Fragment {
-    let project = task
-        .project_id
-        .map_or_else(|| "—".to_owned(), |id| id.to_string());
+fn render_task_row(task: &Task, filters: &Filters, projects: &[Project]) -> Fragment {
+    let project = task.project_id.map_or_else(
+        || "—".to_owned(),
+        |id| {
+            projects
+                .iter()
+                .find(|item| item.project_id == id)
+                .map_or_else(|| id.to_string(), |item| item.project_name.clone())
+        },
+    );
     TASK_ROW.fill(&[
         (
             "href",
