@@ -79,6 +79,10 @@ out=$("$B" get 1)
 has "a comment leaves the revision" "revision 1" "$out"
 out=$("$B" comment 1 --body "-dash body")
 has "hyphen comment body accepted" "ok" "$out"
+out=$("$B" --actor " bad name" update 1 --if-revision 99 --comment hi 2>&1); code=$?
+check "comment-only update refuses an invalid actor" 1 "$code"
+out=$("$B" agents)
+lacks "invalid actor never joins the roster" "bad name" "$out"
 
 # --- long comment text is reachable, and a long title survives --full -----
 fresh d2

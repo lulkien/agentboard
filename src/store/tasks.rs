@@ -530,6 +530,9 @@ impl Board {
         task_id: u64,
         now_ms: i64,
     ) -> Result<()> {
+        // Every write reaches the roster through here, so a branch that skips its
+        // own check still cannot admit a bad name.
+        validate_actor(actor)?;
         let record = match self.agents.get(txn, actor.as_bytes())? {
             Some(raw) => {
                 let mut record: Agent = serde_json::from_slice(raw)?;
