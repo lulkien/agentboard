@@ -63,6 +63,30 @@ fn rollup(task: Task, counts: &[u64; Status::ALL.len()], cursor: Cursor) -> Epic
 }
 
 impl Board {
+    /// Counts for every status after all other filters, including terminal rows.
+    pub fn status_counts(&self, filter: &ListFilter<'_>) -> Result<Vec<(Status, u64)>> {
+        let txn = read_txn(&self.env)?;
+        self.checked_metadata(&txn)?;
+        let without_status = ListFilter {
+            status: None,
+            assignee: filter.assignee,
+            parent: filter.parent,
+            project: filter.project,
+            include_terminal: true,
+            limit: filter.limit,
+            offset: filter.offset,
+        };
+        let mut counts = [0_u64; Status::ALL.len()];
+        for entry in self.tasks.iter(&txn)? {
+            let (_, raw) = entry?;
+            let task: Task = serde_json::from_slice(raw)?;
+            if keep(&without_status, &task) {
+                counts[keys::status_code(task.status) as usize] += 1;
+            }
+        }
+        Ok(status_counts(&counts))
+    }
+
     /// Direct-child counts in the caller's snapshot, including write transactions.
     pub(super) fn child_counts(
         &self,

@@ -1,5 +1,6 @@
 //! Global event feed, opaque resume cursors and a bounded long-poll.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::domain::{Event, EventKind};
@@ -230,6 +231,69 @@ impl Board {
         Ok(OlderFeedPage {
             events,
             before,
+            older,
+        })
+    }
+
+    /// Dashboard history scoped to a project, newest when `before` is absent.
+    /// Task-to-project lookups share the page's read transaction and are cached
+    /// because a task commonly has several events in the scanned range.
+    pub fn feed_in_project(
+        &self,
+        filter: &FeedFilter<'_>,
+        project: u64,
+        before: Option<&str>,
+        limit: usize,
+    ) -> Result<OlderFeedPage> {
+        let txn = read_txn(&self.env)?;
+        let metadata = self.checked_metadata(&txn)?;
+        let high = metadata.next_event_seq.saturating_sub(1);
+        let start = match before {
+            Some(raw) => checked_cursor(raw, &metadata.instance_id)?
+                .seq
+                .min(high.saturating_add(1)),
+            None => high.saturating_add(1),
+        };
+        let limit = if limit == 0 { DEFAULT_PAGE } else { limit }.clamp(1, MAX_PAGE);
+        let mut projects: HashMap<u64, Option<u64>> = HashMap::new();
+        let mut picked = Vec::new();
+        let mut older = false;
+        let mut seq = start.saturating_sub(1);
+        while seq >= 1 {
+            if let Some(raw) = self.events.get(&txn, &keys::task(seq))? {
+                let event: Event = serde_json::from_slice(raw)?;
+                if event.seq != seq {
+                    return Err(Error::Corrupt("event key/sequence mismatch"));
+                }
+                if matches(filter, &event) {
+                    let task_project = match projects.get(&event.task_id) {
+                        Some(value) => *value,
+                        None => {
+                            let task = self
+                                .read_task_in_txn(&txn, event.task_id)?
+                                .ok_or(Error::Corrupt("event points to missing task"))?;
+                            projects.insert(event.task_id, task.project_id);
+                            task.project_id
+                        }
+                    };
+                    if task_project == Some(project) {
+                        if picked.len() == limit {
+                            older = true;
+                            break;
+                        }
+                        picked.push(event);
+                    }
+                }
+            }
+            seq -= 1;
+        }
+        picked.reverse();
+        Ok(OlderFeedPage {
+            before: Cursor {
+                instance_id: metadata.instance_id,
+                seq: picked.first().map_or(start, |event| event.seq),
+            },
+            events: picked,
             older,
         })
     }

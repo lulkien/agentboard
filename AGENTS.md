@@ -36,7 +36,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 99 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 102 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` (default binary) | `333/333 passed (cli, lmdb)` |
@@ -69,8 +69,9 @@ update the expectation here.
   lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/release/claim/
   comment, index upkeep, events), `feed` (cursors, filters, bounded older-page read,
   wait), `wait` (per-row
-  blocking wait that re-queries its watched set), `list` (list, brief),
-  `tests`/`m3_tests` (store proofs).
+  blocking wait that re-queries its watched set), `list` (list, brief,
+  status counts), `overview` (dashboard lanes, attention and held work),
+  `tests`/`m3_tests`/`overview_tests` (store proofs).
 - The board format is version 2 and uses eight named databases, including
   `projects`; format 1 boards refuse to open until migrated.
 - `src/render.rs` — the only place compact text is built, including the `…`
