@@ -207,7 +207,7 @@ fn respond(stream: &mut TcpStream, board: &Board, bound_address: SocketAddr) -> 
             stream,
             "200 OK",
             "text/css; charset=utf-8",
-            include_str!("dashboard/style.css"),
+            include_str!("../dashboard/style.css"),
         );
     }
     if path == "/assets/theme.js" {

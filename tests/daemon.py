@@ -29,6 +29,15 @@ def check(name, want, got):
         print(f"FAIL: {name}: want {want!r} got {got!r}")
 
 
+def ok(name, condition):
+    global passed, failed
+    if condition:
+        passed += 1
+    else:
+        failed += 1
+        print(f"FAIL: {name}")
+
+
 def has(name, needle, hay):
     global passed, failed
     if needle in hay:
@@ -59,6 +68,15 @@ class Daemon:
         data = response.read().decode()
         conn.close()
         return response.status, data
+
+    def fetch(self, method, path, headers=None):
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=30)
+        conn.request(method, path, None, headers or {})
+        response = conn.getresponse()
+        data = response.read()
+        head = {name.lower(): value for name, value in response.getheaders()}
+        conn.close()
+        return response.status, head, data
 
     def rpc(self, path, method, params=None, headers=None):
         self.seq += 1
@@ -249,6 +267,108 @@ def api_checks(scratch):
         daemon.close()
 
 
+CSP = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def css_checks(css):
+    """The stylesheet rules the HTML dashboard suite pinned, on the embedded file."""
+    ok("blocked column heading retains its hatch", re.search(r"\.column-head\.status-blocked\s*\{[^}]*background-image:none", css))
+    ok("empty card slot lacks its dashed shape", re.search(r"\.card-list > \.empty\s*\{[^}]*border:1px dashed", css))
+    ok("card does not own its background rule", re.search(r"(?m)^\.card\s*\{[^}]*background:var\(--strip\)", css))
+    ok("shared panel/card padding rule remains", not re.search(r"\.panel\s*,\s*\.card", css))
+    ok("more row is not strip shaped", re.search(r"\.column-more\s*\{[^}]*min-height:36px", css))
+    ok("page head does not wrap its title and aside", re.search(r"\.page-head\s*\{[^}]*display:flex[^}]*flex-wrap:wrap", css))
+    ok("status chips are shorter than 36px", re.search(r"\.status-chip\s*\{[^}]*min-height:36px", css))
+    ok("phone topbar remains sticky", re.search(r"@media\s*\(max-width:650px\)\s*\{[^}]*\.topbar\s*\{[^}]*position:static", css))
+    phone_rules = css.split("@media (max-width:650px)", 1)[1].split("@media (prefers-reduced-motion", 1)[0]
+    ok("direct timeline events are missing their marker rule", re.search(r"\.timeline\s*>\s*li::before\s*\{[^}]*background:var\(--implementing\)", css))
+    ok("seat names can overflow their chips", re.search(r"\.seat-name\s*\{[^}]*text-overflow:ellipsis[^}]*min-width:0", css))
+    ok("kanban does not use five shrinkable columns", re.search(r"\.kanban\s*\{[^}]*grid-template-columns:repeat\(5,minmax\(0,1fr\)\)", css))
+    ok("card titles lack the three-line clamp and long-token fallback", re.search(r"\.card-title\s*\{[^}]*-webkit-line-clamp:3[^}]*overflow:hidden[^}]*overflow-wrap:anywhere[^}]*max-height:", css))
+    ok("cards keep an intrinsic minimum width", re.search(r"(?m)^\.card\s*\{[^}]*min-width:0", css))
+    ok("column headings are not sticky", re.search(r"\.column-head\s*\{[^}]*position:sticky", css))
+    ok("kanban does not stack on narrow screens", re.search(r"@media\s*\(max-width:899px\)\s*\{[^}]*\.kanban\s*\{[^}]*grid-template-columns:1fr", css))
+    ok("attention rail is not a two-column strip grid", re.search(r"\.attention \.strip-list\s*\{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)", css))
+    ok("attention rail does not collapse to one column on narrow screens", re.search(r"@media\s*\(max-width:899px\)\s*\{[^}]*\.attention \.strip-list\s*\{[^}]*grid-template-columns:1fr", css))
+    ok("top bar is not sticky, layered and opaque", re.search(r"\.topbar\s*\{[^}]*position:sticky[^}]*top:0[^}]*z-index:\d+[^}]*background:var\(--strip\)", css))
+    ok("anchors do not account for the sticky header", "scroll-padding-top:70px" in css and "scroll-margin-top:70px" in css)
+    ok("header control sizing is not shared", re.search(r"\.header-control\s*\{[^}]*min-height:40px[^}]*padding:\.5rem \.75rem[^}]*font:inherit", css))
+    ok("header does not wrap at narrow widths", ".topbar {" in css and "flex-wrap:wrap" in css)
+    ok("Show button does not share the theme control padding", ".project-switcher button[type=submit] { padding:.5rem .75rem; }" in css)
+    ok("page layout does not keep the footer at the viewport bottom", "body { min-height:100vh; display:flex; flex-direction:column; }" in css and "main { flex:1;" in css)
+    ok("footer is not a slim 40px bar", re.search(r"(?m)^footer\s*\{[^}]*min-height:40px[^}]*padding:0 1rem", css))
+    ok("footer theme control is not compact", "footer .theme-toggle { margin:0 auto; min-height:28px; padding:.25rem .6rem; font:600 13px/1.2 var(--signage); }" in css)
+    ok("footer must not be fixed or sticky", not re.search(r"(?m)^footer[^{}]*\{[^}]*position:", css))
+    ok("main bottom gap above the footer was not reduced", "margin:1.5rem auto;" in css and "main { margin:1rem auto; }" in phone_rules)
+    ok("system theme defaults are missing", "prefers-color-scheme" in css)
+    ok("feed change details do not inherit the dashboard font", "pre { font:inherit; }" in css)
+    ok("reduced motion or keyboard focus style is missing", "prefers-reduced-motion" in css and ":focus-visible" in css)
+    ok("tasks table must preserve intrinsic cell widths and scroll inside its wrapper without per-letter wrapping", re.search('\\.table-scroll\\s*\\{[^}]*overflow-x:auto', css) and re.search('\\.task-table\\s*\\{[^}]*width:max-content[^}]*min-width:100%', css) and (not re.search('(?:\\.path\\s*,\\s*td|td)\\s*\\{[^}]*overflow-wrap:anywhere', css)))
+    ok("task titles are not width-capped, clamped to three lines, and protected from unbroken tokens", re.search(r"\.task-table \.task-title\s*\{[^}]*min-width:11rem[^}]*max-width:11rem", css) and re.search(r"\.task-table \.task-title > span\s*\{[^}]*-webkit-line-clamp:3[^}]*overflow:hidden[^}]*overflow-wrap:anywhere", css))
+    ok("non-title task cells are not kept to one line", re.search(r"\.task-table td:not\(\.task-title\)\s*\{(?=[^}]*white-space:nowrap)(?=[^}]*text-overflow:ellipsis)(?=[^}]*overflow:hidden)[^}]*\}", css))
+    ok("task table scroll cue edge and shadow are missing", re.search(r"\.table-scroll\s*\{[^}]*border-right:2px solid var\(--muted\)[^}]*box-shadow:inset -8px 0 8px -8px var\(--ink\)", css))
+    ok("strip list items keep their intrinsic min-content width", re.search(r"\.strip-list\s*>\s*li\s*\{[^}]*min-width:0", css))
+    ok("strip titles do not permit long words to shrink", re.search(r"\.strip-title\s*\{[^}]*overflow-wrap:anywhere", css))
+    ok("unbroken detail titles can overflow their page", re.search(r"\.issue-header h2\s*\{[^}]*overflow-wrap:anywhere", css))
+    ok("no redundant card flag rule", "card-flag" not in css)
+
+
+def static_checks(daemon):
+    """The embedded dashboard: one shell for every page path, no inline code."""
+    shell = open(os.path.join(ROOT, "dashboard", "index.html"), "rb").read()
+    browser_headers = {
+        "content-security-policy": CSP,
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+    }
+    for path in ["/", "/epics", "/tasks", "/tasks/1", "/tasks/999", "/feed", "/tasks?project=1&status=todo",
+                 "/feed?task=1&kind=commented", "/epics?project=2"]:
+        status, head, body = daemon.fetch("GET", path)
+        check(f"{path} is 200", 200, status)
+        check(f"{path} serves the embedded shell", shell, body)
+        check(f"{path} is html", "text/html; charset=utf-8", head.get("content-type"))
+        for name, value in browser_headers.items():
+            check(f"{path} sends {name}", value, head.get(name))
+    check("HEAD / is allowed", 200, daemon.fetch("HEAD", "/")[0])
+    for method in ["POST", "PUT", "PATCH", "DELETE"]:
+        check(f"{method} / is 405", 405, daemon.fetch(method, "/")[0])
+        check(f"{method} /tasks/1 is 405", 405, daemon.fetch(method, "/tasks/1")[0])
+    for path in ["/tasks/1/extra", "/elsewhere", "/assets/nope", "/assets/index.html", "/index.html", "/app.js"]:
+        check(f"{path} is 404", 404, daemon.fetch("GET", path)[0])
+    status, head, _ = daemon.fetch("GET", "/", {"Host": "evil.example"})
+    check("a foreign Host cannot load the shell", 421, status)
+    check("a refusal still carries nosniff", "nosniff", head.get("x-content-type-options"))
+    status, head, _ = daemon.fetch("GET", "/api/board")
+    check("API responses are no-store", "no-store", head.get("cache-control"))
+    check("API responses are nosniff", "nosniff", head.get("x-content-type-options"))
+
+    status, head, script = daemon.fetch("GET", "/assets/app.js")
+    check("app.js is 200", 200, status)
+    check("app.js is javascript", "text/javascript; charset=utf-8", head.get("content-type"))
+    check("app.js is the repo file", open(os.path.join(ROOT, "dashboard", "app.js"), "rb").read(), script)
+    check("app.js is no-store", "no-store", head.get("cache-control"))
+    script = script.decode()
+    for banned in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "setTimeout(", "setInterval("]:
+        check(f"app.js never uses {banned}", False, banned in script)
+    ok("app.js fetches and never writes", "fetch(" in script and not re.search(r"""['"](POST|PUT|PATCH|DELETE)['"]""", script))
+
+    status, head, sheet = daemon.fetch("GET", "/assets/style.css")
+    check("style.css is 200", 200, status)
+    check("style.css is css", "text/css; charset=utf-8", head.get("content-type"))
+    check("style.css is the repo file", open(os.path.join(ROOT, "dashboard", "style.css"), "rb").read(), sheet)
+    css_checks(sheet.decode())
+
+    page = shell.decode()
+    check("index.html has no inline script", [], re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", page))
+    check("index.html has no inline style element", False, "<style" in page)
+    check("index.html has no style attribute", False, bool(re.search(r"\sstyle\s*=", page)))
+    check("index.html has no event handler attribute", False, bool(re.search(r"\son[a-z]+\s*=", page)))
+    check("index.html loads only /assets files", ["/assets/app.js", "/assets/style.css"],
+          sorted(re.findall(r"(?:src|href)=\"(/assets/[^\"]+)\"", page)))
+
+
 def main():
     if not os.path.exists(BIN):
         raise SystemExit(f"no binary at {BIN}; cargo build first")
@@ -267,6 +387,7 @@ def main():
         check("health refuses POST", 405, daemon.request("POST", "/api/health", "{}")[0])
         check("health refuses HEAD", 405, daemon.request("HEAD", "/api/health")[0])
         check("unknown path is 404", 404, daemon.request("GET", "/nope")[0])
+        static_checks(daemon)
 
         # Identity is the URL segment: two seats interleaved on one daemon.
         daemon.rpc("/mcp/alice", "initialize", {"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "c", "version": "0"}})

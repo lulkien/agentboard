@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Agentboard</title>
+    <link rel="stylesheet" href="/assets/style.css">
+    <script defer src="/assets/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" href="/" data-nav="brand">Agentboard</a>
+      <nav aria-label="Main navigation">
+        <a href="/" data-nav="board">Board</a>
+        <a href="/epics" data-nav="epics">Epics</a>
+        <a href="/tasks" data-nav="tasks">Tasks</a>
+        <a href="/feed" data-nav="feed">Feed</a>
+      </nav>
+      <form class="project-switcher" method="get" action="/">
+        <select class="header-control" name="project" aria-label="Project">
+          <option value="">All projects</option>
+        </select>
+        <button class="header-control" type="submit">Show</button>
+      </form>
+    </header>
+    <main id="main">
+      <div class="page-head"><h1>Agentboard</h1></div>
+    </main>
+    <footer>
+      <button class="header-control theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Change theme" title="Change theme">Change theme</button>
+    </footer>
+  </body>
+</html>

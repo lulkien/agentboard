@@ -5,6 +5,10 @@
 //! The port is also a browser-reachable write surface, so one guard runs before
 //! every route: `Host` must be ours, an `Origin` must be ours, and `/mcp` answers
 //! loopback peers only whatever the bind address.
+//!
+//! The dashboard is three embedded files (`dashboard/`). Every page path answers
+//! the same `index.html`; `app.js` fetches the JSON API for that path and builds
+//! the DOM. Stateless plain GET pages: no client router, no write route.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -18,11 +22,19 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use rust_embed::RustEmbed;
 
 mod api;
 
 use crate::server::{Board as McpBoard, RequestScope};
 use crate::store::Board;
+
+/// The dashboard files, compiled into the binary (also in debug builds).
+#[derive(RustEmbed)]
+#[folder = "dashboard/"]
+struct Assets;
+
+const CSP: &str = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 type Mcp = StreamableHttpService<McpBoard, NeverSessionManager>;
 
@@ -81,6 +93,12 @@ fn router(board: Arc<Board>, bound: SocketAddr) -> Router {
     );
     Router::new()
         .route("/mcp/{actor}", any(mcp_request))
+        .route("/", get(shell))
+        .route("/epics", get(shell))
+        .route("/tasks", get(shell))
+        .route("/tasks/{id}", get(shell))
+        .route("/feed", get(shell))
+        .route("/assets/{name}", get(asset))
         .route("/api/health", get(health))
         .route("/api/board", get(api::board))
         .route("/api/epics", get(api::epics))
@@ -90,7 +108,53 @@ fn router(board: Arc<Board>, bound: SocketAddr) -> Router {
         .route("/api/projects", get(api::projects))
         .layer(middleware::from_fn(api_get_only))
         .layer(middleware::from_fn_with_state(bound, guard))
+        .layer(middleware::from_fn(browser_headers))
         .with_state(App { mcp, board })
+}
+
+async fn shell() -> Response {
+    file("index.html")
+}
+
+/// `index.html` is only reachable as a page, never as an asset.
+async fn asset(Path(name): Path<String>) -> Response {
+    if name == "index.html" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    file(&name)
+}
+
+fn file(name: &str) -> Response {
+    let Some(found) = Assets::get(name) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let content_type = match name.rsplit_once('.').map(|(_, extension)| extension) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+    (
+        [(header::CONTENT_TYPE, content_type)],
+        found.data.into_owned(),
+    )
+        .into_response()
+}
+
+/// Everything a browser can load, guard refusals included, is uncacheable, never
+/// sniffed, sends no referrer and may only load our own files. `/mcp` is for
+/// agents, not browsers, and keeps rmcp's headers.
+async fn browser_headers(request: Request, next: Next) -> Response {
+    let browser = !request.uri().path().starts_with("/mcp");
+    let mut response = next.run(request).await;
+    if browser {
+        let headers = response.headers_mut();
+        headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+        headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+        headers.insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
+        headers.insert(header::CONTENT_SECURITY_POLICY, CSP.parse().unwrap());
+    }
+    response
 }
 
 async fn mcp_request(

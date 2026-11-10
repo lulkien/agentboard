@@ -44,7 +44,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
 | `python3 tests/mcp_client.py` | `188/188 passed (mcp, lmdb)` |
 | `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `188/188 passed (mcp-http, lmdb)` |
-| `python3 tests/daemon.py` | `daemon: 160/160 passed (http, lmdb)` (scratch boards, loopback port 0) |
+| `python3 tests/daemon.py` | `daemon: 301/301 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 32/32 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
 | `bash tests/seats-install.sh` | `220/220 passed (seats installer)` (isolated homes; no board writes) |
@@ -95,6 +95,12 @@ update the expectation here.
   `src/daemon/api.rs` is the read-only JSON API beside it (GET only, no write route);
   it builds JSON from the store read models and takes every query through
   `src/routes.rs::parse`, the one strict query validator the HTML dashboard shares.
+- `dashboard/` — the daemon's dashboard: `index.html`, `app.js`, `style.css`,
+  embedded with rust-embed (`debug-embed`, so debug and release serve the same
+  bytes) and served by `src/daemon.rs`: every page path answers `index.html`,
+  files live under `/assets/`, and `app.js` builds the DOM from the JSON API with
+  `createElement`/`textContent` only. The feature-gated SSR dashboard still
+  includes `dashboard/style.css` until it is removed.
 - `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.
