@@ -329,6 +329,7 @@ def main() -> int:
             footer = html.split("<footer>", 1)[1].split("</footer>", 1)[0]
             assert re.search(r'<button[^>]*>Change theme</button>', footer) and "current theme" in request(port, "GET", "/assets/theme.js")[1], "theme button label or mode accessibility is missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
+            assert re.search(r"\.timeline\s*>\s*li::before\s*\{[^}]*background:var\(--implementing\)", dashboard_css), "direct timeline events are missing their marker rule"
             assert re.search(r"\.seat-name\s*\{[^}]*text-overflow:ellipsis[^}]*min-width:0", dashboard_css), "seat names can overflow their chips"
             assert re.search(r"\.kanban\s*\{[^}]*grid-template-columns:repeat\(5,minmax\(0,1fr\)\)", dashboard_css), "kanban does not use five shrinkable columns"
             assert re.search(r"\.card-title\s*\{[^}]*-webkit-line-clamp:3[^}]*overflow:hidden[^}]*overflow-wrap:anywhere[^}]*max-height:", dashboard_css), "card titles lack the three-line clamp and long-token fallback"
