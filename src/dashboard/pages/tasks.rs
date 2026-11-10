@@ -99,25 +99,34 @@ pub(super) fn tasks(
     for task in &page.tasks {
         render_task_row(&mut body, task, filters.project);
     }
+    let page_count = page.total.div_ceil(PAGE_SIZE).max(1);
+    let page_number = (offset / PAGE_SIZE + 1) as u64;
     body.push_str("</tbody></table></div><nav class=\"pagination\" aria-label=\"Task pages\">");
     if offset > 0 {
         let _ = write!(
             body,
-            "<a href=\"{}\">Previous</a>",
+            "<a class=\"page-arrow\" aria-label=\"Previous page\" rel=\"prev\" href=\"{}\">←</a>",
             html::escape(&html::query_url(
                 filters,
                 Some(offset.saturating_sub(PAGE_SIZE))
             ))
         );
+    } else {
+        body.push_str("<span class=\"page-arrow\" aria-label=\"Previous page\" aria-disabled=\"true\">←</span>");
     }
+    let _ = write!(body, "<span>Page {page_number} of {page_count}</span>");
     if page.more {
         let _ = write!(
             body,
-            "<a href=\"{}\">Next</a>",
+            "<a class=\"page-arrow\" aria-label=\"Next page\" rel=\"next\" href=\"{}\">→</a>",
             html::escape(&html::query_url(
                 filters,
                 Some(offset.saturating_add(page.tasks.len()))
             ))
+        );
+    } else {
+        body.push_str(
+            "<span class=\"page-arrow\" aria-label=\"Next page\" aria-disabled=\"true\">→</span>",
         );
     }
     body.push_str("</nav></section>");

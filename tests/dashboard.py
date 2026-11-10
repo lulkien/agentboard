@@ -201,12 +201,18 @@ def main() -> int:
             assert 'class="active" href="/epics"' in epics_home, "epics tab was not marked active"
             assert "/assets/dashboard.css" in html and "/assets/theme.js" in html and "/assets/live.js" in html, "embedded dashboard assets are missing"
             assert 'id="pulse-status"' in html and 'data-follow aria-pressed="false"' in html, "live controls are missing"
+            assert 'class="header-control follow-toggle"' in html and 'class="header-control theme-toggle"' in html and '<select class="header-control" name="project">' in html, "header controls do not share sizing class"
+            assert 'title="Reload this page automatically when the board changes"' in html, "Follow button title is missing"
             live_status, live_js, _headers = request(port, "GET", "/assets/live.js")
             assert live_status == 200 and "textContent" in live_js and "visibilitychange" in live_js and "innerHTML" not in live_js, "live script violates the safe polling contract"
             assert "let timer = null;" in live_js and re.search(r"function schedule\(delay\)\s*\{\s*window\.clearTimeout\(timer\);\s*timer = null;[\s\S]*?timer = window\.setTimeout\(poll, delay\);", live_js), "poll re-arm does not clear the single timer first"
             assert re.search(r"if \(document\.hidden\)\s*\{\s*window\.clearTimeout\(timer\);\s*timer = null;\s*\}\s*else\s*\{\s*poll\(\);", live_js), "poll timer does not stop while hidden and resume on show"
             assert live_js.count("const baselineCursor = body.dataset.cursor || \"\";") == 1 and "cursor = next" not in live_js and "baselineCursor.split(\":\")" in live_js, "event count cursor is not fixed at page load"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
+            assert re.search(r"\.topbar\s*\{[^}]*position:sticky[^}]*top:0[^}]*z-index:\d+[^}]*background:var\(--strip\)", dashboard_css), "top bar is not sticky, layered and opaque"
+            assert "scroll-padding-top:70px" in dashboard_css and "scroll-margin-top:70px" in dashboard_css, "anchors do not account for the sticky header"
+            assert re.search(r"\.header-control\s*\{[^}]*min-height:40px[^}]*padding:\.5rem \.75rem[^}]*font:inherit", dashboard_css), "header control sizing is not shared"
+            assert not re.search(r"@media \(max-width:650px\)\s*\{[^}]*\.(?:header-control|follow-toggle|theme-toggle)", dashboard_css), "narrow layout overrides shared header control sizing"
             assert "prefers-color-scheme" in dashboard_css, "system theme defaults are missing"
             assert "pre { font:inherit; }" in dashboard_css, "feed change details do not inherit the dashboard font"
             assert "prefers-reduced-motion" in dashboard_css and ":focus-visible" in dashboard_css, "reduced motion or keyboard focus style is missing"
@@ -254,7 +260,16 @@ def main() -> int:
             assert chips == ["All 53", "todo 48", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 1", "canceled 0"], f"task status counts are wrong: {chips}"
             status, active_todo, _headers = request(port, "GET", "/tasks?status=todo")
             assert status == 200 and 'class="status-chip status-todo" href="/tasks?status=todo" aria-current="true"' in active_todo, "active status chip is missing"
-            assert 'href="/tasks?offset=20"' in tasks, "next-page link is missing"
+            pager = re.search(r'<nav class="pagination"[^>]*>(.*?)</nav>', tasks)
+            assert pager and '<span class="page-arrow" aria-label="Previous page" aria-disabled="true">←</span><span>Page 1 of 3</span>' in pager.group(1), "first page indicator or disabled previous arrow is wrong"
+            assert '<a class="page-arrow" aria-label="Next page" rel="next" href="/tasks?offset=20">→</a>' in pager.group(1), "first page next arrow is missing or malformed"
+            second_status, second_page, _headers = request(port, "GET", "/tasks?offset=20")
+            second_pager = re.search(r'<nav class="pagination"[^>]*>(.*?)</nav>', second_page)
+            assert second_status == 200 and second_pager and 'aria-label="Previous page" rel="prev" href="/tasks?offset=0"' in second_pager.group(1) and 'Page 2 of 3' in second_pager.group(1) and 'aria-label="Next page" rel="next" href="/tasks?offset=40"' in second_pager.group(1), "middle page arrows or indicator are wrong"
+            last_status, last_page, _headers = request(port, "GET", "/tasks?offset=40")
+            last_pager = re.search(r'<nav class="pagination"[^>]*>(.*?)</nav>', last_page)
+            assert last_status == 200 and last_pager and 'Page 3 of 3' in last_pager.group(1) and '<span class="page-arrow" aria-label="Next page" aria-disabled="true">→</span>' in last_pager.group(1), "last page does not disable next arrow"
+            assert "Previous</a>" not in tasks and "Next</a>" not in tasks, "pager still renders text links"
             first_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', tasks)]
             assert first_ids == list(range(53, 33, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
 
