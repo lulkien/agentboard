@@ -74,3 +74,69 @@ to install or deploy binaries
 live board. Deploy or install through the project's development tools and MCP
 when the row asks for it. Never write another actor's row without `force` and a
 `reason`, never stage prompt text in a file.
+
+## Look at the dashboard
+
+For a dashboard UI change, use `agent-browser` against a disposable board and
+report the URL, viewport/theme measurements, and screenshot paths. Keep the
+screenshots in `/tmp/agentboard/scratch/`, never in the repository.
+
+First check the real launch: `S=$(agent-browser session id --scope worktree
+--prefix task)` then `agent-browser --session "$S" open about:blank` and close
+that session. `agent-browser doctor` currently reports `No Chrome binary found`
+and a failed launch even when the configured Chrome for Testing executable
+works; treat that as a known false negative. If the real `about:blank` launch
+fails, report its output and stop.
+
+Set up a scratch board; never use the live board:
+
+```bash
+export AGENTBOARD_DB="$(mktemp -d)/b" AGENTBOARD_ACTOR=coder
+agentboard project add --name dashboard-a --path "$PWD"
+agentboard project add --name dashboard-b --path /tmp/dashboard-project-b
+agentboard add "$(python3 -c 'print("x" * 200)')" --project 1
+agentboard add 'A very long dashboard title with spaces that should wrap across the card and remain readable at narrow viewport widths' --project 1
+agentboard add '<script>alert(1)</script>' --project 1
+agentboard add 'Dashboard epic' --project 1  # use its printed task ID below
+agentboard add 'Epic child' --parent EPIC_ID --project 1
+agentboard add 'Blocked row' --status blocked --assignee coder --project 1
+agentboard add 'Reviewing row' --status reviewing --assignee reviewer --new-actor --project 1
+agentboard add 'Second project todo' --project 2
+```
+
+Build `target/release/agentboard` with `cargo build --release --features
+dashboard`. Make a screenshot scratchpad and pick a free loopback port, then
+start the dashboard in the background and save its PID for cleanup:
+
+```bash
+SCRATCH=$(mktemp -d /tmp/agentboard/scratch/T95.XXXXXX)
+PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+target/release/agentboard dashboard "127.0.0.1:$PORT" --db "$AGENTBOARD_DB" >"$SCRATCH/dashboard.log" 2>&1 &
+PID=$!
+S=$(agent-browser session id --scope worktree --prefix task)
+```
+
+Pass `--session "$S"` on every browser command; open the local URL with the
+domain limit (the option is `--allowed-domains`):
+
+```bash
+agent-browser --session "$S" --allowed-domains 127.0.0.1 open "http://127.0.0.1:$PORT/"
+agent-browser --session "$S" snapshot -c
+```
+
+For each combination of light/dark and `1280x800`/`360x740`, run
+`agent-browser --session "$S" set media light|dark` and
+`agent-browser --session "$S" set viewport WIDTH HEIGHT`, then measure rather
+than eyeball. This reports page overflow and any
+`.card`, `.task-strip` or `.seat-chip` whose content exceeds its box while either
+overflow axis is visible:
+
+```bash
+agent-browser --session "$S" eval "JSON.stringify({page:{scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth},visibleOverflow:[...document.querySelectorAll('.card,.task-strip,.seat-chip')].filter(e=>e.scrollWidth>e.clientWidth&&(getComputedStyle(e).overflowX==='visible'||getComputedStyle(e).overflowY==='visible')).map(e=>({className:e.className,scrollWidth:e.scrollWidth,clientWidth:e.clientWidth}))})"
+```
+
+Save a screenshot for each combination with
+`agent-browser --session "$S" screenshot "$SCRATCH/$MODE-${WIDTH}x${HEIGHT}.png"`,
+naming the four paths in the coder report. Always run
+`agent-browser --session "$S" close` and `kill "$PID"`, including after a
+failed check.

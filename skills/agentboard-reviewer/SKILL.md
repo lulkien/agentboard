@@ -79,6 +79,37 @@ the status update that follows. The manual's tools table is right: `task_comment
 never bumps the revision.
 
 
-Never edit files, commit, build, run tests, install, reset a board, or create board
-state. Never close a row you did not review, and never accept "it should work" as
-evidence.
+Never edit files, commit, build, run tests, install, reset a board, or create
+state except for the scratch dashboard check below. Never close a row you did not
+review, and never accept "it should work" as evidence.
+
+## Look at the dashboard
+
+For a dashboard UI change, first open the screenshot paths in the coder report
+with image Read and judge the rendered layout; say so if the report has no
+screenshots. A UI row is not done without the reviewer's own overflow
+measurements or an explicit reason they could not be run. The Claude reviewer
+seat may also check it in a browser: set `AGENTBOARD_DB="$(mktemp -d)/b"` and seed a scratch
+LMDB board with the long unspaced title, long spaced title, `<script>` title,
+epic and child, blocked/reviewing/todo rows, and two projects using the CLI. Never
+use or write to the live board. Start the dashboard on a free port from the
+already-built `target/release/agentboard` supplied by the coder; the reviewer
+never builds, tests, installs, or runs a gate. Use a reviewer-owned
+`S=$(agent-browser session id --scope worktree --prefix task)`, pass
+`--session "$S"` on every command, and open only
+`http://127.0.0.1:PORT/` with `--allowed-domains 127.0.0.1`. Prefer `snapshot`
+for structure. At both `1280x800` and `360x740`, in light and dark media modes,
+set the viewport and use `eval` to report `document.documentElement.scrollWidth`
+versus `clientWidth` and any `.card`, `.task-strip`, or `.seat-chip` whose
+`scrollWidth` exceeds `clientWidth` with visible overflow. Save reviewer
+screenshots or notes under `/tmp/agentboard/scratch/`, never in the repository.
+Always stop the dashboard process and run `agent-browser --session "$S" close`.
+A missing or stale built binary means report that and do not build. The current
+Codex reviewer profile is read-only and git-only, so it cannot run this browser
+procedure; until T96 changes that profile, Codex reviewers must judge from the
+coder report and its screenshot paths.
+
+`agent-browser doctor` currently has a known false negative: it can report
+`No Chrome binary found` and a failed launch while the configured Chrome for
+Testing path works. The real launch check is an isolated session's `open
+about:blank` followed by `close`; block only if that actual launch fails.

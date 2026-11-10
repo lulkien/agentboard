@@ -49,21 +49,49 @@ with tempfile.TemporaryDirectory(prefix='agentboard-doc-names-') as scratch:
             proc.wait(timeout=5)
 
 help_cache = {}
+command_cache = {}
+binary_root_commands = set()
 cli_source = (ROOT / 'src/cli.rs').read_text()
 optional_commands = set()
 if re.search(r'#\[cfg\(feature = "dashboard"\)\]\s+Dashboard\s*\{', cli_source):
     optional_commands.add('dashboard')
 
-def commands(prefix):
+def command_names(output):
+    section = output.split('Commands:\n', 1)
+    return set(re.findall(r'^  ([a-z][a-z-]*)\s',
+                          section[1].split('\nOptions:', 1)[0], re.M)) if len(section) == 2 else set()
+
+def help_output(prefix):
     if prefix not in help_cache:
+        if prefix and prefix[0] in optional_commands:
+            help_output(())
+            if prefix[0] not in binary_root_commands:
+                help_cache[prefix] = None
+                return None
         result = subprocess.run([args.binary, *prefix, '--help'],
                                 capture_output=True, text=True, timeout=5, check=True)
-        section = result.stdout.split('Commands:\n', 1)
-        help_cache[prefix] = set(re.findall(r'^  ([a-z][a-z-]*)\s',
-                                  section[1].split('\nOptions:', 1)[0], re.M)) if len(section) == 2 else set()
+        help_cache[prefix] = result.stdout
         if not prefix:
-            help_cache[prefix].update(optional_commands)
+            binary_root_commands.update(command_names(result.stdout))
     return help_cache[prefix]
+
+def commands(prefix):
+    if prefix not in command_cache:
+        output = help_output(prefix)
+        names = command_names(output) if output is not None else set()
+        if not prefix:
+            names.update(optional_commands)
+        command_cache[prefix] = names
+    return command_cache[prefix]
+
+def flags(prefix):
+    output = help_output(prefix)
+    if output is None:
+        return set()
+    section = output.split('Options:\n', 1)
+    if len(section) != 2:
+        return set()
+    return set(re.findall(r'--[a-z][a-z-]*', section[1]))
 
 errors = []
 cli_count = tool_count = 0
@@ -116,6 +144,16 @@ for path in paths:
                     errors.append(f'{path.relative_to(ROOT)}:{number}: unknown CLI command {" ".join((*prefix, word))}')
                     break
                 prefix = (*prefix, word)
+
+# Optional subcommands are documented in source even when the binary is built
+# without their feature. When the tested binary does expose one, keep its
+# command-specific flags documented too.
+documented_text = '\n'.join(path.read_text() for path in paths)
+global_flags = {'--db', '--actor', '--help', '--version'}
+for command in optional_commands & binary_root_commands:
+    for flag in sorted(flags((command,)) - global_flags):
+        if flag not in documented_text:
+            errors.append(f'optional CLI command {command} is missing flag {flag}')
 
 # A stale number and a stale list are different failures: seats/README.md once
 # said "nine tools" and named nine of eleven, so a count-only check passed while

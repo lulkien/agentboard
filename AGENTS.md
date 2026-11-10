@@ -49,7 +49,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 117 CLI names, 141 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 130 CLI names, 141 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 14 gates passed`; with `--full` `GATES OK: 15 gates passed` |
 | `bash scripts/gate.sh --features dashboard` | `GATES OK: 16 gates passed` |
@@ -57,6 +57,8 @@ and uses scratch boards; the dashboard test starts its own local listener.
 
 `AGENTBOARD_TEST_BIN` points any suite at another binary; the suites never touch a
 live board, because each one sets `AGENTBOARD_DB` to a fresh `mktemp` directory.
+UI-affecting dashboard rows must include screenshot paths and overflow measurements
+in the coder report.
 Add or change behaviour with a test in the suite that owns that kind of check:
 `tests/cli.sh` for verbs, exit codes and text, `tests/mcp_client.py` for tool text
 and JSON-RPC shape, `tests/race.sh` for cross-process claims. When a count changes,
@@ -154,7 +156,13 @@ have both adapters call it, so a rule exists once.
 
 You read and judge; you never edit. Inputs: the commit or row the brief names, its
 `description` and `goal`. Output: findings classified blocker, follow-up or nit.
-No file edit, no commit, no build, no install, no probe that creates state;
+No file edit, no commit, no build, no test, no install. For a dashboard UI change,
+the Claude reviewer may start the already-built dashboard on a scratch board and
+use `agent-browser` only against its local loopback URL, following
+`skills/agentboard-reviewer/SKILL.md`; screenshots and notes stay outside the
+repository, and the server and browser must be stopped. The current Codex reviewer
+profile is read-only/git-only and cannot run this procedure; Codex reviewers must
+judge from the coder report and screenshot paths until T96 changes that profile.
 `git status --short` stays clean apart from the one report file the brief allows.
 
 ## Decide with the human, not alone

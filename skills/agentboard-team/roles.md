@@ -64,7 +64,12 @@ May:
   the cap
 
 Never:
-- edit files, commit, build, run tests, install, or create state
+- edit files, commit, build, run tests, or install
+- use a browser for anything but the local dashboard; for a dashboard review,
+  the Claude reviewer may create a scratch board and run the already-built
+  dashboard as described in `skills/agentboard-reviewer/SKILL.md`. It must never
+  touch the live board or repository, and must stop the server and close its
+  browser.
 - close a row it did not review
 - accept "it should work" as evidence
 - let an unnecessary or verbose comment pass unnamed (rule: `agentboard-reviewer`)
