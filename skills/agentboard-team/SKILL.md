@@ -26,7 +26,7 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
   `~/.local/state/agentboard/lmdb`. `agentboard path` prints the resolved one.
 - A seat writes as its name: CLI uses `AGENTBOARD_ACTOR` or `--actor`; HTTP MCP
   uses `/mcp/<seat>` in the card URL. Stdio `agentboard serve --actor coder` remains
-  available for Grok and one-shot use.
+  available for one-shot use.
 - Names identify a seat; they are not a credential. A name enters the roster when
   it first writes, and pointing a row at an unseen name needs `new_actor`, so a
   typo cannot invent a person.
@@ -246,7 +246,7 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 | --- | --- | --- | --- | --- | --- |
 | Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a four-tool edit deny list | `/agentboard-<seat>` |
 | Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml`, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
-| Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `${AGENTBOARD_SEAT:-manager}` in `~/.grok/config.toml` | `--trust --always-approve` | `/agentboard-manager` |
+| Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `~/.grok/config.toml`, URL `/mcp/${AGENTBOARD_SEAT:-manager}` | `--trust --always-approve` | `/agentboard-manager` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
 Model and effort per seat come from the launch table for every client. Skills are

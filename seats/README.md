@@ -90,8 +90,9 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 - Commands, never home paths: `git`, `ferris-search`,
   `codebase-memory-mcp` resolve on the seat's `PATH`. Check the one that matters
   with `readlink -f "$(command -v agentboard)"`.
-- Claude and Codex cards connect to `http://127.0.0.1:8765/mcp/<seat>`; the URL
-  names the actor on every request. Grok continues to run a stdio server.
+- Claude and Codex cards connect to `http://127.0.0.1:8765/mcp/<seat>`; Grok
+  connects to `http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}`. The URL
+  names the actor on every request. Keep `AGENTBOARD_SEAT` nonempty when set.
 - The board tool set is the ten tools of this build: `task_add`, `task_list`,
   `task_get`, `task_epic`, `task_update`, `task_claim`, `task_comment`,
   `board_feed`, `board_brief`, `board_agents`.

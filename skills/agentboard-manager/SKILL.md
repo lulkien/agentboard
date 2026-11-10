@@ -32,8 +32,9 @@ seat is a named terminal and `hc send` waits for the program to pause.
    repository before launching or assigning seats. `board_agents` is board-wide.
 2. Check that the shared daemon is running on the intended board (`GET
    /api/health`) before launching HTTP seats. Each card's `/mcp/<seat>` URL
-   supplies its actor; Grok keeps its stdio MCP server. The manual's launch sections
-   have the exact commands and preferred-model table (Claude Opus/Sonnet 5.5;
+   supplies its actor, including Grok's `${AGENTBOARD_SEAT:-manager}` URL. The
+   manual's launch sections have the exact commands and preferred-model table
+   (Claude Opus/Sonnet 5.5;
    Codex Sol with model and effort supplied by each seat profile).
    - herdr: one tab per seat and never split panes; pass those flags after `--` on
      `herdr agent start`.
@@ -156,7 +157,7 @@ seat is a named terminal and `hc send` waits for the program to pause.
 Install the seat cards and launcher with `./seats/install.py`, or manage only the
 Grok MCP entry with `./seats/install.py --grok-only`. The installer writes the
 marked block from `seats/grok/agentboard-mcp.toml` to `~/.grok/config.toml`; the
-`agentboard` command must be on Grok's PATH. The actor defaults to `manager` via
+daemon must be running before Grok starts. The actor defaults to `manager` via
 `${AGENTBOARD_SEAT:-manager}`. To use another manager name in herdr, create its
 pane with `herdr tab create --env AGENTBOARD_SEAT=<name>`; in hc carry it in argv,
 since `hc run` has no environment flag: `hc run --bg --name manager-2 -- env

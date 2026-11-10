@@ -253,6 +253,8 @@ grok=$home/.grok/config.toml
 grok_inst; code=$?
 is "fresh Grok install exit" test "$code" -eq 0
 same "fresh Grok config is the source block" "$grok_src" "$grok"
+has "fresh Grok config has seat HTTP URL" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
+is "fresh Grok config has no stdio serve" test -z "$(grep -F 'args = ["serve"]' "$grok" || true)"
 has "fresh Grok install says added" "added: $grok" "$tmp/out"
 is "Grok-only install leaves Codex links alone" test ! -e "$home/.codex/coder.config.toml"
 cp "$grok" "$tmp/grok-before"
@@ -273,7 +275,7 @@ same "Grok plain run leaves a different literal actor" "$tmp/grok-literal-actor"
 has "Grok different literal actor reports difference" 'differs from the repo' "$tmp/err"
 has "Grok different literal actor says unchanged" 'unchanged:' "$tmp/out"
 grok_inst --force
-has "Grok force replaces the literal actor" 'AGENTBOARD_ACTOR = "${AGENTBOARD_SEAT:-manager}"' "$grok"
+has "Grok force replaces the literal actor" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
 has "Grok force on literal actor says replaced" 'replaced:' "$tmp/out"
 
 # --- preserve existing config bytes, other tables, CRLF and file mode -------
@@ -321,7 +323,26 @@ has "Grok plain run notes edited block" 'differs from the repo' "$tmp/err"
 grok_inst --force
 has "Grok force replaces marked block" 'replaced:' "$tmp/out"
 is "Grok force keeps neighboring tables" grep -qF '[mcp_servers.other]' "$grok"
-has "Grok force restores source actor" 'AGENTBOARD_ACTOR = "${AGENTBOARD_SEAT:-manager}"' "$grok"
+has "Grok force restores source actor" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
+
+# An existing marked stdio card upgrades in place under --force.
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+cat >"$grok" <<'EOF'
+# BEGIN AGENTBOARD MCP
+[mcp_servers.agentboard]
+command = "agentboard"
+args = ["serve"]
+enabled = true
+
+[mcp_servers.agentboard.env]
+AGENTBOARD_ACTOR = "${AGENTBOARD_SEAT:-manager}"
+# END AGENTBOARD MCP
+EOF
+grok_inst --force
+has "Grok force upgrades stdio card to HTTP" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
+is "Grok upgraded card has no serve" test -z "$(grep -F 'args = ["serve"]' "$grok" || true)"
 
 GB='# BEGIN AGENTBOARD MCP'
 GE='# END AGENTBOARD MCP'
