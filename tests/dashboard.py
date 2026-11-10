@@ -185,7 +185,10 @@ def main() -> int:
         db = Path(temp) / "board"
         READ_ONLY_DB = db
         run_cli(db, "project", "add", "--name", "dashboard", "--path", "/dashboard")
-        run_cli(db, "add", "Epic <script>alert('epic')</script>")
+        long_unbroken_title = "T90" + "x" * 195 + "<&"
+        escaped_unbroken_title = html_lib.escape(long_unbroken_title, quote=True)
+        long_spaced_title = "T90 long title " + "words " * 30 + "words"
+        run_cli(db, "add", long_unbroken_title)
         run_cli(db, "add", "Done child", "--parent", "1", "--status", "done")
         dangerous_title = "<script>alert('x')</script>"
         description = 'A "quoted" <tag>& first line\nsecond line'
@@ -253,6 +256,9 @@ def main() -> int:
             assert request(port, "GET", "/assets/live.js")[0] == 404, "removed live asset did not return 404"
             for index in range(45):
                 run_cli(db, "add", f"Page task {index:02}")
+            run_cli(db, "update", "8", "--if-revision", "1", "--title", long_spaced_title)
+            run_cli(db, "add", long_unbroken_title)
+            run_cli(db, "add", long_spaced_title)
             project_name = '<b>p&"</b>'
             run_cli(db, "project", "add", "--name", project_name, "--path", "/other-dashboard")
             run_cli(db, "add", "Other project row", "--project", "2")
@@ -263,12 +269,14 @@ def main() -> int:
             assert attention.index("Blocked child") < attention.index("Reviewing child"), "attention order is wrong"
             assert "alice&lt;&amp;" in html and 'href="/tasks/3"' in html, "alice seat or held task is missing"
             assert "manager" in html and all(f'href="/tasks/{task_id}"' in html for task_id in (4, 5, 6)), "manager seat or held tasks are missing"
-            for status_name, expected in (("todo", 48), ("planning", 1), ("implementing", 1), ("blocked", 1), ("reviewing", 1)):
+            for status_name, expected in (("todo", 50), ("planning", 1), ("implementing", 1), ("blocked", 1), ("reviewing", 1)):
                 assert f'id="bay-{status_name}">{status_name} {expected}' in html, f"{status_name} lane count is wrong"
-            assert 'href="/tasks?status=todo">+40 more</a>' in html, "todo lane overflow link is wrong"
+            assert 'href="/tasks?status=todo">+42 more</a>' in html, "todo lane overflow link is wrong"
+            assert f'title="{escaped_unbroken_title}"' in html and f'>{escaped_unbroken_title}</span>' in html, "long unbroken title is clipped or escaped incorrectly in board strips"
+            assert f'title="{long_spaced_title}"' in html and f'>{long_spaced_title}</span>' in html, "long spaced title is missing from board strips"
             status, epics_home, _headers = request(port, "GET", "/epics")
             assert status == 200 and "Epics" in epics_home and 'href="/tasks?parent=1"' in epics_home, "epics route or drill-down link is missing"
-            assert "&lt;script&gt;alert(&#39;epic&#39;)&lt;/script&gt;" in epics_home, "epic title was not escaped"
+            assert f'title="{escaped_unbroken_title}"' in epics_home and f'>{escaped_unbroken_title}</span>' in epics_home, "long unbroken epic title was clipped or escaped incorrectly"
             assert "1 / 6 done" in epics_home, "epic direct-child progress is wrong"
             assert 'role="img" aria-label="1 of 6 direct children done"' in epics_home, "epic rollup is not accessible"
             assert epics_home.count("<rect ") == 6, "epic rollup did not include each populated status"
@@ -339,8 +347,12 @@ def main() -> int:
 
             status, tasks, _headers = request(port, "GET", "/tasks")
             assert status == 200 and 'class="active" href="/tasks"' in tasks, "tasks tab is missing or inactive"
+            assert escaped_unbroken_title in tasks and long_spaced_title in tasks, "long titles are missing from the tasks table"
+            assert re.search(r"\.strip-list\s*>\s*li\s*\{[^}]*min-width:0", dashboard_css), "strip list items keep their intrinsic min-content width"
+            assert re.search(r"\.strip-title\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "strip titles do not permit long words to shrink"
+            assert re.search(r"\.issue-header h2\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "unbroken detail titles can overflow their page"
             chips = re.findall(r'<a class="status-chip(?: status-[a-z]+)?"[^>]*>([^<]+)</a>', tasks)
-            assert chips == ["All 53", "todo 48", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 1", "canceled 0"], f"task status counts are wrong: {chips}"
+            assert chips == ["All 55", "todo 50", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 1", "canceled 0"], f"task status counts are wrong: {chips}"
             status, active_todo, _headers = request(port, "GET", "/tasks?status=todo")
             assert status == 200 and 'class="status-chip status-todo" href="/tasks?status=todo" aria-current="true"' in active_todo, "active status chip is missing"
             pager = re.search(r'<nav class="pagination"[^>]*>(.*?)</nav>', tasks)
@@ -354,10 +366,14 @@ def main() -> int:
             assert last_status == 200 and last_pager and 'Page 3 of 3' in last_pager.group(1) and '<span class="page-arrow" aria-label="Next page" aria-disabled="true">→</span>' in last_pager.group(1), "last page does not disable next arrow"
             assert "Previous</a>" not in tasks and "Next</a>" not in tasks, "pager still renders text links"
             first_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', tasks)]
-            assert first_ids == list(range(53, 33, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
+            assert first_ids == list(range(55, 35, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
 
             status, detail, _headers = request(port, "GET", "/tasks/3")
             assert status == 200, f"task detail returned {status}"
+            status, long_detail, _headers = request(port, "GET", "/tasks/53")
+            assert status == 200 and escaped_unbroken_title in long_detail, "long unbroken title is missing from task detail"
+            status, spaced_detail, _headers = request(port, "GET", "/tasks/54")
+            assert status == 200 and long_spaced_title in spaced_detail, "long spaced title is missing from task detail"
             assert 'class="active" href="/tasks"' in detail, "task detail did not mark the Tasks tab active"
             assert "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;" in detail, "detail title was not escaped"
             assert "A &quot;quoted&quot; &lt;tag&gt;&amp; first line\nsecond line" in detail, "full multiline description was not escaped/preserved"
@@ -403,7 +419,7 @@ def main() -> int:
             assert status == 200 and "Page task 20" in second_page, "offset paging did not advance"
             assert "Page task 00" not in second_page, "offset page repeats the first page"
             second_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', second_page)]
-            assert second_ids == list(range(33, 13, -1)), f"task page 2 has a gap, duplicate, or wrong order: {second_ids}"
+            assert second_ids == list(range(35, 15, -1)), f"task page 2 has a gap, duplicate, or wrong order: {second_ids}"
             assert not set(first_ids) & set(second_ids) and first_ids[-1] - 1 == second_ids[0], "task pages overlap or have a gap"
 
             query = urlencode({"assignee": "alice<&"})
@@ -483,11 +499,11 @@ def main() -> int:
             nested_status, nested_epics, _headers = request(port, "GET", "/epics")
             assert nested_status == 200 and 'class="epic-row depth-1"' in nested_epics and ">in T1</a>" in nested_epics, "nested epic was not indented under its parent"
             run_cli(db, "add", "Scoped epic", "--project", "1")
-            run_cli(db, "add", "Scoped child", "--parent", "55", "--project", "1")
-            run_cli(db, "add", "Foreign child", "--parent", "55", "--project", "2")
+            run_cli(db, "add", "Scoped child", "--parent", "57", "--project", "1")
+            run_cli(db, "add", "Foreign child", "--parent", "57", "--project", "2")
             scoped_epics_status, scoped_epics, _headers = request(port, "GET", "/epics?project=1")
             assert scoped_epics_status == 200 and "Scoped child" in scoped_epics and "Foreign child" not in scoped_epics, "epic child strips ignored project scope"
-            assert 'href="/tasks/56?project=1"' in scoped_epics, "scoped epic child link dropped its project"
+            assert 'href="/tasks/58?project=1"' in scoped_epics, "scoped epic child link dropped its project"
 
             if BASELINE:
                 compare_baseline(db, port, BASELINE)
