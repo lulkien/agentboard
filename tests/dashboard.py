@@ -185,8 +185,9 @@ def main() -> int:
         db = Path(temp) / "board"
         READ_ONLY_DB = db
         run_cli(db, "project", "add", "--name", "dashboard", "--path", "/dashboard")
-        long_unbroken_title = "Epic <script>alert('epic')</script> T90" + "x" * 140 + "<&"
-        escaped_unbroken_title = html_lib.escape(long_unbroken_title, quote=True).replace("&#x27;", "&#39;")
+        long_unbroken_title = "T90" + "x" * 195 + "<&"
+        escaped_unbroken_title = html_lib.escape(long_unbroken_title, quote=True)
+        escaped_dangerous_title = "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"
         escaped_epic_title = "Epic <script>alert('epic')</script>"
         escaped_epic_title_html = html_lib.escape(escaped_epic_title, quote=True).replace("&#x27;", "&#39;")
         long_spaced_title = "T90 long title " + "words " * 30 + "words"
@@ -256,7 +257,7 @@ def main() -> int:
             assert feed_cursor(db) == cursor_before_host_checks, "Host checks changed the board event cursor"
             assert request(port, "GET", "/pulse")[0] == 404, "removed /pulse route did not return 404"
             assert request(port, "GET", "/assets/live.js")[0] == 404, "removed live asset did not return 404"
-            for index in range(45):
+            for index in range(43):
                 run_cli(db, "add", f"Page task {index:02}")
             run_cli(db, "update", "8", "--if-revision", "1", "--title", long_spaced_title)
             run_cli(db, "add", long_unbroken_title)
@@ -264,12 +265,15 @@ def main() -> int:
             project_name = '<b>p&"</b>'
             run_cli(db, "project", "add", "--name", project_name, "--path", "/other-dashboard")
             run_cli(db, "add", "Other project row", "--project", "2")
+            escaped_epic_id = run_cli(db, "add", escaped_epic_title).split()[1].removeprefix("T")
+            run_cli(db, "add", "Escaped epic child", "--parent", escaped_epic_id, "--status", "done")
+            run_cli(db, "update", escaped_epic_id, "--if-revision", "1", "--status", "canceled")
             status, html, _headers = request(port, "GET", "/")
             assert status == 200, f"GET / returned {status} after adding fixture rows"
             assert "Needs attention" in html and 'class="active" href="/"' in html, "board home is missing"
             attention = html.split('class="attention panel"', 1)[1].split('</section>', 1)[0]
             assert attention.index("Blocked child") < attention.index("Reviewing child"), "attention order is wrong"
-            assert html.index('class="seat-bar') < html.index('class="attention') < html.index('id="bay-todo"'), "seat bar, attention rail and status bays are out of order"
+            assert html.index('class="seat-bar') < html.index('class="attention') < html.index('id="col-todo"'), "seat bar, attention rail and kanban columns are out of order"
             assert '<span class="seat-name">manager</span> <span class="seat-count">3</span>' in html, "manager held-task count is missing from seat bar"
             assert '<span class="seat-name">alice&lt;&amp;</span> <span class="seat-count">1</span>' in html, "escaped Alice held-task count is missing from seat bar"
             assert 'href="/tasks?assignee=alice%3C%26"' in html, "Alice seat chip does not link to her filtered task list"
@@ -278,18 +282,39 @@ def main() -> int:
             assert status == 200 and '<span class="seat-chip idle" title="manager">' in project_two_board, "unheld manager seat is not idle"
             manager_idle = project_two_board.split('<span class="seat-chip idle" title="manager">', 1)[1].split("</li>", 1)[0]
             assert '<span class="seat-name">manager</span> idle' in manager_idle and 'class="seat-count"' not in manager_idle, "idle manager chip has a count or malformed label"
-            for status_name, expected in (("todo", 50), ("planning", 1), ("implementing", 1), ("blocked", 1), ("reviewing", 1)):
-                assert f'id="bay-{status_name}">{status_name} {expected}' in html, f"{status_name} lane count is wrong"
-            assert 'href="/tasks?status=todo">+42 more</a>' in html, "todo lane overflow link is wrong"
-            assert f'title="{escaped_unbroken_title}"' in html and f'>{escaped_unbroken_title}</span>' in html, "long unbroken title is clipped or escaped incorrectly in board strips"
-            assert f'title="{long_spaced_title}"' in html and f'>{long_spaced_title}</span>' in html, "long spaced title is missing from board strips"
+            project_two_planning = project_two_board.split('id="col-planning"', 1)[1].split('</section>', 1)[0]
+            assert '<li class="empty">None</li>' in project_two_planning, "empty planning column has no None state"
+            project_one_status, project_one_board, _headers = request(port, "GET", "/?project=1")
+            project_one_card3 = re.search(r'<a class="card [^"]+" href="/tasks/3(?:\?[^"]*)?"[^>]*>.*?</a>', project_one_board, re.S).group(0)
+            assert project_one_status == 200 and 'class="card-project"' not in project_one_card3, "scoped card still renders a project name"
+            column_ids = [html.index(f'id="col-{name}"') for name in ("todo", "planning", "implementing", "blocked", "reviewing")]
+            assert column_ids == sorted(column_ids), "kanban columns are not in status order"
+            for status_name, expected in (("todo", 48), ("planning", 1), ("implementing", 1), ("blocked", 1), ("reviewing", 1)):
+                assert re.search(rf'id="col-{status_name}"><span aria-hidden="true">.</span> {status_name} <span class="column-count">{expected}</span>', html), f"{status_name} column count or glyph is wrong"
+            kanban = html.split('class="kanban"', 1)[1].split('class="closed-row"', 1)[0]
+            todo_column = kanban.split('id="col-todo"', 1)[1].split('</section>', 1)[0]
+            assert todo_column.count('class="card status-todo"') == 8, "todo column does not render exactly eight cards"
+            assert 'href="/tasks?status=todo">+40 more</a>' in todo_column, "todo column overflow link is wrong"
+            blocked_card = kanban.split('href="/tasks/6"', 1)[1].split('</a>', 1)[0]
+            reviewing_card = kanban.split('href="/tasks/7"', 1)[1].split('</a>', 1)[0]
+            assert 'class="card status-blocked"' in kanban and '<span class="card-flag">blocked</span>' in blocked_card, "blocked card lacks its visible flag"
+            assert '<span class="card-flag">reviewing</span>' in reviewing_card, "reviewing card lacks its visible flag"
+            todo_card = todo_column.split('class="card status-todo"', 1)[1].split('</a>', 1)[0]
+            assert '<span class="visually-hidden">todo</span>' in todo_card and 'class="card-flag"' not in todo_card, "ordinary todo card has a visible flag or no hidden status"
+            card3 = kanban.split('href="/tasks/3"', 1)[1].split('</a>', 1)[0]
+            assert f'title="{escaped_dangerous_title}"' in card3 and f'class="card-title">{escaped_dangerous_title}</span>' in card3, "T3 escaped title is missing from the card title and text"
+            assert 'alice&lt;&amp;' in card3 and 'in T1' in card3 and 'class="card-project">dashboard</span>' in card3 and '<time datetime="' in card3, "T3 card metadata is incomplete or unescaped"
+            assert f'title="{escaped_unbroken_title}"' in html, "full long unbroken title is missing from its card title attribute"
+            assert f'title="{long_spaced_title}"' in html, "separate long spaced title fixture is missing from a card title attribute"
+            assert 'href="/tasks?status=done"' in html and 'href="/tasks?status=canceled"' in html, "closed row is missing done or canceled links"
+            assert "<details" not in html and "status-bay" not in html, "old collapsible status bays remain on the Board"
             status, epics_home, _headers = request(port, "GET", "/epics")
             assert status == 200 and "Epics" in epics_home and 'href="/tasks?parent=1"' in epics_home, "epics route or drill-down link is missing"
             assert f'title="{escaped_unbroken_title}"' in epics_home and f'>{escaped_unbroken_title}</span>' in epics_home, "long unbroken epic title was clipped or escaped incorrectly"
-            assert escaped_epic_title_html in epics_home, "script-like epic title is not escaped in the epic strip"
+            assert f'title="{escaped_epic_title_html}"' in epics_home and f'class="strip-title">{escaped_epic_title_html}</span>' in epics_home, "independent script-like epic title is not escaped in both title and text"
             assert "1 / 6 done" in epics_home, "epic direct-child progress is wrong"
             assert 'role="img" aria-label="1 of 6 direct children done"' in epics_home, "epic rollup is not accessible"
-            assert epics_home.count("<rect ") == 6, "epic rollup did not include each populated status"
+            assert epics_home.count("<rect ") == 7, "epic rollup did not include each populated status"
             epic_row = epics_home.split('class="epic-row depth-0"', 1)[1].split("</article>", 1)[0]
             child_strip_list = epic_row.split('class="strip-list epic-children"', 1)[1].split("</ul>", 1)[0]
             assert child_strip_list.count('class="task-strip ') == 4, "epic did not render its capped direct child strips"
@@ -305,6 +330,11 @@ def main() -> int:
             assert re.search(r'<button[^>]*>Change theme</button>', footer) and "current theme" in request(port, "GET", "/assets/theme.js")[1], "theme button label or mode accessibility is missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
             assert re.search(r"\.seat-name\s*\{[^}]*text-overflow:ellipsis[^}]*min-width:0", dashboard_css), "seat names can overflow their chips"
+            assert re.search(r"\.kanban\s*\{[^}]*grid-template-columns:repeat\(5,minmax\(0,1fr\)\)", dashboard_css), "kanban does not use five shrinkable columns"
+            assert re.search(r"\.card-title\s*\{[^}]*-webkit-line-clamp:3[^}]*overflow:hidden[^}]*overflow-wrap:anywhere[^}]*max-height:", dashboard_css), "card titles lack the three-line clamp and long-token fallback"
+            assert re.search(r"(?m)^\.card\s*\{[^}]*min-width:0", dashboard_css), "cards keep an intrinsic minimum width"
+            assert re.search(r"\.column-head\s*\{[^}]*position:sticky", dashboard_css), "column headings are not sticky"
+            assert re.search(r"@media\s*\(max-width:899px\)\s*\{[^}]*\.kanban\s*\{[^}]*grid-template-columns:1fr", dashboard_css), "kanban does not stack on narrow screens"
             assert re.search(r"\.attention \.strip-list\s*\{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)", dashboard_css), "attention rail is not a two-column strip grid"
             assert re.search(r"@media\s*\(max-width:899px\)\s*\{[^}]*\.attention \.strip-list\s*\{[^}]*grid-template-columns:1fr", dashboard_css), "attention rail does not collapse to one column on narrow screens"
             assert re.search(r"\.topbar\s*\{[^}]*position:sticky[^}]*top:0[^}]*z-index:\d+[^}]*background:var\(--strip\)", dashboard_css), "top bar is not sticky, layered and opaque"
@@ -365,7 +395,7 @@ def main() -> int:
             assert re.search(r"\.strip-title\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "strip titles do not permit long words to shrink"
             assert re.search(r"\.issue-header h2\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "unbroken detail titles can overflow their page"
             chips = re.findall(r'<a class="status-chip(?: status-[a-z]+)?"[^>]*>([^<]+)</a>', tasks)
-            assert chips == ["All 55", "todo 50", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 1", "canceled 0"], f"task status counts are wrong: {chips}"
+            assert chips == ["All 55", "todo 48", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 2", "canceled 1"], f"task status counts are wrong: {chips}"
             status, active_todo, _headers = request(port, "GET", "/tasks?status=todo")
             assert status == 200 and 'class="status-chip status-todo" href="/tasks?status=todo" aria-current="true"' in active_todo, "active status chip is missing"
             pager = re.search(r'<nav class="pagination"[^>]*>(.*?)</nav>', tasks)
@@ -377,15 +407,16 @@ def main() -> int:
             last_status, last_page, _headers = request(port, "GET", "/tasks?offset=40")
             last_pager = re.search(r'<nav class="pagination"[^>]*>(.*?)</nav>', last_page)
             assert last_status == 200 and last_pager and 'Page 3 of 3' in last_pager.group(1) and '<span class="page-arrow" aria-label="Next page" aria-disabled="true">→</span>' in last_pager.group(1), "last page does not disable next arrow"
+            assert escaped_dangerous_title in last_page, "independent escaped script title is missing from the tasks table"
             assert "Previous</a>" not in tasks and "Next</a>" not in tasks, "pager still renders text links"
             first_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', tasks)]
             assert first_ids == list(range(55, 35, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
 
             status, detail, _headers = request(port, "GET", "/tasks/3")
             assert status == 200, f"task detail returned {status}"
-            status, long_detail, _headers = request(port, "GET", "/tasks/53")
+            status, long_detail, _headers = request(port, "GET", "/tasks/51")
             assert status == 200 and escaped_unbroken_title in long_detail, "long unbroken title is missing from task detail"
-            status, spaced_detail, _headers = request(port, "GET", "/tasks/54")
+            status, spaced_detail, _headers = request(port, "GET", "/tasks/52")
             assert status == 200 and long_spaced_title in spaced_detail, "long spaced title is missing from task detail"
             assert 'class="active" href="/tasks"' in detail, "task detail did not mark the Tasks tab active"
             assert "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;" in detail, "detail title was not escaped"

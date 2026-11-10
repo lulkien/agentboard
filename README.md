@@ -198,7 +198,8 @@ unchanged. The dashboard routes are `/` (board with seats, attention and status 
 and `/feed` (board event history). `/assets/dashboard.css` and `/assets/theme.js`
 are embedded dashboard assets. The footer theme button cycles through light,
 dark and system appearance, saving a manual choice in local storage.
-The display uses compact task strips, status glyphs and text, a skip link, and
+The Board uses five status columns with bounded task cards, alongside compact
+attention strips, a closed-row summary, status glyphs and text, a skip link, and
 visible keyboard focus in both themes. HTML responses use a restrictive Content
 Security Policy and `Cache-Control: no-store`; all responses send `nosniff` and
 `Referrer-Policy: no-referrer`. Assets are served from the binary, with no inline

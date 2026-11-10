@@ -21,7 +21,6 @@ const LIST_ITEM: Template = Template::new(
     "board-list-item",
     include_str!("../templates/board-list-item.html"),
 );
-const MORE: Template = Template::new("board-more", include_str!("../templates/board-more.html"));
 const MORE_TASKS: Template = Template::new(
     "board-more-tasks",
     include_str!("../templates/board-more-tasks.html"),
@@ -39,15 +38,42 @@ const EMPTY_SEATS: Template = Template::new(
     "board-seats-empty",
     include_str!("../templates/board-seats-empty.html"),
 );
-const BAYS: Template = Template::new("board-bays", include_str!("../templates/board-bays.html"));
-const BAY: Template = Template::new("board-bay", include_str!("../templates/board-bay.html"));
-const CLOSED_COUNTS: Template = Template::new(
-    "board-closed-counts",
-    include_str!("../templates/board-closed-counts.html"),
+const KANBAN: Template = Template::new(
+    "board-kanban",
+    include_str!("../templates/board-kanban.html"),
 );
-const CLOSED_COUNT: Template = Template::new(
-    "board-closed-count",
-    include_str!("../templates/board-closed-count.html"),
+const COLUMN: Template = Template::new(
+    "board-column",
+    include_str!("../templates/board-column.html"),
+);
+const CARD: Template = Template::new("board-card", include_str!("../templates/board-card.html"));
+const CLOSED_ROW: Template = Template::new(
+    "board-closed-row",
+    include_str!("../templates/board-closed-row.html"),
+);
+const CLOSED_ITEM: Template = Template::new(
+    "board-closed-item",
+    include_str!("../templates/board-closed-item.html"),
+);
+const EMPTY_COLUMN: Template = Template::new(
+    "board-empty-column",
+    include_str!("../templates/board-empty-column.html"),
+);
+const MORE_CARDS: Template = Template::new(
+    "board-more-cards",
+    include_str!("../templates/board-more-cards.html"),
+);
+const CARD_PARENT: Template = Template::new(
+    "board-card-parent",
+    include_str!("../templates/board-card-parent.html"),
+);
+const CARD_PROJECT: Template = Template::new(
+    "board-card-project",
+    include_str!("../templates/board-card-project.html"),
+);
+const CARD_TIME: Template = Template::new(
+    "board-card-time",
+    include_str!("../templates/board-card-time.html"),
 );
 
 pub(super) fn board_page(
@@ -123,35 +149,40 @@ pub(super) fn board_page(
         ("empty", html_slot(empty_seats)),
     ]);
 
-    let bays: Fragment = overview
+    let columns: Fragment = overview
         .lanes
         .iter()
         .map(|lane| {
             let status = lane.status.as_str();
-            let href = html::url(&format!("/tasks?status={status}"), project);
-            let items: Fragment = lane
+            let cards: Fragment = lane
                 .tasks
                 .iter()
-                .map(|task| strip_item(task, project))
+                .map(|task| render_card(task, project, projects, now_ms))
                 .collect();
+            let items = if lane.tasks.is_empty() {
+                EMPTY_COLUMN.fill(&[])
+            } else {
+                cards
+            };
+            let href = html::url(&format!("/tasks?status={status}"), project);
             let more = if lane.total > lane.tasks.len() {
-                MORE.fill(&[
+                MORE_CARDS.fill(&[
                     ("href", text(href)),
                     ("count", text(lane.total - lane.tasks.len())),
                 ])
             } else {
                 Fragment::empty()
             };
-            BAY.fill(&[
+            COLUMN.fill(&[
                 ("status", text(status)),
                 ("total", text(lane.total)),
-                ("open", text(if lane.total <= 8 { " open" } else { "" })),
+                ("glyph", text(html::status_glyph(lane.status))),
                 ("items", html_slot(items)),
                 ("more", html_slot(more)),
             ])
         })
         .collect();
-    let counts: Fragment = [Status::Done, Status::Canceled]
+    let closed_items: Fragment = [Status::Done, Status::Canceled]
         .into_iter()
         .map(|status| {
             let count = overview
@@ -160,24 +191,69 @@ pub(super) fn board_page(
                 .find(|(item, _)| *item == status)
                 .map_or(0, |(_, count)| *count);
             let href = html::url(&format!("/tasks?status={}", status.as_str()), project);
-            CLOSED_COUNT.fill(&[
+            CLOSED_ITEM.fill(&[
                 ("href", text(href)),
+                ("glyph", text(html::status_glyph(status))),
                 ("status", text(status.as_str())),
                 ("count", text(count)),
             ])
         })
         .collect();
-    let closed_counts = CLOSED_COUNTS.fill(&[("counts", html_slot(counts))]);
-    let bays = BAYS.fill(&[
-        ("bays", html_slot(bays)),
-        ("closed_counts", html_slot(closed_counts)),
+    let kanban = KANBAN.fill(&[
+        ("columns", html_slot(columns)),
+        (
+            "closed",
+            html_slot(CLOSED_ROW.fill(&[("items", html_slot(closed_items))])),
+        ),
     ]);
     let body = BOARD.fill(&[
         ("attention", html_slot(attention)),
         ("seats", html_slot(seats)),
-        ("bays", html_slot(bays)),
+        ("bays", html_slot(kanban)),
     ]);
     html::shell("Board", Page::Board, body, project, projects)
+}
+
+fn render_card(task: &Task, project: Option<u64>, projects: &[Project], now_ms: i64) -> Fragment {
+    let status = task.status.as_str();
+    let href = html::url(&format!("/tasks/{}", task.id), project);
+    let flag_class = if matches!(task.status, Status::Blocked | Status::Reviewing) {
+        "card-flag"
+    } else {
+        "visually-hidden"
+    };
+    let parent = task
+        .parent_id
+        .map_or_else(Fragment::empty, |id| CARD_PARENT.fill(&[("id", text(id))]));
+    let project_name = if project.is_none() {
+        task.project_id
+            .and_then(|id| projects.iter().find(|item| item.project_id == id))
+            .map_or_else(Fragment::empty, |item| {
+                CARD_PROJECT.fill(&[("name", text(&item.project_name))])
+            })
+    } else {
+        Fragment::empty()
+    };
+    let timestamp = super::time::format_timestamp(task.updated_at_ms);
+    let age = format_age(now_ms, task.updated_at_ms);
+    let time = CARD_TIME.fill(&[("timestamp", text(&timestamp)), ("age", text(age))]);
+    CARD.fill(&[
+        ("class", text(status)),
+        ("href", text(href)),
+        ("title", text(&task.title)),
+        ("glyph", text(html::status_glyph(task.status))),
+        ("id", text(task.id)),
+        ("flag_class", text(flag_class)),
+        ("status", text(status)),
+        ("title_text", text(&task.title)),
+        (
+            "assignee",
+            text(task.assignee.as_deref().unwrap_or("Unassigned")),
+        ),
+        ("parent", html_slot(parent)),
+        ("project", html_slot(project_name)),
+        ("time", html_slot(time)),
+    ])
 }
 
 fn strip_item(task: &Task, project: Option<u64>) -> Fragment {
