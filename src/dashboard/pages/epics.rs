@@ -3,8 +3,8 @@ use agentboard::store::{Board, Brief, Epic, ListFilter};
 
 use super::PageError;
 use crate::dashboard::html;
-use crate::dashboard::routes::Page;
 use crate::dashboard::template::{Fragment, Template, html as html_slot, text};
+use agentboard::routes::Page;
 
 const CHILD_STRIP_CAP: usize = 4;
 

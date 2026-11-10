@@ -4,8 +4,8 @@ use agentboard::store::{Board, Cursor, FeedFilter};
 use super::time::format_timestamp;
 use super::{PAGE_SIZE, PageError};
 use crate::dashboard::html;
-use crate::dashboard::routes::{Filters, Page};
 use crate::dashboard::template::{Fragment, Template, html as html_slot, text};
+use agentboard::routes::{Filters, Page};
 
 const FEED: Template = Template::new("feed", include_str!("../templates/feed.html"));
 const OPTION: Template =

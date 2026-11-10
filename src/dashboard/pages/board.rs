@@ -4,9 +4,9 @@ use agentboard::store::{Agent, Overview};
 use super::time::format_age;
 use crate::dashboard::{
     html,
-    routes::Page,
     template::{Fragment, Template, html as html_slot, text},
 };
+use agentboard::routes::Page;
 
 const BOARD: Template = Template::new("board", include_str!("../templates/board.html"));
 const ATTENTION: Template = Template::new(

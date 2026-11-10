@@ -36,7 +36,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 106 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 107 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` (default binary) | `337/337 passed (cli, lmdb)` |
@@ -44,7 +44,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
 | `python3 tests/mcp_client.py` | `188/188 passed (mcp, lmdb)` |
 | `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `188/188 passed (mcp-http, lmdb)` |
-| `python3 tests/daemon.py` | `daemon: 44/44 passed (http, lmdb)` (scratch boards, loopback port 0) |
+| `python3 tests/daemon.py` | `daemon: 160/160 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 32/32 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
 | `bash tests/seats-install.sh` | `220/220 passed (seats installer)` (isolated homes; no board writes) |
@@ -92,6 +92,9 @@ update the expectation here.
 - `src/daemon.rs` — `agentboard daemon`: the same MCP adapter over streamable HTTP
   (axum + rmcp, stateless) at `/mcp/<actor>`, one shared `Arc<Board>`, and the guard
   (Host, Origin, loopback peer for `/mcp`) that runs before every route.
+  `src/daemon/api.rs` is the read-only JSON API beside it (GET only, no write route);
+  it builds JSON from the store read models and takes every query through
+  `src/routes.rs::parse`, the one strict query validator the HTML dashboard shares.
 - `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.

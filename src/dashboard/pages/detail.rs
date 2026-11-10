@@ -4,8 +4,8 @@ use agentboard::store::{Board, Epic, FeedFilter, ListFilter, TaskPage};
 use super::PageError;
 use super::time::format_timestamp;
 use crate::dashboard::html;
-use crate::dashboard::routes::Page;
 use crate::dashboard::template::{Fragment, Slot, Template, html as html_slot, text};
+use agentboard::routes::Page;
 
 const START: Template = Template::new(
     "detail-start",

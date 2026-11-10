@@ -1,9 +1,9 @@
 use std::fmt::Write;
 
-use super::routes::{Filters, Page};
 use super::template::{Fragment, Template, html as html_slot, text as text_slot};
 use agentboard::domain::Project;
 use agentboard::domain::{EventKind, Status};
+use agentboard::routes::{Filters, Page};
 
 const SHELL: Template = Template::new("shell", include_str!("templates/shell.html"));
 const PROJECT_OPTION: Template = Template::new(

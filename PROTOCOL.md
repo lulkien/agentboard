@@ -40,6 +40,24 @@ One guard runs before every route: `Host` must be the bound address, `localhost`
 `GET /api/health` answers `{"board": PATH, "instance": ID}`. Stdio `serve` is
 unchanged.
 
+### Read-only JSON API
+
+Six GET endpoints, one per dashboard page, behind the same guard: `/api/board`,
+`/api/epics`, `/api/tasks`, `/api/tasks/ID`, `/api/feed` and `/api/projects`. They
+take the dashboard's query grammar (`project`; `status`, `assignee`, `parent`,
+`offset` on tasks; `task`, `kind`, `before` on the feed) and refuse it the same
+way: unknown, duplicate or malformed keys and a key the endpoint does not take are
+400; a missing task, parent or `project` is 404; any non-GET method is 405. There
+is no write route. Bodies are JSON; task rows are summaries (`id`, `title`,
+`status`, `priority`, `assignee`, `parent_id`, `project_id`, `revision`,
+`created_at_ms`, `updated_at_ms`) with the client-facing status names, and only
+`/api/tasks/ID` adds `description`, `goal`, `reporter` and the three reports.
+`counts` is every status as `{status, count}`. `/api/board` caps each lane,
+the attention list and each held list at 8 rows beside their `total`; `/api/tasks`
+pages 20 newest-first with `total`/`more`; `/api/feed` pages 20 events in ascending
+order with `older` and an opaque `before` cursor (`instance:seq`) for the next
+older page. Reads never move the event cursor.
+
 ## Optional dashboard
 
 The separate `agentboard dashboard [ip:port] [--db PATH]` subcommand is available

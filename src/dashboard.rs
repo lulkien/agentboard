@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use agentboard::daemon::host_allowed;
+use agentboard::routes;
 use agentboard::store::{Board, BoardOptions};
 
 mod html;
 mod pages;
-mod routes;
 mod template;
 
 const ERROR_TEMPLATE: template::Template =
@@ -239,7 +239,7 @@ fn respond(stream: &mut TcpStream, board: &Board, bound_address: SocketAddr) -> 
     }
     let route = match routes::parse(path, query) {
         Ok(route) => route,
-        Err(()) => {
+        Err(_) => {
             return response(
                 stream,
                 "400 Bad Request",

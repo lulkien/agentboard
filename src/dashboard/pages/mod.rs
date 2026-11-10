@@ -3,8 +3,8 @@ use agentboard::{
     store::{Board, ListFilter, MAX_LIST_LIMIT},
 };
 
-use super::routes::{Page, Route};
 use super::template::Fragment;
+use agentboard::routes::{Page, Route};
 
 mod board;
 mod detail;

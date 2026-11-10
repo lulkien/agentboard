@@ -1,5 +1,9 @@
-use agentboard::domain::{EventKind, Status};
-use agentboard::store::Cursor;
+use crate::domain::{EventKind, Status};
+use crate::store::Cursor;
+
+/// A path or query the dashboard grammar refuses.
+#[derive(Debug)]
+pub struct BadQuery;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Page {
@@ -28,7 +32,7 @@ pub struct Filters {
     pub before: Option<String>,
 }
 
-pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
+pub fn parse(path: &str, query: &str) -> Result<Route, BadQuery> {
     let page = if path == "/" {
         Page::Board
     } else if path == "/epics" {
@@ -39,20 +43,20 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
         Page::Feed
     } else if let Some(raw_id) = path.strip_prefix("/tasks/") {
         if raw_id.is_empty() || raw_id.contains('/') {
-            return Err(());
+            return Err(BadQuery);
         }
         Page::Detail(positive(raw_id)?)
     } else {
-        return Err(());
+        return Err(BadQuery);
     };
     let mut filters = Filters::default();
     let mut seen = [false; 8];
     if !query.is_empty() {
         for pair in query.split('&') {
             if pair.is_empty() {
-                return Err(());
+                return Err(BadQuery);
             }
-            let (key, value) = pair.split_once('=').ok_or(())?;
+            let (key, value) = pair.split_once('=').ok_or(BadQuery)?;
             let key = decode(key)?;
             let value = decode(value)?;
             let slot = match key.as_str() {
@@ -64,15 +68,15 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
                 "kind" => 5,
                 "before" => 6,
                 "project" => 7,
-                _ => return Err(()),
+                _ => return Err(BadQuery),
             };
             if seen[slot] {
-                return Err(());
+                return Err(BadQuery);
             }
             seen[slot] = true;
             match key.as_str() {
                 "status" if !value.is_empty() => {
-                    filters.status = Some(Status::parse(&value).map_err(|_| ())?)
+                    filters.status = Some(Status::parse(&value).map_err(|_| BadQuery)?)
                 }
                 "status" => {}
                 "assignee" => {
@@ -82,16 +86,18 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
                 }
                 "parent" if !value.is_empty() => filters.parent = Some(positive(&value)?),
                 "parent" => {}
-                "offset" if !value.is_empty() => filters.offset = value.parse().map_err(|_| ())?,
+                "offset" if !value.is_empty() => {
+                    filters.offset = value.parse().map_err(|_| BadQuery)?
+                }
                 "offset" => {}
                 "task" if !value.is_empty() => filters.feed_task = Some(positive(&value)?),
                 "task" => {}
                 "kind" if !value.is_empty() => {
-                    filters.feed_kind = Some(EventKind::parse(&value).map_err(|_| ())?)
+                    filters.feed_kind = Some(EventKind::parse(&value).map_err(|_| BadQuery)?)
                 }
                 "kind" => {}
                 "before" if !value.is_empty() => {
-                    Cursor::parse(&value).map_err(|_| ())?;
+                    Cursor::parse(&value).map_err(|_| BadQuery)?;
                     filters.before = Some(value);
                 }
                 "before" => {}
@@ -111,17 +117,17 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
         .enumerate()
         .any(|(slot, present)| *present && !allowed.contains(&slot))
     {
-        return Err(());
+        return Err(BadQuery);
     }
     Ok(Route { page, filters })
 }
 
-fn positive(value: &str) -> Result<u64, ()> {
-    let id: u64 = value.parse().map_err(|_| ())?;
-    if id == 0 { Err(()) } else { Ok(id) }
+fn positive(value: &str) -> Result<u64, BadQuery> {
+    let id: u64 = value.parse().map_err(|_| BadQuery)?;
+    if id == 0 { Err(BadQuery) } else { Ok(id) }
 }
 
-fn decode(value: &str) -> Result<String, ()> {
+fn decode(value: &str) -> Result<String, BadQuery> {
     let mut bytes = Vec::with_capacity(value.len());
     let raw = value.as_bytes();
     let mut i = 0;
@@ -129,8 +135,8 @@ fn decode(value: &str) -> Result<String, ()> {
         match raw[i] {
             b'+' => bytes.push(b' '),
             b'%' => {
-                let high = *raw.get(i + 1).ok_or(())?;
-                let low = *raw.get(i + 2).ok_or(())?;
+                let high = *raw.get(i + 1).ok_or(BadQuery)?;
+                let low = *raw.get(i + 2).ok_or(BadQuery)?;
                 bytes.push((hex(high)? << 4) | hex(low)?);
                 i += 2;
             }
@@ -138,15 +144,15 @@ fn decode(value: &str) -> Result<String, ()> {
         }
         i += 1;
     }
-    String::from_utf8(bytes).map_err(|_| ())
+    String::from_utf8(bytes).map_err(|_| BadQuery)
 }
 
-fn hex(byte: u8) -> Result<u8, ()> {
+fn hex(byte: u8) -> Result<u8, BadQuery> {
     match byte {
         b'0'..=b'9' => Ok(byte - b'0'),
         b'a'..=b'f' => Ok(byte - b'a' + 10),
         b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(()),
+        _ => Err(BadQuery),
     }
 }
 

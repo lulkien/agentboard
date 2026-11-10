@@ -190,6 +190,10 @@ startup line and `GET /api/health` print the resolved board path and instance id
 While it runs it holds the board open, so `reset` and migration refuse until it
 is stopped. See `PROTOCOL.md` for the guard and the stateless mode.
 
+The same port serves a read-only JSON API: `GET /api/board`, `/api/epics`,
+`/api/tasks`, `/api/tasks/ID`, `/api/feed` and `/api/projects`, all accepting
+`?project=ID`; `PROTOCOL.md` lists the shapes and refusals.
+
 ## Optional dashboard
 
 The `dashboard` subcommand is available when the binary is built with the

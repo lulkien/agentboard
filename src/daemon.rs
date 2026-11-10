@@ -12,12 +12,14 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Path, Request, State};
-use axum::http::{StatusCode, header};
+use axum::http::{Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+
+mod api;
 
 use crate::server::{Board as McpBoard, RequestScope};
 use crate::store::Board;
@@ -80,6 +82,13 @@ fn router(board: Arc<Board>, bound: SocketAddr) -> Router {
     Router::new()
         .route("/mcp/{actor}", any(mcp_request))
         .route("/api/health", get(health))
+        .route("/api/board", get(api::board))
+        .route("/api/epics", get(api::epics))
+        .route("/api/tasks", get(api::tasks))
+        .route("/api/tasks/{id}", get(api::task))
+        .route("/api/feed", get(api::feed))
+        .route("/api/projects", get(api::projects))
+        .layer(middleware::from_fn(api_get_only))
         .layer(middleware::from_fn_with_state(bound, guard))
         .with_state(App { mcp, board })
 }
@@ -132,6 +141,14 @@ async fn health(State(app): State<App>) -> Response {
         .into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
+}
+
+/// axum answers HEAD from a GET route; the API is GET only, so HEAD is 405 too.
+async fn api_get_only(request: Request, next: Next) -> Response {
+    if request.method() == Method::HEAD && request.uri().path().starts_with("/api/") {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    next.run(request).await
 }
 
 /// Runs before every route.

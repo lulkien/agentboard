@@ -3,8 +3,8 @@ use agentboard::store::TaskPage;
 
 use super::PAGE_SIZE;
 use crate::dashboard::html;
-use crate::dashboard::routes::{Filters, Page};
 use crate::dashboard::template::{Fragment, Template, html as html_slot, text};
+use agentboard::routes::{Filters, Page};
 
 const TASKS: Template = Template::new("tasks", include_str!("../templates/tasks.html"));
 const STATUS_ALL: Template = Template::new(

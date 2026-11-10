@@ -5,6 +5,7 @@ pub mod cli;
 pub mod daemon;
 pub mod domain;
 pub mod render;
+pub mod routes;
 pub mod server;
 
 pub mod store;

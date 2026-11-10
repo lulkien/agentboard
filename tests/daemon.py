@@ -8,6 +8,7 @@ here touches a live board or a fixed port.
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -83,6 +84,171 @@ def cli(db, *args, **kwargs):
     return subprocess.run([BIN, "--db", db, *args], capture_output=True, text=True, **kwargs)
 
 
+def get_json(daemon, target):
+    status, body = daemon.request("GET", target)
+    return status, (json.loads(body) if status == 200 else body)
+
+
+def feed_cursor(db):
+    match = re.search(r"^cursor (.+)$", cli(db, "feed", "--after", "0", "--limit", "500").stdout, re.MULTILINE)
+    return match.group(1)
+
+
+def api_checks(scratch):
+    """The read-only JSON API, on the fixture the HTML dashboard suite used."""
+    db = os.path.join(scratch, "api")
+
+    def add(*args):
+        out = cli(db, "--actor", "manager", "add", *args)
+        assert out.returncode == 0, out.stderr
+        return out.stdout.split()[1].removeprefix("T")
+
+    cli(db, "--actor", "manager", "project", "add", "--name", "dashboard", "--path", "/dashboard")
+    unbroken = "T90" + "x" * 195 + "<&"
+    spaced = "T90 long title " + "words " * 30 + "words"
+    add(unbroken)
+    add("Done child", "--parent", "1", "--status", "done")
+    description = 'A "quoted" <tag>& first line\nsecond line'
+    goal = "Goal <done>&\nkeep this line"
+    add("<script>alert('x')</script>", "--parent", "1", "--assignee", "alice<&", "--new-actor",
+        "--project", "1", "--description", description, "--goal", goal)
+    cli(db, "--actor", "manager", "update", "3", "--if-revision", "1", "--priority", "-7")
+    report = "Coder <b>&\nsecond line"
+    cli(db, "--actor", "manager", "update", "3", "--if-revision", "2", "--coder-report", report)
+    comment = 'Comment "quoted" <b>&\nsecond line'
+    cli(db, "--actor", "manager", "comment", "3", "--body", comment)
+    add("Planning child", "--parent", "1", "--status", "planning", "--assignee", "manager")
+    add("Implementing child", "--parent", "1", "--status", "implementing", "--assignee", "manager")
+    add("Blocked child", "--parent", "1", "--status", "blocked", "--assignee", "manager")
+    add("Reviewing child", "--parent", "1", "--status", "reviewing")
+    for index in range(43):
+        add(f"Page task {index:02}")
+    cli(db, "--actor", "manager", "update", "8", "--if-revision", "1", "--title", spaced)
+    add(unbroken)
+    add(spaced)
+    cli(db, "--actor", "manager", "project", "add", "--name", '<b>p&"</b>', "--path", "/other")
+    add("Other project row", "--project", "2")
+    epic = add("Escaped epic <script>")
+    add("Escaped epic child", "--parent", epic, "--status", "done")
+    cli(db, "--actor", "manager", "update", epic, "--if-revision", "1", "--status", "canceled")
+    add("Canceled fixture row", "--status", "canceled")
+
+    daemon = Daemon(db)
+    try:
+        cursor = feed_cursor(db)
+        port = daemon.port
+
+        # Board: lane cap with totals, attention order, held counts.
+        status, board = get_json(daemon, "/api/board")
+        check("board is 200", 200, status)
+        lanes = {lane["status"]: lane for lane in board["lanes"]}
+        check("lanes are the five open statuses in order", ["todo", "planning", "implementing", "blocked", "reviewing"], [lane["status"] for lane in board["lanes"]])
+        check("todo lane is capped at 8", 8, len(lanes["todo"]["tasks"]))
+        check("todo lane total is 48", 48, lanes["todo"]["total"])
+        check("status names are client-facing", "implementing", lanes["implementing"]["tasks"][0]["status"])
+        check("attention order is blocked, assigned todo, reviewing", [6, 3, 7], [t["id"] for t in board["attention"]["tasks"]])
+        check("attention total", 3, board["attention"]["total"])
+        held = {h["assignee"]: h["total"] for h in board["held"]}
+        check("held counts", {"manager": 3, "alice<&": 1}, held)
+        counts = {c["status"]: c["count"] for c in board["counts"]}
+        check("board counts: done 2, canceled 2", (2, 2), (counts["done"], counts["canceled"]))
+        check("board summaries carry no report text", False, "coder_report" in json.dumps(board))
+        check("board agents are listed", True, {"manager", "alice<&"} <= {a["name"] for a in board["agents"]})
+        check("board cursor is instance:seq", cursor, board["cursor"])
+        status, two = get_json(daemon, "/api/board?project=2")
+        check("project 2 board holds its one todo", [53], [t["id"] for t in {l["status"]: l for l in two["lanes"]}["todo"]["tasks"]])
+        check("project 2 has no held rows", [], two["held"])
+        check("project 2 still lists the roster", True, "manager" in {a["name"] for a in two["agents"]})
+        status, one = get_json(daemon, "/api/board?project=1")
+        check("project 1 board holds only its row", [3], [t["id"] for l in one["lanes"] for t in l["tasks"]])
+
+        # Tasks: newest first, paging, status counts, filters.
+        status, page = get_json(daemon, "/api/tasks")
+        check("tasks page one is newest first 56..37", list(range(56, 36, -1)), [t["id"] for t in page["tasks"]])
+        check("tasks total and more", (56, True), (page["total"], page["more"]))
+        all_counts = {c["status"]: c["count"] for c in page["counts"]}
+        check("status counts: All 56 / todo 48", (56, 48), (sum(all_counts.values()), all_counts["todo"]))
+        status, page2 = get_json(daemon, "/api/tasks?offset=20")
+        check("offset 20 continues 36..17", list(range(36, 16, -1)), [t["id"] for t in page2["tasks"]])
+        status, last = get_json(daemon, "/api/tasks?offset=40")
+        check("last page has 16 rows and no more", (16, False), (len(last["tasks"]), last["more"]))
+        status, todo = get_json(daemon, "/api/tasks?status=todo")
+        check("status filter total", 48, todo["total"])
+        status, mine = get_json(daemon, "/api/tasks?assignee=alice%3C%26")
+        check("assignee filter is percent-decoded", [3], [t["id"] for t in mine["tasks"]])
+        status, kids = get_json(daemon, "/api/tasks?parent=1")
+        check("parent filter lists the children", [2, 3, 4, 5, 6, 7], sorted(t["id"] for t in kids["tasks"]))
+        status, scoped = get_json(daemon, "/api/tasks?project=2")
+        check("project 2 lists only its row", [53], [t["id"] for t in scoped["tasks"]])
+        check("scoped status counts add up", 1, sum(c["count"] for c in scoped["counts"]))
+
+        # Detail.
+        status, detail = get_json(daemon, "/api/tasks/3")
+        check("detail is 200", 200, status)
+        task = detail["task"]
+        check("detail keeps description bytes", description, task["description"])
+        check("detail keeps goal bytes", goal, task["goal"])
+        check("detail keeps report bytes", report, task["coder_report"])
+        check("detail priority", -7, task["priority"])
+        check("detail has no epic for a leaf", None, detail["epic"])
+        kinds = [event["kind"] for event in detail["events"]]
+        check("detail events are this task's, oldest first", ["created", "updated", "updated", "commented"], kinds)
+        check("detail comment text", comment, detail["events"][-1]["payload"]["text"])
+        status, parent = get_json(daemon, "/api/tasks/1")
+        check("a parent row carries its rollup", 6, parent["epic"]["total"])
+        check("a parent row lists its children", 6, parent["children"]["total"])
+
+        # Epics.
+        status, epics = get_json(daemon, "/api/epics")
+        check("epics are 200", 200, status)
+        by_id = {e["task"]["id"]: e for e in epics["epics"]}
+        check("epic ids", [1, 54], sorted(by_id))
+        check("epic children are capped at 4 with the total", (4, 6), (len(by_id[1]["children"]["tasks"]), by_id[1]["children"]["total"]))
+        check("epic rollup", (1, 6), (by_id[1]["done"], by_id[1]["total"]))
+        check("epic depth is 0 for a root", 0, by_id[1]["depth"])
+
+        # Feed: newest page, before paging, filters, project isolation.
+        status, newest = get_json(daemon, "/api/feed")
+        check("feed page is 20 events", 20, len(newest["events"]))
+        check("feed says older exists", True, newest["older"])
+        seqs = [e["seq"] for e in newest["events"]]
+        check("feed is in ascending order", sorted(seqs), seqs)
+        status, older = get_json(daemon, "/api/feed?before=" + urllib.parse.quote(newest["before"], safe=""))
+        older_seqs = [e["seq"] for e in older["events"]]
+        check("older page ends before the newest page", True, max(older_seqs) < min(seqs))
+        check("older page is full", 20, len(older_seqs))
+        check("feed event keeps the stored actor", "manager", newest["events"][0]["actor"])
+        status, filtered = get_json(daemon, "/api/feed?task=3&kind=commented")
+        check("feed filter", [3], sorted({e["task_id"] for e in filtered["events"]}))
+        check("feed kind filter", ["commented"], sorted({e["kind"] for e in filtered["events"]}))
+        check("filtered feed is exhausted", (False, None), (filtered["older"], filtered["before"]))
+        status, isolated = get_json(daemon, "/api/feed?project=2")
+        check("project feed holds only that project's rows", {53}, {e["task_id"] for e in isolated["events"]})
+        status, listing = get_json(daemon, "/api/projects")
+        check("projects are listed", ["dashboard", '<b>p&"</b>'], [p["project_name"] for p in listing["projects"]])
+
+        # Refusals.
+        for target in ["/api/tasks?status=bogus", "/api/tasks?foo=1", "/api/tasks?status=todo&status=done",
+                       "/api/tasks?offset=x", "/api/tasks?parent=0", "/api/board?offset=1", "/api/board?status=todo",
+                       "/api/epics?task=1", "/api/feed?before=zzz", "/api/feed?before=foreign:5", "/api/feed?kind=bogus",
+                       "/api/feed?status=todo", "/api/projects?kind=x", "/api/tasks/abc", "/api/tasks/0",
+                       "/api/board?project=0", "/api/board?project=x", "/api/board?project=1&project=1",
+                       "/api/tasks?x", "/api/tasks?&", "/api/tasks?status=%zz"]:
+            check(f"400 for {target}", 400, daemon.request("GET", target)[0])
+        for target in ["/api/tasks/999", "/api/tasks?parent=999", "/api/board?project=9", "/api/feed?project=9",
+                       "/api/epics?project=9", "/api/projects?project=9", "/api/tasks/1/extra", "/api/nope"]:
+            check(f"404 for {target}", 404, daemon.request("GET", target)[0])
+        for target in ["/api/board", "/api/epics", "/api/tasks", "/api/tasks/3", "/api/feed", "/api/projects"]:
+            for method in ["POST", "PUT", "PATCH", "DELETE", "HEAD"]:
+                check(f"{method} {target} is 405", 405, daemon.request(method, target, "{}")[0])
+        check("a foreign Host cannot read the API", 421, daemon.request("GET", "/api/board", headers={"Host": "evil.example"})[0])
+        check("a foreign Origin cannot read the API", 403, daemon.request("GET", "/api/tasks", headers={"Origin": "http://evil.example"})[0])
+        check("our Origin reads the API", 200, daemon.request("GET", "/api/tasks", headers={"Origin": f"http://127.0.0.1:{port}"})[0])
+        check("no GET moved the feed cursor", cursor, feed_cursor(db))
+    finally:
+        daemon.close()
+
+
 def main():
     if not os.path.exists(BIN):
         raise SystemExit(f"no binary at {BIN}; cargo build first")
@@ -99,6 +265,7 @@ def main():
         check("health names the resolved board", db, health["board"])
         has("startup line names the instance", health["instance"], daemon.line)
         check("health refuses POST", 405, daemon.request("POST", "/api/health", "{}")[0])
+        check("health refuses HEAD", 405, daemon.request("HEAD", "/api/health")[0])
         check("unknown path is 404", 404, daemon.request("GET", "/nope")[0])
 
         # Identity is the URL segment: two seats interleaved on one daemon.
@@ -178,6 +345,8 @@ def main():
         print("project scope: argument, URL, then whole board; daemon env and cwd ignored")
     finally:
         daemon.close()
+
+    api_checks(scratch)
 
     print(f"daemon: {passed}/{passed + failed} passed (http, lmdb)")
     return 0 if failed == 0 else 1
