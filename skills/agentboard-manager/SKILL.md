@@ -30,8 +30,9 @@ seat is a named terminal and `hc send` waits for the program to pause.
    the process working directory to a registered project path. If none matches,
    the summary covers the whole board. Check the selected project against the
    repository before launching or assigning seats. `board_agents` is board-wide.
-2. Launch only the seats this work needs and register each seat's MCP server with
-   its board name (`agentboard serve --actor <seat>`). The manual's launch sections
+2. Check that the shared daemon is running on the intended board (`GET
+   /api/health`) before launching HTTP seats. Each card's `/mcp/<seat>` URL
+   supplies its actor; Grok keeps its stdio MCP server. The manual's launch sections
    have the exact commands and preferred-model table (Claude Opus/Sonnet 5.5;
    Codex Sol with model and effort supplied by each seat profile).
    - herdr: one tab per seat and never split panes; pass those flags after `--` on

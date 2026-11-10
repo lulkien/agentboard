@@ -12,6 +12,7 @@ its client gets a board identity.
 | `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
 | `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | `claude --mcp-config <file>` |
 | `grok/agentboard-mcp.toml` | grok (manager) | managed block in `~/.grok/config.toml` by `install.py` |
+| `systemd/agentboard.service` | shared HTTP daemon | linked to `~/.config/systemd/user/agentboard.service` |
 
 ## Install
 
@@ -25,6 +26,12 @@ file that is not a symlink into this repo, and `--force` replaces only the named
 destinations. A full install also links `seats/start-agentboard-manager` to
 `~/.local/bin/start-agentboard-manager`; `--grok-only` manages only the Grok MCP
 block and does not install the launcher.
+The user unit is linked, never enabled or started. Start the daemon before launching
+HTTP seats and before merging these cards into a live checkout. Its default address
+is `127.0.0.1:8765`; check `/api/health` for the board path and instance. The unit
+uses the default board path. If the manager uses `AGENTBOARD_DB`, give the unit the
+same absolute path with a systemd user drop-in. Stop the daemon before resetting
+or migrating the board, then start it again.
 
 ## Start the manager in the current pane or terminal
 
@@ -80,9 +87,11 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 
 ## What every card carries
 
-- Commands, never home paths: `agentboard`, `git`, `ferris-search`,
+- Commands, never home paths: `git`, `ferris-search`,
   `codebase-memory-mcp` resolve on the seat's `PATH`. Check the one that matters
   with `readlink -f "$(command -v agentboard)"`.
+- Claude and Codex cards connect to `http://127.0.0.1:8765/mcp/<seat>`; the URL
+  names the actor on every request. Grok continues to run a stdio server.
 - The board tool set is the ten tools of this build: `task_add`, `task_list`,
   `task_get`, `task_epic`, `task_update`, `task_claim`, `task_comment`,
   `board_feed`, `board_brief`, `board_agents`.
@@ -122,9 +131,9 @@ board tool.
 
 ## Claude
 
-One `--mcp-config` card per seat, because a Claude seat's actor comes from that
-file. `analyst-mcp.json`, `coder-mcp.json`, `manager-mcp.json` and
-`reviewer-mcp.json` differ only in `AGENTBOARD_ACTOR`. A Claude manager starts with
+One `--mcp-config` card per seat. `analyst-mcp.json`, `coder-mcp.json`,
+`manager-mcp.json` and `reviewer-mcp.json` use distinct `/mcp/<seat>` URLs, which
+name the actor for each request. A Claude manager starts with
 `claude --mcp-config ~/.claude/manager-mcp.json`.
 
 ## Grok
@@ -158,7 +167,6 @@ go after herdr's `--` or the `--` that ends `hc run`'s own options.
 
 ## Verified or not
 
-The codex cards are checked with `codex -p <seat> mcp list`, which loads the
-profile and prints the servers and env that profile resolves. The claude cards are
-not exercised here: the account quota decides whether a live seat can be started,
-and a card that has not been run is not a proof.
+The installer suite checks the linked URL cards and user unit in isolated homes.
+The coder report for the HTTP cutover records live Claude and Codex writes against
+a scratch daemon; card shape alone is not transport proof.

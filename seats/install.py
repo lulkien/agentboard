@@ -272,6 +272,7 @@ def main():
         for seat in SEATS:
             check(f"{claude_home}/{seat}-mcp.json")
         check(f"{home}/.local/bin/start-agentboard-manager")
+        check(f"{home}/.config/systemd/user/agentboard.service")
     if refuse:
         sys.exit(1)
 
@@ -331,6 +332,7 @@ def main():
         for seat in SEATS:
             link(f"{src}/claude/{seat}-mcp.json", f"{claude_home}/{seat}-mcp.json")
         link(f"{src}/start-agentboard-manager", f"{home}/.local/bin/start-agentboard-manager")
+        link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")
         install_grok_block()
     finally:
         if os.path.lexists(rules_tmp):

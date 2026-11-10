@@ -8,8 +8,8 @@ platforms: [linux, macos]
 # agentboard manual
 
 The board holds the work: tasks, statuses, owners, comments and an event feed.
-It is one LMDB directory. There is no server process: every CLI call and every MCP
-server opens the directory, and the file lock keeps concurrent writers honest.
+It is one LMDB directory. CLI calls open it directly; one resident `agentboard daemon`
+serves HTTP MCP and the dashboard, with the file lock keeping writers honest.
 
 Pages here:
 
@@ -24,15 +24,18 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
 
 - One directory per board: `$AGENTBOARD_DB`, else
   `~/.local/state/agentboard/lmdb`. `agentboard path` prints the resolved one.
-- A seat writes as its name: export `AGENTBOARD_ACTOR` or pass `--actor`, and give
-  the MCP server the same name, for example `agentboard serve --actor coder`.
+- A seat writes as its name: CLI uses `AGENTBOARD_ACTOR` or `--actor`; HTTP MCP
+  uses `/mcp/<seat>` in the card URL. Stdio `agentboard serve --actor coder` remains
+  available for Grok and one-shot use.
 - Names identify a seat; they are not a credential. A name enters the roster when
   it first writes, and pointing a row at an unseen name needs `new_actor`, so a
   typo cannot invent a person.
 - One live process per name. The board cannot tell two processes with one name
   apart, so they share one identity and the revision guard is the only brake.
-- Every seat points at the same `AGENTBOARD_DB`. Different directories are
-  different boards that cannot see each other.
+- Every CLI seat and the daemon point at the same `AGENTBOARD_DB`. Different
+  directories are different boards that cannot see each other.
+- Stop the daemon before `agentboard reset` or board migration; its lifetime lock
+  makes either operation refuse while it is running. Start it again afterward.
 - The map size is fixed at creation (`AGENTBOARD_MAP_SIZE_MB`, default 1024);
   there is no growth in place.
 
@@ -241,8 +244,8 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config` | bypass; analyst/reviewer add a four-tool edit deny list | `/agentboard-<seat>` |
-| Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
+| Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a four-tool edit deny list | `/agentboard-<seat>` |
+| Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml`, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
 | Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `${AGENTBOARD_SEAT:-manager}` in `~/.grok/config.toml` | `--trust --always-approve` | `/agentboard-manager` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
@@ -251,20 +254,20 @@ one physical copy under `~/.agents/skills`, linked into each client.
 
 ## Register a seat's MCP server
 
-The seat's board name is not a herdr or hc concept: the MCP server carries it. Register
-once per client, with the seat's actor and the shared board:
+Start `agentboard daemon` on the board before launching HTTP seats. Its default
+address is `127.0.0.1:8765`; `GET /api/health` shows the board path and instance.
+The URL path carries the actor on each request. The installer links the cards and
+the optional systemd user unit; it never enables or starts the unit. If the CLI
+uses a custom `AGENTBOARD_DB`, configure the same absolute path for the unit.
 
 ```bash
 # codex: ~/.codex/<seat>.config.toml, layered by codex -p <seat>
 #   [mcp_servers.agentboard]
-#   command = "agentboard"
-#   [mcp_servers.agentboard.env]
-#   AGENTBOARD_ACTOR = "coder"
+#   url = "http://127.0.0.1:8765/mcp/coder"
 #
 # claude: one mcp-config file per seat, named on the command line
+#   "agentboard": { "type": "http", "url": "http://127.0.0.1:8765/mcp/coder" }
 claude --mcp-config ~/.claude/coder-mcp.json
-
-
 ```
 
 The repo's `seats/` directory is the canonical copy of those cards, and

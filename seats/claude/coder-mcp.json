@@ -1,12 +1,8 @@
 {
   "mcpServers": {
     "agentboard": {
-      "type": "stdio",
-      "command": "agentboard",
-      "args": [],
-      "env": {
-        "AGENTBOARD_ACTOR": "coder"
-      }
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp/coder"
     },
     "codebase-memory-mcp": {
       "type": "stdio",

@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 repo=$(pwd)
 src=$repo/seats/codex/rules/agentboard.rules
 launcher=$repo/seats/start-agentboard-manager
+unit=$repo/seats/systemd/agentboard.service
 grok_src=$repo/seats/grok/agentboard-mcp.toml
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -60,6 +61,13 @@ newhome
 inst; code=$?
 is "fresh install exit" test "$code" -eq 0
 is "manager launcher linked" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = "$launcher"
+is "user unit linked" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
+for seat in analyst coder manager reviewer; do
+  is "$seat Claude URL card" python3 -c 'import json,sys; s=sys.argv[1]; p=sys.argv[2]; a=json.load(open(p))["mcpServers"]["agentboard"]; assert a == {"type":"http","url":f"http://127.0.0.1:8765/mcp/{s}"}' "$seat" "$home/.claude/$seat-mcp.json"
+  is "$seat Codex URL card" python3 -c 'import sys,tomllib; s=sys.argv[1]; p=sys.argv[2]; a=tomllib.load(open(p,"rb"))["mcp_servers"]["agentboard"]; assert a["url"] == f"http://127.0.0.1:8765/mcp/{s}" and "command" not in a and "env" not in a and len(a["tools"]) == 10' "$seat" "$home/.codex/$seat.config.toml"
+done
+has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
+has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config/systemd/user/agentboard.service"
 same "fresh default.rules is the source block" "$src" "$rules"
 is "no separate agentboard.rules" test ! -e "$home/.codex/rules/agentboard.rules"
 has "fresh install says added" "added: $rules" "$tmp/out"
@@ -73,13 +81,27 @@ inst; code=$?
 is "foreign launcher link refused" test "$code" -eq 1
 has "foreign launcher link diagnosed" 'foreign link:' "$tmp/err"
 is "foreign launcher link preserved" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = /old/checkout/start-agentboard-manager
+is "foreign launcher refusal leaves unit unlinked" test ! -e "$home/.config/systemd/user/agentboard.service"
 inst --force
 is "force replaces launcher link" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = "$launcher"
+
+# --- user unit follows the same foreign-link rules ---------------------------
+newhome
+mkdir -p "$home/.config/systemd/user"
+ln -s /old/checkout/agentboard.service "$home/.config/systemd/user/agentboard.service"
+inst; code=$?
+is "foreign unit link refused" test "$code" -eq 1
+has "foreign unit link diagnosed" 'foreign link:' "$tmp/err"
+is "foreign unit link preserved" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = /old/checkout/agentboard.service
+is "foreign unit refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
+inst --force
+is "force replaces unit link" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 
 # --- grok-only does not manage the PATH launcher ------------------------------
 newhome
 grok_inst
 is "grok-only leaves manager launcher alone" test ! -e "$home/.local/bin/start-agentboard-manager"
+is "grok-only leaves user unit alone" test ! -e "$home/.config/systemd/user/agentboard.service"
 
 # --- user rules, no trailing newline: original bytes stay the prefix ---------
 newhome

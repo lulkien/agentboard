@@ -1,0 +1,11 @@
+[Unit]
+Description=agentboard MCP and dashboard daemon
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/agentboard daemon 127.0.0.1:8765
+Restart=on-failure
+RestartPreventExitStatus=1
+
+[Install]
+WantedBy=default.target

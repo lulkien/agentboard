@@ -33,11 +33,8 @@ command = "codebase-memory-mcp"
 default_tools_approval_mode = "approve"
 
 [mcp_servers.agentboard]
-command = "agentboard"
+url = "http://127.0.0.1:8765/mcp/analyst"
 default_tools_approval_mode = "auto"
-
-[mcp_servers.agentboard.env]
-AGENTBOARD_ACTOR = "analyst"
 
 [mcp_servers.agentboard.tools]
 task_add = { approval_mode = "auto" }        # create a task
