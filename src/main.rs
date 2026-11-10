@@ -80,9 +80,11 @@ fn run(
     match cmd {
         None | Some(Cmd::Serve) => serve(path, actor),
         #[cfg(feature = "dashboard")]
-        Some(Cmd::Dashboard { address }) => {
-            dashboard::serve(path, address).map(|()| (String::new(), ExitCode::SUCCESS))
-        }
+        Some(Cmd::Dashboard {
+            address,
+            allow_non_loopback,
+        }) => dashboard::serve(path, address, allow_non_loopback)
+            .map(|()| (String::new(), ExitCode::SUCCESS)),
         Some(Cmd::Path) => Ok((path.display().to_string(), ExitCode::SUCCESS)),
         Some(Cmd::Project { cmd }) => {
             let board = open(&path)?;

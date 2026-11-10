@@ -183,12 +183,14 @@ The `dashboard` subcommand is available when the binary is built with the
 
 ```bash
 cargo build --release --features dashboard
-agentboard dashboard [ip:port] [--db PATH]
+agentboard dashboard [ip:port] [--db PATH] [--allow-non-loopback]
 ```
 
 It defaults to `127.0.0.1:8080`; the global `--db` option works before or after
-the subcommand. The page is read-only and has no authentication. It binds only to
-loopback by default; bind a non-loopback address only deliberately. The
+the subcommand. The page is read-only and has no authentication. Localhost-only
+is the supported mode; binding a non-loopback address is refused unless
+`--allow-non-loopback` is passed deliberately. Requests with an unrelated Host
+header are refused to prevent DNS-rebinding reads. The
 `agentboard serve` command remains MCP over stdio and its 10-tool surface is
 unchanged. The dashboard routes are `/` (board with attention, seats and status bays),
 `/epics` (epic overview), `/tasks`

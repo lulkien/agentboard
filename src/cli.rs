@@ -55,6 +55,9 @@ pub enum Cmd {
         /// Address to listen on
         #[arg(value_name = "IP:PORT", default_value = "127.0.0.1:8080")]
         address: SocketAddr,
+        /// Permit binding to a non-loopback interface
+        #[arg(long)]
+        allow_non_loopback: bool,
     },
     /// Create a task
     Add {

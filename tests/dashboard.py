@@ -59,6 +59,29 @@ def pulse_cursor(port: int) -> str:
         return response.read().decode()
 
 
+def raw_request(
+    port: int, method: str, target: str, host: str | None
+) -> tuple[int, str, dict[str, str]]:
+    host_line = f"Host: {host}\r\n" if host is not None else ""
+    with socket.create_connection(("127.0.0.1", port), timeout=4) as connection:
+        connection.sendall(
+            f"{method} {target} HTTP/1.1\r\n{host_line}Connection: close\r\n\r\n".encode()
+        )
+        response = bytearray()
+        while chunk := connection.recv(4096):
+            response.extend(chunk)
+    headers, body = bytes(response).split(b"\r\n\r\n", 1)
+    lines = headers.decode().split("\r\n")
+    status = int(lines[0].split()[1])
+    parsed_headers = {
+        name.lower(): value.strip()
+        for line in lines[1:]
+        if ":" in line
+        for name, value in [line.split(":", 1)]
+    }
+    return status, body.decode(), parsed_headers
+
+
 def feed_cursor(db: Path) -> str:
     output = run_cli(db, "feed", "--after", "0")
     match = re.search(r"^cursor (.+)$", output, re.MULTILINE)
@@ -130,6 +153,15 @@ def main() -> int:
                 raise AssertionError("dashboard did not accept connections")
 
             assert status == 200, f"GET / returned {status}"
+            cursor_before_host_checks = pulse_cursor(port)
+            for host in [f"127.0.0.1:{port}", f"localhost:{port}", "127.0.0.1", "localhost"]:
+                host_status, _, _headers = raw_request(port, "GET", "/", host)
+                assert host_status == 200, f"Host {host} returned {host_status}"
+            evil_status, evil_body, _headers = raw_request(port, "GET", "/", "evil.example")
+            assert evil_status == 421 and evil_body == "misdirected request", "untrusted Host was not refused with 421"
+            missing_status, missing_body, _headers = raw_request(port, "GET", "/", None)
+            assert missing_status == 400 and missing_body == "host header required", "missing Host was not refused with 400"
+            assert pulse_cursor(port) == cursor_before_host_checks, "Host checks changed the board event cursor"
             expected_cursor = feed_cursor(db)
             pulse_status, pulse, pulse_headers = request(port, "GET", "/pulse")
             assert pulse_status == 200 and pulse == expected_cursor, f"pulse did not return the current CLI cursor: {pulse_status} {pulse!r} != {expected_cursor!r}"
@@ -405,6 +437,49 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait(timeout=3)
+
+        refused = subprocess.run(
+            [str(BIN), "dashboard", "0.0.0.0:0", "--db", str(db)],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        refusal = refused.stdout + refused.stderr
+        assert refused.returncode == 1 and "--allow-non-loopback" in refusal, "non-loopback bind was not refused with the required flag"
+
+        with socket.socket() as probe:
+            probe.bind(("0.0.0.0", 0))
+            public_port = probe.getsockname()[1]
+        public_server = subprocess.Popen(
+            [str(BIN), "dashboard", f"0.0.0.0:{public_port}", "--allow-non-loopback", "--db", str(db)],
+            cwd=ROOT,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            for _ in range(50):
+                if public_server.poll() is not None:
+                    raise AssertionError(f"dashboard with --allow-non-loopback exited with code {public_server.returncode}")
+                try:
+                    public_status, _, _headers = raw_request(
+                        public_port, "GET", "/pulse", f"127.0.0.1:{public_port}"
+                    )
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            else:
+                raise AssertionError("dashboard with --allow-non-loopback did not bind")
+            assert public_status == 200, f"dashboard with --allow-non-loopback returned {public_status}"
+        finally:
+            public_server.terminate()
+            try:
+                public_server.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                public_server.kill()
+                public_server.wait(timeout=3)
 
     print("dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)")
     return 0
