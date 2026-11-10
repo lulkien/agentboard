@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BIN = Path(os.environ.get("AGENTBOARD_TEST_BIN", ROOT / "target/debug/agentboard"))
 PAGE_SIZE = 20
 CSP = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+READ_ONLY_DB = None
 
 
 def run_cli(db: Path, *args: str) -> str:
@@ -38,14 +39,24 @@ def run_cli(db: Path, *args: str) -> str:
 
 
 def request(port: int, method: str, target: str) -> tuple[int, str, dict[str, str]]:
+    before = pulse_cursor(port) if method == "GET" and READ_ONLY_DB else None
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{target}", method=method
     )
     try:
         with urllib.request.urlopen(req, timeout=4) as response:
-            return response.status, response.read().decode(), {k.lower(): v for k, v in response.headers.items()}
+            result = response.status, response.read().decode(), {k.lower(): v for k, v in response.headers.items()}
     except urllib.error.HTTPError as response:
-        return response.code, response.read().decode(), {k.lower(): v for k, v in response.headers.items()}
+        result = response.code, response.read().decode(), {k.lower(): v for k, v in response.headers.items()}
+    if before is not None:
+        assert pulse_cursor(port) == before, f"GET {target} changed the board event cursor"
+    return result
+
+
+def pulse_cursor(port: int) -> str:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/pulse", timeout=4) as response:
+        assert response.status == 200, f"GET /pulse returned {response.status} while checking read-only behavior"
+        return response.read().decode()
 
 
 def feed_cursor(db: Path) -> str:
@@ -56,11 +67,13 @@ def feed_cursor(db: Path) -> str:
 
 
 def main() -> int:
+    global READ_ONLY_DB
     if not BIN.is_file():
         raise SystemExit(f"feature binary not found: {BIN}; build with --features dashboard")
 
     with tempfile.TemporaryDirectory(prefix="agentboard-dashboard-") as temp:
         db = Path(temp) / "board"
+        READ_ONLY_DB = db
         run_cli(db, "project", "add", "--name", "dashboard", "--path", "/dashboard")
         run_cli(db, "add", "Epic <script>alert('epic')</script>")
         run_cli(db, "add", "Done child", "--parent", "1", "--status", "done")
@@ -92,12 +105,6 @@ def main() -> int:
         run_cli(db, "add", "Implementing child", "--parent", "1", "--status", "implementing", "--assignee", "manager")
         run_cli(db, "add", "Blocked child", "--parent", "1", "--status", "blocked", "--assignee", "manager")
         run_cli(db, "add", "Reviewing child", "--parent", "1", "--status", "reviewing")
-        for index in range(45):
-            run_cli(db, "add", f"Page task {index:02}")
-        project_name = '<b>p&"</b>'
-        run_cli(db, "project", "add", "--name", project_name, "--path", "/other-dashboard")
-        run_cli(db, "add", "Other project row", "--project", "2")
-
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
@@ -123,6 +130,24 @@ def main() -> int:
                 raise AssertionError("dashboard did not accept connections")
 
             assert status == 200, f"GET / returned {status}"
+            expected_cursor = feed_cursor(db)
+            pulse_status, pulse, pulse_headers = request(port, "GET", "/pulse")
+            assert pulse_status == 200 and pulse == expected_cursor, f"pulse did not return the current CLI cursor: {pulse_status} {pulse!r} != {expected_cursor!r}"
+            assert pulse_headers.get("content-type", "").startswith("text/plain") and pulse_headers.get("cache-control") == "no-store", "pulse response is not uncached text"
+            prior_instance, prior_seq = expected_cursor.rsplit(":", 1)
+            run_cli(db, "comment", "3", "--body", "pulse marker")
+            pulse_status, pulse_after_comment, _headers = request(port, "GET", "/pulse")
+            next_instance, next_seq = pulse_after_comment.rsplit(":", 1)
+            assert pulse_status == 200 and next_instance == prior_instance and int(next_seq) == int(prior_seq) + 1, "pulse did not advance after a CLI comment"
+            assert request(port, "POST", "/pulse")[0] == 405, "POST /pulse was not refused"
+            assert request(port, "GET", "/pulse?x=1")[0] == 400, "pulse accepted a query"
+            for index in range(45):
+                run_cli(db, "add", f"Page task {index:02}")
+            project_name = '<b>p&"</b>'
+            run_cli(db, "project", "add", "--name", project_name, "--path", "/other-dashboard")
+            run_cli(db, "add", "Other project row", "--project", "2")
+            status, html, _headers = request(port, "GET", "/")
+            assert status == 200, f"GET / returned {status} after adding fixture rows"
             assert "Needs attention" in html and 'class="active" href="/"' in html, "board home is missing"
             attention = html.split('class="attention panel"', 1)[1].split('</section>', 1)[0]
             assert attention.index("Blocked child") < attention.index("Reviewing child"), "attention order is wrong"
@@ -142,7 +167,10 @@ def main() -> int:
             assert child_strip_list.count('class="task-strip ') == 4, "epic did not render its capped direct child strips"
             assert ">+2 more</a>" in epic_row and ">All children</a>" in epic_row, "epic child overflow or all-children link is missing"
             assert 'class="active" href="/epics"' in epics_home, "epics tab was not marked active"
-            assert "/assets/dashboard.css" in html and "/assets/theme.js" in html, "embedded theme assets are missing"
+            assert "/assets/dashboard.css" in html and "/assets/theme.js" in html and "/assets/live.js" in html, "embedded dashboard assets are missing"
+            assert 'id="pulse-status"' in html and 'data-follow aria-pressed="false"' in html, "live controls are missing"
+            live_status, live_js, _headers = request(port, "GET", "/assets/live.js")
+            assert live_status == 200 and "textContent" in live_js and "visibilitychange" in live_js and "innerHTML" not in live_js, "live script violates the safe polling contract"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
             assert "prefers-color-scheme" in dashboard_css, "system theme defaults are missing"
             assert "pre { font:inherit; }" in dashboard_css, "feed change details do not inherit the dashboard font"
@@ -152,6 +180,7 @@ def main() -> int:
             for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed"]:
                 page_status, body, headers = request(port, "GET", path)
                 assert page_status == 200, f"GET {path} returned {page_status}"
+                assert re.search(r'<body data-cursor="[^:]+:\d+">', body), f"{path} lacks a valid event cursor"
                 assert headers.get("content-security-policy") == CSP, f"{path} has wrong CSP"
                 assert headers.get("cache-control") == "no-store", f"{path} is cacheable"
                 assert headers.get("x-content-type-options") == "nosniff", f"{path} lacks nosniff"
@@ -180,7 +209,7 @@ def main() -> int:
                 plain = request(port, "GET", path)
                 blank = request(port, "GET", f"{path}?project=")
                 assert blank[:2] == plain[:2], f"blank project changed {path}"
-            for asset in ["/assets/dashboard.css", "/assets/theme.js"]:
+            for asset in ["/assets/dashboard.css", "/assets/theme.js", "/assets/live.js"]:
                 asset_status, _, headers = request(port, "GET", asset)
                 assert asset_status == 200 and headers.get("x-content-type-options") == "nosniff", f"{asset} lacks nosniff"
 
@@ -312,7 +341,7 @@ def main() -> int:
                 status, _, _headers = request(port, "GET", f"/feed?{bad_query}")
                 assert status == 400, f"invalid feed query {bad_query} returned {status}"
 
-            for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed", "/assets/dashboard.css", "/assets/theme.js"]:
+            for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed", "/pulse", "/assets/dashboard.css", "/assets/theme.js", "/assets/live.js"]:
                 status, _, _headers = request(port, "POST", path)
                 assert status == 405, f"POST {path} returned {status}"
             assert feed_cursor(db) == before, "POST changed the board event cursor"

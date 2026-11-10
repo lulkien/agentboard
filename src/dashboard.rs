@@ -142,6 +142,33 @@ fn respond(stream: &mut TcpStream, board: &Board) -> io::Result<()> {
         );
     }
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    if path == "/pulse" {
+        if target.contains('?') {
+            return response(
+                stream,
+                "400 Bad Request",
+                "text/plain; charset=utf-8",
+                "invalid dashboard query",
+            );
+        }
+        let cursor = board
+            .cursor_now()
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        return response(
+            stream,
+            "200 OK",
+            "text/plain; charset=utf-8",
+            &cursor.encode(),
+        );
+    }
+    if path == "/assets/live.js" {
+        return response(
+            stream,
+            "200 OK",
+            "text/javascript; charset=utf-8",
+            include_str!("dashboard/live.js"),
+        );
+    }
     if path == "/assets/dashboard.css" {
         return response(
             stream,
@@ -188,6 +215,9 @@ fn respond(stream: &mut TcpStream, board: &Board) -> io::Result<()> {
             );
         }
     };
+    let cursor = board
+        .cursor_now()
+        .map_err(|error| io::Error::other(error.to_string()))?;
     let body = match pages::render(board, route) {
         Ok(body) => body,
         Err(pages::PageError::BadRequest) => {
@@ -213,6 +243,11 @@ fn respond(stream: &mut TcpStream, board: &Board) -> io::Result<()> {
             )
         }
     };
+    let body = body.replacen(
+        "<body>",
+        &format!("<body data-cursor=\"{}\">", cursor.encode()),
+        1,
+    );
     response(stream, "200 OK", "text/html; charset=utf-8", &body)
 }
 
@@ -236,6 +271,9 @@ fn response(
     )?;
     if content_type.starts_with("text/html") {
         stream.write_all(b"Cache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\n")?;
+    }
+    if content_type.starts_with("text/plain") {
+        stream.write_all(b"Cache-Control: no-store\r\n")?;
     }
     if status.starts_with("405") {
         stream.write_all(b"Allow: GET\r\n")?;
