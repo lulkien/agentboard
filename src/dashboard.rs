@@ -231,9 +231,12 @@ fn response(
 ) -> io::Result<()> {
     write!(
         stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n",
         body.len()
     )?;
+    if content_type.starts_with("text/html") {
+        stream.write_all(b"Cache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\n")?;
+    }
     if status.starts_with("405") {
         stream.write_all(b"Allow: GET\r\n")?;
     }

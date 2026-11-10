@@ -117,7 +117,7 @@ fn task_detail(
             let timestamp = format_timestamp(event.timestamp_ms);
             let _ = write!(
                 body,
-                "<li><div class=\"timeline-heading\"><strong>{}</strong><span class=\"meta\">{} · <time datetime=\"{timestamp}\">{timestamp}</time></span></div>",
+                "<li><div class=\"timeline-heading\"><strong>{}</strong><span class=\"meta\">{}</span><time datetime=\"{timestamp}\">{timestamp}</time></div>",
                 kind, actor
             );
             let payload_text = event
@@ -190,7 +190,7 @@ fn task_detail(
     );
     body.push_str("</dl></aside></div>");
     html::shell(
-        &format!("T{} · {}", task.id, task.title),
+        &format!("T{} | {}", task.id, task.title),
         Page::Detail(task.id),
         &body,
     )

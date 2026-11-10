@@ -195,6 +195,11 @@ unchanged. The dashboard routes are `/` and `/epics` (epic overview), `/tasks`
 and `/feed` (board event history). `/assets/dashboard.css` and
 `/assets/theme.js` are embedded dashboard assets. The theme button cycles through
 light, dark and system appearance, saving a manual choice in local storage.
+The display uses compact task strips, status glyphs and text, a skip link, and
+visible keyboard focus in both themes. HTML responses use a restrictive Content
+Security Policy and `Cache-Control: no-store`; all responses send `nosniff` and
+`Referrer-Policy: no-referrer`. Assets are served from the binary, with no inline
+scripts or styles.
 Every route is GET-only; other methods receive `405 Method Not Allowed`. The feed
 shows the newest 20 matching events and uses its opaque `before` cursor to page
 toward older events while retaining task and event-kind filters.

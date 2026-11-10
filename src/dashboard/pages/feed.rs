@@ -101,7 +101,7 @@ fn render_feed_event(body: &mut String, event: &agentboard::domain::Event) {
     let timestamp = format_timestamp(event.timestamp_ms);
     let _ = write!(
         body,
-        "<li><article class=\"feed-event\"><header class=\"timeline-heading\"><span class=\"badge event-kind\">{kind}</span><a href=\"/tasks/{}\">T{}</a><span class=\"meta\">by {actor} · <time datetime=\"{timestamp}\">{timestamp}</time></span></header>",
+        "<li><article class=\"feed-event\"><header class=\"timeline-heading\"><span class=\"badge event-kind\">{kind}</span><a href=\"/tasks/{}\">T{}</a><span class=\"meta\">by {actor}</span><time datetime=\"{timestamp}\">{timestamp}</time></header>",
         event.task_id, event.task_id
     );
     if let Some(text) = event

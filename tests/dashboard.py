@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 ROOT = Path(__file__).resolve().parents[1]
 BIN = Path(os.environ.get("AGENTBOARD_TEST_BIN", ROOT / "target/debug/agentboard"))
 PAGE_SIZE = 20
+CSP = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 
 def run_cli(db: Path, *args: str) -> str:
@@ -35,15 +36,15 @@ def run_cli(db: Path, *args: str) -> str:
     return result.stdout
 
 
-def request(port: int, method: str, target: str) -> tuple[int, str]:
+def request(port: int, method: str, target: str) -> tuple[int, str, dict[str, str]]:
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{target}", method=method
     )
     try:
         with urllib.request.urlopen(req, timeout=4) as response:
-            return response.status, response.read().decode()
+            return response.status, response.read().decode(), {k.lower(): v for k, v in response.headers.items()}
     except urllib.error.HTTPError as response:
-        return response.code, response.read().decode()
+        return response.code, response.read().decode(), {k.lower(): v for k, v in response.headers.items()}
 
 
 def feed_cursor(db: Path) -> str:
@@ -110,7 +111,7 @@ def main() -> int:
                 if server.poll() is not None:
                     raise AssertionError(f"dashboard exited early with code {server.returncode}")
                 try:
-                    status, html = request(port, "GET", "/")
+                    status, html, _headers = request(port, "GET", "/")
                     break
                 except OSError:
                     time.sleep(0.1)
@@ -127,16 +128,35 @@ def main() -> int:
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
             assert "prefers-color-scheme" in dashboard_css, "system theme defaults are missing"
             assert "pre { font:inherit; }" in dashboard_css, "feed change details do not inherit the dashboard font"
-            theme_status, theme_js = request(port, "GET", "/assets/theme.js")
+            assert "prefers-reduced-motion" in dashboard_css and ":focus-visible" in dashboard_css, "reduced motion or keyboard focus style is missing"
+            theme_status, theme_js, _headers = request(port, "GET", "/assets/theme.js")
             assert theme_status == 200 and "localStorage" in theme_js and "try" in theme_js, "theme persistence/failure handling is missing"
+            for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed"]:
+                page_status, body, headers = request(port, "GET", path)
+                assert page_status == 200, f"GET {path} returned {page_status}"
+                assert headers.get("content-security-policy") == CSP, f"{path} has wrong CSP"
+                assert headers.get("cache-control") == "no-store", f"{path} is cacheable"
+                assert headers.get("x-content-type-options") == "nosniff", f"{path} lacks nosniff"
+                assert headers.get("referrer-policy") == "no-referrer", f"{path} has wrong referrer policy"
+                assert 'style="' not in body and "<style" not in body, f"{path} has inline CSS"
+                assert not re.search(r"<script(?![^>]*\bsrc=)", body), f"{path} has inline script"
+                assert 'href="#main"' in body and 'id="main"' in body, f"{path} lacks skip link"
+                assert 'aria-current="page"' in body, f"{path} lacks current nav state"
+                badges = re.findall(r'<span class="badge status-([a-z]+)">((?:<span[^>]*>[^<]*</span> )?[^<]*)</span>', body)
+                assert len(badges) == body.count('class="badge status-'), f"{path} has malformed status badge"
+                for status_name, badge in badges:
+                    assert status_name in badge, f"{path} badge lacks {status_name} text"
+            for asset in ["/assets/dashboard.css", "/assets/theme.js"]:
+                asset_status, _, headers = request(port, "GET", asset)
+                assert asset_status == 200 and headers.get("x-content-type-options") == "nosniff", f"{asset} lacks nosniff"
 
-            status, tasks = request(port, "GET", "/tasks")
+            status, tasks, _headers = request(port, "GET", "/tasks")
             assert status == 200 and 'class="active" href="/tasks"' in tasks, "tasks tab is missing or inactive"
             assert 'href="/tasks?offset=20"' in tasks, "next-page link is missing"
             first_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', tasks)]
             assert first_ids == list(range(52, 32, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
 
-            status, detail = request(port, "GET", "/tasks/3")
+            status, detail, _headers = request(port, "GET", "/tasks/3")
             assert status == 200, f"task detail returned {status}"
             assert 'class="active" href="/tasks"' in detail, "task detail did not mark the Tasks tab active"
             assert "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;" in detail, "detail title was not escaped"
@@ -151,23 +171,23 @@ def main() -> int:
             assert "Analyst report" not in detail and "Reviewer report" not in detail, "empty report sections were printed"
             assert 'href="/feed?task=3"' in detail, "older activity link is missing"
 
-            status, epic_detail = request(port, "GET", "/tasks/1")
+            status, epic_detail, _headers = request(port, "GET", "/tasks/1")
             assert status == 200 and "Child tasks" in epic_detail, "epic detail child list is missing"
             assert "1 / 6 done" in epic_detail and 'max="6" value="1"' in epic_detail, "epic detail rollup is wrong"
             assert "Planning child" in epic_detail, "direct child is missing from epic detail"
-            status, leaf_detail = request(port, "GET", "/tasks/2")
+            status, leaf_detail, _headers = request(port, "GET", "/tasks/2")
             assert status == 200 and "Child tasks" not in leaf_detail, "leaf was incorrectly treated as an epic"
             for path, expected in [("/tasks/99999", 404), ("/tasks/0", 400), ("/tasks/nope", 400), ("/tasks/3/extra", 404)]:
-                detail_status, _ = request(port, "GET", path)
+                detail_status, _, _headers = request(port, "GET", path)
                 assert detail_status == expected, f"{path} returned {detail_status}, expected {expected}"
-            detail_status, _ = request(port, "GET", "/tasks/3?status=todo")
+            detail_status, _, _headers = request(port, "GET", "/tasks/3?status=todo")
             assert detail_status == 400, "detail route accepted a query parameter"
 
             for index in range(45):
                 run_cli(db, "comment", "3", "--body", f"feed note {index:02}")
             before = feed_cursor(db)
 
-            status, second_page = request(port, "GET", "/tasks?offset=20")
+            status, second_page, _headers = request(port, "GET", "/tasks?offset=20")
             assert status == 200 and "Page task 20" in second_page, "offset paging did not advance"
             assert "Page task 00" not in second_page, "offset page repeats the first page"
             second_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', second_page)]
@@ -175,73 +195,73 @@ def main() -> int:
             assert not set(first_ids) & set(second_ids) and first_ids[-1] - 1 == second_ids[0], "task pages overlap or have a gap"
 
             query = urlencode({"assignee": "alice<&"})
-            status, filtered = request(port, "GET", f"/tasks?{query}")
+            status, filtered, _headers = request(port, "GET", f"/tasks?{query}")
             assert status == 200 and dangerous_title not in filtered, "filter returned unsafe raw title"
             assert "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;" in filtered, "assignee filter missed the task"
             assert "<script>alert('x')</script>" not in filtered, "raw task markup was rendered"
             assert "alice&lt;&amp;" in filtered and "1" in filtered, "task metadata was not escaped"
             assert 'href="/tasks/3"' in filtered, "task detail link is missing"
-            status, filtered_done = request(port, "GET", "/tasks?status=done")
+            status, filtered_done, _headers = request(port, "GET", "/tasks?status=done")
             assert status == 200 and "Done child" in filtered_done, "status filter missed done task"
             assert "Planning child" not in filtered_done, "status filter leaked another status"
             filtered_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', filtered_done)]
             assert filtered_ids == sorted(filtered_ids, reverse=True), f"filtered tasks are not newest-first: {filtered_ids}"
-            status, invalid = request(port, "GET", "/tasks?status=unknown")
+            status, invalid, _headers = request(port, "GET", "/tasks?status=unknown")
             assert status == 400 and "invalid dashboard query" in invalid, "invalid status was accepted"
-            status, not_found = request(port, "GET", "/elsewhere")
+            status, not_found, _headers = request(port, "GET", "/elsewhere")
             assert status == 404, f"unknown path returned {status}"
-            status, child_tasks = request(port, "GET", "/tasks?parent=1")
+            status, child_tasks, _headers = request(port, "GET", "/tasks?parent=1")
             assert status == 200 and "Done child" in child_tasks and "Page task 00" not in child_tasks, "parent filter failed"
             child_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', child_tasks)]
             assert len(child_ids) > 1 and child_ids == sorted(child_ids, reverse=True), f"multi-row parent filter is not newest-first: {child_ids}"
-            status, all_tasks = request(port, "GET", "/tasks")
+            status, all_tasks, _headers = request(port, "GET", "/tasks")
             assert status == 200, "unfiltered tasks failed"
-            status, todo_tasks = request(port, "GET", "/tasks?status=todo")
+            status, todo_tasks, _headers = request(port, "GET", "/tasks?status=todo")
             assert status == 200, "todo task filter failed"
             for query, expected_tasks in [("status=todo&assignee=&parent=", todo_tasks), ("status=&assignee=&parent=", all_tasks)]:
-                blank_status, blank_tasks = request(port, "GET", f"/tasks?{query}")
+                blank_status, blank_tasks, _headers = request(port, "GET", f"/tasks?{query}")
                 assert blank_status == 200 and blank_tasks == expected_tasks, f"blank task filters {query} changed results"
-            status, blank_assignee_tasks = request(port, "GET", "/tasks?assignee=")
+            status, blank_assignee_tasks, _headers = request(port, "GET", "/tasks?assignee=")
             assert status == 200 and blank_assignee_tasks == all_tasks, "blank assignee filter changed results"
             for bad_query in ["status=todo&status=done", "unknown=1", "parent=0", "status=%"]:
-                status, _ = request(port, "GET", f"/tasks?{bad_query}")
+                status, _, _headers = request(port, "GET", f"/tasks?{bad_query}")
                 assert status == 400, f"malformed query {bad_query} returned {status}"
 
-            status, feed_page_one = request(port, "GET", "/feed?task=3&kind=commented")
+            status, feed_page_one, _headers = request(port, "GET", "/feed?task=3&kind=commented")
             assert status == 200 and 'class="active" href="/feed"' in feed_page_one, "feed tab is missing or inactive"
             notes_one = re.findall(r"feed note (\d{2})", feed_page_one)
             assert notes_one == [f"{index:02}" for index in range(25, 45)], f"newest feed page is wrong: {notes_one}"
             older_link = re.search(r'href="(/feed\?task=3&amp;kind=commented&amp;before=[^"]+)"', feed_page_one)
             assert older_link, f"older feed link did not retain filters: {feed_page_one}"
             older_target = older_link.group(1).replace("&amp;", "&")
-            status, feed_page_two = request(port, "GET", older_target)
+            status, feed_page_two, _headers = request(port, "GET", older_target)
             notes_two = re.findall(r"feed note (\d{2})", feed_page_two)
             assert status == 200 and notes_two == [f"{index:02}" for index in range(5, 25)], f"second older page has a gap/duplicate: {notes_two}"
             older_link_two = re.search(r'href="(/feed\?task=3&amp;kind=commented&amp;before=[^"]+)"', feed_page_two)
             assert older_link_two, "second older feed link is missing"
-            status, feed_page_three = request(port, "GET", older_link_two.group(1).replace("&amp;", "&"))
+            status, feed_page_three, _headers = request(port, "GET", older_link_two.group(1).replace("&amp;", "&"))
             notes_three = re.findall(r"feed note (\d{2})", feed_page_three)
             assert status == 200 and notes_three == [f"{index:02}" for index in range(5)], f"last older page has a gap/duplicate: {notes_three}"
             assert "Comment &quot;quoted&quot; &lt;b&gt;&amp;\nsecond line" in feed_page_three, "feed comment text was not escaped/preserved"
             assert 'href="/feed?task=3&amp;kind=commented"' in feed_page_three, "newest feed link did not retain filters"
-            status, updated_feed = request(port, "GET", "/feed?task=3&kind=updated")
+            status, updated_feed, _headers = request(port, "GET", "/feed?task=3&kind=updated")
             assert status == 200 and "updated" in updated_feed and "feed note" not in updated_feed, "feed kind filter failed"
-            status, all_feed = request(port, "GET", "/feed")
+            status, all_feed, _headers = request(port, "GET", "/feed")
             assert status == 200, "unfiltered feed failed"
-            status, task_feed = request(port, "GET", "/feed?task=3")
+            status, task_feed, _headers = request(port, "GET", "/feed?task=3")
             assert status == 200, "task feed filter failed"
-            status, kind_feed = request(port, "GET", "/feed?kind=commented")
+            status, kind_feed, _headers = request(port, "GET", "/feed?kind=commented")
             assert status == 200, "kind feed filter failed"
             for query in ["task=&kind=", "task=3&kind=", "task=&kind=commented"]:
-                blank_status, blank_feed = request(port, "GET", f"/feed?{query}")
+                blank_status, blank_feed, _headers = request(port, "GET", f"/feed?{query}")
                 expected_feed = task_feed if query == "task=3&kind=" else kind_feed if query == "task=&kind=commented" else all_feed
                 assert blank_status == 200 and blank_feed == expected_feed, f"blank feed filters {query} changed results"
             for bad_query in ["task=0", "kind=bad", "task=3&task=4", "before=bad", "before=foreign-board:1", "unknown=x"]:
-                status, _ = request(port, "GET", f"/feed?{bad_query}")
+                status, _, _headers = request(port, "GET", f"/feed?{bad_query}")
                 assert status == 400, f"invalid feed query {bad_query} returned {status}"
 
             for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed", "/assets/dashboard.css", "/assets/theme.js"]:
-                status, _ = request(port, "POST", path)
+                status, _, _headers = request(port, "POST", path)
                 assert status == 405, f"POST {path} returned {status}"
             assert feed_cursor(db) == before, "POST changed the board event cursor"
 

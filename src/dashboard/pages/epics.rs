@@ -15,19 +15,11 @@ pub(super) fn epics(brief: &Brief) -> String {
         let max = epic.total.max(1);
         let value = epic.done.min(max);
         let title = html::escape(&epic.task.title);
+        let strip = html::strip(&epic.task, &format!("/tasks?parent={}", epic.task.id));
         let _ = write!(
             body,
-            "<article class=\"card epic-card\"><div class=\"card-heading\"><h2><a href=\"/tasks?parent={}\">{}</a></h2>{}</div><p class=\"meta\">T{} · priority {}</p><p class=\"progress-copy\">{} / {} done</p><progress max=\"{max}\" value=\"{value}\" aria-label=\"{}: {} of {} direct children done\"></progress><ul class=\"counts\">",
-            epic.task.id,
-            title,
-            html::status_badge(epic.task.status),
-            epic.task.id,
-            epic.task.priority,
-            epic.done,
-            epic.total,
-            title,
-            epic.done,
-            epic.total
+            "<article class=\"card epic-card\"><h2>{strip}</h2><p class=\"meta\">Priority {}</p><p class=\"progress-copy\">{} / {} done</p><progress max=\"{max}\" value=\"{value}\" aria-label=\"{}: {} of {} direct children done\"></progress><ul class=\"counts\">",
+            epic.task.priority, epic.done, epic.total, title, epic.done, epic.total
         );
         for status in Status::ALL {
             let count = epic

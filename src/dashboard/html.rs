@@ -23,23 +23,62 @@ pub fn shell(title: &str, active: Page, content: &str) -> String {
     let safe_title = escape(title);
     let _ = write!(
         out,
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} · Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><header class=\"topbar\"><a class=\"brand\" href=\"/epics\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"/epics\">Epics</a><a class=\"{}\" href=\"/tasks\">Tasks</a><a class=\"{}\" href=\"/feed\">Feed</a></nav><button class=\"theme-toggle\" type=\"button\" data-theme-toggle aria-pressed=\"false\" aria-label=\"Change color theme\">Theme: system</button></header><main><h1>{safe_title}</h1>{content}</main></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"/epics\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"/epics\"{}>Epics</a><a class=\"{}\" href=\"/tasks\"{}>Tasks</a><a class=\"{}\" href=\"/feed\"{}>Feed</a></nav><button class=\"theme-toggle\" type=\"button\" data-theme-toggle aria-pressed=\"false\" aria-label=\"Change color theme\">Theme: system</button></header><main id=\"main\"><h1>{safe_title}</h1>{content}</main></body></html>",
         if active == Page::Epics { "active" } else { "" },
+        if active == Page::Epics {
+            " aria-current=\"page\""
+        } else {
+            ""
+        },
         if matches!(active, Page::Tasks | Page::Detail(_)) {
             "active"
         } else {
             ""
         },
-        if active == Page::Feed { "active" } else { "" }
+        if matches!(active, Page::Tasks | Page::Detail(_)) {
+            " aria-current=\"page\""
+        } else {
+            ""
+        },
+        if active == Page::Feed { "active" } else { "" },
+        if active == Page::Feed {
+            " aria-current=\"page\""
+        } else {
+            ""
+        }
     );
     out
 }
 
 pub fn status_badge(status: Status) -> String {
     format!(
-        "<span class=\"badge status-{}\">{}</span>",
+        "<span class=\"badge status-{}\"><span aria-hidden=\"true\">{}</span> {}</span>",
         status.as_str(),
+        status_glyph(status),
         status.as_str()
+    )
+}
+
+pub fn status_glyph(status: Status) -> char {
+    match status {
+        Status::Todo => '○',
+        Status::Planning => '◇',
+        Status::Implementing => '▶',
+        Status::Blocked => '■',
+        Status::Reviewing => '◎',
+        Status::Done => '✓',
+        Status::Canceled => '✕',
+    }
+}
+
+pub fn strip(task: &agentboard::domain::Task, href: &str) -> String {
+    let status = task.status.as_str();
+    let title = escape(&task.title);
+    let href = escape(href);
+    format!(
+        "<a class=\"task-strip status-{status}\" href=\"{href}\" title=\"{title}\"><span class=\"strip-glyph\" aria-hidden=\"true\">{}</span><span class=\"strip-id\">T{}</span><span class=\"strip-title\">{title}</span><span class=\"visually-hidden\">{status}</span></a>",
+        status_glyph(task.status),
+        task.id
     )
 }
 
