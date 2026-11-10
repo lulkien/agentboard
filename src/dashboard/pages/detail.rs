@@ -71,60 +71,85 @@ fn task_detail(
     let tasks_href = html::escape(&html::url("/tasks", project));
     let _ = write!(
         body,
-        "<nav class=\"breadcrumbs\" aria-label=\"Breadcrumb\"><a href=\"{tasks_href}\">Tasks</a> <span aria-hidden=\"true\">/</span> <span>T{}</span></nav><header class=\"issue-header\"><p class=\"meta\">Task T{}</p><div class=\"card-heading\"><h2>{title}</h2>{}</div></header><div class=\"detail-layout\"><div class=\"detail-main\"><section class=\"panel text-section\"><h2>Description</h2><div class=\"full-text\">{}</div></section><section class=\"panel text-section\"><h2>Goal</h2><div class=\"full-text\">{}</div></section>",
+        "<nav class=\"breadcrumbs\" aria-label=\"Breadcrumb\"><a href=\"{tasks_href}\">Tasks</a> <span aria-hidden=\"true\">/</span> <span>T{}</span></nav><header class=\"issue-header\"><p class=\"meta\">Task T{}</p><div class=\"card-heading\"><h2>{title}</h2>{}</div></header><div class=\"detail-layout\"><div class=\"detail-main\"><section class=\"panel text-section\" id=\"goal\"><h2>Goal</h2><div class=\"full-text\">{}</div></section><section class=\"panel text-section\" id=\"description\"><h2>Description</h2><div class=\"full-text\">{}</div></section>",
         task.id,
         task.id,
         html::status_badge(task.status),
-        html::escape(&task.description),
-        html::escape(&task.goal)
+        html::escape(&task.goal),
+        html::escape(&task.description)
     );
-    for (heading, report) in [
-        ("Analyst report", task.analyst_report.as_str()),
-        ("Coder report", task.coder_report.as_str()),
-        ("Reviewer report", task.reviewer_report.as_str()),
+    for (id, heading, report) in [
+        (
+            "analyst-report",
+            "Analyst report",
+            task.analyst_report.as_str(),
+        ),
+        ("coder-report", "Coder report", task.coder_report.as_str()),
+        (
+            "reviewer-report",
+            "Reviewer report",
+            task.reviewer_report.as_str(),
+        ),
     ] {
         if !report.is_empty() {
             let _ = write!(
                 body,
-                "<section class=\"panel text-section\"><h2>{heading}</h2><div class=\"full-text\">{}</div></section>",
+                "<section class=\"panel text-section\" id=\"{id}\"><h2>{heading}</h2><div class=\"full-text\">{}</div></section>",
                 html::escape(report)
             );
         }
     }
+    let mut on_page = vec![("Goal", "goal"), ("Description", "description")];
+    for (id, heading, report) in [
+        (
+            "analyst-report",
+            "Analyst report",
+            task.analyst_report.as_str(),
+        ),
+        ("coder-report", "Coder report", task.coder_report.as_str()),
+        (
+            "reviewer-report",
+            "Reviewer report",
+            task.reviewer_report.as_str(),
+        ),
+    ] {
+        if !report.is_empty() {
+            on_page.push((heading, id));
+        }
+    }
+    on_page.push(("Activity", "activity"));
+    let mut children_section = String::new();
     if let Some(epic) = epic {
         let maximum = epic.total.max(1);
         let progress = epic.done.min(maximum);
         let _ = write!(
-            body,
-            "<section class=\"panel\"><div class=\"card-heading\"><h2>Child tasks</h2><span class=\"meta\">{} / {} done</span></div><progress max=\"{maximum}\" value=\"{progress}\" aria-label=\"{}: {} of {} direct children done\"></progress><div class=\"table-scroll\"><table><thead><tr><th scope=\"col\">ID</th><th scope=\"col\">Status</th><th scope=\"col\">Title</th><th scope=\"col\">Assignee</th></tr></thead><tbody>",
+            &mut children_section,
+            "<section class=\"panel children-panel\"><div class=\"card-heading\"><h2>Child tasks</h2><span class=\"meta\">{} / {} done</span></div><progress max=\"{maximum}\" value=\"{progress}\" aria-label=\"{}: {} of {} direct children done\"></progress><ul class=\"strip-list\">",
             epic.done, epic.total, title, epic.done, epic.total
         );
         for child in &children.tasks {
-            let child_title = html::escape(&child.title);
-            let assignee = html::escape(child.assignee.as_deref().unwrap_or("—"));
             let href = html::escape(&html::url(&format!("/tasks/{}", child.id), project));
             let _ = write!(
-                body,
-                "<tr><td><a href=\"{href}\">T{}</a></td><td>{}</td><td>{child_title}</td><td>{assignee}</td></tr>",
-                child.id,
-                html::status_badge(child.status)
+                &mut children_section,
+                "<li>{}</li>",
+                html::strip(child, &href)
             );
         }
-        body.push_str("</tbody></table></div>");
+        children_section.push_str("</ul>");
         if children.total > children.tasks.len() {
             let href = html::escape(&html::url(&format!("/tasks?parent={}", task.id), project));
             let _ = write!(
-                body,
+                &mut children_section,
                 "<p><a href=\"{href}\">View all {} child tasks</a></p>",
                 children.total
             );
         }
-        body.push_str("</section>");
+        children_section.push_str("</section>");
     }
     let history_href = html::escape(&html::url(&format!("/feed?task={}", task.id), project));
     let _ = write!(
         body,
-        "<section class=\"panel activity\"><div class=\"card-heading\"><h2>Activity</h2><a href=\"{history_href}\">Older history</a></div>"
+        "<section class=\"panel activity\" id=\"activity\"><div class=\"card-heading\"><h2>Activity</h2><a href=\"{history_href}\">Older history</a></div>"
     );
     if events.is_empty() {
         body.push_str("<p class=\"empty\">No activity yet</p>");
@@ -156,13 +181,47 @@ fn task_detail(
                     html::escape(text)
                 );
             } else if event.kind == EventKind::Updated {
-                body.push_str("<p class=\"meta\">Task fields updated</p>");
+                let mut changes = Vec::new();
+                if let Some(values) = event
+                    .payload
+                    .get("changes")
+                    .and_then(serde_json::Value::as_object)
+                {
+                    for (field, pair) in values {
+                        let old = pair.get("old").map(display_value).unwrap_or_default();
+                        let new = pair.get("new").map(display_value).unwrap_or_default();
+                        changes.push((field.as_str(), old, new));
+                    }
+                }
+                if changes.is_empty() {
+                    body.push_str("<p class=\"meta\">Task fields updated</p>");
+                } else {
+                    body.push_str("<ul class=\"change-list\">");
+                    for (field, old, new) in changes {
+                        let _ = write!(
+                            body,
+                            "<li><strong>{}</strong>: {} → {}</li>",
+                            html::escape(field),
+                            html::escape(&old),
+                            html::escape(&new)
+                        );
+                    }
+                    body.push_str("</ul>");
+                }
             }
             body.push_str("</li>");
         }
         body.push_str("</ol>");
     }
-    body.push_str("</section></div><aside class=\"panel metadata\" aria-label=\"Task metadata\"><h2>Details</h2><dl>");
+    body.push_str("</section></div><aside class=\"detail-aside\"><nav class=\"panel on-this-page\" aria-label=\"On this page\"><h2>On this page</h2><ul>");
+    for (label, id) in on_page {
+        let _ = write!(body, "<li><a href=\"#{id}\">{label}</a></li>");
+    }
+    body.push_str("</ul></nav>");
+    body.push_str(&children_section);
+    body.push_str(
+        "<section class=\"panel metadata\" aria-label=\"Task metadata\"><h2>Details</h2><dl>",
+    );
     metadata_item(&mut body, "Status", &html::status_badge(task.status));
     metadata_item(
         &mut body,
@@ -208,7 +267,7 @@ fn task_detail(
         "Updated",
         &format!("<time datetime=\"{updated}\">{updated}</time>"),
     );
-    body.push_str("</dl></aside></div>");
+    body.push_str("</dl></section></aside></div>");
     html::shell(
         &format!("T{} | {}", task.id, task.title),
         Page::Detail(task.id),
@@ -216,6 +275,14 @@ fn task_detail(
         project,
         projects,
     )
+}
+
+fn display_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Null => "—".to_owned(),
+        other => other.to_string(),
+    }
 }
 
 fn metadata_item(body: &mut String, label: &str, value: &str) {

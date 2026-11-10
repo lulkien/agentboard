@@ -48,7 +48,7 @@ pub fn render(board: &Board, route: Route) -> Result<String, PageError> {
             let brief = board
                 .brief_for_project(0, project)
                 .map_err(|e| PageError::Store(e.to_string()))?;
-            Ok(epics(&brief, project, &projects))
+            epics(board, &brief, project, &projects)
         }
         Page::Tasks => {
             if let Some(parent) = route.filters.parent {

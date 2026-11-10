@@ -135,7 +135,12 @@ def main() -> int:
             assert status == 200 and "Epics" in epics_home and 'href="/tasks?parent=1"' in epics_home, "epics route or drill-down link is missing"
             assert "&lt;script&gt;alert(&#39;epic&#39;)&lt;/script&gt;" in epics_home, "epic title was not escaped"
             assert "1 / 6 done" in epics_home, "epic direct-child progress is wrong"
-            assert 'max="6" value="1"' in epics_home, "epic progress bar values are wrong"
+            assert 'role="img" aria-label="1 of 6 direct children done"' in epics_home, "epic rollup is not accessible"
+            assert epics_home.count("<rect ") == 6, "epic rollup did not include each populated status"
+            epic_row = epics_home.split('class="epic-row depth-0"', 1)[1].split("</article>", 1)[0]
+            child_strip_list = epic_row.split('class="strip-list epic-children"', 1)[1].split("</ul>", 1)[0]
+            assert child_strip_list.count('class="task-strip ') == 4, "epic did not render its capped direct child strips"
+            assert ">+2 more</a>" in epic_row and ">All children</a>" in epic_row, "epic child overflow or all-children link is missing"
             assert 'class="active" href="/epics"' in epics_home, "epics tab was not marked active"
             assert "/assets/dashboard.css" in html and "/assets/theme.js" in html, "embedded theme assets are missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
@@ -195,6 +200,9 @@ def main() -> int:
             assert "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;" in detail, "detail title was not escaped"
             assert "A &quot;quoted&quot; &lt;tag&gt;&amp; first line\nsecond line" in detail, "full multiline description was not escaped/preserved"
             assert "Goal &lt;done&gt;&amp;\nkeep this line" in detail, "full multiline goal was not escaped/preserved"
+            detail_ids = [detail.index(f'id="{section}"') for section in ("goal", "description", "coder-report", "activity")]
+            assert detail_ids == sorted(detail_ids), "detail sections are not in goal-first reading order"
+            assert 'href="#goal"' in detail and 'href="#description"' in detail and 'href="#coder-report"' in detail and 'href="#activity"' in detail, "On this page links are missing"
             assert "alice&lt;&amp;" in detail and "1" in detail, "detail metadata was not escaped"
             assert "Reporter" in detail and "manager" in detail and "Priority" in detail and "-7" in detail, "reporter or signed priority metadata is missing"
             assert 'href="/tasks/1"' in detail and "Parent" in detail, "parent link is missing"
@@ -202,12 +210,14 @@ def main() -> int:
             assert "Comment &quot;quoted&quot; &lt;b&gt;&amp;\nsecond line" in detail, "comment text was not escaped/preserved"
             assert "Coder report" in detail and "Coder &lt;b&gt;&amp;\nsecond line" in detail, "report section was not escaped/preserved"
             assert "Analyst report" not in detail and "Reviewer report" not in detail, "empty report sections were printed"
+            assert 'id="analyst-report"' not in detail and 'id="reviewer-report"' not in detail, "empty report anchors were printed"
+            assert '<ul class="change-list">' in detail and "<strong>priority</strong>" in detail, "update changes were not rendered"
             assert 'href="/feed?task=3"' in detail, "older activity link is missing"
 
             status, epic_detail, _headers = request(port, "GET", "/tasks/1")
             assert status == 200 and "Child tasks" in epic_detail, "epic detail child list is missing"
             assert "1 / 6 done" in epic_detail and 'max="6" value="1"' in epic_detail, "epic detail rollup is wrong"
-            assert "Planning child" in epic_detail, "direct child is missing from epic detail"
+            assert "Planning child" in epic_detail and 'class="task-strip status-planning"' in epic_detail, "direct child strip is missing from epic detail"
             status, leaf_detail, _headers = request(port, "GET", "/tasks/2")
             assert status == 200 and "Child tasks" not in leaf_detail, "leaf was incorrectly treated as an epic"
             for path, expected in [("/tasks/99999", 404), ("/tasks/0", 400), ("/tasks/nope", 400), ("/tasks/3/extra", 404)]:
@@ -306,6 +316,16 @@ def main() -> int:
                 status, _, _headers = request(port, "POST", path)
                 assert status == 405, f"POST {path} returned {status}"
             assert feed_cursor(db) == before, "POST changed the board event cursor"
+
+            run_cli(db, "add", "Nested child", "--parent", "4")
+            nested_status, nested_epics, _headers = request(port, "GET", "/epics")
+            assert nested_status == 200 and 'class="epic-row depth-1"' in nested_epics and ">in T1</a>" in nested_epics, "nested epic was not indented under its parent"
+            run_cli(db, "add", "Scoped epic", "--project", "1")
+            run_cli(db, "add", "Scoped child", "--parent", "55", "--project", "1")
+            run_cli(db, "add", "Foreign child", "--parent", "55", "--project", "2")
+            scoped_epics_status, scoped_epics, _headers = request(port, "GET", "/epics?project=1")
+            assert scoped_epics_status == 200 and "Scoped child" in scoped_epics and "Foreign child" not in scoped_epics, "epic child strips ignored project scope"
+            assert 'href="/tasks/56?project=1"' in scoped_epics, "scoped epic child link dropped its project"
 
             with socket.create_connection(("127.0.0.1", port), timeout=4) as connection:
                 connection.settimeout(4)
