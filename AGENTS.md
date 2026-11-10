@@ -49,7 +49,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 114 CLI names, 138 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 117 CLI names, 141 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 14 gates passed`; with `--full` `GATES OK: 15 gates passed` |
 | `bash scripts/gate.sh --features dashboard` | `GATES OK: 16 gates passed` |
@@ -82,8 +82,9 @@ update the expectation here.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
 - `src/dashboard.rs` and `src/dashboard/` — optional, feature-gated, read-only HTTP
-  dashboard adapter, route/query parsing, page rendering, shared HTML helpers and
-  embedded CSS/theme assets.
+  dashboard adapter, route/query parsing, page rendering, shared HTML helpers,
+  and embedded CSS/theme assets. `template.rs` fills the embedded files in
+  `templates/`; text slots are escaped once at fill time.
 - `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.
@@ -125,6 +126,8 @@ have both adapters call it, so a rule exists once.
   cap. Do not make it ALL-rows or read it from current state.
 - Full text must never go through the compact renderer: no title clip, no
   whitespace collapse. A reader that asks for full text gets stored bytes.
+- The template whitespace rule applies only to template source lines; it never
+  applies to slot values.
 - Tool counts in `src/server.rs` (first line), `README.md`, `PROTOCOL.md`, this file
   and `seats/README.md` come from `python3 scripts/sync-tool-count.py`; run it with
   `--check` in a gate and never count by hand. A count written in words counts too.

@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::fmt::Write;
 
 use super::routes::{Filters, Page};
@@ -9,15 +8,10 @@ use agentboard::domain::{EventKind, Status};
 const SHELL: Template = Template::new("shell", include_str!("templates/shell.html"));
 const PROJECT_OPTION: Template = Template::new(
     "project-option",
-    "<option value=\"{{id}}\"{{selected}}>{{name}}</option>",
+    include_str!("templates/project-option.html"),
 );
-const TEXT: Template = Template::new("text", "{{value}}");
 const BADGE: Template = Template::new("badge", include_str!("templates/badge.html"));
 const STRIP: Template = Template::new("strip", include_str!("templates/strip.html"));
-
-pub fn text(value: impl Display) -> String {
-    TEXT.fill(&[("value", text_slot(value))]).to_string()
-}
 
 pub fn shell(
     title: &str,

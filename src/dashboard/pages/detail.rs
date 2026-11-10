@@ -1,13 +1,85 @@
-use std::fmt::Write;
-
-use agentboard::domain::{EventKind, Project, Task};
-use agentboard::store::{Board, FeedFilter, ListFilter, TaskPage};
+use agentboard::domain::{Event, EventKind, Project, Task};
+use agentboard::store::{Board, Epic, FeedFilter, ListFilter, TaskPage};
 
 use super::PageError;
 use super::time::format_timestamp;
 use crate::dashboard::html;
 use crate::dashboard::routes::Page;
-use crate::dashboard::template::Fragment;
+use crate::dashboard::template::{Fragment, Slot, Template, html as html_slot, text};
+
+const START: Template = Template::new(
+    "detail-start",
+    include_str!("../templates/detail-start.html"),
+);
+const REPORT: Template = Template::new(
+    "detail-report",
+    include_str!("../templates/detail-report.html"),
+);
+const CHILDREN: Template = Template::new(
+    "detail-children",
+    include_str!("../templates/detail-children.html"),
+);
+const CHILD: Template = Template::new(
+    "detail-child",
+    include_str!("../templates/detail-child.html"),
+);
+const CHILD_MORE: Template = Template::new(
+    "detail-child-more",
+    include_str!("../templates/detail-child-more.html"),
+);
+const ACTIVITY: Template = Template::new(
+    "detail-activity",
+    include_str!("../templates/detail-activity.html"),
+);
+const NO_ACTIVITY: Template = Template::new(
+    "detail-no-activity",
+    include_str!("../templates/detail-no-activity.html"),
+);
+const EVENT: Template = Template::new(
+    "detail-event",
+    include_str!("../templates/detail-event.html"),
+);
+const EVENTS: Template = Template::new(
+    "detail-events",
+    include_str!("../templates/detail-events.html"),
+);
+const EVENT_TEXT: Template = Template::new(
+    "detail-event-text",
+    include_str!("../templates/detail-event-text.html"),
+);
+const CHANGE_EMPTY: Template = Template::new(
+    "detail-change-empty",
+    include_str!("../templates/detail-change-empty.html"),
+);
+const CHANGES: Template = Template::new(
+    "detail-changes",
+    include_str!("../templates/detail-changes.html"),
+);
+const CHANGE: Template = Template::new(
+    "detail-change",
+    include_str!("../templates/detail-change.html"),
+);
+const ON_PAGE: Template = Template::new(
+    "detail-on-page",
+    include_str!("../templates/detail-on-page.html"),
+);
+const ON_PAGE_ITEM: Template = Template::new(
+    "detail-on-page-item",
+    include_str!("../templates/detail-on-page-item.html"),
+);
+const METADATA: Template = Template::new(
+    "metadata-row",
+    include_str!("../templates/metadata-row.html"),
+);
+const PRIORITY: Template = Template::new(
+    "detail-priority",
+    include_str!("../templates/detail-priority.html"),
+);
+const PARENT: Template = Template::new(
+    "detail-parent",
+    include_str!("../templates/detail-parent.html"),
+);
+const TIME: Template = Template::new("detail-time", include_str!("../templates/detail-time.html"));
 
 pub(super) fn detail(
     board: &Board,
@@ -62,110 +134,155 @@ pub(super) fn detail(
 fn task_detail(
     task: &Task,
     children: &TaskPage,
-    epic: Option<&agentboard::store::Epic>,
-    events: &[agentboard::domain::Event],
+    epic: Option<&Epic>,
+    events: &[Event],
     project: Option<u64>,
     projects: &[Project],
 ) -> Fragment {
-    let mut body = String::new();
-    let title = html::text(&task.title);
-    let tasks_href = html::text(html::url("/tasks", project));
-    let _ = write!(
-        body,
-        "<nav class=\"breadcrumbs\" aria-label=\"Breadcrumb\"><a href=\"{tasks_href}\">Tasks</a> <span aria-hidden=\"true\">/</span> <span>T{}</span></nav><header class=\"issue-header\"><p class=\"meta\">Task T{}</p><div class=\"card-heading\"><h2>{title}</h2>{}</div></header><div class=\"detail-layout\"><div class=\"detail-main\"><section class=\"panel text-section\" id=\"goal\"><h2>Goal</h2><div class=\"full-text\">{}</div></section><section class=\"panel text-section\" id=\"description\"><h2>Description</h2><div class=\"full-text\">{}</div></section>",
-        task.id,
-        task.id,
-        html::status_badge(task.status),
-        html::text(&task.goal),
-        html::text(&task.description)
+    let reports = [
+        (
+            "analyst-report",
+            "Analyst report",
+            task.analyst_report.as_str(),
+        ),
+        ("coder-report", "Coder report", task.coder_report.as_str()),
+        (
+            "reviewer-report",
+            "Reviewer report",
+            task.reviewer_report.as_str(),
+        ),
+    ];
+    let report_sections: Fragment = reports
+        .iter()
+        .filter(|(_, _, report)| !report.is_empty())
+        .map(|(id, heading, report)| {
+            REPORT.fill(&[
+                ("id", text(id)),
+                ("heading", text(heading)),
+                ("report", text(report)),
+            ])
+        })
+        .collect();
+
+    let mut page_items = vec![("Goal", "goal"), ("Description", "description")];
+    page_items.extend(
+        reports
+            .iter()
+            .filter(|(_, _, report)| !report.is_empty())
+            .map(|(id, heading, _)| (*heading, *id)),
     );
-    for (id, heading, report) in [
-        (
-            "analyst-report",
-            "Analyst report",
-            task.analyst_report.as_str(),
-        ),
-        ("coder-report", "Coder report", task.coder_report.as_str()),
-        (
-            "reviewer-report",
-            "Reviewer report",
-            task.reviewer_report.as_str(),
-        ),
-    ] {
-        if !report.is_empty() {
-            let _ = write!(
-                body,
-                "<section class=\"panel text-section\" id=\"{id}\"><h2>{heading}</h2><div class=\"full-text\">{}</div></section>",
-                html::text(report)
-            );
-        }
-    }
-    let mut on_page = vec![("Goal", "goal"), ("Description", "description")];
-    for (id, heading, report) in [
-        (
-            "analyst-report",
-            "Analyst report",
-            task.analyst_report.as_str(),
-        ),
-        ("coder-report", "Coder report", task.coder_report.as_str()),
-        (
-            "reviewer-report",
-            "Reviewer report",
-            task.reviewer_report.as_str(),
-        ),
-    ] {
-        if !report.is_empty() {
-            on_page.push((heading, id));
-        }
-    }
-    on_page.push(("Activity", "activity"));
-    let mut children_section = String::new();
-    if let Some(epic) = epic {
+    page_items.push(("Activity", "activity"));
+    let page_links: Fragment = page_items
+        .iter()
+        .map(|(label, id)| ON_PAGE_ITEM.fill(&[("label", text(label)), ("id", text(id))]))
+        .collect();
+    let on_page = ON_PAGE.fill(&[("items", html_slot(page_links))]);
+
+    let child_section = epic.map_or_else(Fragment::empty, |epic| {
         let maximum = epic.total.max(1);
         let progress = epic.done.min(maximum);
-        let _ = write!(
-            &mut children_section,
-            "<section class=\"panel children-panel\"><div class=\"card-heading\"><h2>Child tasks</h2><span class=\"meta\">{} / {} done</span></div><progress max=\"{maximum}\" value=\"{progress}\" aria-label=\"{}: {} of {} direct children done\"></progress><ul class=\"strip-list\">",
-            epic.done, epic.total, title, epic.done, epic.total
-        );
-        for child in &children.tasks {
-            let href = html::url(&format!("/tasks/{}", child.id), project);
-            let _ = write!(
-                &mut children_section,
-                "<li>{}</li>",
-                html::strip(child, &href)
-            );
-        }
-        children_section.push_str("</ul>");
-        if children.total > children.tasks.len() {
-            let href = html::text(html::url(&format!("/tasks?parent={}", task.id), project));
-            let _ = write!(
-                &mut children_section,
-                "<p><a href=\"{href}\">View all {} child tasks</a></p>",
-                children.total
-            );
-        }
-        children_section.push_str("</section>");
+        let child_items: Fragment = children
+            .tasks
+            .iter()
+            .map(|child| {
+                let href = html::url(&format!("/tasks/{}", child.id), project);
+                CHILD.fill(&[("strip", html_slot(html::strip(child, &href)))])
+            })
+            .collect();
+        let more = if children.total > children.tasks.len() {
+            let href = html::url(&format!("/tasks?parent={}", task.id), project);
+            CHILD_MORE.fill(&[("href", text(href)), ("total", text(children.total))])
+        } else {
+            Fragment::empty()
+        };
+        CHILDREN.fill(&[
+            ("done", text(epic.done)),
+            ("total", text(epic.total)),
+            ("title", text(&task.title)),
+            ("maximum", text(maximum)),
+            ("progress", text(progress)),
+            ("children", html_slot(child_items)),
+            ("more", html_slot(more)),
+        ])
+    });
+
+    let history_href = html::url(&format!("/feed?task={}", task.id), project);
+    let activity_content = activity_content(events);
+    let activity = ACTIVITY.fill(&[
+        ("href", text(history_href)),
+        ("content", html_slot(activity_content)),
+    ]);
+
+    let mut metadata = vec![
+        metadata_row("Status", html_slot(html::status_badge(task.status))),
+        metadata_row(
+            "Priority",
+            html_slot(PRIORITY.fill(&[("priority", text(task.priority))])),
+        ),
+        metadata_row(
+            "Assignee",
+            text(task.assignee.as_deref().unwrap_or("Unassigned")),
+        ),
+        metadata_row("Reporter", text(&task.reporter)),
+    ];
+    if let Some(parent) = task.parent_id {
+        let href = html::url(&format!("/tasks/{parent}"), project);
+        metadata.push(metadata_row(
+            "Parent",
+            html_slot(PARENT.fill(&[("href", text(href)), ("parent", text(parent))])),
+        ));
     }
-    let history_href = html::text(html::url(&format!("/feed?task={}", task.id), project));
-    let _ = write!(
+    metadata.push(metadata_row(
+        "Project",
+        text(
+            task.project_id
+                .map_or_else(|| "—".to_owned(), |id| id.to_string()),
+        ),
+    ));
+    metadata.push(metadata_row("Revision", text(task.revision)));
+    let created = format_timestamp(task.created_at_ms);
+    metadata.push(metadata_row(
+        "Created",
+        html_slot(TIME.fill(&[("time", text(&created))])),
+    ));
+    let updated = format_timestamp(task.updated_at_ms);
+    metadata.push(metadata_row(
+        "Updated",
+        html_slot(TIME.fill(&[("time", text(&updated))])),
+    ));
+    let metadata: Fragment = metadata.into_iter().collect();
+
+    let body = START.fill(&[
+        ("tasks_href", text(html::url("/tasks", project))),
+        ("id", text(task.id)),
+        ("title", text(&task.title)),
+        ("badge", html_slot(html::status_badge(task.status))),
+        ("goal", text(&task.goal)),
+        ("description", text(&task.description)),
+        ("reports", html_slot(report_sections)),
+        ("on_page", html_slot(on_page)),
+        ("children", html_slot(child_section)),
+        ("activity", html_slot(activity)),
+        ("metadata", html_slot(metadata)),
+    ]);
+    html::shell(
+        &format!("T{} | {}", task.id, task.title),
+        Page::Detail(task.id),
         body,
-        "<section class=\"panel activity\" id=\"activity\"><div class=\"card-heading\"><h2>Activity</h2><a href=\"{history_href}\">Older history</a></div>"
-    );
+        project,
+        projects,
+    )
+}
+
+fn activity_content(events: &[Event]) -> Fragment {
     if events.is_empty() {
-        body.push_str("<p class=\"empty\">No activity yet</p>");
-    } else {
-        body.push_str("<ol class=\"timeline\">");
-        for event in events {
-            let actor = html::text(&event.actor);
-            let kind = event.kind.as_str();
+        return NO_ACTIVITY.fill(&[]);
+    }
+    let items: Fragment = events
+        .iter()
+        .map(|event| {
             let timestamp = format_timestamp(event.timestamp_ms);
-            let _ = write!(
-                body,
-                "<li><div class=\"timeline-heading\"><strong>{}</strong><span class=\"meta\">{}</span><time datetime=\"{timestamp}\">{timestamp}</time></div>",
-                kind, actor
-            );
-            let payload_text = event
+            let body = if let Some(payload_text) = event
                 .payload
                 .get("text")
                 .and_then(serde_json::Value::as_str)
@@ -174,108 +291,56 @@ fn task_detail(
                         .payload
                         .get("reason")
                         .and_then(serde_json::Value::as_str)
-                });
-            if let Some(text) = payload_text {
-                let _ = write!(
-                    body,
-                    "<div class=\"full-text event-text\">{}</div>",
-                    html::text(text)
-                );
+                }) {
+                EVENT_TEXT.fill(&[("text", text(payload_text))])
             } else if event.kind == EventKind::Updated {
-                let mut changes = Vec::new();
-                if let Some(values) = event
-                    .payload
-                    .get("changes")
-                    .and_then(serde_json::Value::as_object)
-                {
-                    for (field, pair) in values {
-                        let old = pair.get("old").map(display_value).unwrap_or_default();
-                        let new = pair.get("new").map(display_value).unwrap_or_default();
-                        changes.push((field.as_str(), old, new));
-                    }
-                }
-                if changes.is_empty() {
-                    body.push_str("<p class=\"meta\">Task fields updated</p>");
-                } else {
-                    body.push_str("<ul class=\"change-list\">");
-                    for (field, old, new) in changes {
-                        let _ = write!(
-                            body,
-                            "<li><strong>{}</strong>: {} → {}</li>",
-                            html::text(field),
-                            html::text(&old),
-                            html::text(&new)
-                        );
-                    }
-                    body.push_str("</ul>");
-                }
-            }
-            body.push_str("</li>");
-        }
-        body.push_str("</ol>");
+                updated_changes(event)
+            } else {
+                Fragment::empty()
+            };
+            EVENT.fill(&[
+                ("kind", text(event.kind.as_str())),
+                ("actor", text(&event.actor)),
+                ("timestamp", text(&timestamp)),
+                ("body", html_slot(body)),
+            ])
+        })
+        .collect();
+    EVENTS.fill(&[("items", html_slot(items))])
+}
+
+fn updated_changes(event: &Event) -> Fragment {
+    let changes: Vec<_> = event
+        .payload
+        .get("changes")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|values| values.iter())
+        .map(|(field, pair)| {
+            let old = pair.get("old").map(display_value).unwrap_or_default();
+            let new = pair.get("new").map(display_value).unwrap_or_default();
+            (field.clone(), old, new)
+        })
+        .collect();
+    if changes.is_empty() {
+        CHANGE_EMPTY.fill(&[])
+    } else {
+        let rows: Fragment = changes
+            .iter()
+            .map(|(field, old, new)| {
+                CHANGE.fill(&[
+                    ("field", text(field)),
+                    ("old", text(old)),
+                    ("new", text(new)),
+                ])
+            })
+            .collect();
+        CHANGES.fill(&[("rows", html_slot(rows))])
     }
-    body.push_str("</section></div><aside class=\"detail-aside\"><nav class=\"panel on-this-page\" aria-label=\"On this page\"><h2>On this page</h2><ul>");
-    for (label, id) in on_page {
-        let _ = write!(body, "<li><a href=\"#{id}\">{label}</a></li>");
-    }
-    body.push_str("</ul></nav>");
-    body.push_str(&children_section);
-    body.push_str(
-        "<section class=\"panel metadata\" aria-label=\"Task metadata\"><h2>Details</h2><dl>",
-    );
-    metadata_item(&mut body, "Status", html::status_badge(task.status));
-    metadata_item(
-        &mut body,
-        "Priority",
-        format!(
-            "<span class=\"priority priority-value\">{}</span>",
-            task.priority
-        ),
-    );
-    metadata_item(
-        &mut body,
-        "Assignee",
-        html::text(task.assignee.as_deref().unwrap_or("Unassigned")),
-    );
-    metadata_item(&mut body, "Reporter", html::text(&task.reporter));
-    if let Some(parent) = task.parent_id {
-        let href = html::text(html::url(&format!("/tasks/{parent}"), project));
-        metadata_item(
-            &mut body,
-            "Parent",
-            format!("<a href=\"{href}\">T{parent}</a>"),
-        );
-    }
-    metadata_item(
-        &mut body,
-        "Project",
-        html::text(
-            task.project_id
-                .map_or_else(|| "—".to_owned(), |id| id.to_string())
-                .as_str(),
-        ),
-    );
-    metadata_item(&mut body, "Revision", task.revision.to_string());
-    let created = format_timestamp(task.created_at_ms);
-    metadata_item(
-        &mut body,
-        "Created",
-        format!("<time datetime=\"{created}\">{created}</time>"),
-    );
-    let updated = format_timestamp(task.updated_at_ms);
-    metadata_item(
-        &mut body,
-        "Updated",
-        format!("<time datetime=\"{updated}\">{updated}</time>"),
-    );
-    body.push_str("</dl></section></aside></div>");
-    html::shell(
-        &format!("T{} | {}", task.id, task.title),
-        Page::Detail(task.id),
-        Fragment::from_legacy(body),
-        project,
-        projects,
-    )
+}
+
+fn metadata_row(label: &str, value: Slot) -> Fragment {
+    METADATA.fill(&[("label", text(label)), ("value", value)])
 }
 
 fn display_value(value: &serde_json::Value) -> String {
@@ -284,11 +349,4 @@ fn display_value(value: &serde_json::Value) -> String {
         serde_json::Value::Null => "—".to_owned(),
         other => other.to_string(),
     }
-}
-
-fn metadata_item(body: &mut String, label: &str, value: impl std::fmt::Display) {
-    let _ = write!(
-        body,
-        "<div class=\"metadata-row\"><dt>{label}</dt><dd>{value}</dd></div>"
-    );
 }

@@ -13,11 +13,6 @@ impl Fragment {
         Self(String::new())
     }
 
-    /// TEMPORARY: wraps a page body already escaped by the old format!/escape code; removed in the last template child (T88).
-    pub(in crate::dashboard) fn from_legacy(value: String) -> Self {
-        Self(value)
-    }
-
     pub fn into_string(self) -> String {
         self.0
     }

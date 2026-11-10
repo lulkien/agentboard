@@ -203,6 +203,9 @@ visible keyboard focus in both themes. HTML responses use a restrictive Content
 Security Policy and `Cache-Control: no-store`; all responses send `nosniff` and
 `Referrer-Policy: no-referrer`. Assets are served from the binary, with no inline
 scripts or styles.
+Dashboard markup lives in `src/dashboard/templates/` as embedded `.html` files
+and is filled by `src/dashboard/template.rs`; text slots are escaped once when
+the template is rendered.
 Every route is GET-only; other methods receive `405 Method Not Allowed`. The feed
 shows the newest 20 matching events and uses its opaque `before` cursor to page
 toward older events while retaining task and event-kind filters.
