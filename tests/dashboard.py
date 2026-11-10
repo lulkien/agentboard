@@ -203,6 +203,9 @@ def main() -> int:
             assert 'id="pulse-status"' in html and 'data-follow aria-pressed="false"' in html, "live controls are missing"
             live_status, live_js, _headers = request(port, "GET", "/assets/live.js")
             assert live_status == 200 and "textContent" in live_js and "visibilitychange" in live_js and "innerHTML" not in live_js, "live script violates the safe polling contract"
+            assert "let timer = null;" in live_js and re.search(r"function schedule\(delay\)\s*\{\s*window\.clearTimeout\(timer\);\s*timer = null;[\s\S]*?timer = window\.setTimeout\(poll, delay\);", live_js), "poll re-arm does not clear the single timer first"
+            assert re.search(r"if \(document\.hidden\)\s*\{\s*window\.clearTimeout\(timer\);\s*timer = null;\s*\}\s*else\s*\{\s*poll\(\);", live_js), "poll timer does not stop while hidden and resume on show"
+            assert live_js.count("const baselineCursor = body.dataset.cursor || \"\";") == 1 and "cursor = next" not in live_js and "baselineCursor.split(\":\")" in live_js, "event count cursor is not fixed at page load"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
             assert "prefers-color-scheme" in dashboard_css, "system theme defaults are missing"
             assert "pre { font:inherit; }" in dashboard_css, "feed change details do not inherit the dashboard font"

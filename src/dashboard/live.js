@@ -5,7 +5,8 @@
   const followButton = document.querySelector("[data-follow]");
   if (!body || !status || !message || !followButton) return;
 
-  let cursor = body.dataset.cursor || "";
+  const baselineCursor = body.dataset.cursor || "";
+  let timer = null;
   let failures = 0;
   let follow = false;
   try {
@@ -46,7 +47,7 @@
         const next = (await response.text()).trim();
         failures = 0;
         const [instance, rawSeq] = next.split(":");
-        const [oldInstance, rawOldSeq] = cursor.split(":");
+        const [oldInstance, rawOldSeq] = baselineCursor.split(":");
         const seq = Number(rawSeq);
         const oldSeq = Number(rawOldSeq);
         if (instance !== oldInstance) {
@@ -56,7 +57,6 @@
           show(`${seq - oldSeq} new events`, true);
           if (follow && !focusedFormField()) location.reload();
         }
-        cursor = next;
       } catch (_) {
         failures += 1;
         if (failures >= 2) {
@@ -65,11 +65,22 @@
         }
       }
     }
-    window.setTimeout(poll, delay);
+    schedule(delay);
+  }
+
+  function schedule(delay) {
+    window.clearTimeout(timer);
+    timer = null;
+    if (!document.hidden) timer = window.setTimeout(poll, delay);
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) poll();
+    if (document.hidden) {
+      window.clearTimeout(timer);
+      timer = null;
+    } else {
+      poll();
+    }
   });
-  window.setTimeout(poll, 5000);
+  schedule(5000);
 })();
