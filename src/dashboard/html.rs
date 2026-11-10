@@ -34,7 +34,7 @@ pub fn shell(
     let feed_url = escape(&url("/feed", project));
     let _ = write!(
         out,
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script><script defer src=\"/assets/live.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"{board_url}\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"{board_url}\"{}>Board</a><a class=\"{}\" href=\"{epics_url}\"{}>Epics</a><a class=\"{}\" href=\"{tasks_url}\"{}>Tasks</a><a class=\"{}\" href=\"{feed_url}\"{}>Feed</a></nav><div class=\"pulse-controls\"><span id=\"pulse-status\" class=\"pulse-status\" role=\"status\" aria-live=\"polite\"><span class=\"pulse-dot\" aria-hidden=\"true\"></span><span data-pulse-message>Live</span></span><button class=\"header-control follow-toggle\" type=\"button\" data-follow aria-pressed=\"false\" title=\"Reload this page automatically when the board changes\">Follow</button></div>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"{board_url}\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"{board_url}\"{}>Board</a><a class=\"{}\" href=\"{epics_url}\"{}>Epics</a><a class=\"{}\" href=\"{tasks_url}\"{}>Tasks</a><a class=\"{}\" href=\"{feed_url}\"{}>Feed</a></nav>",
         if active == Page::Board { "active" } else { "" },
         if active == Page::Board {
             " aria-current=\"page\""
@@ -73,7 +73,7 @@ pub fn shell(
     };
     let _ = write!(
         out,
-        "<form method=\"get\" action=\"{action}\"><label>Project<select class=\"header-control\" name=\"project\"><option value=\"\"{}>All projects</option>",
+        "<form class=\"project-switcher\" method=\"get\" action=\"{action}\"><select class=\"header-control\" name=\"project\" aria-label=\"Project\"><option value=\"\"{}>All projects</option>",
         if project.is_none() { " selected" } else { "" }
     );
     for item in projects {
@@ -89,11 +89,11 @@ pub fn shell(
             escape(&item.project_name)
         );
     }
-    out.push_str("</select></label><button type=\"submit\">Show</button></form><button class=\"header-control theme-toggle\" type=\"button\" data-theme-toggle aria-pressed=\"false\" aria-label=\"Change color theme\">Theme: system</button></header><main id=\"main\"><h1>");
+    out.push_str("</select><button class=\"header-control\" type=\"submit\">Show</button></form></header><main id=\"main\"><h1>");
     out.push_str(&safe_title);
     out.push_str("</h1>");
     out.push_str(content);
-    out.push_str("</main></body></html>");
+    out.push_str("</main><footer><button class=\"header-control theme-toggle\" type=\"button\" data-theme-toggle aria-pressed=\"false\" aria-label=\"Change theme\" title=\"Change theme\">Change theme</button></footer></body></html>");
     out
 }
 

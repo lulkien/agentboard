@@ -195,11 +195,9 @@ header are refused to prevent DNS-rebinding reads. The
 unchanged. The dashboard routes are `/` (board with attention, seats and status bays),
 `/epics` (epic overview), `/tasks`
 (filtered and paged task list), `/tasks/ID` (task details and recent activity),
-and `/feed` (board event history), with `/pulse` returning the current event cursor
-for live updates. `/assets/dashboard.css`, `/assets/theme.js` and
-`/assets/live.js` are embedded dashboard assets. The theme button cycles through
-light, dark and system appearance, saving a manual choice in local storage. The
-Follow button polls while the page is visible and can reload when new events arrive.
+and `/feed` (board event history). `/assets/dashboard.css` and `/assets/theme.js`
+are embedded dashboard assets. The footer theme button cycles through light,
+dark and system appearance, saving a manual choice in local storage.
 The display uses compact task strips, status glyphs and text, a skip link, and
 visible keyboard focus in both themes. HTML responses use a restrictive Content
 Security Policy and `Cache-Control: no-store`; all responses send `nosniff` and

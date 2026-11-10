@@ -197,33 +197,6 @@ fn respond(stream: &mut TcpStream, board: &Board, bound_address: SocketAddr) -> 
         );
     }
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    if path == "/pulse" {
-        if target.contains('?') {
-            return response(
-                stream,
-                "400 Bad Request",
-                "text/plain; charset=utf-8",
-                "invalid dashboard query",
-            );
-        }
-        let cursor = board
-            .cursor_now()
-            .map_err(|error| io::Error::other(error.to_string()))?;
-        return response(
-            stream,
-            "200 OK",
-            "text/plain; charset=utf-8",
-            &cursor.encode(),
-        );
-    }
-    if path == "/assets/live.js" {
-        return response(
-            stream,
-            "200 OK",
-            "text/javascript; charset=utf-8",
-            include_str!("dashboard/live.js"),
-        );
-    }
     if path == "/assets/dashboard.css" {
         return response(
             stream,
@@ -270,9 +243,6 @@ fn respond(stream: &mut TcpStream, board: &Board, bound_address: SocketAddr) -> 
             );
         }
     };
-    let cursor = board
-        .cursor_now()
-        .map_err(|error| io::Error::other(error.to_string()))?;
     let body = match pages::render(board, route) {
         Ok(body) => body,
         Err(pages::PageError::BadRequest) => {
@@ -298,11 +268,6 @@ fn respond(stream: &mut TcpStream, board: &Board, bound_address: SocketAddr) -> 
             )
         }
     };
-    let body = body.replacen(
-        "<body>",
-        &format!("<body data-cursor=\"{}\">", cursor.encode()),
-        1,
-    );
     response(stream, "200 OK", "text/html; charset=utf-8", &body)
 }
 

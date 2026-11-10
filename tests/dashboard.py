@@ -39,7 +39,7 @@ def run_cli(db: Path, *args: str) -> str:
 
 
 def request(port: int, method: str, target: str) -> tuple[int, str, dict[str, str]]:
-    before = pulse_cursor(port) if method == "GET" and READ_ONLY_DB else None
+    before = feed_cursor(READ_ONLY_DB) if method == "GET" and READ_ONLY_DB else None
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{target}", method=method
     )
@@ -49,14 +49,8 @@ def request(port: int, method: str, target: str) -> tuple[int, str, dict[str, st
     except urllib.error.HTTPError as response:
         result = response.code, response.read().decode(), {k.lower(): v for k, v in response.headers.items()}
     if before is not None:
-        assert pulse_cursor(port) == before, f"GET {target} changed the board event cursor"
+        assert feed_cursor(READ_ONLY_DB) == before, f"GET {target} changed the board event cursor"
     return result
-
-
-def pulse_cursor(port: int) -> str:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/pulse", timeout=4) as response:
-        assert response.status == 200, f"GET /pulse returned {response.status} while checking read-only behavior"
-        return response.read().decode()
 
 
 def raw_request(
@@ -153,7 +147,7 @@ def main() -> int:
                 raise AssertionError("dashboard did not accept connections")
 
             assert status == 200, f"GET / returned {status}"
-            cursor_before_host_checks = pulse_cursor(port)
+            cursor_before_host_checks = feed_cursor(db)
             for host in [f"127.0.0.1:{port}", f"localhost:{port}", "127.0.0.1", "localhost"]:
                 host_status, _, _headers = raw_request(port, "GET", "/", host)
                 assert host_status == 200, f"Host {host} returned {host_status}"
@@ -161,18 +155,9 @@ def main() -> int:
             assert evil_status == 421 and evil_body == "misdirected request", "untrusted Host was not refused with 421"
             missing_status, missing_body, _headers = raw_request(port, "GET", "/", None)
             assert missing_status == 400 and missing_body == "host header required", "missing Host was not refused with 400"
-            assert pulse_cursor(port) == cursor_before_host_checks, "Host checks changed the board event cursor"
-            expected_cursor = feed_cursor(db)
-            pulse_status, pulse, pulse_headers = request(port, "GET", "/pulse")
-            assert pulse_status == 200 and pulse == expected_cursor, f"pulse did not return the current CLI cursor: {pulse_status} {pulse!r} != {expected_cursor!r}"
-            assert pulse_headers.get("content-type", "").startswith("text/plain") and pulse_headers.get("cache-control") == "no-store", "pulse response is not uncached text"
-            prior_instance, prior_seq = expected_cursor.rsplit(":", 1)
-            run_cli(db, "comment", "3", "--body", "pulse marker")
-            pulse_status, pulse_after_comment, _headers = request(port, "GET", "/pulse")
-            next_instance, next_seq = pulse_after_comment.rsplit(":", 1)
-            assert pulse_status == 200 and next_instance == prior_instance and int(next_seq) == int(prior_seq) + 1, "pulse did not advance after a CLI comment"
-            assert request(port, "POST", "/pulse")[0] == 405, "POST /pulse was not refused"
-            assert request(port, "GET", "/pulse?x=1")[0] == 400, "pulse accepted a query"
+            assert feed_cursor(db) == cursor_before_host_checks, "Host checks changed the board event cursor"
+            assert request(port, "GET", "/pulse")[0] == 404, "removed /pulse route did not return 404"
+            assert request(port, "GET", "/assets/live.js")[0] == 404, "removed live asset did not return 404"
             for index in range(45):
                 run_cli(db, "add", f"Page task {index:02}")
             project_name = '<b>p&"</b>'
@@ -199,29 +184,34 @@ def main() -> int:
             assert child_strip_list.count('class="task-strip ') == 4, "epic did not render its capped direct child strips"
             assert ">+2 more</a>" in epic_row and ">All children</a>" in epic_row, "epic child overflow or all-children link is missing"
             assert 'class="active" href="/epics"' in epics_home, "epics tab was not marked active"
-            assert "/assets/dashboard.css" in html and "/assets/theme.js" in html and "/assets/live.js" in html, "embedded dashboard assets are missing"
-            assert 'id="pulse-status"' in html and 'data-follow aria-pressed="false"' in html, "live controls are missing"
-            assert 'class="header-control follow-toggle"' in html and 'class="header-control theme-toggle"' in html and '<select class="header-control" name="project">' in html, "header controls do not share sizing class"
-            assert 'title="Reload this page automatically when the board changes"' in html, "Follow button title is missing"
-            live_status, live_js, _headers = request(port, "GET", "/assets/live.js")
-            assert live_status == 200 and "textContent" in live_js and "visibilitychange" in live_js and "innerHTML" not in live_js, "live script violates the safe polling contract"
-            assert "let timer = null;" in live_js and re.search(r"function schedule\(delay\)\s*\{\s*window\.clearTimeout\(timer\);\s*timer = null;[\s\S]*?timer = window\.setTimeout\(poll, delay\);", live_js), "poll re-arm does not clear the single timer first"
-            assert re.search(r"if \(document\.hidden\)\s*\{\s*window\.clearTimeout\(timer\);\s*timer = null;\s*\}\s*else\s*\{\s*poll\(\);", live_js), "poll timer does not stop while hidden and resume on show"
-            assert live_js.count("const baselineCursor = body.dataset.cursor || \"\";") == 1 and "cursor = next" not in live_js and "baselineCursor.split(\":\")" in live_js, "event count cursor is not fixed at page load"
+            assert "/assets/dashboard.css" in html and "/assets/theme.js" in html and "live.js" not in html, "embedded dashboard assets are wrong"
+            header = html.split("<header", 1)[1].split("</header>", 1)[0]
+            assert header.index("Agentboard") < header.index(">Board</a>") < header.index(">Epics</a>") < header.index(">Tasks</a>") < header.index(">Feed</a>") < header.index("project-switcher"), "header order is wrong"
+            assert '<select class="header-control" name="project" aria-label="Project">' in header and ">Show</button>" in header, "project switcher is missing its accessible select or Show button"
+            assert "Change theme" not in header and ">Project<" not in header and "<label" not in header, "header contains extra visible controls or a Project label"
+            assert html.count("<footer>") == 1 and html.index("</main>") < html.index("<footer>") and "<footer><button class=\"header-control theme-toggle\"" in html, "footer theme control is missing or misplaced"
+            footer = html.split("<footer>", 1)[1].split("</footer>", 1)[0]
+            assert re.search(r'<button[^>]*>Change theme</button>', footer) and "current theme" in request(port, "GET", "/assets/theme.js")[1], "theme button label or mode accessibility is missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
             assert re.search(r"\.topbar\s*\{[^}]*position:sticky[^}]*top:0[^}]*z-index:\d+[^}]*background:var\(--strip\)", dashboard_css), "top bar is not sticky, layered and opaque"
             assert "scroll-padding-top:70px" in dashboard_css and "scroll-margin-top:70px" in dashboard_css, "anchors do not account for the sticky header"
             assert re.search(r"\.header-control\s*\{[^}]*min-height:40px[^}]*padding:\.5rem \.75rem[^}]*font:inherit", dashboard_css), "header control sizing is not shared"
-            assert not re.search(r"@media \(max-width:650px\)\s*\{[^}]*\.(?:header-control|follow-toggle|theme-toggle)", dashboard_css), "narrow layout overrides shared header control sizing"
+            assert ".topbar {" in dashboard_css and "flex-wrap:wrap" in dashboard_css, "header does not wrap at narrow widths"
+            assert ".project-switcher button[type=submit] { padding:.5rem .75rem; }" in dashboard_css, "Show button does not share the theme control padding"
+            assert "body { min-height:100vh; display:flex; flex-direction:column; }" in dashboard_css and "main { flex:1;" in dashboard_css, "page layout does not keep the footer at the viewport bottom"
             assert "prefers-color-scheme" in dashboard_css, "system theme defaults are missing"
             assert "pre { font:inherit; }" in dashboard_css, "feed change details do not inherit the dashboard font"
             assert "prefers-reduced-motion" in dashboard_css and ":focus-visible" in dashboard_css, "reduced motion or keyboard focus style is missing"
             theme_status, theme_js, _headers = request(port, "GET", "/assets/theme.js")
             assert theme_status == 200 and "localStorage" in theme_js and "try" in theme_js, "theme persistence/failure handling is missing"
+            assert "data-theme-toggle" in theme_js and "setAttribute('data-theme'" in theme_js and "removeAttribute('data-theme')" in theme_js and "button.textContent = 'Change theme'" in theme_js, "theme modes or visible button label are missing"
             for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed"]:
                 page_status, body, headers = request(port, "GET", path)
                 assert page_status == 200, f"GET {path} returned {page_status}"
-                assert re.search(r'<body data-cursor="[^:]+:\d+">', body), f"{path} lacks a valid event cursor"
+                assert all(term not in body for term in ("pulse", "Follow", "live.js", "data-cursor")), f"{path} contains removed live UI"
+                assert body.count("<footer>") == 1 and body.index("</main>") < body.index("<footer>"), f"{path} footer is missing or misplaced"
+                page_footer = body.split("<footer>", 1)[1].split("</footer>", 1)[0]
+                assert re.search(r'<button[^>]*>Change theme</button>', page_footer), f"{path} footer theme button is missing"
                 assert headers.get("content-security-policy") == CSP, f"{path} has wrong CSP"
                 assert headers.get("cache-control") == "no-store", f"{path} is cacheable"
                 assert headers.get("x-content-type-options") == "nosniff", f"{path} lacks nosniff"
@@ -250,7 +240,7 @@ def main() -> int:
                 plain = request(port, "GET", path)
                 blank = request(port, "GET", f"{path}?project=")
                 assert blank[:2] == plain[:2], f"blank project changed {path}"
-            for asset in ["/assets/dashboard.css", "/assets/theme.js", "/assets/live.js"]:
+            for asset in ["/assets/dashboard.css", "/assets/theme.js"]:
                 asset_status, _, headers = request(port, "GET", asset)
                 assert asset_status == 200 and headers.get("x-content-type-options") == "nosniff", f"{asset} lacks nosniff"
 
@@ -391,7 +381,7 @@ def main() -> int:
                 status, _, _headers = request(port, "GET", f"/feed?{bad_query}")
                 assert status == 400, f"invalid feed query {bad_query} returned {status}"
 
-            for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed", "/pulse", "/assets/dashboard.css", "/assets/theme.js", "/assets/live.js"]:
+            for path in ["/", "/epics", "/tasks", "/tasks/1", "/feed", "/assets/dashboard.css", "/assets/theme.js"]:
                 status, _, _headers = request(port, "POST", path)
                 assert status == 405, f"POST {path} returned {status}"
             assert feed_cursor(db) == before, "POST changed the board event cursor"
@@ -483,7 +473,7 @@ def main() -> int:
                     raise AssertionError(f"dashboard with --allow-non-loopback exited with code {public_server.returncode}")
                 try:
                     public_status, _, _headers = raw_request(
-                        public_port, "GET", "/pulse", f"127.0.0.1:{public_port}"
+                        public_port, "GET", "/", f"127.0.0.1:{public_port}"
                     )
                     break
                 except OSError:

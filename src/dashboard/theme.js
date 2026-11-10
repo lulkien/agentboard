@@ -10,9 +10,10 @@
   const apply = () => {
     if (theme === 'system') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', theme);
-    button.textContent = `Theme: ${theme}`;
+    button.textContent = 'Change theme';
     button.setAttribute('aria-pressed', String(theme !== 'system'));
-    button.setAttribute('aria-label', `Color theme: ${theme}; activate to change`);
+    button.setAttribute('aria-label', `Change theme; current theme: ${theme}`);
+    button.title = `Current theme: ${theme}`;
   };
   apply();
   button.addEventListener('click', () => {
