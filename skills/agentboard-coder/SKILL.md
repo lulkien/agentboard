@@ -110,14 +110,13 @@ agentboard add 'Reviewing row' --status reviewing --assignee reviewer --new-acto
 agentboard add 'Second project todo' --project 2
 ```
 
-Build `target/release/agentboard` with `cargo build --release --features
-dashboard`. Make a screenshot scratchpad and pick a free loopback port, then
-start the dashboard in the background and save its PID for cleanup:
+Build `target/release/agentboard` with `cargo build --release`. Make a screenshot scratchpad and pick a free loopback port, then
+start `agentboard daemon` (it serves the dashboard at `/`) in the background and save its PID for cleanup:
 
 ```bash
 SCRATCH=$(mktemp -d /tmp/agentboard/scratch/T95.XXXXXX)
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-target/release/agentboard dashboard "127.0.0.1:$PORT" --db "$AGENTBOARD_DB" >"$SCRATCH/dashboard.log" 2>&1 &
+target/release/agentboard daemon "127.0.0.1:$PORT" --db "$AGENTBOARD_DB" >"$SCRATCH/dashboard.log" 2>&1 &
 PID=$!
 S=$(agent-browser session id --scope worktree --prefix task)
 ```

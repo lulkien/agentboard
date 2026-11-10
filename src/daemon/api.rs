@@ -1,6 +1,6 @@
 //! Read-only JSON API: one GET endpoint per dashboard page. Each endpoint reuses
 //! `routes::parse` for its query, so unknown, duplicate and malformed keys are
-//! refused the way the HTML dashboard refuses them, and answers from the same
+//! refused the way `routes::parse` refuses them, and answers from the same
 //! store read models. Task rows are summaries (no description, goal or reports)
 //! except in the detail endpoint; statuses use the client-facing names.
 

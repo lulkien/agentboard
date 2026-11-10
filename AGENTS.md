@@ -31,7 +31,7 @@ place.
 Run these from the repo root. A change is not done until each prints what is beside
 it. `bash scripts/gate.sh` runs the whole table in order, checks each line, and stops
 at the first failure; `--full` adds the ignored latency run. Everything is offline
-and uses scratch boards; the dashboard test starts its own local listener.
+and uses scratch boards; the daemon suites start their own loopback listeners.
 
 | Command | Expected |
 | --- | --- |
@@ -39,9 +39,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `cargo test --offline --lib` | `test result: ok. 107 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` (default binary) | `337/337 passed (cli, lmdb)` |
-| `AGENTBOARD_TEST_BIN=target/release/agentboard` with `bash tests/cli.sh` (dashboard-feature binary) | `339/339 passed (cli, lmdb)` |
-| `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
+| `bash tests/cli.sh` | `335/335 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `188/188 passed (mcp, lmdb)` |
 | `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `188/188 passed (mcp-http, lmdb)` |
 | `python3 tests/daemon.py` | `daemon: 301/301 passed (http, lmdb)` (scratch boards, loopback port 0) |
@@ -51,10 +49,9 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 130 CLI names, 141 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 140 CLI names, 143 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
-| `bash scripts/gate.sh --features dashboard` | `GATES OK: 18 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 
 `AGENTBOARD_TEST_BIN` points any suite at another binary; the suites never touch a
@@ -85,22 +82,17 @@ update the expectation here.
   roster, index and event writes; no epic flag or database is stored.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
-- `src/dashboard.rs` and `src/dashboard/` — optional, feature-gated, read-only HTTP
-  dashboard adapter, route/query parsing, page rendering, shared HTML helpers,
-  and embedded CSS/theme assets. `template.rs` fills the embedded files in
-  `templates/`; text slots are escaped once at fill time.
 - `src/daemon.rs` — `agentboard daemon`: the same MCP adapter over streamable HTTP
   (axum + rmcp, stateless) at `/mcp/<actor>`, one shared `Arc<Board>`, and the guard
   (Host, Origin, loopback peer for `/mcp`) that runs before every route.
   `src/daemon/api.rs` is the read-only JSON API beside it (GET only, no write route);
   it builds JSON from the store read models and takes every query through
-  `src/routes.rs::parse`, the one strict query validator the HTML dashboard shares.
+  `src/routes.rs::parse`, the one strict query validator for the API.
 - `dashboard/` — the daemon's dashboard: `index.html`, `app.js`, `style.css`,
   embedded with rust-embed (`debug-embed`, so debug and release serve the same
   bytes) and served by `src/daemon.rs`: every page path answers `index.html`,
   files live under `/assets/`, and `app.js` builds the DOM from the JSON API with
-  `createElement`/`textContent` only. The feature-gated SSR dashboard still
-  includes `dashboard/style.css` until it is removed.
+  `createElement`/`textContent` only.
 - `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.
@@ -178,7 +170,7 @@ Reviewers read and judge the commit or row the brief names, its `description` an
 `goal`. They report findings classified blocker, follow-up or nit.
 Reviewers may re-run suites against the already-built binary on scratch boards,
 and directly run that binary on a scratch board; they never build. For a dashboard
-UI change, the Claude reviewer may start the already-built dashboard on a scratch
+UI change, the Claude reviewer may start the already-built `agentboard daemon` on a scratch
 board and use `agent-browser` only against its local loopback URL, following
 `skills/agentboard-reviewer/SKILL.md`; screenshots and notes stay outside the
 repository, and the server and browser must be stopped. The Codex reviewer profile

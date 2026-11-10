@@ -87,13 +87,12 @@ never bumps the revision.
 You may run the repo suites that exercise an already-built binary:
 `bash tests/cli.sh`, `bash tests/seats-install.sh`,
 `bash tests/skills-install.sh`, `bash tests/start-agentboard-manager.sh`,
-`bash tests/race.sh`, `python3 tests/mcp_client.py`, `python3 tests/dashboard.py`,
+`bash tests/race.sh`, `python3 tests/mcp_client.py`,
 `bash tests/migrate.sh`, `python3 tests/doc-names.py`,
 `python3 scripts/sync-tool-count.py --check`, and `python3 scripts/doc-overlap.py`.
-Set `AGENTBOARD_TEST_BIN=target/release/agentboard` when the suite needs the
-dashboard-feature binary. You may run the built binary directly with
-`AGENTBOARD_DB=$(mktemp -d)/b` and start its dashboard on a free `127.0.0.1`
-port. If the binary is missing or older than the branch's last commit, report
+Set `AGENTBOARD_TEST_BIN` to point a suite at another binary. You may run the built binary directly with
+`AGENTBOARD_DB=$(mktemp -d)/b` and start `agentboard daemon 127.0.0.1:PORT` (the dashboard is its `/` page) on a
+free port. If the binary is missing or older than the branch's last commit, report
 that and ask for a coder build; do not build it yourself.
 
 ## Must not
@@ -115,7 +114,7 @@ measurements or an explicit reason they could not be run. The Claude reviewer
 seat may also check it in a browser: set `AGENTBOARD_DB="$(mktemp -d)/b"` and seed a scratch
 LMDB board with the long unspaced title, long spaced title, `<script>` title,
 epic and child, blocked/reviewing/todo rows, and two projects using the CLI. Never
-use or write to the live board. Start the dashboard on a free port from the
+use or write to the live board. Start `agentboard daemon 127.0.0.1:PORT` on a free port from the
 already-built `target/release/agentboard` supplied by the coder; the reviewer
 may run the already-built dashboard on a scratch board and use `agent-browser`
 only against its loopback URL as described below. It may not build or run a gate.
@@ -125,10 +124,10 @@ Use a reviewer-owned
 `http://127.0.0.1:PORT/` with `--allowed-domains 127.0.0.1`. Prefer `snapshot`
 for structure. At both `1280x800` and `360x740`, in light and dark media modes,
 set the viewport and use `eval` to report `document.documentElement.scrollWidth`
-versus `clientWidth` and any `.card`, `.task-strip`, or `.seat-chip` whose
+versus `clientWidth` and any `.card`, `.task-strip`, or `.seat-chip` (the classes `dashboard/app.js` renders) whose
 `scrollWidth` exceeds `clientWidth` with visible overflow. Save reviewer
 screenshots or notes under `/tmp/agentboard/scratch/`, never in the repository.
-Always stop the dashboard process and run `agent-browser --session "$S" close`.
+Always stop the daemon process and run `agent-browser --session "$S" close`.
 A missing or stale built binary means report that and do not build. The Codex
 reviewer profile remains read-only and git-only because this checkout
 has no verified profile setting that limits browser network access to loopback

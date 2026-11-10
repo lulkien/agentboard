@@ -1,7 +1,7 @@
 use crate::domain::{EventKind, Status};
 use crate::store::Cursor;
 
-/// A path or query the dashboard grammar refuses.
+/// A path or query the query grammar refuses.
 #[derive(Debug)]
 pub struct BadQuery;
 

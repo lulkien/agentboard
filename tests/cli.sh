@@ -16,45 +16,6 @@ check() { local name=$1 want=$2 got=$3; [[ "$got" == "$want" ]] && ok || bad "$n
 has() { local name=$1 needle=$2 hay=$3; [[ "$hay" == *"$needle"* ]] && ok || bad "$name: missing '$needle' in '$hay'"; }
 lacks() { local name=$1 needle=$2 hay=$3; [[ "$hay" != *"$needle"* ]] && ok || bad "$name: unexpected '$needle' in '$hay'"; }
 fresh() { AGENTBOARD_DB="$S/board-$1"; export AGENTBOARD_DB; }
-http_status() {
-    python3 - "$1" "$2" <<'PY'
-import sys
-import urllib.error
-import urllib.request
-
-request = urllib.request.Request(sys.argv[1], method=sys.argv[2])
-try:
-    with urllib.request.urlopen(request, timeout=4) as response:
-        print(response.status)
-except urllib.error.HTTPError as response:
-    print(response.code)
-PY
-}
-
-# --- optional dashboard CLI and HTTP skeleton -----------------------------
-if "$B" dashboard --help >/dev/null 2>&1; then
-    ok # The dashboard subcommand is present in this feature-enabled binary.
-    "$B" add "dashboard test board" --db "$S/dashboard-board" >/dev/null
-    port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
-    "$B" dashboard "127.0.0.1:$port" --db "$S/dashboard-board" >/dev/null 2>&1 &
-    dashboard_pid=$!
-    trap 'kill "$dashboard_pid" 2>/dev/null || true; rm -rf "$S"' EXIT
-    code=1
-    for _ in {1..30}; do
-        code=$(http_status "http://127.0.0.1:$port/" GET) && break
-        sleep 0.1
-    done
-    check "dashboard GET / status" "200" "$code"
-check "dashboard GET other path status" "404" "$(http_status "http://127.0.0.1:$port/missing" GET)"
-check "dashboard POST status" "405" "$(http_status "http://127.0.0.1:$port/" POST)"
-    kill "$dashboard_pid" 2>/dev/null || true
-    wait "$dashboard_pid" 2>/dev/null || true
-    trap 'rm -rf "$S"' EXIT
-else
-    out=$("$B" dashboard 2>&1); code=$?
-    check "dashboard subcommand is refused without feature" 2 "$code"
-    has "feature-off refusal names dashboard" "unrecognized subcommand 'dashboard'" "$out"
-fi
 
 # --- daemon CLI skeleton (the HTTP behaviour is proved by tests/daemon.py) -----
 out=$("$B" daemon --help 2>&1); code=$?

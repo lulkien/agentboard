@@ -3,10 +3,10 @@
 One board shared by a team of CLI agents. A manager adds work, workers claim it,
 everyone reads the same event feed. The board is a single LMDB directory: no
 background daemon or database server. `agentboard serve` is MCP on stdio;
-`agentboard daemon` is the same ten tools over local HTTP for every seat at once;
-an optional dashboard feature serves a read-only page over HTTP.
+`agentboard daemon` is the same ten tools over local HTTP for every seat at once,
+with a read-only dashboard and JSON API on the same port.
 
-10 MCP tools, 16 default CLI commands plus the optional dashboard, one store behind both.
+10 MCP tools, 16 CLI commands, one store behind both.
 
 ## Why it exists
 
@@ -20,7 +20,6 @@ the process that wrote it.
 ```bash
 cargo build --release          # target/release/agentboard
 cargo install --path . --locked   # ~/.cargo/bin/agentboard
-cargo build --release --features dashboard # also enable the optional dashboard
 ```
 
 Rust 1.89 or newer, edition 2024. The only C dependency is the one `heed` builds
@@ -106,7 +105,6 @@ agentboard project ls
 agentboard project update ID [--name NAME] [--path PATH]
 agentboard serve
 agentboard daemon [IP:PORT] [--allow-non-loopback]
-agentboard dashboard [IP:PORT] [--db PATH]
 ```
 
 Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `canceled`
@@ -193,45 +191,6 @@ is stopped. See `PROTOCOL.md` for the guard and the stateless mode.
 The same port serves a read-only JSON API: `GET /api/board`, `/api/epics`,
 `/api/tasks`, `/api/tasks/ID`, `/api/feed` and `/api/projects`, all accepting
 `?project=ID`; `PROTOCOL.md` lists the shapes and refusals.
-
-## Optional dashboard
-
-The `dashboard` subcommand is available when the binary is built with the
-`dashboard` Cargo feature:
-
-```bash
-cargo build --release --features dashboard
-agentboard dashboard [ip:port] [--db PATH] [--allow-non-loopback]
-```
-
-It defaults to `127.0.0.1:8080`; the global `--db` option works before or after
-the subcommand. The page is read-only and has no authentication. Localhost-only
-is the supported mode; binding a non-loopback address is refused unless
-`--allow-non-loopback` is passed deliberately. Requests with an unrelated Host
-header are refused to prevent DNS-rebinding reads. The
-`agentboard serve` command remains MCP over stdio and its 10-tool surface is
-unchanged. The dashboard routes are `/` (board with seats, attention and status columns),
-`/epics` (epic overview), `/tasks`
-(filtered and paged task list), `/tasks/ID` (task details and recent activity),
-and `/feed` (board event history). `/assets/dashboard.css` and `/assets/theme.js`
-are embedded dashboard assets. The footer theme button cycles through light,
-dark and system appearance, saving a manual choice in local storage.
-The Board uses five status columns with bounded task cards, alongside compact
-attention strips, a closed-row summary, status glyphs and text, a skip link, and
-visible keyboard focus in both themes. HTML responses use a restrictive Content
-Security Policy and `Cache-Control: no-store`; all responses send `nosniff` and
-`Referrer-Policy: no-referrer`. Assets are served from the binary, with no inline
-scripts or styles.
-Dashboard markup lives in `src/dashboard/templates/` as embedded `.html` files
-and is filled by `src/dashboard/template.rs`; text slots are escaped once when
-the template is rendered.
-Every route is GET-only; other methods receive `405 Method Not Allowed`. The feed
-shows the newest 20 matching events and uses its opaque `before` cursor to page
-toward older events while retaining task and event-kind filters.
-Add `?project=ID` to any dashboard page to show that project's tasks, epics,
-and events. The project selector in the top bar changes scope; navigation,
-filters, and pagination keep the selected project in the URL. An empty
-`project=` shows the whole board. Unknown project IDs return 404.
 
 ## Quota take-over
 

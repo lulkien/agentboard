@@ -58,25 +58,6 @@ pages 20 newest-first with `total`/`more`; `/api/feed` pages 20 events in ascend
 order with `older` and an opaque `before` cursor (`instance:seq`) for the next
 older page. Reads never move the event cursor.
 
-## Optional dashboard
-
-The separate `agentboard dashboard [ip:port] [--db PATH]` subcommand is available
-in builds made with `cargo build --release --features dashboard`. It defaults to
-`127.0.0.1:8080`. Put `--db PATH` before or after this command to select a board.
-Requests can only read; credentials are not checked. To expose the page on another
-interface, choose a non-loopback address explicitly. `serve` stays MCP over stdio,
-with the same 10 tools. Dashboard routes are `/` and `/epics` for epic progress,
-`/tasks` for filtered and paged tasks, `/tasks/ID` for full task details and recent
-activity, and `/feed` for event history. `/assets/dashboard.css` and
-`/assets/theme.js` are served from embedded files. The theme button cycles light,
-dark and system appearance, with manual choices stored in local storage. All routes
-are GET-only; non-GET methods receive `405 Method Not Allowed`.
-
-The feed accepts optional `task=ID` and `kind=created|updated|claimed|commented`
-filters. It shows the newest 20 matching events; an opaque `before` cursor follows
-older matching events without gaps or duplicates and retains the filters. Unknown,
-duplicate, malformed or foreign-board query values receive `400 Bad Request`.
-
 ## Ordering
 
 Lists and claim use the same order: `(priority, id)` ascending, priority

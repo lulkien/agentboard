@@ -4,7 +4,6 @@
 #
 #   bash scripts/gate.sh                         # every gate but latency
 #   bash scripts/gate.sh --full                  # also measure claim_latency
-#   bash scripts/gate.sh --features dashboard    # prove the optional dashboard
 #
 # Every gate must also print what the table beside it promises. A gate that
 # exits 0 with the wrong text is still a failure, because that text is what the
@@ -13,24 +12,13 @@
 set -u
 
 usage() {
-  echo "usage: ${0##*/} [--full] [--features dashboard]"
+  echo "usage: ${0##*/} [--full]"
 }
 
 full=0
-dashboard_feature=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --full) full=1 ;;
-    --features)
-      shift
-      if [ "${1:-}" != "dashboard" ]; then
-        echo "gate: only the dashboard feature has a feature gate" >&2
-        usage >&2
-        exit 2
-      fi
-      dashboard_feature=1
-      ;;
-    --features=dashboard) dashboard_feature=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "gate: unknown argument ${1}" >&2
@@ -44,7 +32,6 @@ done
 # Runs from the repo root whatever directory the caller is in.
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd) || exit 1
 cd "$root" || exit 1
-feature_bin="$root/target/release/agentboard"
 
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
@@ -64,14 +51,6 @@ gate() { # gate <command...>
   local code=${PIPESTATUS[0]}
   [ "$code" -eq 0 ] || fail "$code"
   gates=$((gates + 1))
-}
-
-binary_gate() { # use the release binary built for this gate mode
-  if [ "$dashboard_feature" -eq 1 ]; then
-    gate env AGENTBOARD_TEST_BIN="$feature_bin" "$@"
-  else
-    gate "$@"
-  fi
 }
 
 want() { # want <extended regex the command's output must contain>
@@ -98,53 +77,31 @@ silent() { # the command must print nothing at all
 gate cargo fmt --check
 silent
 
-if [ "$dashboard_feature" -eq 1 ]; then
-  gate cargo test --offline --lib --features dashboard
-else
-  gate cargo test --offline --lib
-fi
+gate cargo test --offline --lib
 want '^test result: ok\. [0-9]+ passed; 0 failed'
 
-if [ "$dashboard_feature" -eq 1 ]; then
-  gate cargo test --offline --bin agentboard --features dashboard
-  want '^test result: ok\. 4 passed; 0 failed; 0 ignored'
-fi
-
-if [ "$dashboard_feature" -eq 1 ]; then
-  gate cargo clippy --offline --all-targets --all-features -- -D warnings
-else
-  gate cargo clippy --offline --all-targets -- -D warnings
-fi
+gate cargo clippy --offline --all-targets -- -D warnings
 refuse '^(warning|error)(\[|:)'
 
-if [ "$dashboard_feature" -eq 1 ]; then
-  gate cargo build --release --features dashboard
-else
-  gate cargo build --release
-fi
+gate cargo build --release
 want 'Finished'
 
-binary_gate bash tests/cli.sh
+gate bash tests/cli.sh
 want '^[0-9]+/[0-9]+ passed \(cli, lmdb\)$'
 
-binary_gate python3 tests/mcp_client.py
+gate python3 tests/mcp_client.py
 want '^[0-9]+/[0-9]+ passed \(mcp, lmdb\)$'
 
-binary_gate env AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py
+gate env AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py
 want '^[0-9]+/[0-9]+ passed \(mcp-http, lmdb\)$'
 
-binary_gate python3 tests/daemon.py
+gate python3 tests/daemon.py
 want '^daemon: [0-9]+/[0-9]+ passed \(http, lmdb\)$'
 
-if [ "$dashboard_feature" -eq 1 ]; then
-  binary_gate python3 tests/dashboard.py
-  want '^dashboard: all checks passed \(read-only HTTP, filters, paging, escaping, bounds\)$'
-fi
-
-binary_gate bash tests/race.sh
+gate bash tests/race.sh
 want '^ok: [0-9]+ processes claimed [0-9]+ tasks'
 
-binary_gate bash tests/migrate.sh
+gate bash tests/migrate.sh
 want '^(migrate: [0-9]+/[0-9]+ passed \(scratch LMDB, stepwise\)|SKIP migrate: Python lmdb unavailable offline \(use uv run --with lmdb\))$'
 
 gate bash tests/skills-install.sh
@@ -159,11 +116,7 @@ want '^[0-9]+/[0-9]+ passed \(manager launcher\)$'
 gate python3 scripts/sync-tool-count.py --check
 want '^MCP router: [0-9]+ tools; published counts match$'
 
-if [ "$dashboard_feature" -eq 1 ]; then
-  gate python3 tests/doc-names.py --binary "$feature_bin"
-else
-  gate python3 tests/doc-names.py
-fi
+gate python3 tests/doc-names.py
 want '^doc-names: [0-9]+ pages, [0-9]+ CLI names, [0-9]+ MCP names passed$'
 
 gate python3 scripts/doc-overlap.py

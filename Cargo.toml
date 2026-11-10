@@ -10,10 +10,6 @@ license = "MIT"
 name = "agentboard"
 path = "src/main.rs"
 
-[features]
-default = []
-dashboard = []
-
 [dependencies]
 # No colour stack: help and errors are plain text on purpose.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }

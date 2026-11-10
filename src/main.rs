@@ -14,9 +14,6 @@ use agentboard::store::{
 };
 use agentboard::{cli, render};
 
-#[cfg(feature = "dashboard")]
-mod dashboard;
-
 fn main() -> ExitCode {
     let args = Cli::try_parse().unwrap_or_else(|error| error.exit());
     let Cli { db, actor, cmd } = args;
@@ -83,12 +80,6 @@ fn run(
             address,
             allow_non_loopback,
         }) => daemon(path, address, allow_non_loopback),
-        #[cfg(feature = "dashboard")]
-        Some(Cmd::Dashboard {
-            address,
-            allow_non_loopback,
-        }) => dashboard::serve(path, address, allow_non_loopback)
-            .map(|()| (String::new(), ExitCode::SUCCESS)),
         Some(Cmd::Path) => Ok((path.display().to_string(), ExitCode::SUCCESS)),
         Some(Cmd::Project { cmd }) => {
             let board = open(&path)?;
