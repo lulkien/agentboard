@@ -2,7 +2,8 @@
 
 Written 2026-11-11 against `agentboard 0.4.0` at commit `27ffa1f`. This is a review
 file, like `manager-loop-gaps.md`: it records what could be better, with the
-evidence and the smallest fix. Nothing here is implemented or filed as a row.
+evidence and the smallest fix. Nothing here is filed as a row. Findings marked
+**Done** are implemented; the commit is named under each one.
 
 ## Summary
 
@@ -15,11 +16,11 @@ Do these first:
 
 | # | Finding | Kind | Size |
 | --- | --- | --- | --- |
-| [1](#1-a-comment-only-update-skips-actor-validation) | A comment-only `update` writes an invalid actor name to the roster | bug, reproduced | one line plus a test |
-| [2](#2-wait---assignee-can-miss-a-handoff-between-re-arms) | `wait --assignee` can miss a handoff that lands between two re-arms | loop gap | one CLI flag |
+| [1](#1-a-comment-only-update-skips-actor-validation) | A comment-only `update` writes an invalid actor name to the roster | bug, reproduced | **Done** `8744808` |
+| [2](#2-wait---assignee-can-miss-a-handoff-between-re-arms) | `wait --assignee` can miss a handoff that lands between two re-arms | loop gap | **Done** `f61ab67` |
 | [5](#5-wait---epic-scans-every-task-40-times-a-second) | `wait --epic` scans and decodes every task 40 times a second | performance, measured | a few lines in `wait.rs` |
 | [9](#9-a-full-map-has-no-way-out-except-reset) | A full map has no remedy except `reset`, and events grow faster than tasks | data lifecycle | decided, see D1 to D3 |
-| [16](#16-protocolmd-has-drifted-from-the-code) | `PROTOCOL.md` has five stale statements the doc gates do not catch | docs | small |
+| [16](#16-protocolmd-has-drifted-from-the-code) | `PROTOCOL.md` has five stale statements the doc gates do not catch | docs | **Done** `567aed4`, see the note under it |
 
 ## How this was checked
 
@@ -55,6 +56,10 @@ These are worth keeping as they are:
 ## Correctness
 
 ### 1. A comment-only update skips actor validation
+
+**Status: done** in `8744808`. `touch_actor` calls `validate_actor`; `tests/cli.sh`
+covers the refusal and the roster. Still open from the "also note" below: refusing
+`--force` and `--reason` on a comment-only update.
 
 `Board::update` has an early branch for "a comment with no field change". That
 branch calls `touch_actor` and appends the event without ever calling
@@ -92,6 +97,9 @@ discarded argument the release path refuses by name; it is worth refusing here t
 
 ### 2. `wait --assignee` can miss a handoff between re-arms
 
+**Status: done** in `f61ab67`. `wait --after CURSOR` passes the watermark through;
+the README, the manager skill and `workflow.md` re-arm with it.
+
 The assignee branch of a wait is decided from `updated` events after a watermark.
 The store accepts that watermark (`WaitSpec.after`, `src/store/wait.rs:29`), and
 the verdict prints `cursor …` "to follow on with" (`src/render.rs:247`). But the
@@ -112,6 +120,9 @@ previous wait printed.
 `wait ID --assignee --after CURSOR` matches at once; without `--after` it times out.
 
 ### 3. A wildcard bind cannot be reached from another host
+
+**Status: done** in `8add61a`, as decision D6: `0.0.0.0` and `[::]` are refused at
+startup, with or without `--allow-non-loopback`.
 
 `agentboard daemon 0.0.0.0:PORT --allow-non-loopback` starts, but the Host guard
 accepts only the literal bound address, `localhost` or `127.0.0.1`
@@ -421,6 +432,10 @@ arguments have no description:
 ## Documentation
 
 ### 16. `PROTOCOL.md` has drifted from the code
+
+**Status: done** in `567aed4`: the five lines are corrected and the count pattern in
+`scripts/sync-tool-count.py` accepts a number split across a line. Still open: the
+`tests/doc-names.py` check that the task field list equals `Task`'s serde fields.
 
 The two doc gates check tool names, CLI names and the published tool count. They
 did not catch these:
