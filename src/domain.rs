@@ -19,6 +19,29 @@ pub const MAX_TITLE_CHARS: usize = 200;
 /// separates sections, so a report stays readable without relying on blank lines.
 pub const REPORT_SEPARATOR: &str = "\n\n---\n\n";
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    pub project_id: u64,
+    pub project_name: String,
+    pub project_path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewProject {
+    pub project_name: String,
+    pub project_path: String,
+}
+
+pub fn validate_project(name: &str, path: &str) -> Result<(), Error> {
+    if name.trim().is_empty() || name.trim() != name || name.chars().any(char::is_control) {
+        return Err(Error::InvalidProjectName);
+    }
+    if path.trim().is_empty() || path.trim() != path || path.chars().any(char::is_control) {
+        return Err(Error::InvalidProjectPath);
+    }
+    Ok(())
+}
+
 /// The stored names `in_progress` and `review` are board format and stay frozen;
 /// the variants are what clients see as `implementing` and `reviewing`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -115,6 +138,9 @@ pub enum Error {
     UnknownEventKind(String),
     NoChange,
     RevisionOverflow,
+    InvalidProjectName,
+    InvalidProjectPath,
+    EmptyProjectPatch,
 }
 
 impl std::fmt::Display for Error {
@@ -159,6 +185,13 @@ impl std::fmt::Display for Error {
             ),
             Self::NoChange => f.write_str("task update has no field changes"),
             Self::RevisionOverflow => f.write_str("task revision overflow"),
+            Self::InvalidProjectName => f.write_str(
+                "project name must be nonempty, trimmed, and contain no control characters",
+            ),
+            Self::InvalidProjectPath => f.write_str(
+                "project path must be nonempty, trimmed, and contain no control characters",
+            ),
+            Self::EmptyProjectPatch => f.write_str("project update has no field changes"),
         }
     }
 }

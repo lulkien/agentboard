@@ -5,6 +5,7 @@ mod feed;
 pub mod keys;
 mod list;
 mod open;
+mod projects;
 mod tasks;
 mod wait;
 

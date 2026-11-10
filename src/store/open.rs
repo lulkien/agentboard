@@ -11,7 +11,7 @@ use crate::domain;
 pub(super) type Db = Database<'static, Bytes, Bytes>;
 pub(super) type StoreEnv = Env<WithoutTls>;
 pub(super) type ReadTxn<'env> = heed::RoTxn<'env, WithoutTls>;
-pub(super) const FORMAT_VERSION: u32 = 1;
+pub(super) const FORMAT_VERSION: u32 = 2;
 const APPLICATION: &str = "agentboard-lmdb";
 const ENVELOPE_KEY: &[u8] = b"envelope";
 const DEFAULT_MAP_SIZE_MB: usize = 1024;
@@ -62,6 +62,8 @@ pub struct Metadata {
     pub instance_id: String,
     pub next_task_id: u64,
     pub next_event_seq: u64,
+    #[serde(default = "first_project_id")]
+    pub next_project_id: u64,
     pub map_size_mb: usize,
 }
 
@@ -76,9 +78,14 @@ impl Metadata {
             instance_id,
             next_task_id: 1,
             next_event_seq: 1,
+            next_project_id: 1,
             map_size_mb,
         })
     }
+}
+
+fn first_project_id() -> u64 {
+    1
 }
 
 #[derive(Debug)]
@@ -110,6 +117,7 @@ pub enum Error {
     WaitWithoutTask,
     UnknownAssignee(String),
     MissingTask(u64),
+    MissingProject(u64),
     NotReleasable {
         id: u64,
         status: domain::Status,
@@ -148,7 +156,7 @@ impl std::fmt::Display for Error {
             Self::EnvironmentAlreadyOpen => f.write_str("LMDB environment already open in this process; reuse its Board handle"),
             Self::MapFull => f.write_str("LMDB map full; set AGENTBOARD_MAP_SIZE_MB for a fresh board or reset this disposable board with a larger size"),
             Self::ReadersFull => f.write_str("LMDB reader slots exhausted (limit 256)"),
-            Self::FormatMismatch { expected, found } => write!(f, "board format {found} is incompatible with expected {expected}; run board reset --yes after stopping clients"),
+            Self::FormatMismatch { expected, found } => write!(f, "board format {found} is incompatible with expected {expected}; migrate the board before opening it"),
             Self::Unstamped => f.write_str("unstamped board; inspect it before board reset --yes"),
             Self::ForeignBoard => f.write_str("directory is not an agentboard LMDB board"),
             Self::UnknownEntry(name) => write!(
@@ -165,6 +173,7 @@ impl std::fmt::Display for Error {
             Self::WaitWithoutTask => f.write_str("wait needs at least one task id"),
             Self::UnknownAssignee(name) => write!(f, "unknown assignee {name:?}; use new_actor=true to register the target"),
             Self::MissingTask(id) => write!(f, "task T{id} does not exist"),
+            Self::MissingProject(id) => write!(f, "project {id} does not exist"),
             Self::NotReleasable { id, status } => {
                 write!(f, "task T{id} is {}; nothing to release", status.as_str())
             }
@@ -234,6 +243,7 @@ pub struct Board {
     pub(super) agents: Db,
     pub(super) tasks_by_status: Db,
     pub(super) tasks_by_assignee: Db,
+    pub(super) projects: Db,
     pub(super) path: PathBuf,
     _lifetime_lock: File,
 }
@@ -315,7 +325,7 @@ impl Board {
             }
         }
         let mut builder = EnvOpenOptions::new().read_txn_without_tls();
-        builder.max_dbs(7).max_readers(256);
+        builder.max_dbs(8).max_readers(256);
         if fresh {
             builder.map_size(options.map_size_bytes()?);
         }
@@ -325,72 +335,86 @@ impl Board {
             heed::Error::EnvAlreadyOpened => Error::EnvironmentAlreadyOpen,
             other => Error::from(other),
         })?;
-        let (meta, tasks, events, events_by_task, agents, tasks_by_status, tasks_by_assignee) =
-            if fresh {
-                let wtxn = env.write_txn()?;
-                env.create_databases_and_commit(wtxn, |opener, txn| -> Result<_> {
-                    let meta = opener.create_database::<Bytes, Bytes>(txn, Some("meta"))?;
-                    let envelope = Metadata::fresh(options.map_size_mb)?;
-                    meta.put(txn, ENVELOPE_KEY, &serde_json::to_vec(&envelope)?)?;
-                    let tasks = opener.create_database::<Bytes, Bytes>(txn, Some("tasks"))?;
-                    let events = opener.create_database::<Bytes, Bytes>(txn, Some("events"))?;
-                    let events_by_task =
-                        opener.create_database::<Bytes, Bytes>(txn, Some("events_by_task"))?;
-                    let agents = opener.create_database::<Bytes, Bytes>(txn, Some("agents"))?;
-                    let tasks_by_status =
-                        opener.create_database::<Bytes, Bytes>(txn, Some("tasks_by_status"))?;
-                    let tasks_by_assignee =
-                        opener.create_database::<Bytes, Bytes>(txn, Some("tasks_by_assignee"))?;
-                    Ok(CommitOrAbort::<_, ()>::Commit((
-                        meta,
-                        tasks,
-                        events,
-                        events_by_task,
-                        agents,
-                        tasks_by_status,
-                        tasks_by_assignee,
-                    )))
-                })?
-                .unwrap_commit()
-            } else {
-                let rtxn = read_txn(&env)?;
-                env.open_databases_and_commit(rtxn, |opener, txn| -> Result<_> {
-                    let meta = opener
-                        .open_database::<Bytes, Bytes>(txn, Some("meta"))?
-                        .ok_or(Error::Unstamped)?;
-                    let raw = meta.get(txn, ENVELOPE_KEY)?.ok_or(Error::Unstamped)?;
-                    let envelope: Metadata = serde_json::from_slice(raw)?;
-                    check_metadata(&envelope, options)?;
-                    let tasks = opener
-                        .open_database::<Bytes, Bytes>(txn, Some("tasks"))?
-                        .ok_or(Error::Corrupt("missing tasks database"))?;
-                    let events = opener
-                        .open_database::<Bytes, Bytes>(txn, Some("events"))?
-                        .ok_or(Error::Corrupt("missing events database"))?;
-                    let events_by_task = opener
-                        .open_database::<Bytes, Bytes>(txn, Some("events_by_task"))?
-                        .ok_or(Error::Corrupt("missing events_by_task database"))?;
-                    let agents = opener
-                        .open_database::<Bytes, Bytes>(txn, Some("agents"))?
-                        .ok_or(Error::Corrupt("missing agents database"))?;
-                    let tasks_by_status = opener
-                        .open_database::<Bytes, Bytes>(txn, Some("tasks_by_status"))?
-                        .ok_or(Error::Corrupt("missing tasks_by_status database"))?;
-                    let tasks_by_assignee = opener
-                        .open_database::<Bytes, Bytes>(txn, Some("tasks_by_assignee"))?
-                        .ok_or(Error::Corrupt("missing tasks_by_assignee database"))?;
-                    Ok(CommitOrAbort::<_, ()>::Commit((
-                        meta,
-                        tasks,
-                        events,
-                        events_by_task,
-                        agents,
-                        tasks_by_status,
-                        tasks_by_assignee,
-                    )))
-                })?
-                .unwrap_commit()
-            };
+        let (
+            meta,
+            tasks,
+            events,
+            events_by_task,
+            agents,
+            tasks_by_status,
+            tasks_by_assignee,
+            projects,
+        ) = if fresh {
+            let wtxn = env.write_txn()?;
+            env.create_databases_and_commit(wtxn, |opener, txn| -> Result<_> {
+                let meta = opener.create_database::<Bytes, Bytes>(txn, Some("meta"))?;
+                let envelope = Metadata::fresh(options.map_size_mb)?;
+                meta.put(txn, ENVELOPE_KEY, &serde_json::to_vec(&envelope)?)?;
+                let tasks = opener.create_database::<Bytes, Bytes>(txn, Some("tasks"))?;
+                let events = opener.create_database::<Bytes, Bytes>(txn, Some("events"))?;
+                let events_by_task =
+                    opener.create_database::<Bytes, Bytes>(txn, Some("events_by_task"))?;
+                let agents = opener.create_database::<Bytes, Bytes>(txn, Some("agents"))?;
+                let tasks_by_status =
+                    opener.create_database::<Bytes, Bytes>(txn, Some("tasks_by_status"))?;
+                let tasks_by_assignee =
+                    opener.create_database::<Bytes, Bytes>(txn, Some("tasks_by_assignee"))?;
+                let projects = opener.create_database::<Bytes, Bytes>(txn, Some("projects"))?;
+                Ok(CommitOrAbort::<_, ()>::Commit((
+                    meta,
+                    tasks,
+                    events,
+                    events_by_task,
+                    agents,
+                    tasks_by_status,
+                    tasks_by_assignee,
+                    projects,
+                )))
+            })?
+            .unwrap_commit()
+        } else {
+            let rtxn = read_txn(&env)?;
+            env.open_databases_and_commit(rtxn, |opener, txn| -> Result<_> {
+                let meta = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("meta"))?
+                    .ok_or(Error::Unstamped)?;
+                let raw = meta.get(txn, ENVELOPE_KEY)?.ok_or(Error::Unstamped)?;
+                let envelope: Metadata = serde_json::from_slice(raw)?;
+                check_metadata(&envelope, options)?;
+                let tasks = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("tasks"))?
+                    .ok_or(Error::Corrupt("missing tasks database"))?;
+                let events = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("events"))?
+                    .ok_or(Error::Corrupt("missing events database"))?;
+                let events_by_task = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("events_by_task"))?
+                    .ok_or(Error::Corrupt("missing events_by_task database"))?;
+                let agents = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("agents"))?
+                    .ok_or(Error::Corrupt("missing agents database"))?;
+                let tasks_by_status = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("tasks_by_status"))?
+                    .ok_or(Error::Corrupt("missing tasks_by_status database"))?;
+                let tasks_by_assignee = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("tasks_by_assignee"))?
+                    .ok_or(Error::Corrupt("missing tasks_by_assignee database"))?;
+                let projects = opener
+                    .open_database::<Bytes, Bytes>(txn, Some("projects"))?
+                    .ok_or(Error::Corrupt("missing projects database"))?;
+                Ok(CommitOrAbort::<_, ()>::Commit((
+                    meta,
+                    tasks,
+                    events,
+                    events_by_task,
+                    agents,
+                    tasks_by_status,
+                    tasks_by_assignee,
+                    projects,
+                )))
+            })?
+            .unwrap_commit()
+        };
         if env.info().map_size != options.map_size_bytes()? {
             return Err(Error::Corrupt(
                 "LMDB map size disagrees with board metadata",
@@ -405,6 +429,7 @@ impl Board {
             agents,
             tasks_by_status,
             tasks_by_assignee,
+            projects,
             path,
             _lifetime_lock: lock,
         })
@@ -573,7 +598,7 @@ fn inspect_for_reset(path: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
     let mut builder = EnvOpenOptions::new().read_txn_without_tls();
-    builder.max_dbs(7).max_readers(256);
+    builder.max_dbs(8).max_readers(256);
     // This inspection environment is dropped before any LMDB file is removed.
     let env = unsafe { builder.open(path) }?;
     let txn = read_txn(&env)?;

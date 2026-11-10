@@ -673,7 +673,7 @@ fn existing_board_refuses_a_missing_named_database() {
     let scratch = Scratch::new();
     {
         let mut builder = heed::EnvOpenOptions::new();
-        builder.max_dbs(7).map_size(8 * 1024 * 1024);
+        builder.max_dbs(8).map_size(8 * 1024 * 1024);
         // SAFETY: the scratch environment is opened and dropped inside this test.
         let env = unsafe { builder.open(scratch.path()) }.unwrap();
         let txn = env.write_txn().unwrap();
@@ -683,6 +683,7 @@ fn existing_board_refuses_a_missing_named_database() {
             instance_id: "half-built".into(),
             next_task_id: 1,
             next_event_seq: 1,
+            next_project_id: 1,
             map_size_mb: 8,
         };
         env.create_databases_and_commit(txn, |opener, txn| -> super::Result<_> {
@@ -697,6 +698,73 @@ fn existing_board_refuses_a_missing_named_database() {
         Board::open_with_options(scratch.path(), options()),
         Err(Error::Corrupt("missing tasks database"))
     ));
+}
+
+#[test]
+fn projects_receive_stable_board_ids_and_update_atomically() {
+    use crate::domain::NewProject;
+
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let first = board
+        .add_project(NewProject {
+            project_name: "one".into(),
+            project_path: "/one".into(),
+        })
+        .unwrap();
+    let second = board
+        .add_project(NewProject {
+            project_name: "two".into(),
+            project_path: "/two".into(),
+        })
+        .unwrap();
+    assert_eq!(first.project_id, 1);
+    assert_eq!(second.project_id, 2);
+    assert_eq!(board.list_projects().unwrap(), vec![first.clone(), second]);
+    let updated = board
+        .update_project(first.project_id, None, Some("/updated".into()))
+        .unwrap();
+    assert_eq!(updated.project_path, "/updated");
+    assert_eq!(board.get_project(first.project_id).unwrap(), Some(updated));
+    assert!(matches!(
+        board.update_project(99, None, Some("/missing".into())),
+        Err(Error::MissingProject(99))
+    ));
+    assert!(matches!(
+        board.add_project(NewProject {
+            project_name: " ".into(),
+            project_path: "/bad".into()
+        }),
+        Err(Error::Domain(crate::domain::Error::InvalidProjectName))
+    ));
+    assert!(matches!(
+        board.update_project(first.project_id, None, None),
+        Err(Error::Domain(crate::domain::Error::EmptyProjectPatch))
+    ));
+}
+
+#[test]
+fn version_one_board_is_refused_as_needing_migration() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let mut metadata = board.metadata().unwrap();
+    metadata.format_version = 1;
+    let mut txn = board.env.write_txn().unwrap();
+    write_metadata(board.meta, &mut txn, &metadata).unwrap();
+    txn.commit().unwrap();
+    drop(board);
+    let error = match Board::open_with_options(scratch.path(), options()) {
+        Err(error) => error,
+        Ok(_) => panic!("v1 board unexpectedly opened"),
+    };
+    assert!(matches!(
+        error,
+        Error::FormatMismatch {
+            expected: 2,
+            found: 1
+        }
+    ));
+    assert!(error.to_string().contains("migrate"));
 }
 
 #[test]

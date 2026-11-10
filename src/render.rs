@@ -1,12 +1,19 @@
 //! Compact text rendering shared by the CLI and the MCP tools.
 
-use crate::domain::{Event, Status, Task};
+use crate::domain::{Event, Project, Status, Task};
 use crate::store::{Agent, Brief, Epic, FeedPage, WaitOutcome};
 
 /// Width of a task title in a one-line list.
 const TITLE_WIDTH: usize = 72;
 /// Width of a free-text field in a compact record.
 const FIELD_WIDTH: usize = 160;
+
+pub fn project_line(project: &Project) -> String {
+    format!(
+        "{}\t{}\t{}",
+        project.project_id, project.project_name, project.project_path
+    )
+}
 
 /// Collapse whitespace and cut to `width`, marking the cut so a reader knows the
 /// text continues. Full text is available from `get --full` / `task_get(full=true)`.

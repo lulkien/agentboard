@@ -44,6 +44,11 @@ pub struct Cli {
 pub enum Cmd {
     /// MCP server on stdio (the default with no command)
     Serve,
+    /// Manage board projects
+    Project {
+        #[command(subcommand)]
+        cmd: ProjectCmd,
+    },
     /// Read-only dashboard over HTTP
     #[cfg(feature = "dashboard")]
     Dashboard {
@@ -231,6 +236,28 @@ pub enum Cmd {
     Reset {
         #[arg(long)]
         yes: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectCmd {
+    /// Add a project
+    Add {
+        #[arg(long, allow_hyphen_values = true)]
+        name: String,
+        #[arg(long, allow_hyphen_values = true)]
+        path: String,
+    },
+    /// List projects
+    Ls,
+    /// Update a project
+    Update {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(long, allow_hyphen_values = true)]
+        name: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        path: Option<String>,
     },
 }
 

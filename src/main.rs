@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use rmcp::ServiceExt;
 
-use agentboard::domain::{self, EventKind, NewTask, Status, TaskPatch};
+use agentboard::domain::{self, EventKind, NewProject, NewTask, Status, TaskPatch};
 use agentboard::store::{
     AssigneeMatch, Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput,
     UpdateInput, WaitSpec, parse_status_csv,
@@ -34,7 +34,7 @@ fn main() -> ExitCode {
     }
 }
 
-use cli::{Cli, Cmd};
+use cli::{Cli, Cmd, ProjectCmd};
 
 fn board_path(db: Option<PathBuf>) -> Result<PathBuf, String> {
     if let Some(path) = db {
@@ -84,6 +84,39 @@ fn run(
             dashboard::serve(path, address).map(|()| (String::new(), ExitCode::SUCCESS))
         }
         Some(Cmd::Path) => Ok((path.display().to_string(), ExitCode::SUCCESS)),
+        Some(Cmd::Project { cmd }) => {
+            let board = open(&path)?;
+            match cmd {
+                ProjectCmd::Add { name, path } => {
+                    let project = board
+                        .add_project(NewProject {
+                            project_name: name,
+                            project_path: path,
+                        })
+                        .map_err(|e| e.to_string())?;
+                    Ok((project.project_id.to_string(), ExitCode::SUCCESS))
+                }
+                ProjectCmd::Ls => {
+                    let projects = board.list_projects().map_err(|e| e.to_string())?;
+                    let output = if projects.is_empty() {
+                        "no projects".to_owned()
+                    } else {
+                        projects
+                            .iter()
+                            .map(render::project_line)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    Ok((output, ExitCode::SUCCESS))
+                }
+                ProjectCmd::Update { id, name, path } => {
+                    let project = board
+                        .update_project(id, name, path)
+                        .map_err(|e| e.to_string())?;
+                    Ok((render::project_line(&project), ExitCode::SUCCESS))
+                }
+            }
+        }
         Some(Cmd::Reset { yes }) => {
             if !yes {
                 return Err("reset discards the board; pass --yes to confirm".into());

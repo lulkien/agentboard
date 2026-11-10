@@ -4,6 +4,10 @@ What an agent sees. Ten MCP tools, the cursor format, the refusals, the exit
 codes. The store that implements this is described in `AGENTS.md`; running a team
 is described in `skills/agentboard-team`.
 
+The board uses format 2 and eight named LMDB databases. Format 1 boards refuse
+to open until migrated. Projects are managed through the CLI only; MCP remains
+at ten tools.
+
 ## Transport
 
 `agentboard serve`, or `agentboard` with no command: MCP over stdio, protocol

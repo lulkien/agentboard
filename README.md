@@ -5,7 +5,7 @@ everyone reads the same event feed. The board is a single LMDB directory: no
 background daemon or database server. The default CLI and MCP transport stay local;
 an optional dashboard feature serves a read-only page over HTTP.
 
-10 MCP tools, 14 default CLI verbs plus the optional dashboard, one store behind both.
+10 MCP tools, 15 default CLI commands plus the optional dashboard, one store behind both.
 
 ## Why it exists
 
@@ -33,6 +33,8 @@ with `cc`.
   directory foreign, and the store refuses it by name rather than guessing.
 - Map size: `AGENTBOARD_MAP_SIZE_MB`, default 1024. There is no growth in place; a
   bigger board means a bigger map before it is created.
+- Board format 2 stores eight named databases, including the board-assigned
+  project registry. Format 1 boards must be migrated before opening with this version.
 - `agentboard reset --yes` discards the board. It refuses while another process
   holds it, and it refuses to delete a directory with unknown files in it.
 
@@ -80,6 +82,9 @@ agentboard brief
 agentboard agents
 agentboard path
 agentboard reset --yes
+agentboard project add --name NAME --path PATH
+agentboard project ls
+agentboard project update ID [--name NAME] [--path PATH]
 agentboard serve
 agentboard dashboard [IP:PORT] [--db PATH]
 ```

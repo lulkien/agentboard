@@ -583,5 +583,19 @@ check "forced release with a reason and no comment exit" 0 "$code"
 has "forced release shows the reason in the feed" \
     "| the reviewer seat owns this now" "$("$B" feed --task 4 --kind updated)"
 
+fresh project-registry
+out=$("$B" project add --name "agentboard" --path "$PWD"); code=$?
+check "project add exit" 0 "$code"
+[[ "$out" =~ ^[0-9]+$ ]] && ok || bad "project add returns numeric id: '$out'"
+check "project add id" 1 "$out"
+out=$("$B" project ls); code=$?
+check "project ls exit" 0 "$code"
+has "project ls shows project name" "agentboard" "$out"
+has "project ls shows project path" "$PWD" "$out"
+out=$("$B" project update 1 --path "$PWD/updated"); code=$?
+check "project update exit" 0 "$code"
+has "project update returns updated path" "$PWD/updated" "$out"
+has "project ls sees updated path" "$PWD/updated" "$("$B" project ls)"
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]

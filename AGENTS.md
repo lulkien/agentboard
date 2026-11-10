@@ -36,10 +36,10 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 96 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 98 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` (default binary) | `299/299 passed (cli, lmdb)` |
+| `bash tests/cli.sh` (default binary) | `308/308 passed (cli, lmdb)` |
 | `AGENTBOARD_TEST_BIN=target/release/agentboard` with `bash tests/cli.sh` (dashboard-feature binary) | `301/301 passed (cli, lmdb)` |
 | `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
 | `python3 tests/mcp_client.py` | `180/180 passed (mcp, lmdb)` |
@@ -48,7 +48,7 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 108 CLI names, 138 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 114 CLI names, 138 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 13 gates passed`; with `--full` `GATES OK: 14 gates passed` |
 | `bash scripts/gate.sh --features dashboard` | `GATES OK: 15 gates passed` |
@@ -70,6 +70,8 @@ update the expectation here.
   wait), `wait` (per-row
   blocking wait that re-queries its watched set), `list` (list, brief),
   `tests`/`m3_tests` (store proofs).
+- The board format is version 2 and uses eight named databases, including
+  `projects`; format 1 boards refuse to open until migrated.
 - `src/render.rs` — the only place compact text is built, including the `…`
   truncation and the full-text path.
 - Epics are derived direct-child rollups in `store::epic`, shared by both
@@ -154,7 +156,7 @@ No file edit, no commit, no build, no install, no probe that creates state;
 
 - Pushing.
 - Wiping or migrating a live board.
-- Changing the board format or the seven database names.
+- Changing the board format or the eight database names.
 - Adding a dependency the task at hand does not need.
 
 ## Where the rest lives
