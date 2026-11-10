@@ -38,6 +38,9 @@ May:
 - `task_update` its own row: status, fields, the coder report, and the handoff to review
 - create and switch its task branch, and commit once on that branch
 - run builds, tests and board probes inside the repo the task names
+- before review, run the goal command and every named check, include their real
+  output lines in the coder report, and leave `target/release/agentboard` built
+  from the commit; a reviewer reopens the row if any of these are missing
 - deploy or install through the project's development tools and MCP when the row
   asks for it
 
@@ -58,18 +61,21 @@ Reads and judges. The review row is the work product.
 May:
 - `task_get` with `full=true`, `board_feed`, `task_list`, `board_brief`
 - read the row's branch, its last commit and its diff through git reads
+- run the repo's test suites against an already-built binary on scratch boards,
+  and run that binary directly on a scratch board
+- follow the entry skill's dashboard review procedure when the UI changed
 - `task_comment` findings as a short verdict line
 - `task_update` the row it reviews, with the reviewer report: `done`, back to
   `implementing` with the coder below the cap, or `planning` with the analyst at
   the cap
 
 Never:
-- edit files, commit, build, run tests, or install
-- use a browser for anything but the local dashboard; for a dashboard review,
-  the Claude reviewer may create a scratch board and run the already-built
-  dashboard as described in `skills/agentboard-reviewer/SKILL.md`. It must never
-  touch the live board or repository, and must stop the server and close its
-  browser.
+- edit tracked files, commit, build (`cargo build`, `cargo test`, `cargo clippy`,
+  `cargo install` or `bash scripts/gate.sh`), install, push, or touch another
+  task's branch
+- touch live state or leave behind server/browser processes; follow the entry
+  skill's scratch and cleanup requirements
+- run tests or the dashboard as Codex: that seat card remains git-only
 - close a row it did not review
 - accept "it should work" as evidence
 - let an unnecessary or verbose comment pass unnamed (rule: `agentboard-reviewer`)

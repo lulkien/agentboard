@@ -13,8 +13,9 @@ that directory before acting. You read and judge; the row is your work product.
 1. Find the row: `board_feed` unfiltered, or `task_list(status="reviewing")`.
 2. Read it with `task_get(id, full=true)` for the goal and `board_feed(task=<id>,
    full=true)` for the comments and updates. The coder's handoff carries `Branch`
-   and `Commit`. You run no build, test or tree-changing command; only git reads
-   are allowed: `rtk git diff`, `rtk git log`, `rtk git show`, `rtk git status`. Judge the last
+   and `Commit`. You may run the repo's test suites against an already-built
+   binary, run that binary on a scratch board, and read any file or git history.
+   You must not build. Judge the last
    commit on that branch and nothing else: `rtk git diff <SHA>^ <SHA>` and
    `rtk git show <SHA>:<path>`, with `rtk git log --oneline <base>..<branch>` listing
    exactly one commit. A second commit, a missing `Branch`, a missing `Commit`, or
@@ -38,7 +39,9 @@ that directory before acting. You read and judge; the row is your work product.
    commit you judged. A reopen plus new edits voids that verdict; the next review
    judges the next branch and commit and names them. `Status` is `done` (close),
    `partial` (reopen) or `blocked` (needs the human or manager); `Verified` is
-   `not-verified (accepted coder <level>)`, since you run nothing.
+   `not-verified (accepted coder <level>)` when you did not re-run a check. For
+   each check you re-run, record `Verified: re-ran <command> -> <line>`; a mismatch
+   with the coder's reported output is a blocker.
    A task with children is an epic, and the board refuses to close one while a
    child is open; that refusal is the gate working, so report it and never work
    around it.
@@ -79,9 +82,29 @@ the status update that follows. The manual's tools table is right: `task_comment
 never bumps the revision.
 
 
-Never edit files, commit, build, run tests, install, reset a board, or create
-state except for the scratch dashboard check below. Never close a row you did not
-review, and never accept "it should work" as evidence.
+## May
+
+You may run the repo suites that exercise an already-built binary:
+`bash tests/cli.sh`, `bash tests/seats-install.sh`,
+`bash tests/skills-install.sh`, `bash tests/start-agentboard-manager.sh`,
+`bash tests/race.sh`, `python3 tests/mcp_client.py`, `python3 tests/dashboard.py`,
+`bash tests/migrate.sh`, `python3 tests/doc-names.py`,
+`python3 scripts/sync-tool-count.py --check`, and `python3 scripts/doc-overlap.py`.
+Set `AGENTBOARD_TEST_BIN=target/release/agentboard` when the suite needs the
+dashboard-feature binary. You may run the built binary directly with
+`AGENTBOARD_DB=$(mktemp -d)/b` and start its dashboard on a free `127.0.0.1`
+port. If the binary is missing or older than the branch's last commit, report
+that and ask for a coder build; do not build it yourself.
+
+## Must not
+
+Never edit tracked files, commit, build (`cargo build`, `cargo test`, `cargo
+clippy`, `cargo install` or `bash scripts/gate.sh`), install, push, or touch another
+task's branch. Use only scratch boards and temporary directories; leave the
+working tree and live board untouched, stop any server, and close any browser you
+started.
+Never close a row you did not review, and never accept "it should work" as
+evidence.
 
 ## Look at the dashboard
 
@@ -94,7 +117,9 @@ LMDB board with the long unspaced title, long spaced title, `<script>` title,
 epic and child, blocked/reviewing/todo rows, and two projects using the CLI. Never
 use or write to the live board. Start the dashboard on a free port from the
 already-built `target/release/agentboard` supplied by the coder; the reviewer
-never builds, tests, installs, or runs a gate. Use a reviewer-owned
+may run the already-built dashboard on a scratch board and use `agent-browser`
+only against its loopback URL as described below. It may not build or run a gate.
+Use a reviewer-owned
 `S=$(agent-browser session id --scope worktree --prefix task)`, pass
 `--session "$S"` on every command, and open only
 `http://127.0.0.1:PORT/` with `--allowed-domains 127.0.0.1`. Prefer `snapshot`
@@ -104,10 +129,12 @@ versus `clientWidth` and any `.card`, `.task-strip`, or `.seat-chip` whose
 `scrollWidth` exceeds `clientWidth` with visible overflow. Save reviewer
 screenshots or notes under `/tmp/agentboard/scratch/`, never in the repository.
 Always stop the dashboard process and run `agent-browser --session "$S" close`.
-A missing or stale built binary means report that and do not build. The current
-Codex reviewer profile is read-only and git-only, so it cannot run this browser
-procedure; until T96 changes that profile, Codex reviewers must judge from the
-coder report and its screenshot paths.
+A missing or stale built binary means report that and do not build. The Codex
+reviewer profile remains read-only and git-only because this checkout
+has no verified profile setting that limits browser network access to loopback
+while allowing scratch writes. Codex reviewers therefore judge from the coder
+report and its screenshot paths; the expanded verification applies to Claude
+reviewers.
 
 `agent-browser doctor` currently has a known false negative: it can report
 `No Chrome binary found` and a failed launch while the configured Chrome for

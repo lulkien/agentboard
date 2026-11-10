@@ -154,15 +154,17 @@ have both adapters call it, so a rule exists once.
 
 ## If you are the reviewer
 
-You read and judge; you never edit. Inputs: the commit or row the brief names, its
-`description` and `goal`. Output: findings classified blocker, follow-up or nit.
-No file edit, no commit, no build, no test, no install. For a dashboard UI change,
-the Claude reviewer may start the already-built dashboard on a scratch board and
-use `agent-browser` only against its local loopback URL, following
+Reviewers read and judge the commit or row the brief names, its `description` and
+`goal`. They report findings classified blocker, follow-up or nit.
+Reviewers may re-run suites against the already-built binary on scratch boards,
+and directly run that binary on a scratch board; they never build. For a dashboard
+UI change, the Claude reviewer may start the already-built dashboard on a scratch
+board and use `agent-browser` only against its local loopback URL, following
 `skills/agentboard-reviewer/SKILL.md`; screenshots and notes stay outside the
-repository, and the server and browser must be stopped. The current Codex reviewer
-profile is read-only/git-only and cannot run this procedure; Codex reviewers must
-judge from the coder report and screenshot paths until T96 changes that profile.
+repository, and the server and browser must be stopped. The Codex reviewer profile
+remains read-only/git-only because no verified setting safely bounds browser
+network access to loopback while permitting scratch writes; Codex reviewers judge
+from the coder report and screenshot paths.
 `git status --short` stays clean apart from the one report file the brief allows.
 
 ## Decide with the human, not alone

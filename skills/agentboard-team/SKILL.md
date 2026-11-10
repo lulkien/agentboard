@@ -137,7 +137,8 @@ that idles. Pick one kind per team; do not mix Claude and Codex rows of the tabl
 in one launch unless the human asks.
 
 The deny list removes the four file-mutation tools only; the shell stays open, and
-the seat's own rules (analyst and reviewer never commit, build or install; the
+the seat's own rules (analyst never commits, builds or installs; reviewer never
+commits, builds or installs; the
 coder commits only on its task branch) are what cover it.
 
 A launch prompt uses `--wait` for proof it landed; without it a stalled prompt (an
@@ -214,7 +215,8 @@ terminal that idles. Pick one kind per team; do not mix Claude and Codex rows of
 table in one launch unless the human asks.
 
 The deny list removes the four file-mutation tools only; the shell stays open, and
-the seat's own rules (analyst and reviewer never commit, build or install; the
+the seat's own rules (analyst never commits, builds or installs; reviewer never
+commits, builds or installs; the
 coder commits only on its task branch) are what cover it.
 
 Wake every seat with a plain `hc send`, never `--if idle`: it accepts only `idle` or

@@ -33,7 +33,11 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    reviewer reads the last commit only. Never push, never merge into the working
    branch, and never switch to another task's branch.
 
-   Then run the checks its goal names and keep the real output.
+   Before handing the row to review, run the goal's own command and every check
+   it names. Keep each command's real output line in the coder report, and leave
+   `target/release/agentboard` built from the committed code for the reviewer.
+   The reviewer reopens a row handed over without the required checks, their
+   output, or that current release binary.
 4. Write the coder report and the short comment in the same call:
    `task_update(id, if_revision, coder_report=..., comment=...)`. The report
    carries the handoff shape from `workflow.md` (Reports and evidence): `Status`,

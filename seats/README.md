@@ -110,7 +110,13 @@ board tool.
   `git diff`, `git log`, `git show` and `git status`; the sandbox refuses every
   write. Rules live per `CODEX_HOME`, not per profile, so the coder and manager's
   git write subcommands are in the same file; the reviewer cannot use them because
-  its sandbox is read-only.
+  its sandbox is read-only. The profile also cannot create scratch boards or run
+  tests. It remains unchanged because Codex's documented
+  `sandbox_workspace_write.network_access` option is a boolean for outbound
+  network access; it has no loopback-only host allowlist, so it cannot permit the
+  local dashboard while denying other network access. The expanded verification
+  and local dashboard procedure apply to Claude reviewers; Codex reviewers rely
+  on the coder's report and screenshots.
 
 ## Claude
 
