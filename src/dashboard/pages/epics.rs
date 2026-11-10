@@ -9,24 +9,27 @@ use crate::dashboard::template::{Fragment, Template, html as html_slot, text};
 const CHILD_STRIP_CAP: usize = 4;
 
 const EPICS: Template = Template::new("epics", include_str!("../templates/epics.html"));
-const EMPTY: Template = Template::new("epics-empty", "<p class=\"empty panel\">No epics yet</p>");
+const EMPTY: Template = Template::new("epics-empty", include_str!("../templates/epics-empty.html"));
 const EPIC_ROW: Template = Template::new("epic-row", include_str!("../templates/epic-row.html"));
 const PARENT_LINK: Template = Template::new(
     "epic-parent-link",
-    "<a class=\"meta\" href=\"{{href}}\">in T{{parent}}</a>",
+    include_str!("../templates/epic-parent-link.html"),
 );
 const SVG_RECT: Template = Template::new(
     "epic-svg-rect",
-    "<rect class=\"status-{{status}}\" x=\"{{x}}\" y=\"0\" width=\"{{width}}\" height=\"10\"></rect>",
+    include_str!("../templates/epic-svg-rect.html"),
 );
 const COUNT_ITEM: Template = Template::new(
     "epic-count-item",
-    "<li class=\"status-{{status}}\">{{status}}: <strong>{{count}}</strong></li>",
+    include_str!("../templates/epic-count-item.html"),
 );
-const CHILD_ITEM: Template = Template::new("epic-child-item", "<li>{{strip}}</li>");
+const CHILD_ITEM: Template = Template::new(
+    "epic-child-item",
+    include_str!("../templates/epic-child-item.html"),
+);
 const MORE_CHILDREN: Template = Template::new(
     "epic-more-children",
-    "<p class=\"epic-more\"><a href=\"{{href}}\">+{{count}} more</a></p>",
+    include_str!("../templates/epic-more-children.html"),
 );
 
 pub(super) fn epics(

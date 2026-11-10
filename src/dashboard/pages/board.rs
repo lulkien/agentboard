@@ -15,11 +15,18 @@ const ATTENTION: Template = Template::new(
     "board-attention",
     include_str!("../templates/board-attention.html"),
 );
-const LIST_ITEM: Template = Template::new("board-list-item", "<li>{{content}}</li>");
-const MORE: Template = Template::new("board-more", "<a href=\"{{href}}\">+{{count}} more</a>");
+const EMPTY_ATTENTION: Template = Template::new(
+    "board-empty-attention",
+    include_str!("../templates/board-empty-attention.html"),
+);
+const LIST_ITEM: Template = Template::new(
+    "board-list-item",
+    include_str!("../templates/board-list-item.html"),
+);
+const MORE: Template = Template::new("board-more", include_str!("../templates/board-more.html"));
 const MORE_TASKS: Template = Template::new(
     "board-more-tasks",
-    "<a href=\"{{href}}\">+{{count}} more tasks</a>",
+    include_str!("../templates/board-more-tasks.html"),
 );
 const SEATS: Template = Template::new("board-seats", include_str!("../templates/board-seats.html"));
 const SEAT: Template = Template::new("board-seat", include_str!("../templates/board-seat.html"));
@@ -27,23 +34,20 @@ const HELD: Template = Template::new(
     "board-seat-held",
     include_str!("../templates/board-seat-held.html"),
 );
-const IDLE: Template = Template::new("board-idle", "<p class=\"empty\">idle{{last_seen}}</p>");
+const IDLE: Template = Template::new("board-idle", include_str!("../templates/board-idle.html"));
 const LAST_SEEN: Template = Template::new(
     "board-last-seen",
-    "{{space}}· last seen <time datetime=\"{{timestamp}}\">{{timestamp}}</time>",
+    include_str!("../templates/board-last-seen.html"),
 );
-const BAYS: Template = Template::new(
-    "board-bays",
-    "<div class=\"status-bays\">{{bays}}{{closed_counts}}</div>",
-);
+const BAYS: Template = Template::new("board-bays", include_str!("../templates/board-bays.html"));
 const BAY: Template = Template::new("board-bay", include_str!("../templates/board-bay.html"));
 const CLOSED_COUNTS: Template = Template::new(
     "board-closed-counts",
-    "<p class=\"closed-counts\">Closed: {{counts}}</p>",
+    include_str!("../templates/board-closed-counts.html"),
 );
 const CLOSED_COUNT: Template = Template::new(
     "board-closed-count",
-    "<a href=\"{{href}}\">{{status}} {{count}}</a> ",
+    include_str!("../templates/board-closed-count.html"),
 );
 
 pub(super) fn board_page(
@@ -58,7 +62,7 @@ pub(super) fn board_page(
         .map(|task| strip_item(task, project))
         .collect();
     let empty_attention = if overview.attention.is_empty() {
-        Fragment::lit("<li class=\"empty\">No rows need attention</li>")
+        EMPTY_ATTENTION.fill(&[])
     } else {
         Fragment::empty()
     };
@@ -118,6 +122,7 @@ pub(super) fn board_page(
                     .and_then(|agent| agent.last_seen_ms)
                     .map_or_else(Fragment::empty, |ts| {
                         LAST_SEEN.fill(&[
+                            // Template normalization trims source indentation, so preserve this space as slot data.
                             ("space", text(" ")),
                             ("timestamp", text(format_timestamp(ts))),
                         ])
