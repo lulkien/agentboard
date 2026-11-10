@@ -21,6 +21,7 @@ BIN = Path(os.environ.get("AGENTBOARD_TEST_BIN", ROOT / "target/debug/agentboard
 PAGE_SIZE = 20
 CSP = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 READ_ONLY_DB = None
+BASELINE = os.environ.get("AGENTBOARD_DASHBOARD_BASELINE")
 
 
 def run_cli(db: Path, *args: str) -> str:
@@ -74,6 +75,98 @@ def raw_request(
         for name, value in [line.split(":", 1)]
     }
     return status, body.decode(), parsed_headers
+
+
+def compare_baseline(db: Path, current_port: int, baseline: str) -> None:
+    baseline_bin = Path(baseline)
+    if not baseline_bin.is_absolute():
+        baseline_bin = ROOT / baseline_bin
+    if not baseline_bin.is_file():
+        raise AssertionError(f"dashboard baseline binary not found: {baseline_bin}")
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        baseline_port = probe.getsockname()[1]
+    env = os.environ.copy()
+    env.pop("AGENTBOARD_DB", None)
+    server = subprocess.Popen(
+        [str(baseline_bin), "dashboard", f"127.0.0.1:{baseline_port}", "--db", str(db)],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        for _ in range(50):
+            if server.poll() is not None:
+                raise AssertionError(f"baseline dashboard exited early with code {server.returncode}")
+            try:
+                request(baseline_port, "GET", "/")
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise AssertionError("baseline dashboard did not accept connections")
+
+        feed_status, feed_body, _headers = request(
+            current_port, "GET", "/feed?task=3&kind=commented"
+        )
+        assert feed_status == 200, "filtered feed failed before baseline comparison"
+        older = re.search(
+            r'href="(/feed\?task=3&amp;kind=commented&amp;before=[^"]+)"', feed_body
+        )
+        assert older, "older feed link missing before baseline comparison"
+        older_feed = older.group(1).replace("&amp;", "&")
+
+        pages = [
+            "/",
+            "/epics",
+            "/tasks",
+            "/tasks?status=todo",
+            "/tasks?offset=20",
+            "/tasks?parent=1",
+            "/tasks?assignee=alice%3C%26",
+            "/tasks/1",
+            "/tasks/3",
+            "/tasks/2",
+            "/feed",
+            "/feed?task=3&kind=commented",
+            older_feed,
+        ]
+        targets = pages + [
+            f"{page}{'&' if '?' in page else '?'}project=1" for page in pages
+        ]
+        targets.extend(
+            ["/tasks?project=0", "/elsewhere", "/assets/dashboard.css", "/assets/theme.js"]
+        )
+        assert len(targets) == 30, f"baseline URL list changed: expected 30, got {len(targets)}"
+
+        for target in targets:
+            actual_status, actual_body, actual_headers = request(current_port, "GET", target)
+            baseline_status, baseline_body, baseline_headers = request(
+                baseline_port, "GET", target
+            )
+            if actual_status != baseline_status:
+                raise AssertionError(
+                    f"baseline mismatch for {target}: status {actual_status} != {baseline_status}"
+                )
+            if actual_body.encode() != baseline_body.encode():
+                raise AssertionError(f"baseline mismatch for {target}: response body differs")
+            for header in ("content-type", "content-security-policy"):
+                if actual_headers.get(header) != baseline_headers.get(header):
+                    raise AssertionError(
+                        f"baseline mismatch for {target}: {header} differs "
+                        f"({actual_headers.get(header)!r} != {baseline_headers.get(header)!r})"
+                    )
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=3)
+
+    print("dashboard: 30 pages byte-identical to baseline")
 
 
 def feed_cursor(db: Path) -> str:
@@ -395,6 +488,9 @@ def main() -> int:
             scoped_epics_status, scoped_epics, _headers = request(port, "GET", "/epics?project=1")
             assert scoped_epics_status == 200 and "Scoped child" in scoped_epics and "Foreign child" not in scoped_epics, "epic child strips ignored project scope"
             assert 'href="/tasks/56?project=1"' in scoped_epics, "scoped epic child link dropped its project"
+
+            if BASELINE:
+                compare_baseline(db, port, BASELINE)
 
             with socket.create_connection(("127.0.0.1", port), timeout=4) as connection:
                 connection.settimeout(4)
