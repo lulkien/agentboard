@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>{{title}} | Agentboard</title>
+    <link rel="stylesheet" href="/assets/dashboard.css">
+    <script defer src="/assets/theme.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" href="{{board_url}}">Agentboard</a>
+      <nav aria-label="Main navigation">
+        <a class="{{board_class}}" href="{{board_url}}"{{board_current}}>Board</a>
+        <a class="{{epics_class}}" href="{{epics_url}}"{{epics_current}}>Epics</a>
+        <a class="{{tasks_class}}" href="{{tasks_url}}"{{tasks_current}}>Tasks</a>
+        <a class="{{feed_class}}" href="{{feed_url}}"{{feed_current}}>Feed</a>
+      </nav>
+      <form class="project-switcher" method="get" action="{{action}}">
+        <select class="header-control" name="project" aria-label="Project">
+          <option value=""{{all_projects_selected}}>All projects</option>{{project_options}}
+        </select>
+        <button class="header-control" type="submit">Show</button>
+      </form>
+    </header>
+    <main id="main">
+      <h1>{{title}}</h1>{{content}}
+    </main>
+    <footer>
+      <button class="header-control theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Change theme" title="Change theme">Change theme</button>
+    </footer>
+  </body>
+</html>

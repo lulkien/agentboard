@@ -6,17 +6,18 @@ use agentboard::store::TaskPage;
 use super::PAGE_SIZE;
 use crate::dashboard::html;
 use crate::dashboard::routes::{Filters, Page};
+use crate::dashboard::template::Fragment;
 
 pub(super) fn tasks(
     page: &TaskPage,
     counts: &[(Status, u64)],
     filters: &Filters,
     projects: &[Project],
-) -> String {
+) -> Fragment {
     let total: u64 = counts.iter().map(|(_, count)| count).sum();
     let mut body = format!(
         "<nav class=\"status-chips\" aria-label=\"Task status\"><a class=\"status-chip\" href=\"{}\"{}>All {total}</a>",
-        html::escape(&html::query_url(
+        html::text(html::query_url(
             &Filters {
                 status: None,
                 ..filters.clone()
@@ -41,7 +42,7 @@ pub(super) fn tasks(
             body,
             "<a class=\"status-chip status-{}\" href=\"{}\"{}>{} {count}</a>",
             status.as_str(),
-            html::escape(&href),
+            html::text(&href),
             if filters.status == Some(*status) {
                 " aria-current=\"true\""
             } else {
@@ -64,7 +65,7 @@ pub(super) fn tasks(
             status.as_str()
         );
     }
-    let assignee = html::escape(filters.assignee.as_deref().unwrap_or_default());
+    let assignee = html::text(filters.assignee.as_deref().unwrap_or_default());
     let parent = filters.parent.map(|id| id.to_string()).unwrap_or_default();
     let _ = write!(
         body,
@@ -80,7 +81,7 @@ pub(super) fn tasks(
         let _ = write!(
             body,
             "<p class=\"filter-note\">Showing direct children of epic <a href=\"{}\">T{id}</a></p>",
-            html::escape(&html::url(&format!("/tasks?parent={id}"), filters.project))
+            html::text(html::url(&format!("/tasks?parent={id}"), filters.project))
         );
     }
     let offset = filters.offset.min(page.total);
@@ -106,7 +107,7 @@ pub(super) fn tasks(
         let _ = write!(
             body,
             "<a class=\"page-arrow\" aria-label=\"Previous page\" rel=\"prev\" href=\"{}\">←</a>",
-            html::escape(&html::query_url(
+            html::text(html::query_url(
                 filters,
                 Some(offset.saturating_sub(PAGE_SIZE))
             ))
@@ -119,7 +120,7 @@ pub(super) fn tasks(
         let _ = write!(
             body,
             "<a class=\"page-arrow\" aria-label=\"Next page\" rel=\"next\" href=\"{}\">→</a>",
-            html::escape(&html::query_url(
+            html::text(html::query_url(
                 filters,
                 Some(offset.saturating_add(page.tasks.len()))
             ))
@@ -130,16 +131,22 @@ pub(super) fn tasks(
         );
     }
     body.push_str("</nav></section>");
-    html::shell("Tasks", Page::Tasks, &body, filters.project, projects)
+    html::shell(
+        "Tasks",
+        Page::Tasks,
+        Fragment::from_legacy(body),
+        filters.project,
+        projects,
+    )
 }
 
 fn render_task_row(out: &mut String, task: &Task, project_scope: Option<u64>) {
-    let assignee = html::escape(task.assignee.as_deref().unwrap_or("—"));
+    let assignee = html::text(task.assignee.as_deref().unwrap_or("—"));
     let project = task
         .project_id
         .map_or_else(|| "—".to_owned(), |id| id.to_string());
-    let title = html::escape(&task.title);
-    let href = html::escape(&html::url(&format!("/tasks/{}", task.id), project_scope));
+    let title = html::text(&task.title);
+    let href = html::text(html::url(&format!("/tasks/{}", task.id), project_scope));
     let _ = write!(
         out,
         "<tr><td><a href=\"{href}\">T{}</a></td><td>{}</td><td>{title}</td><td>{assignee}</td><td class=\"path\">{project}</td><td class=\"priority\">{}</td></tr>",

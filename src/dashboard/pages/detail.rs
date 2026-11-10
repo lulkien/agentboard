@@ -7,13 +7,14 @@ use super::PageError;
 use super::time::format_timestamp;
 use crate::dashboard::html;
 use crate::dashboard::routes::Page;
+use crate::dashboard::template::Fragment;
 
 pub(super) fn detail(
     board: &Board,
     id: u64,
     project: Option<u64>,
     projects: &[Project],
-) -> Result<String, PageError> {
+) -> Result<Fragment, PageError> {
     let task = board
         .get(id)
         .map_err(|e| PageError::Store(e.to_string()))?
@@ -65,18 +66,18 @@ fn task_detail(
     events: &[agentboard::domain::Event],
     project: Option<u64>,
     projects: &[Project],
-) -> String {
+) -> Fragment {
     let mut body = String::new();
-    let title = html::escape(&task.title);
-    let tasks_href = html::escape(&html::url("/tasks", project));
+    let title = html::text(&task.title);
+    let tasks_href = html::text(html::url("/tasks", project));
     let _ = write!(
         body,
         "<nav class=\"breadcrumbs\" aria-label=\"Breadcrumb\"><a href=\"{tasks_href}\">Tasks</a> <span aria-hidden=\"true\">/</span> <span>T{}</span></nav><header class=\"issue-header\"><p class=\"meta\">Task T{}</p><div class=\"card-heading\"><h2>{title}</h2>{}</div></header><div class=\"detail-layout\"><div class=\"detail-main\"><section class=\"panel text-section\" id=\"goal\"><h2>Goal</h2><div class=\"full-text\">{}</div></section><section class=\"panel text-section\" id=\"description\"><h2>Description</h2><div class=\"full-text\">{}</div></section>",
         task.id,
         task.id,
         html::status_badge(task.status),
-        html::escape(&task.goal),
-        html::escape(&task.description)
+        html::text(&task.goal),
+        html::text(&task.description)
     );
     for (id, heading, report) in [
         (
@@ -95,7 +96,7 @@ fn task_detail(
             let _ = write!(
                 body,
                 "<section class=\"panel text-section\" id=\"{id}\"><h2>{heading}</h2><div class=\"full-text\">{}</div></section>",
-                html::escape(report)
+                html::text(report)
             );
         }
     }
@@ -128,7 +129,7 @@ fn task_detail(
             epic.done, epic.total, title, epic.done, epic.total
         );
         for child in &children.tasks {
-            let href = html::escape(&html::url(&format!("/tasks/{}", child.id), project));
+            let href = html::url(&format!("/tasks/{}", child.id), project);
             let _ = write!(
                 &mut children_section,
                 "<li>{}</li>",
@@ -137,7 +138,7 @@ fn task_detail(
         }
         children_section.push_str("</ul>");
         if children.total > children.tasks.len() {
-            let href = html::escape(&html::url(&format!("/tasks?parent={}", task.id), project));
+            let href = html::text(html::url(&format!("/tasks?parent={}", task.id), project));
             let _ = write!(
                 &mut children_section,
                 "<p><a href=\"{href}\">View all {} child tasks</a></p>",
@@ -146,7 +147,7 @@ fn task_detail(
         }
         children_section.push_str("</section>");
     }
-    let history_href = html::escape(&html::url(&format!("/feed?task={}", task.id), project));
+    let history_href = html::text(html::url(&format!("/feed?task={}", task.id), project));
     let _ = write!(
         body,
         "<section class=\"panel activity\" id=\"activity\"><div class=\"card-heading\"><h2>Activity</h2><a href=\"{history_href}\">Older history</a></div>"
@@ -156,7 +157,7 @@ fn task_detail(
     } else {
         body.push_str("<ol class=\"timeline\">");
         for event in events {
-            let actor = html::escape(&event.actor);
+            let actor = html::text(&event.actor);
             let kind = event.kind.as_str();
             let timestamp = format_timestamp(event.timestamp_ms);
             let _ = write!(
@@ -178,7 +179,7 @@ fn task_detail(
                 let _ = write!(
                     body,
                     "<div class=\"full-text event-text\">{}</div>",
-                    html::escape(text)
+                    html::text(text)
                 );
             } else if event.kind == EventKind::Updated {
                 let mut changes = Vec::new();
@@ -201,9 +202,9 @@ fn task_detail(
                         let _ = write!(
                             body,
                             "<li><strong>{}</strong>: {} → {}</li>",
-                            html::escape(field),
-                            html::escape(&old),
-                            html::escape(&new)
+                            html::text(field),
+                            html::text(&old),
+                            html::text(&new)
                         );
                     }
                     body.push_str("</ul>");
@@ -222,11 +223,11 @@ fn task_detail(
     body.push_str(
         "<section class=\"panel metadata\" aria-label=\"Task metadata\"><h2>Details</h2><dl>",
     );
-    metadata_item(&mut body, "Status", &html::status_badge(task.status));
+    metadata_item(&mut body, "Status", html::status_badge(task.status));
     metadata_item(
         &mut body,
         "Priority",
-        &format!(
+        format!(
             "<span class=\"priority priority-value\">{}</span>",
             task.priority
         ),
@@ -234,44 +235,44 @@ fn task_detail(
     metadata_item(
         &mut body,
         "Assignee",
-        &html::escape(task.assignee.as_deref().unwrap_or("Unassigned")),
+        html::text(task.assignee.as_deref().unwrap_or("Unassigned")),
     );
-    metadata_item(&mut body, "Reporter", &html::escape(&task.reporter));
+    metadata_item(&mut body, "Reporter", html::text(&task.reporter));
     if let Some(parent) = task.parent_id {
-        let href = html::escape(&html::url(&format!("/tasks/{parent}"), project));
+        let href = html::text(html::url(&format!("/tasks/{parent}"), project));
         metadata_item(
             &mut body,
             "Parent",
-            &format!("<a href=\"{href}\">T{parent}</a>"),
+            format!("<a href=\"{href}\">T{parent}</a>"),
         );
     }
     metadata_item(
         &mut body,
         "Project",
-        &html::escape(
+        html::text(
             task.project_id
                 .map_or_else(|| "—".to_owned(), |id| id.to_string())
                 .as_str(),
         ),
     );
-    metadata_item(&mut body, "Revision", &task.revision.to_string());
+    metadata_item(&mut body, "Revision", task.revision.to_string());
     let created = format_timestamp(task.created_at_ms);
     metadata_item(
         &mut body,
         "Created",
-        &format!("<time datetime=\"{created}\">{created}</time>"),
+        format!("<time datetime=\"{created}\">{created}</time>"),
     );
     let updated = format_timestamp(task.updated_at_ms);
     metadata_item(
         &mut body,
         "Updated",
-        &format!("<time datetime=\"{updated}\">{updated}</time>"),
+        format!("<time datetime=\"{updated}\">{updated}</time>"),
     );
     body.push_str("</dl></section></aside></div>");
     html::shell(
         &format!("T{} | {}", task.id, task.title),
         Page::Detail(task.id),
-        &body,
+        Fragment::from_legacy(body),
         project,
         projects,
     )
@@ -285,7 +286,7 @@ fn display_value(value: &serde_json::Value) -> String {
     }
 }
 
-fn metadata_item(body: &mut String, label: &str, value: &str) {
+fn metadata_item(body: &mut String, label: &str, value: impl std::fmt::Display) {
     let _ = write!(
         body,
         "<div class=\"metadata-row\"><dt>{label}</dt><dd>{value}</dd></div>"

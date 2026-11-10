@@ -7,12 +7,13 @@ use super::time::format_timestamp;
 use super::{PAGE_SIZE, PageError};
 use crate::dashboard::html;
 use crate::dashboard::routes::{Filters, Page};
+use crate::dashboard::template::Fragment;
 
 pub(super) fn feed(
     board: &Board,
     filters: Filters,
     projects: &[Project],
-) -> Result<String, PageError> {
+) -> Result<Fragment, PageError> {
     let filter = FeedFilter {
         task: filters.feed_task,
         kind: filters.feed_kind,
@@ -77,7 +78,7 @@ fn feed_page(
     before: Option<Cursor>,
     project: Option<u64>,
     projects: &[Project],
-) -> String {
+) -> Fragment {
     let task_id = filter.task;
     let kind = filter.kind;
     let mut body = String::from(
@@ -121,7 +122,7 @@ fn feed_page(
     }
     body.push_str("<nav class=\"pagination\" aria-label=\"Feed pages\">");
     if let Some(before) = before.filter(|_| older) {
-        let href = html::escape(&html::feed_url(
+        let href = html::text(html::feed_url(
             task_id,
             kind,
             Some(&before.encode()),
@@ -129,16 +130,22 @@ fn feed_page(
         ));
         let _ = write!(body, "<a href=\"{href}\">Older events</a>");
     }
-    let newest = html::escape(&html::feed_url(task_id, kind, None, project));
+    let newest = html::text(html::feed_url(task_id, kind, None, project));
     let _ = write!(body, "<a href=\"{newest}\">Newest</a></nav></section>");
-    html::shell("Feed", Page::Feed, &body, project, projects)
+    html::shell(
+        "Feed",
+        Page::Feed,
+        Fragment::from_legacy(body),
+        project,
+        projects,
+    )
 }
 
 fn render_feed_event(body: &mut String, event: &agentboard::domain::Event, project: Option<u64>) {
-    let actor = html::escape(&event.actor);
+    let actor = html::text(&event.actor);
     let kind = event.kind.as_str();
     let timestamp = format_timestamp(event.timestamp_ms);
-    let href = html::escape(&html::url(&format!("/tasks/{}", event.task_id), project));
+    let href = html::text(html::url(&format!("/tasks/{}", event.task_id), project));
     let _ = write!(
         body,
         "<li><article class=\"feed-event\"><header class=\"timeline-heading\"><span class=\"badge event-kind\">{kind}</span><a href=\"{href}\">T{}</a><span class=\"meta\">by {actor}</span><time datetime=\"{timestamp}\">{timestamp}</time></header>",
@@ -152,7 +159,7 @@ fn render_feed_event(body: &mut String, event: &agentboard::domain::Event, proje
         let _ = write!(
             body,
             "<div class=\"full-text event-text\">{}</div>",
-            html::escape(text)
+            html::text(text)
         );
     } else {
         let mut has_text = false;
@@ -161,7 +168,7 @@ fn render_feed_event(body: &mut String, event: &agentboard::domain::Event, proje
                 let _ = write!(
                     body,
                     "<p class=\"full-text event-text\"><strong>{label}:</strong> {}</p>",
-                    html::escape(text)
+                    html::text(text)
                 );
                 has_text = true;
             }
@@ -172,7 +179,7 @@ fn render_feed_event(body: &mut String, event: &agentboard::domain::Event, proje
             let _ = write!(
                 body,
                 "<pre class=\"full-text event-text\">{}</pre>",
-                html::escape(&text)
+                html::text(&text)
             );
             has_text = true;
         }

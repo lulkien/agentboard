@@ -6,6 +6,7 @@ use agentboard::store::{Board, Brief, Epic, ListFilter};
 use super::PageError;
 use crate::dashboard::html;
 use crate::dashboard::routes::Page;
+use crate::dashboard::template::Fragment;
 
 const CHILD_STRIP_CAP: usize = 4;
 
@@ -14,7 +15,7 @@ pub(super) fn epics(
     brief: &Brief,
     project: Option<u64>,
     projects: &[Project],
-) -> Result<String, PageError> {
+) -> Result<Fragment, PageError> {
     let mut body = String::from("<section class=\"epic-list\" aria-label=\"Epics\">");
     if brief.epics.is_empty() {
         body.push_str("<p class=\"empty panel\">No epics yet</p>");
@@ -43,7 +44,13 @@ pub(super) fn epics(
         }
     }
     body.push_str("</section>");
-    Ok(html::shell("Epics", Page::Epics, &body, project, projects))
+    Ok(html::shell(
+        "Epics",
+        Page::Epics,
+        Fragment::from_legacy(body),
+        project,
+        projects,
+    ))
 }
 
 fn epic_depth(epic: &Epic, epics: &[Epic]) -> usize {
@@ -76,7 +83,7 @@ fn render_epic(
     let parent_link = task
         .parent_id
         .map(|parent| {
-            let href = html::escape(&html::url(&format!("/tasks/{parent}"), project));
+            let href = html::text(html::url(&format!("/tasks/{parent}"), project));
             format!("<a class=\"meta\" href=\"{href}\">in T{parent}</a>")
         })
         .unwrap_or_default();
@@ -124,7 +131,7 @@ fn render_epic(
             );
         }
     }
-    let children_href = html::escape(&html::url(&format!("/tasks?parent={}", task.id), project));
+    let children_href = html::text(html::url(&format!("/tasks?parent={}", task.id), project));
     let _ = write!(
         body,
         "</ul><a href=\"{children_href}\">All children</a></div><ul class=\"strip-list epic-children\">"
@@ -136,7 +143,7 @@ fn render_epic(
     body.push_str("</ul>");
     if child_total > children.len() {
         let more = child_total - children.len();
-        let href = html::escape(&html::url(&format!("/tasks?parent={}", task.id), project));
+        let href = html::text(html::url(&format!("/tasks?parent={}", task.id), project));
         let _ = write!(
             body,
             "<p class=\"epic-more\"><a href=\"{href}\">+{more} more</a></p>"

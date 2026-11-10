@@ -10,6 +10,10 @@ use agentboard::store::{Board, BoardOptions};
 mod html;
 mod pages;
 mod routes;
+mod template;
+
+const ERROR_TEMPLATE: template::Template =
+    template::Template::new("error", include_str!("dashboard/templates/error.html"));
 
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
@@ -262,12 +266,10 @@ fn respond(stream: &mut TcpStream, board: &Board, bound_address: SocketAddr) -> 
             );
         }
         Err(pages::PageError::Store(message)) => {
-            let escaped = html::escape(&message);
-            format!(
-                "<!doctype html><html><body><h1>Board read failed</h1><p>{escaped}</p></body></html>"
-            )
+            ERROR_TEMPLATE.fill(&[("message", template::text(message))])
         }
     };
+    let body = body.into_string();
     response(stream, "200 OK", "text/html; charset=utf-8", &body)
 }
 

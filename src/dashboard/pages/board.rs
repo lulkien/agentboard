@@ -4,7 +4,7 @@ use agentboard::domain::{Project, Status, Task};
 use agentboard::store::{Agent, Overview};
 
 use super::time::format_timestamp;
-use crate::dashboard::{html, routes::Page};
+use crate::dashboard::{html, routes::Page, template::Fragment};
 
 const SEAT_CAP: usize = 5;
 
@@ -13,7 +13,7 @@ pub(super) fn board_page(
     agents: &[Agent],
     project: Option<u64>,
     projects: &[Project],
-) -> String {
+) -> Fragment {
     let mut body = String::new();
     let _ = write!(
         body,
@@ -31,7 +31,7 @@ pub(super) fn board_page(
         let _ = write!(
             body,
             "<a href=\"{}\">+{} more tasks</a>",
-            html::escape(&html::url("/tasks", project)),
+            html::text(html::url("/tasks", project)),
             overview.attention_total - overview.attention.len()
         );
     }
@@ -48,7 +48,7 @@ pub(super) fn board_page(
         let _ = write!(
             body,
             "<section class=\"seat\"><h3>{}</h3>",
-            html::escape(name)
+            html::text(name)
         );
         if let Some(held) = held {
             body.push_str("<ol class=\"strip-list\">");
@@ -61,7 +61,7 @@ pub(super) fn board_page(
                 let _ = write!(
                     body,
                     "<a href=\"{}\">+{} more</a>",
-                    html::escape(&href),
+                    html::text(&href),
                     held.total - SEAT_CAP
                 );
             }
@@ -102,7 +102,7 @@ pub(super) fn board_page(
             let _ = write!(
                 body,
                 "<a href=\"{}\">+{} more</a>",
-                html::escape(&href),
+                html::text(&href),
                 lane.total - lane.tasks.len()
             );
         }
@@ -119,12 +119,18 @@ pub(super) fn board_page(
         let _ = write!(
             body,
             "<a href=\"{}\">{} {count}</a> ",
-            html::escape(&href),
+            html::text(&href),
             status.as_str()
         );
     }
     body.push_str("</p></div></div>");
-    html::shell("Board", Page::Board, &body, project, projects)
+    html::shell(
+        "Board",
+        Page::Board,
+        Fragment::from_legacy(body),
+        project,
+        projects,
+    )
 }
 
 fn strip_item(out: &mut String, task: &Task, project: Option<u64>) {

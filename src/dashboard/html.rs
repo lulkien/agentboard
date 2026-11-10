@@ -1,69 +1,35 @@
+use std::fmt::Display;
 use std::fmt::Write;
 
 use super::routes::{Filters, Page};
+use super::template::{Fragment, Template, html as html_slot, text as text_slot};
 use agentboard::domain::Project;
 use agentboard::domain::{EventKind, Status};
 
-pub fn escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for c in value.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
+const SHELL: Template = Template::new("shell", include_str!("templates/shell.html"));
+const PROJECT_OPTION: Template = Template::new(
+    "project-option",
+    "<option value=\"{{id}}\"{{selected}}>{{name}}</option>",
+);
+const TEXT: Template = Template::new("text", "{{value}}");
+const BADGE: Template = Template::new("badge", include_str!("templates/badge.html"));
+const STRIP: Template = Template::new("strip", include_str!("templates/strip.html"));
+
+pub fn text(value: impl Display) -> String {
+    TEXT.fill(&[("value", text_slot(value))]).to_string()
 }
 
 pub fn shell(
     title: &str,
     active: Page,
-    content: &str,
+    content: Fragment,
     project: Option<u64>,
     projects: &[Project],
-) -> String {
-    let mut out = String::with_capacity(content.len() + 1200);
-    let safe_title = escape(title);
-    let board_url = escape(&url("/", project));
-    let epics_url = escape(&url("/epics", project));
-    let tasks_url = escape(&url("/tasks", project));
-    let feed_url = escape(&url("/feed", project));
-    let _ = write!(
-        out,
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"{board_url}\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"{board_url}\"{}>Board</a><a class=\"{}\" href=\"{epics_url}\"{}>Epics</a><a class=\"{}\" href=\"{tasks_url}\"{}>Tasks</a><a class=\"{}\" href=\"{feed_url}\"{}>Feed</a></nav>",
-        if active == Page::Board { "active" } else { "" },
-        if active == Page::Board {
-            " aria-current=\"page\""
-        } else {
-            ""
-        },
-        if active == Page::Epics { "active" } else { "" },
-        if active == Page::Epics {
-            " aria-current=\"page\""
-        } else {
-            ""
-        },
-        if matches!(active, Page::Tasks | Page::Detail(_)) {
-            "active"
-        } else {
-            ""
-        },
-        if matches!(active, Page::Tasks | Page::Detail(_)) {
-            " aria-current=\"page\""
-        } else {
-            ""
-        },
-        if active == Page::Feed { "active" } else { "" },
-        if active == Page::Feed {
-            " aria-current=\"page\""
-        } else {
-            ""
-        }
-    );
+) -> Fragment {
+    let board_url = url("/", project);
+    let epics_url = url("/epics", project);
+    let tasks_url = url("/tasks", project);
+    let feed_url = url("/feed", project);
     let action = match active {
         Page::Board => "/",
         Page::Epics => "/epics",
@@ -71,30 +37,73 @@ pub fn shell(
         Page::Detail(_) => "/tasks",
         Page::Feed => "/feed",
     };
-    let _ = write!(
-        out,
-        "<form class=\"project-switcher\" method=\"get\" action=\"{action}\"><select class=\"header-control\" name=\"project\" aria-label=\"Project\"><option value=\"\"{}>All projects</option>",
-        if project.is_none() { " selected" } else { "" }
-    );
-    for item in projects {
-        let _ = write!(
-            out,
-            "<option value=\"{}\"{}>{}</option>",
-            item.project_id,
-            if project == Some(item.project_id) {
-                " selected"
+    let project_options: Fragment = projects
+        .iter()
+        .map(|item| {
+            PROJECT_OPTION.fill(&[
+                ("id", text_slot(item.project_id)),
+                (
+                    "selected",
+                    text_slot(if project == Some(item.project_id) {
+                        " selected"
+                    } else {
+                        ""
+                    }),
+                ),
+                ("name", text_slot(&item.project_name)),
+            ])
+        })
+        .collect();
+    let board_active = active == Page::Board;
+    let epics_active = active == Page::Epics;
+    let tasks_active = matches!(active, Page::Tasks | Page::Detail(_));
+    let feed_active = active == Page::Feed;
+    SHELL.fill(&[
+        ("title", text_slot(title)),
+        ("board_url", text_slot(board_url)),
+        ("epics_url", text_slot(epics_url)),
+        ("tasks_url", text_slot(tasks_url)),
+        ("feed_url", text_slot(feed_url)),
+        (
+            "board_class",
+            text_slot(if board_active { "active" } else { "" }),
+        ),
+        ("board_current", html_slot(current_page(board_active))),
+        (
+            "epics_class",
+            text_slot(if epics_active { "active" } else { "" }),
+        ),
+        ("epics_current", html_slot(current_page(epics_active))),
+        (
+            "tasks_class",
+            text_slot(if tasks_active { "active" } else { "" }),
+        ),
+        ("tasks_current", html_slot(current_page(tasks_active))),
+        (
+            "feed_class",
+            text_slot(if feed_active { "active" } else { "" }),
+        ),
+        ("feed_current", html_slot(current_page(feed_active))),
+        ("action", text_slot(action)),
+        (
+            "all_projects_selected",
+            html_slot(if project.is_none() {
+                Fragment::lit(" selected")
             } else {
-                ""
-            },
-            escape(&item.project_name)
-        );
+                Fragment::empty()
+            }),
+        ),
+        ("project_options", html_slot(project_options)),
+        ("content", html_slot(content)),
+    ])
+}
+
+fn current_page(active: bool) -> Fragment {
+    if active {
+        Fragment::lit(" aria-current=\"page\"")
+    } else {
+        Fragment::empty()
     }
-    out.push_str("</select><button class=\"header-control\" type=\"submit\">Show</button></form></header><main id=\"main\"><h1>");
-    out.push_str(&safe_title);
-    out.push_str("</h1>");
-    out.push_str(content);
-    out.push_str("</main><footer><button class=\"header-control theme-toggle\" type=\"button\" data-theme-toggle aria-pressed=\"false\" aria-label=\"Change theme\" title=\"Change theme\">Change theme</button></footer></body></html>");
-    out
 }
 
 pub fn url(path: &str, project: Option<u64>) -> String {
@@ -108,13 +117,11 @@ pub fn url(path: &str, project: Option<u64>) -> String {
     }
 }
 
-pub fn status_badge(status: Status) -> String {
-    format!(
-        "<span class=\"badge status-{}\"><span aria-hidden=\"true\">{}</span> {}</span>",
-        status.as_str(),
-        status_glyph(status),
-        status.as_str()
-    )
+pub fn status_badge(status: Status) -> Fragment {
+    BADGE.fill(&[
+        ("status", text_slot(status.as_str())),
+        ("glyph", text_slot(status_glyph(status))),
+    ])
 }
 
 pub fn status_glyph(status: Status) -> char {
@@ -129,15 +136,15 @@ pub fn status_glyph(status: Status) -> char {
     }
 }
 
-pub fn strip(task: &agentboard::domain::Task, href: &str) -> String {
+pub fn strip(task: &agentboard::domain::Task, href: &str) -> Fragment {
     let status = task.status.as_str();
-    let title = escape(&task.title);
-    let href = escape(href);
-    format!(
-        "<a class=\"task-strip status-{status}\" href=\"{href}\" title=\"{title}\"><span class=\"strip-glyph\" aria-hidden=\"true\">{}</span><span class=\"strip-id\">T{}</span><span class=\"strip-title\">{title}</span><span class=\"visually-hidden\">{status}</span></a>",
-        status_glyph(task.status),
-        task.id
-    )
+    STRIP.fill(&[
+        ("status", text_slot(status)),
+        ("href", text_slot(href)),
+        ("title", text_slot(&task.title)),
+        ("glyph", text_slot(status_glyph(task.status))),
+        ("id", text_slot(task.id)),
+    ])
 }
 
 pub fn query_url(filters: &Filters, offset: Option<usize>) -> String {

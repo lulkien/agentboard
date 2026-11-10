@@ -1,6 +1,7 @@
 use agentboard::store::{Board, ListFilter, MAX_LIST_LIMIT};
 
 use super::routes::{Page, Route};
+use super::template::Fragment;
 
 mod board;
 mod detail;
@@ -23,7 +24,7 @@ pub enum PageError {
     Store(String),
 }
 
-pub fn render(board: &Board, route: Route) -> Result<String, PageError> {
+pub fn render(board: &Board, route: Route) -> Result<Fragment, PageError> {
     let project = route.filters.project;
     if let Some(id) = project {
         board
