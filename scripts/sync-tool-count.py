@@ -53,7 +53,7 @@ for name in ['src/server.rs', 'README.md', 'PROTOCOL.md', 'AGENTS.md',
     # of this build" is a published count, "nine" on its own is prose. One pass,
     # so a rewritten word is never rewritten again.
     spelled = '|'.join(w.capitalize() for w in words) + '|' + '|'.join(words)
-    after = re.sub(rf'\b({spelled})(?= (?:MCP )?tools)',
+    after = re.sub(rf'\b({spelled})(?=\s+(?:MCP\s+)?tools)',
                    lambda match: word.capitalize() if match.group(1)[0].isupper() else word,
                    after)
     if after != before:

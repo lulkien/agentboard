@@ -25,7 +25,7 @@ AGENTBOARD_ACTOR`.
 
 ## Daemon
 
-`agentboard daemon [ip:port] [--db PATH] [--allow-non-loopback]` serves the same ten
+`agentboard daemon [ip:port] [--db PATH] [--allow-non-loopback]` serves the same twelve
 tools over streamable HTTP, stateless with JSON responses (no session ids), at
 `POST /mcp/<actor>`. The percent-decoded segment is the actor; a missing or empty
 segment is 404. An actor-less stdio setting (`--actor`, `AGENTBOARD_ACTOR`) is not
@@ -67,8 +67,8 @@ skips tasks assigned to another actor; it never picks up a `reviewing` or `block
 ## Tasks
 
 A task is a record: `id`, `title`, `description`, `goal`, `analyst_report`,
-`coder_report`, `reviewer_report`, `status`, `priority`, `assignee`, `parent_id`,
-`path`, `revision`, `created_at`, `updated_at`. `revision` starts at 1 and grows by
+`coder_report`, `reviewer_report`, `status`, `priority`, `reporter`, `assignee`,
+`parent_id`, `project_id`, `revision`, `created_at_ms`, `updated_at_ms`. `revision` starts at 1 and grows by
 one per accepted field change. The three reports are long-form seat notes; a board
 written before they existed loads with each one empty.
 
@@ -166,7 +166,7 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
   `force` without a reason refuses, a reason without `force` refuses, and the
   reason is recorded in the event.
 - `assignee` together with `clear_assignee` refuses, and likewise for `parent` and
-  `path`: pick one.
+  `project`: pick one.
 - `release: true` puts a held row back in `todo` with no assignee, in one write: the
   revision moves, and one `updated` event carries `reason` and any `comment`. The
   holder may release its own row; another actor needs `force` with a reason, as for
@@ -259,10 +259,10 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
 
 ### board_brief
 
-No arguments. All epic rows first, each compact task row followed by `  done D/N`,
-then up to ten unparented non-epic tasks in `planning`, `implementing`, `blocked` or `reviewing`.
+Optional `project` (an ID) limits it to one project. All epic rows first, each
+compact task row followed by `  done D/N`, then up to ten unparented non-epic tasks in `planning`, `implementing`, `blocked` or `reviewing`.
 Each section sorts by `(priority, id)`. Nested and terminal epics remain visible
-while they have children. The final line is the six global status counts, counting
+while they have children. The final line is the seven global status counts, counting
 every task once. There are no section headings; an empty board prints just counts.
 
 ### board_agents
