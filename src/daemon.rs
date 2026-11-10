@@ -197,10 +197,15 @@ fn project_param(query: Option<&str>) -> Result<Option<u64>, &'static str> {
 }
 
 async fn health(State(app): State<App>) -> Response {
-    match app.board.metadata() {
-        Ok(metadata) => axum::Json(serde_json::json!({
+    let read = app
+        .board
+        .metadata()
+        .and_then(|metadata| Ok((metadata, app.board.cursor_now()?)));
+    match read {
+        Ok((metadata, cursor)) => axum::Json(serde_json::json!({
             "board": app.board.path().display().to_string(),
             "instance": metadata.instance_id,
+            "cursor": cursor.encode(),
         }))
         .into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),

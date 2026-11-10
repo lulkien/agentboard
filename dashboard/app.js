@@ -1,7 +1,7 @@
 // Agentboard dashboard: reads the daemon's read-only JSON API and builds the DOM.
 // Every node is made with createElement/createTextNode, so stored text is never
 // parsed as markup. Plain links and GET forms navigate; there is no client router
-// and no live update.
+// and live update is an opt-in poll of the board cursor.
 (() => {
   'use strict';
 
@@ -449,6 +449,7 @@
     const form = document.querySelector('.project-switcher');
     form.setAttribute('action', action);
     const select = form.querySelector('select');
+    while (select.options.length > 1) select.remove(1);
     for (const item of projects) {
       const option = h('option', { value: item.project_id,
         selected: project !== null && String(item.project_id) === project }, item.project_name);
@@ -475,24 +476,83 @@
     main.replaceChildren(h('div', { class: 'page-head' }, h('h1', null, title), aside), content);
   }
 
-  async function start() {
+  async function load() {
     const found = route(location.pathname);
-    if (!found) { render('Not found', null, h('p', { class: 'empty panel' }, 'Not found')); return; }
+    if (!found) return { title: 'Not found', content: h('p', { class: 'empty panel' }, 'Not found') };
     const [active, api, build, action] = found;
+    const projectQuery = project === null || project === '' ? '' : `?project=${enc(project)}`;
+    const [data, listing] = await Promise.all([
+      getJson(api + location.search), getJson(`/api/projects${projectQuery}`)]);
     setNav(active);
+    setProjects(listing.projects, action);
+    const page = build(data, listing.projects);
+    if (page.active) setNav(page.active);
+    return page;
+  }
+
+  async function start() {
     try {
-      const projectQuery = project === null || project === '' ? '' : `?project=${enc(project)}`;
-      const [data, listing] = await Promise.all([
-        getJson(api + location.search), getJson(`/api/projects${projectQuery}`)]);
-      setProjects(listing.projects, action);
-      const page = build(data, listing.projects);
-      if (page.active) setNav(page.active);
+      const page = await load();
       render(page.title, page.aside || null, page.content);
     } catch (error) {
       const message = error.status === 404 ? 'Not found'
         : (error.status === 400 ? 'Invalid query' : 'Board read failed');
       render(message, null, h('p', { class: 'empty panel' }, message));
     }
+  }
+
+  // ---- live update -------------------------------------------------------
+  // Off by default. When on, poll /api/health every LIVE_MS and reload the page
+  // only when the board cursor moved. A failed poll keeps the page on screen.
+  const LIVE_MS = 5000;
+
+  function live() {
+    const button = document.querySelector('[data-live-toggle]');
+    if (!button) return;
+    let on = false;
+    let timer = null;
+    let cursor = null;
+    let busy = false;
+    try { on = localStorage.getItem('agentboard-live') === 'on'; } catch (_) { /* storage can be blocked */ }
+    const label = (state) => {
+      button.textContent = `Live update: ${state}`;
+      button.setAttribute('aria-pressed', String(on));
+    };
+    // A feed page behind `before=` is history, and a focused control is a user typing.
+    const idle = () => !document.hidden && !busy
+      && !new URLSearchParams(location.search).has('before')
+      && !document.activeElement?.matches('input, select, textarea');
+    const tick = async () => {
+      if (!on || !idle()) return;
+      busy = true;
+      try {
+        const seen = (await getJson('/api/health')).cursor;
+        if (cursor !== null && seen !== cursor) {
+          const [x, y] = [scrollX, scrollY];
+          const page = await load();
+          render(page.title, page.aside || null, page.content);
+          scrollTo(x, y);
+        }
+        cursor = seen;
+        label('on');
+      } catch (_) {
+        label('paused, retrying');
+      } finally { busy = false; }
+    };
+    const apply = () => {
+      clearInterval(timer);
+      timer = null;
+      cursor = null;
+      label(on ? 'on' : 'off');
+      if (on) { timer = setInterval(tick, LIVE_MS); tick(); }
+    };
+    button.addEventListener('click', () => {
+      on = !on;
+      try { localStorage.setItem('agentboard-live', on ? 'on' : 'off'); } catch (_) { /* storage can be blocked */ }
+      apply();
+    });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+    apply();
   }
 
   // ---- theme toggle ------------------------------------------------------
@@ -524,5 +584,6 @@
   }
 
   theme();
+  live();
   start();
 })();

@@ -350,8 +350,11 @@ def static_checks(daemon):
     check("app.js is the repo file", open(os.path.join(ROOT, "dashboard", "app.js"), "rb").read(), script)
     check("app.js is no-store", "no-store", head.get("cache-control"))
     script = script.decode()
-    for banned in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "setTimeout(", "setInterval("]:
+    for banned in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "setTimeout("]:
         check(f"app.js never uses {banned}", False, banned in script)
+    ok("app.js live update is off until toggled", "data-live-toggle" in shell.decode() and "Live update: off" in shell.decode())
+    ok("app.js live update polls the health cursor", "/api/health" in script and "setInterval(" in script)
+    ok("app.js project switcher is cleared before refill", "select.remove(1)" in script)
     ok("app.js fetches and never writes", "fetch(" in script and not re.search(r"""['"](POST|PUT|PATCH|DELETE)['"]""", script))
 
     status, head, sheet = daemon.fetch("GET", "/assets/style.css")
@@ -367,6 +370,21 @@ def static_checks(daemon):
     check("index.html has no event handler attribute", False, bool(re.search(r"\son[a-z]+\s*=", page)))
     check("index.html loads only /assets files", ["/assets/app.js", "/assets/style.css"],
           sorted(re.findall(r"(?:src|href)=\"(/assets/[^\"]+)\"", page)))
+
+
+def cursor_checks(scratch):
+    """Live update polls /api/health: its cursor must move on a write."""
+    db = os.path.join(scratch, "live")
+    cli(db, "--actor", "manager", "add", "first")
+    daemon = Daemon(db)
+    try:
+        before = json.loads(daemon.request("GET", "/api/health")[1])["cursor"]
+        cli(db, "--actor", "manager", "add", "second")
+        after = json.loads(daemon.request("GET", "/api/health")[1])["cursor"]
+        ok("health cursor moves after a write", before != after)
+        check("health cursor is stable without a write", after, json.loads(daemon.request("GET", "/api/health")[1])["cursor"])
+    finally:
+        daemon.close()
 
 
 def main():
@@ -387,6 +405,7 @@ def main():
         check("health refuses POST", 405, daemon.request("POST", "/api/health", "{}")[0])
         check("health refuses HEAD", 405, daemon.request("HEAD", "/api/health")[0])
         check("unknown path is 404", 404, daemon.request("GET", "/nope")[0])
+        ok("health carries the board cursor", health["cursor"].startswith(health["instance"]))
         static_checks(daemon)
 
         # Identity is the URL segment: two seats interleaved on one daemon.
@@ -468,6 +487,7 @@ def main():
         daemon.close()
 
     api_checks(scratch)
+    cursor_checks(scratch)
 
     print(f"daemon: {passed}/{passed + failed} passed (http, lmdb)")
     return 0 if failed == 0 else 1
