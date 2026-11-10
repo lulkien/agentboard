@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import html as html_lib
 from pathlib import Path
 import re
 import socket
@@ -93,6 +94,9 @@ def main() -> int:
         run_cli(db, "add", "Reviewing child", "--parent", "1", "--status", "reviewing")
         for index in range(45):
             run_cli(db, "add", f"Page task {index:02}")
+        project_name = '<b>p&"</b>'
+        run_cli(db, "project", "add", "--name", project_name, "--path", "/other-dashboard")
+        run_cli(db, "add", "Other project row", "--project", "2")
 
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
@@ -146,6 +150,22 @@ def main() -> int:
                 assert len(badges) == body.count('class="badge status-'), f"{path} has malformed status badge"
                 for status_name, badge in badges:
                     assert status_name in badge, f"{path} badge lacks {status_name} text"
+            for path in ["/tasks", "/epics", "/tasks/3", "/feed"]:
+                scoped_status, scoped, _headers = request(port, "GET", f"{path}?project=1")
+                assert scoped_status == 200, f"{path}?project=1 returned {scoped_status}"
+                links = [html_lib.unescape(href) for href in re.findall(r'href="(/[^"]+)"', scoped)]
+                assert all("project=1" in href for href in links if not href.startswith("/assets/")), f"{path} lost project scope: {links}"
+                assert '<option value="1" selected>' in scoped, f"{path} did not select project 1"
+            status, second_project, _headers = request(port, "GET", "/tasks?project=2")
+            assert status == 200 and "Other project row" in second_project and "Page task" not in second_project and "&lt;script&gt;alert" not in second_project, "project 2 task list leaked another project"
+            assert "&lt;b&gt;p&amp;&quot;&lt;/b&gt;" in second_project, "project name was not escaped in switcher"
+            for path, expected in [("/tasks?project=99", 404), ("/tasks?project=0", 400), ("/tasks?project=1&project=2", 400), ("/tasks/3?status=todo", 400)]:
+                actual, _, _headers = request(port, "GET", path)
+                assert actual == expected, f"{path} returned {actual}, expected {expected}"
+            for path in ["/epics", "/tasks", "/tasks/3", "/feed"]:
+                plain = request(port, "GET", path)
+                blank = request(port, "GET", f"{path}?project=")
+                assert blank[:2] == plain[:2], f"blank project changed {path}"
             for asset in ["/assets/dashboard.css", "/assets/theme.js"]:
                 asset_status, _, headers = request(port, "GET", asset)
                 assert asset_status == 200 and headers.get("x-content-type-options") == "nosniff", f"{asset} lacks nosniff"
@@ -154,7 +174,7 @@ def main() -> int:
             assert status == 200 and 'class="active" href="/tasks"' in tasks, "tasks tab is missing or inactive"
             assert 'href="/tasks?offset=20"' in tasks, "next-page link is missing"
             first_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', tasks)]
-            assert first_ids == list(range(52, 32, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
+            assert first_ids == list(range(53, 33, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
 
             status, detail, _headers = request(port, "GET", "/tasks/3")
             assert status == 200, f"task detail returned {status}"
@@ -185,13 +205,20 @@ def main() -> int:
 
             for index in range(45):
                 run_cli(db, "comment", "3", "--body", f"feed note {index:02}")
+            run_cli(db, "comment", "53", "--body", "foreign feed marker")
             before = feed_cursor(db)
+            scoped_feed_status, scoped_feed, _headers = request(port, "GET", "/feed?project=1")
+            assert scoped_feed_status == 200 and "foreign feed marker" not in scoped_feed and 'href="/tasks/53?project=1"' not in scoped_feed, "scoped feed leaked project 2"
+            scoped_older = re.search(r'href="(/feed\?before=[^"]+project=1)"', scoped_feed)
+            assert scoped_older, "scoped feed lost project on older link"
+            older_status, older_scoped, _headers = request(port, "GET", html_lib.unescape(scoped_older.group(1)))
+            assert older_status == 200 and 'href="/tasks/53?project=1"' not in older_scoped, "older scoped feed leaked project 2"
 
             status, second_page, _headers = request(port, "GET", "/tasks?offset=20")
             assert status == 200 and "Page task 20" in second_page, "offset paging did not advance"
             assert "Page task 00" not in second_page, "offset page repeats the first page"
             second_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', second_page)]
-            assert second_ids == list(range(32, 12, -1)), f"task page 2 has a gap, duplicate, or wrong order: {second_ids}"
+            assert second_ids == list(range(33, 13, -1)), f"task page 2 has a gap, duplicate, or wrong order: {second_ids}"
             assert not set(first_ids) & set(second_ids) and first_ids[-1] - 1 == second_ids[0], "task pages overlap or have a gap"
 
             query = urlencode({"assignee": "alice<&"})

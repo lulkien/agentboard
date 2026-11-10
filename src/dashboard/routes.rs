@@ -17,6 +17,7 @@ pub struct Route {
 
 #[derive(Debug, Default)]
 pub struct Filters {
+    pub project: Option<u64>,
     pub status: Option<Status>,
     pub assignee: Option<String>,
     pub parent: Option<u64>,
@@ -34,7 +35,7 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
     } else if path == "/feed" {
         Page::Feed
     } else if let Some(raw_id) = path.strip_prefix("/tasks/") {
-        if raw_id.is_empty() || raw_id.contains('/') || !query.is_empty() {
+        if raw_id.is_empty() || raw_id.contains('/') {
             return Err(());
         }
         Page::Detail(positive(raw_id)?)
@@ -42,7 +43,7 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
         return Err(());
     };
     let mut filters = Filters::default();
-    let mut seen = [false; 7];
+    let mut seen = [false; 8];
     if !query.is_empty() {
         for pair in query.split('&') {
             if pair.is_empty() {
@@ -59,6 +60,7 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
                 "task" => 4,
                 "kind" => 5,
                 "before" => 6,
+                "project" => 7,
                 _ => return Err(()),
             };
             if seen[slot] {
@@ -77,47 +79,34 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
                 }
                 "parent" if !value.is_empty() => filters.parent = Some(positive(&value)?),
                 "parent" => {}
-                "offset" => filters.offset = value.parse().map_err(|_| ())?,
+                "offset" if !value.is_empty() => filters.offset = value.parse().map_err(|_| ())?,
+                "offset" => {}
                 "task" if !value.is_empty() => filters.feed_task = Some(positive(&value)?),
                 "task" => {}
                 "kind" if !value.is_empty() => {
                     filters.feed_kind = Some(EventKind::parse(&value).map_err(|_| ())?)
                 }
                 "kind" => {}
-                "before" => {
+                "before" if !value.is_empty() => {
                     Cursor::parse(&value).map_err(|_| ())?;
                     filters.before = Some(value);
                 }
+                "before" => {}
+                "project" if !value.is_empty() => filters.project = Some(positive(&value)?),
+                "project" => {}
                 _ => unreachable!(),
             }
         }
     }
-    if page == Page::Epics
-        && (filters.status.is_some()
-            || filters.assignee.is_some()
-            || filters.parent.is_some()
-            || filters.offset != 0)
-    {
-        return Err(());
-    }
-    if matches!(page, Page::Detail(_))
-        && (filters.status.is_some()
-            || filters.assignee.is_some()
-            || filters.parent.is_some()
-            || filters.offset != 0)
-    {
-        return Err(());
-    }
-    if page == Page::Feed
-        && (filters.status.is_some()
-            || filters.assignee.is_some()
-            || filters.parent.is_some()
-            || filters.offset != 0)
-    {
-        return Err(());
-    }
-    if page != Page::Feed
-        && (filters.feed_task.is_some() || filters.feed_kind.is_some() || filters.before.is_some())
+    let allowed = match page {
+        Page::Epics | Page::Detail(_) => [7].as_slice(),
+        Page::Tasks => [0, 1, 2, 3, 7].as_slice(),
+        Page::Feed => [4, 5, 6, 7].as_slice(),
+    };
+    if seen
+        .iter()
+        .enumerate()
+        .any(|(slot, present)| *present && !allowed.contains(&slot))
     {
         return Err(());
     }
@@ -192,5 +181,12 @@ mod tests {
             );
         }
         assert!(parse("/tasks", "kind=created").is_err());
+        assert!(parse("/tasks/3", "project=1").is_ok());
+        assert!(parse("/tasks/3", "status=").is_err());
+        assert!(parse("/tasks/3", "offset=0").is_err());
+        assert!(parse("/epics", "status=").is_err());
+        assert!(parse("/feed", "offset=0").is_err());
+        assert!(parse("/tasks", "project=0").is_err());
+        assert!(parse("/tasks", "project=1&project=2").is_err());
     }
 }

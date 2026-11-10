@@ -22,12 +22,22 @@ pub enum PageError {
 }
 
 pub fn render(board: &Board, route: Route) -> Result<String, PageError> {
+    let project = route.filters.project;
+    if let Some(id) = project {
+        board
+            .get_project(id)
+            .map_err(|e| PageError::Store(e.to_string()))?
+            .ok_or(PageError::Missing)?;
+    }
+    let projects = board
+        .list_projects()
+        .map_err(|e| PageError::Store(e.to_string()))?;
     match route.page {
         Page::Epics => {
             let brief = board
-                .brief(0)
+                .brief_for_project(0, project)
                 .map_err(|e| PageError::Store(e.to_string()))?;
-            Ok(epics(&brief))
+            Ok(epics(&brief, project, &projects))
         }
         Page::Tasks => {
             if let Some(parent) = route.filters.parent {
@@ -42,15 +52,15 @@ pub fn render(board: &Board, route: Route) -> Result<String, PageError> {
                     status: filters.status,
                     assignee: filters.assignee.as_deref(),
                     parent: filters.parent,
-                    project: None,
+                    project,
                     include_terminal: true,
                     limit: PAGE_SIZE.min(MAX_LIST_LIMIT),
                     offset: filters.offset,
                 })
                 .map_err(|e| PageError::Store(e.to_string()))?;
-            Ok(tasks(&page, &filters))
+            Ok(tasks(&page, &filters, &projects))
         }
-        Page::Detail(id) => detail(board, id),
-        Page::Feed => feed(board, route.filters),
+        Page::Detail(id) => detail(board, id, project, &projects),
+        Page::Feed => feed(board, route.filters, &projects),
     }
 }

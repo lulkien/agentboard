@@ -1,12 +1,13 @@
 use std::fmt::Write;
 
+use agentboard::domain::Project;
 use agentboard::domain::Status;
 use agentboard::store::Brief;
 
 use crate::dashboard::html;
 use crate::dashboard::routes::Page;
 
-pub(super) fn epics(brief: &Brief) -> String {
+pub(super) fn epics(brief: &Brief, project: Option<u64>, projects: &[Project]) -> String {
     let mut body = String::from("<section class=\"card-grid\" aria-label=\"Epics\">");
     if brief.epics.is_empty() {
         body.push_str("<p class=\"empty card\">No epics yet</p>");
@@ -15,7 +16,10 @@ pub(super) fn epics(brief: &Brief) -> String {
         let max = epic.total.max(1);
         let value = epic.done.min(max);
         let title = html::escape(&epic.task.title);
-        let strip = html::strip(&epic.task, &format!("/tasks?parent={}", epic.task.id));
+        let strip = html::strip(
+            &epic.task,
+            &html::url(&format!("/tasks?parent={}", epic.task.id), project),
+        );
         let _ = write!(
             body,
             "<article class=\"card epic-card\"><h2>{strip}</h2><p class=\"meta\">Priority {}</p><p class=\"progress-copy\">{} / {} done</p><progress max=\"{max}\" value=\"{value}\" aria-label=\"{}: {} of {} direct children done\"></progress><ul class=\"counts\">",
@@ -36,9 +40,15 @@ pub(super) fn epics(brief: &Brief) -> String {
                 );
             }
         }
-        body.push_str("</ul><a class=\"button-link\" href=\"/tasks?parent=");
-        let _ = write!(body, "{}\">View child tasks</a></article>", epic.task.id);
+        let href = html::escape(&html::url(
+            &format!("/tasks?parent={}", epic.task.id),
+            project,
+        ));
+        let _ = write!(
+            body,
+            "</ul><a class=\"button-link\" href=\"{href}\">View child tasks</a></article>"
+        );
     }
     body.push_str("</section>");
-    html::shell("Epics", Page::Epics, &body)
+    html::shell("Epics", Page::Epics, &body, project, projects)
 }

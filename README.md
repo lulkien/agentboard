@@ -203,6 +203,10 @@ scripts or styles.
 Every route is GET-only; other methods receive `405 Method Not Allowed`. The feed
 shows the newest 20 matching events and uses its opaque `before` cursor to page
 toward older events while retaining task and event-kind filters.
+Add `?project=ID` to any dashboard page to show that project's tasks, epics,
+and events. The project selector in the top bar changes scope; navigation,
+filters, and pagination keep the selected project in the URL. An empty
+`project=` shows the whole board. Unknown project IDs return 404.
 
 ## Quota take-over
 

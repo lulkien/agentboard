@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use agentboard::domain::{EventKind, Task};
+use agentboard::domain::{EventKind, Project, Task};
 use agentboard::store::{Board, FeedFilter, ListFilter, TaskPage};
 
 use super::PageError;
@@ -8,7 +8,12 @@ use super::time::format_timestamp;
 use crate::dashboard::html;
 use crate::dashboard::routes::Page;
 
-pub(super) fn detail(board: &Board, id: u64) -> Result<String, PageError> {
+pub(super) fn detail(
+    board: &Board,
+    id: u64,
+    project: Option<u64>,
+    projects: &[Project],
+) -> Result<String, PageError> {
     let task = board
         .get(id)
         .map_err(|e| PageError::Store(e.to_string()))?
@@ -43,7 +48,14 @@ pub(super) fn detail(board: &Board, id: u64) -> Result<String, PageError> {
             limit: 20,
         })
         .map_err(|e| PageError::Store(e.to_string()))?;
-    Ok(task_detail(&task, &children, epic.as_ref(), &feed.events))
+    Ok(task_detail(
+        &task,
+        &children,
+        epic.as_ref(),
+        &feed.events,
+        project,
+        projects,
+    ))
 }
 
 fn task_detail(
@@ -51,12 +63,15 @@ fn task_detail(
     children: &TaskPage,
     epic: Option<&agentboard::store::Epic>,
     events: &[agentboard::domain::Event],
+    project: Option<u64>,
+    projects: &[Project],
 ) -> String {
     let mut body = String::new();
     let title = html::escape(&task.title);
+    let tasks_href = html::escape(&html::url("/tasks", project));
     let _ = write!(
         body,
-        "<nav class=\"breadcrumbs\" aria-label=\"Breadcrumb\"><a href=\"/tasks\">Tasks</a> <span aria-hidden=\"true\">/</span> <span>T{}</span></nav><header class=\"issue-header\"><p class=\"meta\">Task T{}</p><div class=\"card-heading\"><h2>{title}</h2>{}</div></header><div class=\"detail-layout\"><div class=\"detail-main\"><section class=\"panel text-section\"><h2>Description</h2><div class=\"full-text\">{}</div></section><section class=\"panel text-section\"><h2>Goal</h2><div class=\"full-text\">{}</div></section>",
+        "<nav class=\"breadcrumbs\" aria-label=\"Breadcrumb\"><a href=\"{tasks_href}\">Tasks</a> <span aria-hidden=\"true\">/</span> <span>T{}</span></nav><header class=\"issue-header\"><p class=\"meta\">Task T{}</p><div class=\"card-heading\"><h2>{title}</h2>{}</div></header><div class=\"detail-layout\"><div class=\"detail-main\"><section class=\"panel text-section\"><h2>Description</h2><div class=\"full-text\">{}</div></section><section class=\"panel text-section\"><h2>Goal</h2><div class=\"full-text\">{}</div></section>",
         task.id,
         task.id,
         html::status_badge(task.status),
@@ -87,26 +102,30 @@ fn task_detail(
         for child in &children.tasks {
             let child_title = html::escape(&child.title);
             let assignee = html::escape(child.assignee.as_deref().unwrap_or("—"));
+            let href = html::escape(&html::url(&format!("/tasks/{}", child.id), project));
             let _ = write!(
                 body,
-                "<tr><td><a href=\"/tasks/{}\">T{}</a></td><td>{}</td><td>{child_title}</td><td>{assignee}</td></tr>",
-                child.id,
+                "<tr><td><a href=\"{href}\">T{}</a></td><td>{}</td><td>{child_title}</td><td>{assignee}</td></tr>",
                 child.id,
                 html::status_badge(child.status)
             );
         }
         body.push_str("</tbody></table></div>");
         if children.total > children.tasks.len() {
+            let href = html::escape(&html::url(&format!("/tasks?parent={}", task.id), project));
             let _ = write!(
                 body,
-                "<p><a href=\"/tasks?parent={}\">View all {} child tasks</a></p>",
-                task.id, children.total
+                "<p><a href=\"{href}\">View all {} child tasks</a></p>",
+                children.total
             );
         }
         body.push_str("</section>");
     }
-    body.push_str("<section class=\"panel activity\"><div class=\"card-heading\"><h2>Activity</h2><a href=\"/feed?task=");
-    let _ = write!(body, "{}\">Older history</a></div>", task.id);
+    let history_href = html::escape(&html::url(&format!("/feed?task={}", task.id), project));
+    let _ = write!(
+        body,
+        "<section class=\"panel activity\"><div class=\"card-heading\"><h2>Activity</h2><a href=\"{history_href}\">Older history</a></div>"
+    );
     if events.is_empty() {
         body.push_str("<p class=\"empty\">No activity yet</p>");
     } else {
@@ -160,10 +179,11 @@ fn task_detail(
     );
     metadata_item(&mut body, "Reporter", &html::escape(&task.reporter));
     if let Some(parent) = task.parent_id {
+        let href = html::escape(&html::url(&format!("/tasks/{parent}"), project));
         metadata_item(
             &mut body,
             "Parent",
-            &format!("<a href=\"/tasks/{parent}\">T{parent}</a>"),
+            &format!("<a href=\"{href}\">T{parent}</a>"),
         );
     }
     metadata_item(
@@ -193,6 +213,8 @@ fn task_detail(
         &format!("T{} | {}", task.id, task.title),
         Page::Detail(task.id),
         &body,
+        project,
+        projects,
     )
 }
 

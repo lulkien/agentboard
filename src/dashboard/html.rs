@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use super::routes::{Filters, Page};
+use agentboard::domain::Project;
 use agentboard::domain::{EventKind, Status};
 
 pub fn escape(value: &str) -> String {
@@ -18,12 +19,21 @@ pub fn escape(value: &str) -> String {
     out
 }
 
-pub fn shell(title: &str, active: Page, content: &str) -> String {
+pub fn shell(
+    title: &str,
+    active: Page,
+    content: &str,
+    project: Option<u64>,
+    projects: &[Project],
+) -> String {
     let mut out = String::with_capacity(content.len() + 1200);
     let safe_title = escape(title);
+    let epics_url = escape(&url("/epics", project));
+    let tasks_url = escape(&url("/tasks", project));
+    let feed_url = escape(&url("/feed", project));
     let _ = write!(
         out,
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"/epics\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"/epics\"{}>Epics</a><a class=\"{}\" href=\"/tasks\"{}>Tasks</a><a class=\"{}\" href=\"/feed\"{}>Feed</a></nav><button class=\"theme-toggle\" type=\"button\" data-theme-toggle aria-pressed=\"false\" aria-label=\"Change color theme\">Theme: system</button></header><main id=\"main\"><h1>{safe_title}</h1>{content}</main></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"{epics_url}\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"{epics_url}\"{}>Epics</a><a class=\"{}\" href=\"{tasks_url}\"{}>Tasks</a><a class=\"{}\" href=\"{feed_url}\"{}>Feed</a></nav>",
         if active == Page::Epics { "active" } else { "" },
         if active == Page::Epics {
             " aria-current=\"page\""
@@ -47,7 +57,47 @@ pub fn shell(title: &str, active: Page, content: &str) -> String {
             ""
         }
     );
+    let action = match active {
+        Page::Epics => "/epics",
+        Page::Tasks => "/tasks",
+        Page::Detail(_) => "/tasks",
+        Page::Feed => "/feed",
+    };
+    let _ = write!(
+        out,
+        "<form method=\"get\" action=\"{action}\"><label>Project<select name=\"project\"><option value=\"\"{}>All projects</option>",
+        if project.is_none() { " selected" } else { "" }
+    );
+    for item in projects {
+        let _ = write!(
+            out,
+            "<option value=\"{}\"{}>{}</option>",
+            item.project_id,
+            if project == Some(item.project_id) {
+                " selected"
+            } else {
+                ""
+            },
+            escape(&item.project_name)
+        );
+    }
+    out.push_str("</select></label><button type=\"submit\">Show</button></form><button class=\"theme-toggle\" type=\"button\" data-theme-toggle aria-pressed=\"false\" aria-label=\"Change color theme\">Theme: system</button></header><main id=\"main\"><h1>");
+    out.push_str(&safe_title);
+    out.push_str("</h1>");
+    out.push_str(content);
+    out.push_str("</main></body></html>");
     out
+}
+
+pub fn url(path: &str, project: Option<u64>) -> String {
+    if let Some(project) = project {
+        format!(
+            "{path}{}project={project}",
+            if path.contains('?') { '&' } else { '?' }
+        )
+    } else {
+        path.to_owned()
+    }
 }
 
 pub fn status_badge(status: Status) -> String {
@@ -96,6 +146,9 @@ pub fn query_url(filters: &Filters, offset: Option<usize>) -> String {
     if let Some(offset) = offset {
         parts.push(format!("offset={offset}"));
     }
+    if let Some(project) = filters.project {
+        parts.push(format!("project={project}"));
+    }
     if parts.is_empty() {
         "/tasks".to_owned()
     } else {
@@ -115,7 +168,12 @@ pub fn encode(value: &str) -> String {
     out
 }
 
-pub fn feed_url(task: Option<u64>, kind: Option<EventKind>, before: Option<&str>) -> String {
+pub fn feed_url(
+    task: Option<u64>,
+    kind: Option<EventKind>,
+    before: Option<&str>,
+    project: Option<u64>,
+) -> String {
     let mut parts = Vec::new();
     if let Some(task) = task {
         parts.push(format!("task={task}"));
@@ -125,6 +183,9 @@ pub fn feed_url(task: Option<u64>, kind: Option<EventKind>, before: Option<&str>
     }
     if let Some(before) = before {
         parts.push(format!("before={}", encode(before)));
+    }
+    if let Some(project) = project {
+        parts.push(format!("project={project}"));
     }
     if parts.is_empty() {
         "/feed".to_owned()
