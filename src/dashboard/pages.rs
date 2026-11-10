@@ -35,7 +35,7 @@ pub fn render(board: &Board, route: Route) -> Result<String, PageError> {
                     status: filters.status,
                     assignee: filters.assignee.as_deref(),
                     parent: filters.parent,
-                    path: None,
+                    project: None,
                     include_terminal: true,
                     limit: PAGE_SIZE.min(MAX_LIST_LIMIT),
                     offset: filters.offset,
@@ -57,7 +57,7 @@ fn detail(board: &Board, id: u64) -> Result<String, PageError> {
         status: None,
         assignee: None,
         parent: Some(id),
-        path: None,
+        project: None,
         include_terminal: true,
         limit: 20,
         offset: 0,
@@ -349,8 +349,12 @@ fn task_detail(
     }
     metadata_item(
         &mut body,
-        "Path",
-        &html::escape(task.path.as_deref().unwrap_or("—")),
+        "Project",
+        &html::escape(
+            task.project_id
+                .map_or_else(|| "—".to_owned(), |id| id.to_string())
+                .as_str(),
+        ),
     );
     metadata_item(&mut body, "Revision", &task.revision.to_string());
     let created = format_timestamp(task.created_at_ms);
@@ -476,7 +480,7 @@ fn tasks(page: &TaskPage, filters: &Filters) -> String {
     let start = if page.tasks.is_empty() { 0 } else { offset + 1 };
     let _ = write!(
         body,
-        "<p class=\"result-count\">Showing {start}–{} of {} tasks</p><div class=\"table-scroll\"><table><thead><tr><th scope=\"col\">ID</th><th scope=\"col\">Status</th><th scope=\"col\">Title</th><th scope=\"col\">Assignee</th><th scope=\"col\">Path</th><th scope=\"col\">Priority</th></tr></thead><tbody>",
+        "<p class=\"result-count\">Showing {start}–{} of {} tasks</p><div class=\"table-scroll\"><table><thead><tr><th scope=\"col\">ID</th><th scope=\"col\">Status</th><th scope=\"col\">Title</th><th scope=\"col\">Assignee</th><th scope=\"col\">Project</th><th scope=\"col\">Priority</th></tr></thead><tbody>",
         offset + page.tasks.len(),
         page.total
     );
@@ -509,11 +513,13 @@ fn tasks(page: &TaskPage, filters: &Filters) -> String {
 
 fn render_task_row(out: &mut String, task: &Task) {
     let assignee = html::escape(task.assignee.as_deref().unwrap_or("—"));
-    let path = html::escape(task.path.as_deref().unwrap_or("—"));
+    let project = task
+        .project_id
+        .map_or_else(|| "—".to_owned(), |id| id.to_string());
     let title = html::escape(&task.title);
     let _ = write!(
         out,
-        "<tr><td><a href=\"/tasks/{}\">T{}</a></td><td>{}</td><td>{title}</td><td>{assignee}</td><td class=\"path\">{path}</td><td class=\"priority\">{}</td></tr>",
+        "<tr><td><a href=\"/tasks/{}\">T{}</a></td><td>{}</td><td>{title}</td><td>{assignee}</td><td class=\"path\">{project}</td><td class=\"priority\">{}</td></tr>",
         task.id,
         task.id,
         html::status_badge(task.status),

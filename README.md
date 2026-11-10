@@ -60,14 +60,14 @@ other's writes as `held by …`.
 ```
 agentboard add "title" [--description TEXT] [--goal TEXT] [--status S]
                       [--priority N] [--assignee NAME] [--parent ID]
-                      [--path PATH] [--new-actor]
-agentboard ls [--status S] [--assignee NAME] [--parent ID] [--path PATH]
+                      [--project ID] [--new-actor]
+agentboard ls [--status S] [--assignee NAME] [--parent ID] [--project ID]
               [--all] [--limit N] [--offset N]
 agentboard get ID [--full]
 agentboard epic ID
 agentboard update ID --if-revision N
               [--title|--description|--goal|--status|--priority|--assignee|
-               --clear-assignee|--parent|--clear-parent|--path|--clear-path]
+               --clear-assignee|--parent|--clear-parent|--project|--clear-project]
               [--analyst-report TEXT|--analyst-report-file PATH|-]
               [--coder-report TEXT|--coder-report-file PATH|-]
               [--reviewer-report TEXT|--reviewer-report-file PATH|-]
@@ -110,7 +110,7 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   one revision bump and one `updated` event carrying `--reason` and `--comment`.
   No field flag rides along: `--status`, `--assignee`, `--clear-assignee`,
   `--title`, `--description`, `--goal`, `--priority`, `--parent`, `--clear-parent`,
-  `--path`, `--clear-path` or a report flag beside it refuses; pick one or the other.
+  `--project`, `--clear-project` or a report flag beside it refuses; pick one or the other.
 - `comment` appends an event and never moves the revision.
 - `epic` shows a task's direct-child status counts and done/total progress. Epics
   are derived from parent links; any task with children is an epic, including a

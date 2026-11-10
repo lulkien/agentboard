@@ -140,7 +140,7 @@ fn run(
             priority,
             assignee,
             parent,
-            path: project,
+            project,
             new_actor,
         }) => {
             let actor = need_actor(actor)?;
@@ -154,7 +154,7 @@ fn run(
                 priority,
                 assignee,
                 parent_id: parent,
-                path: project,
+                project_id: project,
             };
             let added = board
                 .add(&actor, input, new_actor, now_ms())
@@ -172,7 +172,7 @@ fn run(
             status,
             assignee,
             parent,
-            path: project,
+            project,
             all,
             limit,
             offset,
@@ -184,7 +184,7 @@ fn run(
                     status,
                     assignee: assignee.as_deref(),
                     parent,
-                    path: project.as_deref(),
+                    project,
                     include_terminal: all,
                     limit,
                     offset,
@@ -236,8 +236,8 @@ fn run(
             clear_assignee,
             parent,
             clear_parent,
-            path: project,
-            clear_path,
+            project,
+            clear_project,
             release,
             force,
             reason,
@@ -252,8 +252,8 @@ fn run(
             if clear_parent && parent.is_some() {
                 return Err("choose --parent or --clear-parent, not both".into());
             }
-            if clear_path && project.is_some() {
-                return Err("choose --path or --clear-path, not both".into());
+            if clear_project && project.is_some() {
+                return Err("choose --project or --clear-project, not both".into());
             }
             if release && (status.is_some() || assignee.is_some() || clear_assignee) {
                 return Err(
@@ -276,7 +276,7 @@ fn run(
                     || parent.is_some()
                     || clear_parent
                     || project.is_some()
-                    || clear_path)
+                    || clear_project)
             {
                 return Err("choose --release or a field change, not both".into());
             }
@@ -327,7 +327,7 @@ fn run(
                 } else {
                     parent.map(Some)
                 },
-                path: if clear_path {
+                project_id: if clear_project {
                     Some(None)
                 } else {
                     project.map(Some)

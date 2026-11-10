@@ -78,7 +78,7 @@ pub struct AddArgs {
     #[serde(default)]
     pub parent: Option<u64>,
     #[serde(default)]
-    pub path: Option<String>,
+    pub project: Option<u64>,
     /// Register an unknown target assignee in this transaction
     #[serde(default)]
     pub new_actor: bool,
@@ -93,7 +93,7 @@ pub struct ListArgs {
     #[serde(default)]
     pub parent: Option<u64>,
     #[serde(default)]
-    pub path: Option<String>,
+    pub project: Option<u64>,
     /// Include done and canceled rows
     #[serde(default)]
     pub all: bool,
@@ -153,9 +153,9 @@ pub struct UpdateArgs {
     #[serde(default)]
     pub clear_parent: bool,
     #[serde(default)]
-    pub path: Option<String>,
+    pub project: Option<u64>,
     #[serde(default)]
-    pub clear_path: bool,
+    pub clear_project: bool,
     /// Return the row to todo and clear its owner, in one write
     #[serde(default)]
     pub release: bool,
@@ -246,7 +246,7 @@ impl Board {
             priority: args.priority.unwrap_or(100),
             assignee: args.assignee,
             parent_id: args.parent,
-            path: args.path,
+            project_id: args.project,
         };
         let added = blocking(&self.board, move |board| {
             board
@@ -277,7 +277,7 @@ impl Board {
         let ListArgs {
             assignee,
             parent,
-            path,
+            project,
             all,
             limit,
             offset,
@@ -289,7 +289,7 @@ impl Board {
                     status,
                     assignee: assignee.as_deref(),
                     parent,
-                    path: path.as_deref(),
+                    project,
                     include_terminal: all,
                     limit: limit.unwrap_or(20),
                     offset: offset.unwrap_or(0),
@@ -365,8 +365,8 @@ impl Board {
         if args.parent.is_some() && args.clear_parent {
             return Err(err("choose parent or clear_parent, not both".into()));
         }
-        if args.path.is_some() && args.clear_path {
-            return Err(err("choose path or clear_path, not both".into()));
+        if args.project.is_some() && args.clear_project {
+            return Err(err("choose project or clear_project, not both".into()));
         }
         if args.release && (status.is_some() || args.assignee.is_some() || args.clear_assignee) {
             return Err(err(
@@ -385,8 +385,8 @@ impl Board {
                 || args.priority.is_some()
                 || args.parent.is_some()
                 || args.clear_parent
-                || args.path.is_some()
-                || args.clear_path)
+                || args.project.is_some()
+                || args.clear_project)
         {
             return Err(err("choose release or a field change, not both".into()));
         }
@@ -436,10 +436,10 @@ impl Board {
             } else {
                 args.parent.map(Some)
             },
-            path: if args.clear_path {
+            project_id: if args.clear_project {
                 Some(None)
             } else {
-                args.path.map(Some)
+                args.project.map(Some)
             },
         };
         let updated = blocking(&self.board, move |board| {

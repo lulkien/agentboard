@@ -369,7 +369,7 @@ agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 | Tool | Use |
 | --- | --- |
 | `task_add` | file work; assigns on creation when you name an assignee |
-| `task_list` | status, assignee, parent, path; `all=true` includes closed rows |
+| `task_list` | status, assignee, parent, project; `all=true` includes closed rows |
 | `task_get` | one task and its revision; `full=true` for stored text and reports |
 | `task_epic` | umbrella row, direct-child counts and done/total progress |
 | `task_update` | fields, status, owner, reports; needs `if_revision`; `force`+`reason` to override; `release` to return a held row to `todo` |

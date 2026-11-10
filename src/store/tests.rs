@@ -80,7 +80,7 @@ fn draft(assignee: Option<&str>) -> NewTask {
         priority: 10,
         assignee: assignee.map(str::to_owned),
         parent_id: None,
-        path: None,
+        project_id: None,
     }
 }
 

@@ -72,8 +72,8 @@ pub enum Cmd {
         assignee: Option<String>,
         #[arg(long, value_name = "ID")]
         parent: Option<u64>,
-        #[arg(long)]
-        path: Option<String>,
+        #[arg(long, value_name = "ID")]
+        project: Option<u64>,
         /// Register an unknown target assignee
         #[arg(long)]
         new_actor: bool,
@@ -86,8 +86,8 @@ pub enum Cmd {
         assignee: Option<String>,
         #[arg(long, value_name = "ID")]
         parent: Option<u64>,
-        #[arg(long)]
-        path: Option<String>,
+        #[arg(long, value_name = "ID")]
+        project: Option<u64>,
         /// Include done and canceled rows
         #[arg(long)]
         all: bool,
@@ -154,10 +154,10 @@ pub enum Cmd {
         parent: Option<u64>,
         #[arg(long)]
         clear_parent: bool,
+        #[arg(long, value_name = "ID")]
+        project: Option<u64>,
         #[arg(long)]
-        path: Option<String>,
-        #[arg(long)]
-        clear_path: bool,
+        clear_project: bool,
         /// Return the row to todo and clear its owner, in one write
         #[arg(long)]
         release: bool,

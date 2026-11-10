@@ -73,12 +73,12 @@ asked, and an explicit claim of one refuses by name.
 ```json
 {"title": "...", "description": "optional", "goal": "optional",
  "status": "todo", "priority": 100, "assignee": "optional",
- "parent": 3, "path": "optional", "new_actor": false}
+ "parent": 3, "project": 1, "new_actor": false}
 ```
 
 Answers `ok`, the record, and `cursor N` for the created event. Refuses an empty
 title, a title over 200 characters, an unknown status, a self-parent, and an
-unknown assignee without `new_actor`. A direct parent must exist and be nonterminal.
+unknown assignee without `new_actor`, and a project id must exist. A direct parent must exist and be nonterminal.
 Creating or newly reparenting under a `done` or `canceled` parent refuses; the
 manager explicitly reopens the parent first, then retries. Parents never auto-reopen.
 
@@ -86,7 +86,7 @@ manager explicitly reopens the parent first, then retries. Parents never auto-re
 
 ```json
 {"status": "optional", "assignee": "optional", "parent": 3,
- "path": "optional", "all": false, "limit": 20, "offset": 0}
+ "project": 1, "all": false, "limit": 20, "offset": 0}
 ```
 
 One line per task, or the single line `no tasks` when the filter matches nothing, then
@@ -133,7 +133,7 @@ refuses `task T7 does not exist`. Reads append no events.
  "analyst_report": "...", "coder_report": "...", "reviewer_report": "...",
  "replace_report": false,
  "status": "reviewing", "priority": 20, "assignee": "...", "clear_assignee": false,
- "parent": 2, "clear_parent": false, "path": "...", "clear_path": false,
+ "parent": 2, "clear_parent": false, "project": 1, "clear_project": false,
  "release": false, "force": false, "reason": "quota", "comment": "optional",
  "new_actor": false}
 ```
@@ -153,7 +153,7 @@ Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
   holder may release its own row; another actor needs `force` with a reason, as for
   any other protected write. It cannot be combined with any field change —
   `status`, `assignee`, `clear_assignee`, `title`, `description`, `goal`,
-  `priority`, `parent`, `clear_parent`, `path` or `clear_path` — which refuses with
+  `priority`, `parent`, `clear_parent`, `project` or `clear_project` — which refuses with
   `choose release or a field change, not both`; only `force`, `reason` and `comment`
   ride along. A terminal row and a row without an owner refuse by name. The
   event kind is unchanged and no field is added, so an older binary still reads the

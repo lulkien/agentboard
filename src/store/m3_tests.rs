@@ -56,7 +56,7 @@ fn draft(title: &str, status: Status, priority: i32, assignee: Option<&str>) -> 
         priority,
         assignee: assignee.map(str::to_owned),
         parent_id: None,
-        path: None,
+        project_id: None,
     }
 }
 
@@ -72,7 +72,7 @@ fn list_all() -> ListFilter<'static> {
         status: None,
         assignee: None,
         parent: None,
-        path: None,
+        project: None,
         include_terminal: true,
         limit: 50,
         offset: 0,

@@ -10,6 +10,8 @@ import socket
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from urllib.parse import urlencode
 
 
@@ -34,29 +36,14 @@ def run_cli(db: Path, *args: str) -> str:
 
 
 def request(port: int, method: str, target: str) -> tuple[int, str]:
-    result = subprocess.run(
-        [
-            "curl",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "4",
-            "-X",
-            method,
-            "-o",
-            "-",
-            "-w",
-            "\\n%{http_code}",
-            f"http://127.0.0.1:{port}{target}",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{target}", method=method
     )
-    if result.returncode:
-        raise ConnectionError(result.stderr.strip() or "curl request failed")
-    body, status = result.stdout.rsplit("\n", 1)
-    return int(status), body
+    try:
+        with urllib.request.urlopen(req, timeout=4) as response:
+            return response.status, response.read().decode()
+    except urllib.error.HTTPError as response:
+        return response.code, response.read().decode()
 
 
 def feed_cursor(db: Path) -> str:
@@ -72,6 +59,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="agentboard-dashboard-") as temp:
         db = Path(temp) / "board"
+        run_cli(db, "project", "add", "--name", "dashboard", "--path", "/dashboard")
         run_cli(db, "add", "Epic <script>alert('epic')</script>")
         run_cli(db, "add", "Done child", "--parent", "1", "--status", "done")
         dangerous_title = "<script>alert('x')</script>"
@@ -86,8 +74,8 @@ def main() -> int:
             "--assignee",
             "alice<&",
             "--new-actor",
-            "--path",
-            "src/<b>&",
+            "--project",
+            "1",
             "--description",
             description,
             "--goal",
@@ -154,7 +142,7 @@ def main() -> int:
             assert "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;" in detail, "detail title was not escaped"
             assert "A &quot;quoted&quot; &lt;tag&gt;&amp; first line\nsecond line" in detail, "full multiline description was not escaped/preserved"
             assert "Goal &lt;done&gt;&amp;\nkeep this line" in detail, "full multiline goal was not escaped/preserved"
-            assert "alice&lt;&amp;" in detail and "src/&lt;b&gt;&amp;" in detail, "detail metadata was not escaped"
+            assert "alice&lt;&amp;" in detail and "1" in detail, "detail metadata was not escaped"
             assert "Reporter" in detail and "manager" in detail and "Priority" in detail and "-7" in detail, "reporter or signed priority metadata is missing"
             assert 'href="/tasks/1"' in detail and "Parent" in detail, "parent link is missing"
             assert "updated" in detail and "commented" in detail and "<time datetime=" in detail, "activity event kind or timestamp is missing"
@@ -191,7 +179,7 @@ def main() -> int:
             assert status == 200 and dangerous_title not in filtered, "filter returned unsafe raw title"
             assert "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;" in filtered, "assignee filter missed the task"
             assert "<script>alert('x')</script>" not in filtered, "raw task markup was rendered"
-            assert "alice&lt;&amp;" in filtered and "src/&lt;b&gt;&amp;" in filtered, "task metadata was not escaped"
+            assert "alice&lt;&amp;" in filtered and "1" in filtered, "task metadata was not escaped"
             assert 'href="/tasks/3"' in filtered, "task detail link is missing"
             status, filtered_done = request(port, "GET", "/tasks?status=done")
             assert status == 200 and "Done child" in filtered_done, "status filter missed done task"

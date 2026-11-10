@@ -59,15 +59,8 @@ pub fn task_record(task: &Task, full: bool) -> String {
     if let Some(parent) = task.parent_id {
         lines.push(format!("parent T{parent}"));
     }
-    if let Some(path) = task.path.as_deref() {
-        lines.push(format!(
-            "path {}",
-            if full {
-                path.to_owned()
-            } else {
-                truncate(path, FIELD_WIDTH)
-            }
-        ));
+    if let Some(project_id) = task.project_id {
+        lines.push(format!("project {project_id}"));
     }
     for (name, value) in [
         ("description", task.description.as_str()),

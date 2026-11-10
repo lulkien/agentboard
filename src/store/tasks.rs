@@ -66,6 +66,14 @@ impl Board {
         let mut metadata = metadata;
         let task_id = metadata.next_task_id;
         let task = Task::new(task_id, actor, input, now_ms)?;
+        if let Some(project_id) = task.project_id
+            && self
+                .projects
+                .get(&txn, &project_id.to_be_bytes())?
+                .is_none()
+        {
+            return Err(domain::Error::UnknownProject(project_id).into());
+        }
         if let Some(parent_id) = task.parent_id {
             self.check_attachment_parent(&txn, parent_id)?;
         }
@@ -132,6 +140,14 @@ impl Board {
             input.force_reason,
             input.now_ms,
         )?;
+        if let Some(project_id) = applied.task.project_id
+            && self
+                .projects
+                .get(&txn, &project_id.to_be_bytes())?
+                .is_none()
+        {
+            return Err(domain::Error::UnknownProject(project_id).into());
+        }
         if input.patch.status.is_some_and(Status::is_terminal) {
             let counts = self.child_counts(&txn)?;
             let count = counts.get(&input.id).map_or(0, |counts| {
@@ -633,7 +649,7 @@ fn changes(old: &Task, next: &Task) -> Result<serde_json::Value> {
         "priority",
         "assignee",
         "parent_id",
-        "path",
+        "project_id",
     ] {
         let before = old_fields
             .get(field)
@@ -689,5 +705,5 @@ fn patch_is_empty(patch: &crate::domain::TaskPatch) -> bool {
         && patch.priority.is_none()
         && patch.assignee.is_none()
         && patch.parent_id.is_none()
-        && patch.path.is_none()
+        && patch.project_id.is_none()
 }

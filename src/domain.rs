@@ -129,6 +129,7 @@ pub enum Error {
     EmptyReport,
     SelfParent,
     MissingAssignee(Status),
+    UnknownProject(u64),
     MissingForceReason,
     ForceReasonWithoutForce,
     Held { holder: String },
@@ -165,6 +166,7 @@ impl std::fmt::Display for Error {
             Self::MissingAssignee(status) => {
                 write!(f, "{} requires an assignee", status.as_str())
             }
+            Self::UnknownProject(id) => write!(f, "unknown project {id}"),
             Self::MissingForceReason => f.write_str("forced update requires a reason"),
             Self::ForceReasonWithoutForce => f.write_str("force reason requires force=true"),
             Self::Held { holder } => write!(
@@ -230,7 +232,7 @@ pub struct Task {
     pub reporter: String,
     pub assignee: Option<String>,
     pub parent_id: Option<u64>,
-    pub path: Option<String>,
+    pub project_id: Option<u64>,
     pub revision: u64,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
@@ -245,7 +247,7 @@ pub struct NewTask {
     pub priority: i32,
     pub assignee: Option<String>,
     pub parent_id: Option<u64>,
-    pub path: Option<String>,
+    pub project_id: Option<u64>,
 }
 
 impl Task {
@@ -264,7 +266,7 @@ impl Task {
             reporter: actor.to_owned(),
             assignee: input.assignee,
             parent_id: input.parent_id,
-            path: input.path,
+            project_id: input.project_id,
             revision: 1,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
@@ -401,8 +403,8 @@ impl Task {
         if let Some(parent_id) = patch.parent_id {
             next.parent_id = parent_id;
         }
-        if let Some(path) = &patch.path {
-            next.path.clone_from(path);
+        if let Some(project_id) = patch.project_id {
+            next.project_id = project_id;
         }
         let mut report_mode = None;
         for (report, body) in [
@@ -479,7 +481,7 @@ pub struct TaskPatch {
     /// `None` leaves the field alone, `Some(None)` clears it.
     pub assignee: Option<Option<String>>,
     pub parent_id: Option<Option<u64>>,
-    pub path: Option<Option<String>>,
+    pub project_id: Option<Option<u64>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -549,7 +551,7 @@ mod tests {
             priority: 100,
             assignee: None,
             parent_id: None,
-            path: None,
+            project_id: None,
         }
     }
 

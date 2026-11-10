@@ -16,6 +16,20 @@ check() { local name=$1 want=$2 got=$3; [[ "$got" == "$want" ]] && ok || bad "$n
 has() { local name=$1 needle=$2 hay=$3; [[ "$hay" == *"$needle"* ]] && ok || bad "$name: missing '$needle' in '$hay'"; }
 lacks() { local name=$1 needle=$2 hay=$3; [[ "$hay" != *"$needle"* ]] && ok || bad "$name: unexpected '$needle' in '$hay'"; }
 fresh() { AGENTBOARD_DB="$S/board-$1"; export AGENTBOARD_DB; }
+http_status() {
+    python3 - "$1" "$2" <<'PY'
+import sys
+import urllib.error
+import urllib.request
+
+request = urllib.request.Request(sys.argv[1], method=sys.argv[2])
+try:
+    with urllib.request.urlopen(request, timeout=4) as response:
+        print(response.status)
+except urllib.error.HTTPError as response:
+    print(response.code)
+PY
+}
 
 # --- optional dashboard CLI and HTTP skeleton -----------------------------
 if "$B" dashboard --help >/dev/null 2>&1; then
@@ -27,12 +41,12 @@ if "$B" dashboard --help >/dev/null 2>&1; then
     trap 'kill "$dashboard_pid" 2>/dev/null || true; rm -rf "$S"' EXIT
     code=1
     for _ in {1..30}; do
-        code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null) && break
+        code=$(http_status "http://127.0.0.1:$port/" GET) && break
         sleep 0.1
     done
     check "dashboard GET / status" "200" "$code"
-    check "dashboard GET other path status" "404" "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/missing" 2>/dev/null)"
-    check "dashboard POST status" "405" "$(curl -s -X POST -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null)"
+check "dashboard GET other path status" "404" "$(http_status "http://127.0.0.1:$port/missing" GET)"
+check "dashboard POST status" "405" "$(http_status "http://127.0.0.1:$port/" POST)"
     kill "$dashboard_pid" 2>/dev/null || true
     wait "$dashboard_pid" 2>/dev/null || true
     trap 'rm -rf "$S"' EXIT
@@ -596,6 +610,16 @@ out=$("$B" project update 1 --path "$PWD/updated"); code=$?
 check "project update exit" 0 "$code"
 has "project update returns updated path" "$PWD/updated" "$out"
 has "project ls sees updated path" "$PWD/updated" "$("$B" project ls)"
+
+out=$($B add "project one" --project 1); code=$?
+check "task add project id" 0 "$code"
+has "task record names project id" "project 1" "$out"
+out=$($B add "unknown project" --project 999 2>&1); code=$?
+check "unknown project add exit" 1 "$code"
+has "unknown project refusal names id" "unknown project 999" "$out"
+out=$($B ls --project 1); code=$?
+check "project list filter exit" 0 "$code"
+has "project list returns linked task" "project one" "$out"
 
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]

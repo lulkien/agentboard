@@ -15,7 +15,7 @@ pub struct ListFilter<'a> {
     pub status: Option<Status>,
     pub assignee: Option<&'a str>,
     pub parent: Option<u64>,
-    pub path: Option<&'a str>,
+    pub project: Option<u64>,
     /// Terminal rows (`done`, `canceled`) stay out unless this is set.
     pub include_terminal: bool,
     pub limit: usize,
@@ -252,8 +252,8 @@ fn keep(filter: &ListFilter<'_>, task: &Task) -> bool {
     {
         return false;
     }
-    if let Some(path) = filter.path
-        && task.path.as_deref() != Some(path)
+    if let Some(project) = filter.project
+        && task.project_id != Some(project)
     {
         return false;
     }
