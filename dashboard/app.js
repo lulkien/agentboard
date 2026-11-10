@@ -568,6 +568,7 @@
     const apply = () => {
       if (current === 'system') document.documentElement.removeAttribute('data-theme');
       else document.documentElement.setAttribute('data-theme', current);
+      button.textContent = `Theme: ${current}`;
       button.setAttribute('aria-pressed', String(current !== 'system'));
       button.setAttribute('aria-label', `Change theme; current theme: ${current}`);
       button.title = `Current theme: ${current}`;
