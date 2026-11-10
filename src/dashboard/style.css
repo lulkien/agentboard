@@ -108,10 +108,13 @@ form { display:flex; flex-wrap:wrap; align-items:end; gap:.75rem; margin-bottom:
 label { display:grid; gap:.25rem; font-size:13px; font-weight:600; }
 input,select { min-height:40px; min-width:180px; max-width:100%; padding:.5rem .75rem; border:1px solid var(--rule); border-radius:var(--radius); background:var(--strip); color:var(--ink); font:inherit; }
 button[type=submit] { min-height:40px; padding:.5rem 1rem; border:1px solid var(--ink); border-radius:var(--radius); background:var(--ink); color:var(--strip); font:inherit; font-weight:650; cursor:pointer; }
-.table-scroll { overflow-x:auto; margin-top:.5rem; } table { width:100%; border-collapse:collapse; text-align:left; }
+.table-scroll { overflow-x:auto; margin-top:.5rem; border-right:2px solid var(--muted); box-shadow:inset -8px 0 8px -8px var(--ink); } table { width:100%; border-collapse:collapse; text-align:left; }
 th,td { padding:.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
 th { font-size:13px; color:var(--muted); } .path { overflow-wrap:anywhere; }
 .task-table { width:max-content; min-width:100%; }
+.task-table .task-title { width:11rem; min-width:11rem; max-width:11rem; }
+.task-table .task-title > span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-clamp:3; overflow:hidden; overflow-wrap:anywhere; }
+.task-table td:not(.task-title) { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .empty { color:var(--muted); } .pagination { display:flex; justify-content:center; align-items:center; gap:1rem; margin-top:1rem; }
 .page-arrow { display:inline-flex; align-items:center; justify-content:center; min-width:40px; min-height:40px; border:1px solid var(--rule); border-radius:var(--radius); text-decoration:none; font-size:20px; }
 .page-arrow[aria-disabled="true"] { color:var(--muted); }
