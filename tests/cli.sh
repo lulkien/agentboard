@@ -485,6 +485,18 @@ has "wait assignee leaves status alone" "T1 implementing" "$out"
 check "wait assignee handoff ends with the matched notice" "[ATTENTION] wait task is done, please check result" "$(printf '%s\n' "$out" | tail -1)"
 has "wait assignee prints the update event" "updated  T1" "$out"
 
+# A handoff that lands between two waits is seen when the next wait carries the
+# cursor of the first; without it the new wait starts from "now" and times out.
+handoff_row wait-assignee-after
+cur=$("$B" wait 1 --status reviewing,done,blocked --assignee --timeout 1 | rg '^cursor ' | head -1)
+cur=${cur#cursor }
+AGENTBOARD_ACTOR=analyst "$B" update 1 --if-revision 1 --assignee coder --new-actor >/dev/null
+out=$("$B" wait 1 --status reviewing,done,blocked --assignee --timeout 1); code=$?
+check "wait assignee without --after misses an earlier handoff" 3 "$code"
+out=$("$B" wait 1 --status reviewing,done,blocked --assignee --after "$cur" --timeout 1); code=$?
+check "wait assignee --after sees an earlier handoff exit" 0 "$code"
+has "wait assignee --after names the handoff" "handoff T1 to coder" "$out"
+
 handoff_row wait-assignee-off
 handoff_later
 out=$("$B" wait 1 --status reviewing,done,blocked --timeout 1); code=$?

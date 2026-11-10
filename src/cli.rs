@@ -223,6 +223,10 @@ pub enum Cmd {
         // flag, so `--assignee --epic` would name "--epic". Use `--assignee=-x`.
         #[arg(long, value_name = "NAME", num_args = 0..=1)]
         assignee: Option<Option<String>>,
+        /// Count events after this cursor (the `cursor` line of the last wait), so a
+        /// re-armed wait still sees a handoff that landed between two waits
+        #[arg(long, value_name = "CURSOR")]
+        after: Option<String>,
         /// Seconds; accepted range 1..=300 to bound manager waits; values outside it are rejected
         #[arg(long, default_value_t = WAIT_MAX_MS / 1000, value_parser = feed_wait_seconds)]
         timeout: u64,

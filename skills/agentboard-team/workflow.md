@@ -139,7 +139,9 @@ agentboard wait 27 --status reviewing,done,blocked --assignee --timeout 300   # 
 There is no MCP wait tool: waits run only through the binary. Add `--assignee`
 (or a name) when the act-point is a handoff. One wait is at most
 300 seconds: the CLI refuses `--timeout` above 300 or below 1, so a manager parks
-the wait in the background and re-arms a fresh one when it exits 3. The verdict's
+the wait in the background and re-arms a fresh one when it exits 3, passing
+`--after CURSOR` (the `cursor` line of the last verdict) so a handoff between two
+waits is still seen. The verdict's
 first line is `matched:` or `timeout:` and it writes nothing. A seat never waits:
 it does its row, reports it and stops, and the manager prompts it with the next
 one. Do not build a feed loop in a seat; that design is retired.

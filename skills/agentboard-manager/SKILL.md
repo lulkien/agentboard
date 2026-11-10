@@ -107,7 +107,9 @@ seat is a named terminal and `hc send` waits for the program to pause.
    - While an analyst holds a row (`planning`), the hand to the coder moves it to
      `implementing` with the coder as assignee. Arm `wait ID --status reviewing,done,blocked --assignee --timeout 300`
      so that reassignment ends the wait; the
-     first line then carries `; handoff T… to coder`.
+     first line then carries `; handoff T… to coder`. Re-arm with `--after CURSOR`,
+     the `cursor` line the previous wait printed, so a handoff that landed between
+     two waits is not lost.
    - Stage the set by phase. Once you have prompted the reviewer, add
      `implementing` to `done,reviewing,blocked`: the coder has already claimed, so
      `implementing` now means a reopen that needs the coder prompted again.

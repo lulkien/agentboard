@@ -413,6 +413,7 @@ fn run(
             epic,
             status,
             assignee,
+            after,
             timeout,
         }) => {
             let statuses = wait_statuses(status.as_deref())?;
@@ -422,7 +423,7 @@ fn run(
                     ids: &ids,
                     epic,
                     statuses: &statuses,
-                    after: None,
+                    after: after.as_deref(),
                     timeout_ms: timeout.saturating_mul(1000),
                     assignee: assignee.as_ref().map(|name| {
                         name.as_deref()

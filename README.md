@@ -98,7 +98,8 @@ agentboard claim [ID]
 agentboard comment ID (--body TEXT | --body-file PATH|-)
 agentboard feed [--after CURSOR] [--kind K] [--recipient NAME] [--task ID]
                 [--limit N] [--full] [--wait SECONDS]
-agentboard wait ID... [--status CSV] [--assignee [NAME]] [--epic] [--timeout SECONDS]
+agentboard wait ID... [--status CSV] [--assignee [NAME]] [--epic] [--after CURSOR]
+               [--timeout SECONDS]
 agentboard brief [--project ID]
 agentboard agents
 agentboard agents delete NAME
@@ -163,6 +164,8 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   handed to a new owner after the wait starts, even with its status unchanged, which
   is how an analyst-to-coder reassignment reaches the manager; `--assignee NAME`
   accepts only a handoff to that actor, and a release is never a handoff.
+  `--after CURSOR` takes the `cursor` line the previous wait printed, so a handoff
+  that landed between two waits still counts when the manager re-arms.
   `--timeout` accepts 1 to 300 seconds and defaults to 300.
   Values outside that range are rejected before waiting to bound manager waits. A match
   exits `0` and prints `matched: …`, a timeout exits `3` and still prints each row
