@@ -454,9 +454,21 @@ def main():
         daemon.close()
 
     # Non-loopback bind needs the flag.
-    refused = subprocess.run([BIN, "--db", db, "daemon", "0.0.0.0:0"], capture_output=True, text=True, timeout=30)
+    refused = subprocess.run([BIN, "--db", db, "daemon", "192.0.2.1:0"], capture_output=True, text=True, timeout=30)
     check("non-loopback bind without the flag exits 1", 1, refused.returncode)
     has("non-loopback refusal names the flag", "--allow-non-loopback", refused.stderr)
+
+    # A wildcard bind is refused with or without the flag: the Host guard would 421
+    # every remote client, so the daemon asks for one named address instead.
+    for wildcard, shown in (("0.0.0.0:0", "0.0.0.0"), ("[::]:0", "::")):
+        for extra in ([], ["--allow-non-loopback"]):
+            refused = subprocess.run(
+                [BIN, "--db", db, "daemon", wildcard, *extra], capture_output=True, text=True, timeout=30
+            )
+            label = f"wildcard bind {wildcard} {' '.join(extra) or 'without the flag'}"
+            check(f"{label} exits 1", 1, refused.returncode)
+            has(f"{label} names the unspecified address", f"cannot bind the unspecified address {shown}", refused.stderr)
+            check(f"{label} opens no listener", "", refused.stdout)
 
     # Project scope: argument, else the URL, never the daemon's env or cwd.
     pdb = os.path.join(scratch, "projects")

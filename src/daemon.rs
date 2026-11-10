@@ -51,6 +51,14 @@ pub async fn serve(
     address: SocketAddr,
     allow_non_loopback: bool,
 ) -> Result<(), String> {
+    // The Host guard accepts only the bound address, `localhost` and `127.0.0.1`, so a
+    // wildcard bind would answer 421 to every remote client. Name one address.
+    if address.ip().is_unspecified() {
+        return Err(format!(
+            "daemon cannot bind the unspecified address {}; name one address, for example 192.168.1.50:8765",
+            address.ip()
+        ));
+    }
     if !address.ip().is_loopback() && !allow_non_loopback {
         return Err(
             "daemon binding to a non-loopback address requires --allow-non-loopback".into(),

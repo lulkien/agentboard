@@ -32,7 +32,7 @@ segment is 404. An actor-less stdio setting (`--actor`, `AGENTBOARD_ACTOR`) is n
 consulted for a request that has a URL name. `?project=ID` on that URL scopes
 `task_list` and `board_brief` when the call names no `project`; with neither, the
 whole board. The default address is `127.0.0.1:8765`; a non-loopback bind needs the
-flag.
+flag, and a wildcard address (`0.0.0.0`, `[::]`) is refused: name one address.
 
 One guard runs before every route: `Host` must be the bound address, `localhost` or
 `127.0.0.1` (else 421); a present `Origin` must be `http://` plus such a host (else
