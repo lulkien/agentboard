@@ -65,7 +65,7 @@ run_kind() {
   fi
 }
 run_kind claude 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <claude> <--model> <claude-sonnet-5-5> <--mcp-config> <'$HOME'/.claude/manager-mcp.json> <--dangerously-skip-permissions> </agentboard-manager>'
-run_kind codex 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <codex> <--no-daemon> <--profile> <manager> <--model> <gpt-6-luna> <$agentboard-manager>'
+run_kind codex 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <codex> <--no-daemon> <--profile> <manager> <$agentboard-manager>'
 run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <grok> <--trust> <--always-approve>'
 
 run_neither() {
@@ -121,7 +121,7 @@ run_herdr_kind() {
   is "herdr $kind never calls hc" test ! -s "$STUB_HC_LOG"
 }
 run_herdr_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--mcp-config> <'$HOME'/.claude/manager-mcp.json> <--dangerously-skip-permissions> <--> </agentboard-manager>'
-run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--profile> <manager> <--model> <gpt-6-luna> <--> <$agentboard-manager>'
+run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--profile> <manager> <--> <$agentboard-manager>'
 run_herdr_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
 
 run_herdr_not_ready() {

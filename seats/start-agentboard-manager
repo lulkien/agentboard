@@ -38,8 +38,8 @@ case "$KIND" in
     hargs=(--model claude-sonnet-5-5 --mcp-config "$HOME/.claude/manager-mcp.json" --dangerously-skip-permissions -- /agentboard-manager)
     ;;
   codex)
-    argv=(codex --no-daemon --profile manager --model gpt-6-luna '$agentboard-manager')
-    hargs=(--profile manager --model gpt-6-luna -- '$agentboard-manager')
+    argv=(codex --no-daemon --profile manager '$agentboard-manager')
+    hargs=(--profile manager -- '$agentboard-manager')
     ;;
   grok)
     argv=(grok --trust --always-approve)

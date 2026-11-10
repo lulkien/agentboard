@@ -78,15 +78,15 @@ To start the manager in the current herdr pane, run the installed
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
-Analyst and reviewer judge, so they use the stronger model at high effort; the
-coder executes their guidance, so that seat uses the cheaper model at medium
-effort. Swap the id only when the human names a different model.
+For Claude, analyst and reviewer use Opus at high effort and coder uses Sonnet at
+medium effort. Codex loads each seat's model and effort from its profile. Swap a
+model only when the human names a different one.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
-| analyst | `--model claude-opus-5-5 --effort high` | `-m gpt-6-sol` (profile: high) |
-| coder | `--model claude-sonnet-5-5 --effort medium` | `-m gpt-6-luna` (profile: medium) |
-| reviewer | `--model claude-opus-5-5 --effort high` | `-m gpt-6-luna` (profile: high) |
+| analyst | `--model claude-opus-5-5 --effort high` | `-p analyst` (profile: gpt-6-sol, high) |
+| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-sol, medium) |
+| reviewer | `--model claude-opus-5-5 --effort high` | `-p reviewer` (profile: gpt-6-sol, medium) |
 
 ```bash
 export REPO=/path/to/repo
@@ -120,11 +120,11 @@ herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
 # keep the pane rooted in the repository so it can read source files there.
 install -d -m 700 /tmp/agentboard/scratch
 herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
-  -p analyst -m gpt-6-sol
+  -p analyst
 herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
-  -p coder -m gpt-6-luna
+  -p coder
 herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
-  -p reviewer -m gpt-6-luna
+  -p reviewer
 
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
 # and Grok; $agentboard-<seat> T<id> for Codex.
@@ -156,15 +156,15 @@ To start the manager in the current hc terminal, run the installed
 the selected manager as a new terminal named `manager` and prints its address;
 `seats/README.md` documents its prerequisites.
 
-Analyst and reviewer judge, so they use the stronger model at high effort; the
-coder executes their guidance, so that seat uses the cheaper model at medium
-effort. Swap the id only when the human names a different model.
+For Claude, analyst and reviewer use Opus at high effort and coder uses Sonnet at
+medium effort. Codex loads each seat's model and effort from its profile. Swap a
+model only when the human names a different one.
 
 | Seat | Claude | Codex |
 | --- | --- | --- |
-| analyst | `--model claude-opus-5-5 --effort high` | `-m gpt-6-sol` (profile: high) |
-| coder | `--model claude-sonnet-5-5 --effort medium` | `-m gpt-6-luna` (profile: medium) |
-| reviewer | `--model claude-opus-5-5 --effort high` | `-m gpt-6-luna` (profile: high) |
+| analyst | `--model claude-opus-5-5 --effort high` | `-p analyst` (profile: gpt-6-sol, high) |
+| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-sol, medium) |
+| reviewer | `--model claude-opus-5-5 --effort high` | `-p reviewer` (profile: gpt-6-sol, medium) |
 
 ```bash
 export REPO=/path/to/repo
@@ -191,13 +191,13 @@ hc run --bg --name reviewer --cwd "$REPO" -- \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write MultiEdit NotebookEdit
 
-# Codex seats (profile + preferred model). --no-daemon is mandatory: without it the
+# Codex seats (the profile supplies the model and effort). --no-daemon is mandatory: without it the
 # seat's own commands run outside hc and nothing it starts is addressable.
 # The analyst's permission profile writes only in this scratch directory.
 install -d -m 700 /tmp/agentboard/scratch
-hc run --bg --name analyst --cwd "$REPO" -- codex --no-daemon -p analyst -m gpt-6-sol
-hc run --bg --name coder --cwd "$REPO" -- codex --no-daemon -p coder -m gpt-6-luna
-hc run --bg --name reviewer --cwd "$REPO" -- codex --no-daemon -p reviewer -m gpt-6-luna
+hc run --bg --name analyst --cwd "$REPO" -- codex --no-daemon -p analyst
+hc run --bg --name coder --cwd "$REPO" -- codex --no-daemon -p coder
+hc run --bg --name reviewer --cwd "$REPO" -- codex --no-daemon -p reviewer
 
 # The first prompt is the seat skill and the row: /agentboard-<seat> T<id> for
 # Claude and Grok; $agentboard-<seat> T<id> for Codex. A terminal that has not
