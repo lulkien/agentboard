@@ -47,6 +47,8 @@ task_comment = { approval_mode = "approve" } # add a comment
 board_feed = { approval_mode = "approve" }   # read board events
 board_brief = { approval_mode = "approve" }  # show active work and status counts
 board_agents = { approval_mode = "approve" } # list registered actors
+board_project_delete = { approval_mode = "auto" } # manager-only project deletion
+board_agent_delete = { approval_mode = "auto" } # manager-only roster deletion
 
 [notice]
 hide_rate_limit_model_nudge = true

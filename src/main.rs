@@ -31,7 +31,7 @@ fn main() -> ExitCode {
     }
 }
 
-use cli::{Cli, Cmd, ProjectCmd};
+use cli::{AgentsCmd, Cli, Cmd, ProjectCmd};
 
 fn board_path(db: Option<PathBuf>) -> Result<PathBuf, String> {
     if let Some(path) = db {
@@ -105,6 +105,10 @@ fn run(
                             .join("\n")
                     };
                     Ok((output, ExitCode::SUCCESS))
+                }
+                ProjectCmd::Delete { id } => {
+                    let project = board.delete_project(id).map_err(|e| e.to_string())?;
+                    Ok((render::deleted_project(&project), ExitCode::SUCCESS))
                 }
                 ProjectCmd::Update { id, name, path } => {
                     let project = board
@@ -441,8 +445,12 @@ fn run(
                 .map_err(|e| e.to_string())?;
             Ok((render::brief_text(&brief), ExitCode::SUCCESS))
         }
-        Some(Cmd::Agents) => {
+        Some(Cmd::Agents { cmd }) => {
             let board = open(&path)?;
+            if let Some(AgentsCmd::Delete { name }) = cmd {
+                let agent = board.delete_agent(&name).map_err(|e| e.to_string())?;
+                return Ok((render::deleted_agent(&agent), ExitCode::SUCCESS));
+            }
             let agents = board.agents().map_err(|e| e.to_string())?;
             if agents.is_empty() {
                 return Ok(("no actors".into(), ExitCode::SUCCESS));

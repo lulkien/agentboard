@@ -93,9 +93,10 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 - Claude and Codex cards connect to `http://127.0.0.1:8765/mcp/<seat>`; Grok
   connects to `http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}`. The URL
   names the actor on every request. Keep `AGENTBOARD_SEAT` nonempty when set.
-- The board tool set is the ten tools of this build: `task_add`, `task_list`,
+- The board tool set is the twelve tools of this build: `task_add`, `task_list`,
   `task_get`, `task_epic`, `task_update`, `task_claim`, `task_comment`,
-  `board_feed`, `board_brief`, `board_agents`.
+  `board_feed`, `board_brief`, `board_agents`, `board_project_delete`,
+  `board_agent_delete`.
 - One actor per card. A base config must never carry `AGENTBOARD_ACTOR`: every
   seat that reads it would write under that name.
 

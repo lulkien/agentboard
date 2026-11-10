@@ -180,13 +180,15 @@ impl Board {
                     })?;
             }
         }
-        self.ensure_target(
-            &mut txn,
-            applied.task.assignee.as_deref(),
-            input.actor,
-            input.new_actor,
-            input.now_ms,
-        )?;
+        if applied.task.assignee != old.assignee || !applied.task.status.is_terminal() {
+            self.ensure_target(
+                &mut txn,
+                applied.task.assignee.as_deref(),
+                input.actor,
+                input.new_actor,
+                input.now_ms,
+            )?;
+        }
         self.persist_update(
             txn,
             &mut metadata,
@@ -368,6 +370,42 @@ impl Board {
                 .then_with(|| left.name.cmp(&right.name))
         });
         Ok(agents)
+    }
+
+    pub fn delete_agent(&self, name: &str) -> Result<Agent> {
+        let mut txn = self.env.write_txn()?;
+        self.checked_metadata(&txn)?;
+        let raw = self
+            .agents
+            .get(&txn, name.as_bytes())?
+            .ok_or_else(|| Error::MissingAgent(name.to_owned()))?;
+        let agent: Agent = serde_json::from_slice(raw)?;
+        if agent.name != name {
+            return Err(Error::Corrupt("actor roster key/name mismatch"));
+        }
+        let mut count = 0_u64;
+        for status in Status::ALL
+            .into_iter()
+            .filter(|status| !status.is_terminal())
+        {
+            let mut prefix = Vec::with_capacity(name.len() + 2);
+            prefix.extend_from_slice(name.as_bytes());
+            prefix.push(0);
+            prefix.push(keys::status_code(status));
+            for entry in self.tasks_by_assignee.prefix_iter(&txn, &prefix)? {
+                entry?;
+                count += 1;
+            }
+        }
+        if count > 0 {
+            return Err(Error::AgentHoldsOpenTasks {
+                name: name.to_owned(),
+                count,
+            });
+        }
+        self.agents.delete(&mut txn, name.as_bytes())?;
+        txn.commit()?;
+        Ok(agent)
     }
 
     pub(super) fn read_task_in_txn(&self, txn: &ReadTxn<'_>, id: u64) -> Result<Option<Task>> {

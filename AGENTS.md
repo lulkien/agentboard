@@ -6,7 +6,7 @@ tree, not about running a team with it.
 
 Read first:
 
-- `README.md` — the model, the verbs and the ten tools.
+- `README.md` — the model, the verbs and the twelve tools.
 - `PROTOCOL.md` — the wire surface agents see.
 - `skills/agentboard-team` — running a team with this tool; the repo copy is canonical.
 
@@ -36,20 +36,20 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 107 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 109 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `335/335 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `188/188 passed (mcp, lmdb)` |
-| `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `188/188 passed (mcp-http, lmdb)` |
+| `bash tests/cli.sh` | `369/369 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `201/201 passed (mcp, lmdb)` |
+| `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `201/201 passed (mcp-http, lmdb)` |
 | `python3 tests/daemon.py` | `daemon: 301/301 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 32/32 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
 | `bash tests/seats-install.sh` | `242/242 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
-| `python3 scripts/sync-tool-count.py --check` | `MCP router: 10 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 140 CLI names, 143 MCP names passed` |
+| `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 153 CLI names, 153 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
@@ -93,7 +93,7 @@ update the expectation here.
   bytes) and served by `src/daemon.rs`: every page path answers `index.html`,
   files live under `/assets/`, and `app.js` builds the DOM from the JSON API with
   `createElement`/`textContent` only.
-- `src/server.rs` — the MCP adapter, ten tools, store work on `spawn_blocking`.
+- `src/server.rs` — the MCP adapter, twelve tools, store work on `spawn_blocking`.
 - `scripts/gate.sh` — the proof table as one command; `scripts/sync-tool-count.py`
   and `tests/doc-names.py` are the two doc-drift gates it calls.
 
@@ -192,7 +192,7 @@ from the coder report and screenshot paths.
   workflow. `skills/install.py --force` creates canonical repo links under
   `~/.agents/skills`, then links Claude and Codex skills to those
   canonical names. There is one physical copy: never copy over the installed links.
-- `PROTOCOL.md` — the wire surface: ten tools, cursors, refusals, exit codes.
+- `PROTOCOL.md` — the wire surface: twelve tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
   `agentboard-manager/SKILL.md`.

@@ -1,12 +1,13 @@
 # agentboard
 
 One board shared by a team of CLI agents. A manager adds work, workers claim it,
-everyone reads the same event feed. The board is a single LMDB directory: no
-background daemon or database server. `agentboard serve` is MCP on stdio;
-`agentboard daemon` is the same ten tools over local HTTP for every seat at once,
+everyone reads the same event feed. The board is a single LMDB directory with no
+database server. The CLI and `agentboard serve` open it directly;
+`agentboard daemon` is an optional resident process. `agentboard serve` is MCP on stdio;
+`agentboard daemon` is the same twelve tools over local HTTP for every seat at once,
 with a read-only dashboard and JSON API on the same port.
 
-10 MCP tools, 16 CLI commands, one store behind both.
+12 MCP tools, 16 CLI commands, one store behind both.
 
 ## Why it exists
 
@@ -33,6 +34,8 @@ with `cc`.
   directory foreign, and the store refuses it by name rather than guessing.
 - Map size: `AGENTBOARD_MAP_SIZE_MB`, default 1024. There is no growth in place; a
   bigger board means a bigger map before it is created.
+- `agentboard reset --yes` discards the board. It refuses while another process,
+  including a running daemon, holds it, or when unknown files are present.
 - Board format 2 stores eight named databases, including the board-assigned
   project registry. Format 1 boards must be migrated before opening with this version.
 
@@ -53,22 +56,22 @@ registered path. It refuses unmapped paths without changing board data, checks
 the lifetime lock for attached clients, and applies one transaction per version
 step. A completed step survives a later failure; rerun the script to continue.
 An already current board prints `up to date`.
-- `agentboard reset --yes` discards the board. It refuses while another process
-  holds it, and it refuses to delete a directory with unknown files in it.
 
-No two boards share state and no board needs a process to stay alive between
-calls.
+No two boards share state. CLI and stdio calls need no resident process between
+invocations.
 
 ## Actor
 
-Every mutation is attributed to a name: `--actor` or `$AGENTBOARD_ACTOR`. A
-missing or empty name is a refusal that says how to fix it. Names are board
-addresses on a trusted team, not authentication.
+Task mutations are attributed to a name: `--actor` or `$AGENTBOARD_ACTOR`. A
+missing or empty name is a refusal that says how to fix it. Registry deletion
+does not need an actor. Names are board addresses on a trusted team, not authentication.
 
 A name joins the roster on its first accepted mutation, either as the caller or as
 a target assignee created with `--new-actor`. Without that flag an unknown
 assignee is refused, so a typo cannot invent a person. `agentboard agents` lists
 names with their last activity and last task; that is history, never liveness.
+`agents delete NAME` removes a roster entry when it holds no open row. Closed
+rows and events retain the name; a later write by that name registers it again.
 
 One live process per name. Two agents answering to one name will refuse each
 other's writes as `held by …`.
@@ -96,13 +99,15 @@ agentboard comment ID (--body TEXT | --body-file PATH|-)
 agentboard feed [--after CURSOR] [--kind K] [--recipient NAME] [--task ID]
                 [--limit N] [--full] [--wait SECONDS]
 agentboard wait ID... [--status CSV] [--assignee [NAME]] [--epic] [--timeout SECONDS]
-agentboard brief
+agentboard brief [--project ID]
 agentboard agents
+agentboard agents delete NAME
 agentboard path
 agentboard reset --yes
 agentboard project add --name NAME --path PATH
 agentboard project ls
 agentboard project update ID [--name NAME] [--path PATH]
+agentboard project delete ID
 agentboard serve
 agentboard daemon [IP:PORT] [--allow-non-loopback]
 ```
@@ -139,7 +144,10 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   waits for its closed parent before it can reopen, and a closed task takes a new
   owner only in the update that reopens it.
 - `brief` shows all epic rows with progress first, then up to ten unparented active
-  tasks, then global status counts. Each section uses `(priority, id)` order.
+  tasks, then scoped status counts. Each section uses `(priority, id)` order.
+- `project` manages the registry. Deletion refuses while any task still carries
+  its ID; move or detach those rows first. `ls` and `brief` choose the explicit
+  project ID, then `AGENTBOARD_PROJECT`, then a registered path matching the cwd.
 - `feed` is the bus. It answers a page of events plus the cursor to pass as
   `--after`. With no cursor it returns the newest page of *matching* events and
   says `older true` when more matching events sit before it. `--after 0` replays
@@ -174,12 +182,14 @@ agentboard: task is held by alice; --force with a reason takes it, or --release 
 agentboard: forced update requires a reason
 agentboard: unknown assignee "nobody"; use new_actor=true to register the target
 agentboard: task T7 has no holder to release
+agentboard: project 2 still has tasks (count 3); move or detach them first
+agentboard: agent "bob" still holds open tasks (count 2); release or reassign them first
 ```
 
 ## Daemon
 
 `agentboard daemon [IP:PORT] [--allow-non-loopback]` (default `127.0.0.1:8765`) is a
-foreground process that opens the board once and serves the ten MCP tools over
+foreground process that opens the board once and serves the twelve MCP tools over
 streamable HTTP at `/mcp/<actor>`. The URL segment is the seat's name, so one
 process serves every seat and each write is attributed to its URL name. The
 project is the tool argument, else `?project=ID` on the MCP URL, else the whole
@@ -222,7 +232,7 @@ replacement edits the same working tree.
 ## MCP
 
 `agentboard serve` speaks MCP on stdio, and `agentboard` with no command does the
-same. The server needs `$AGENTBOARD_ACTOR` or `--actor`; the client cannot pass
+same. Task writes need `$AGENTBOARD_ACTOR` or `--actor`; the client cannot pass
 one.
 
 | Tool | Answers |
@@ -237,6 +247,8 @@ one.
 | `board_feed` | events, cursor, `more`/`older`; `wait` seconds; `full=true` |
 | `board_brief` | epic progress, unparented active tasks, then counts per status |
 | `board_agents` | roster lines, newest activity first |
+| `board_project_delete` | remove an unused project by ID |
+| `board_agent_delete` | remove a roster name with no open rows |
 
 Both adapters call the same store functions, so a refusal reads the same in both
 and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
@@ -250,3 +262,5 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
 - `skills/agentboard-manager`, `skills/agentboard-analyst`, `skills/agentboard-coder`,
   `skills/agentboard-reviewer` — one entry skill per seat; Grok's manager recipe is
   in `skills/agentboard-manager/SKILL.md`.
+- `seats/` — client cards and their installer; see `seats/README.md` for the
+  HTTP cards and optional systemd user unit.

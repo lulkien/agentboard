@@ -80,6 +80,123 @@ fn list_all() -> ListFilter<'static> {
 }
 
 #[test]
+fn agent_delete_refuses_open_holders_and_keeps_closed_rows_editable() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let open = board
+        .add(
+            "manager",
+            draft("open", Status::Todo, 0, Some("bob")),
+            true,
+            10,
+        )
+        .unwrap()
+        .task;
+    let closed = board
+        .add(
+            "manager",
+            draft("closed", Status::Done, 0, Some("bob")),
+            false,
+            11,
+        )
+        .unwrap()
+        .task;
+    assert!(
+        matches!(board.delete_agent("bob"), Err(Error::AgentHoldsOpenTasks { name, count: 1 }) if name == "bob")
+    );
+    assert!(board.agent("bob").unwrap().is_some());
+    let before = board.metadata().unwrap().next_event_seq;
+    board
+        .update(UpdateInput {
+            id: open.id,
+            actor: "manager",
+            expected_revision: open.revision,
+            patch: &TaskPatch {
+                assignee: Some(None),
+                ..TaskPatch::default()
+            },
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 12,
+        })
+        .unwrap();
+    let before_delete = board.metadata().unwrap().next_event_seq;
+    let index_len = board
+        .tasks_by_assignee
+        .len(&board.env.read_txn().unwrap())
+        .unwrap();
+    assert!(index_len > 0);
+    let old_agent = board.agent("bob").unwrap().unwrap();
+    assert_eq!(board.delete_agent("bob").unwrap(), old_agent);
+    assert!(matches!(board.delete_agent("bob"), Err(Error::MissingAgent(name)) if name == "bob"));
+    assert_eq!(board.metadata().unwrap().next_event_seq, before_delete);
+    assert_eq!(
+        board
+            .tasks_by_assignee
+            .len(&board.env.read_txn().unwrap())
+            .unwrap(),
+        index_len
+    );
+    assert!(before_delete > before);
+    let edited = board
+        .update(UpdateInput {
+            id: closed.id,
+            actor: "manager",
+            expected_revision: closed.revision,
+            patch: &TaskPatch {
+                title: Some("still editable".into()),
+                ..TaskPatch::default()
+            },
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 13,
+        })
+        .unwrap()
+        .task;
+    assert_eq!(edited.assignee.as_deref(), Some("bob"));
+    assert!(
+        matches!(board.update(UpdateInput { id: edited.id, actor: "manager", expected_revision: edited.revision,
+        patch: &status_patch(Status::Todo), force: false, force_reason: None, new_actor: false, comment: None, now_ms: 14 }),
+        Err(Error::UnknownAssignee(name)) if name == "bob")
+    );
+    board
+        .update(UpdateInput {
+            id: edited.id,
+            actor: "manager",
+            expected_revision: edited.revision,
+            patch: &status_patch(Status::Todo),
+            force: false,
+            force_reason: None,
+            new_actor: true,
+            comment: None,
+            now_ms: 15,
+        })
+        .unwrap();
+    assert_eq!(board.agent("bob").unwrap().unwrap().first_seen_ms, 15);
+    board.delete_agent("bob").unwrap_err();
+    board
+        .update(UpdateInput {
+            id: edited.id,
+            actor: "manager",
+            expected_revision: edited.revision + 1,
+            patch: &status_patch(Status::Done),
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 16,
+        })
+        .unwrap();
+    board.delete_agent("bob").unwrap();
+    board.comment("bob", closed.id, "again", 17).unwrap();
+    assert_eq!(board.agent("bob").unwrap().unwrap().first_seen_ms, 17);
+}
+
+#[test]
 fn claim_walks_the_index_and_skips_foreign_rows() {
     let scratch = Scratch::new();
     let board = Board::open_with_options(scratch.path(), options()).unwrap();

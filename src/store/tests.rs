@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Barrier, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::{NewTask, Status, TaskPatch};
+use crate::domain::{NewProject, NewTask, Status, TaskPatch};
 
 use super::open::{FORMAT_VERSION, Metadata, write_metadata};
 use super::{Board, BoardOptions, Error, UpdateInput};
@@ -82,6 +82,61 @@ fn draft(assignee: Option<&str>) -> NewTask {
         parent_id: None,
         project_id: None,
     }
+}
+
+#[test]
+fn project_delete_refuses_referenced_projects_and_never_reuses_ids() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let project = board
+        .add_project(NewProject {
+            project_name: "one".into(),
+            project_path: "/one".into(),
+        })
+        .unwrap();
+    let id = project.project_id;
+    let mut open = draft(None);
+    open.project_id = Some(id);
+    let mut closed = open.clone();
+    closed.status = Status::Done;
+    let first = board.add("manager", open, false, 1).unwrap().task;
+    let second = board.add("manager", closed, false, 2).unwrap().task;
+    assert!(
+        matches!(board.delete_project(id), Err(Error::ProjectInUse { id: found, count: 2 }) if found == id)
+    );
+    assert_eq!(board.get_project(id).unwrap(), Some(project.clone()));
+    for task in [first, second] {
+        board
+            .update(UpdateInput {
+                id: task.id,
+                actor: "manager",
+                expected_revision: task.revision,
+                patch: &TaskPatch {
+                    project_id: Some(None),
+                    ..TaskPatch::default()
+                },
+                force: false,
+                force_reason: None,
+                new_actor: false,
+                comment: None,
+                now_ms: 3,
+            })
+            .unwrap();
+    }
+    assert_eq!(board.delete_project(id).unwrap(), project);
+    assert!(matches!(board.delete_project(id), Err(Error::MissingProject(found)) if found == id));
+    let next = board
+        .add_project(NewProject {
+            project_name: "two".into(),
+            project_path: "/two".into(),
+        })
+        .unwrap();
+    assert!(next.project_id > id);
+    let mut stale = draft(None);
+    stale.project_id = Some(id);
+    assert!(
+        matches!(board.add("manager", stale, false, 4), Err(Error::Domain(crate::domain::Error::UnknownProject(found))) if found == id)
+    );
 }
 
 #[test]

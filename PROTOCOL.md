@@ -1,6 +1,6 @@
 # Protocol
 
-What an agent sees. Ten MCP tools, the cursor format, the refusals, the exit
+What an agent sees. Twelve MCP tools, the cursor format, the refusals, the exit
 codes. The store that implements this is described in `AGENTS.md`; running a team
 is described in `skills/agentboard-team`.
 
@@ -8,8 +8,8 @@ The board uses format 2 and eight named LMDB databases. Format 1 boards refuse
 to open until migrated with `scripts/migrate-board.py` (`uv run --with lmdb
 python3 scripts/migrate-board.py --db DIR --map PATH=ID`). The refusal names
 the board path and both format versions; a newer board asks for a newer binary.
-Projects are managed through the CLI only; MCP remains
-at ten tools.
+Projects are added, listed and updated through the CLI only; both deletes are
+also tools.
 
 ## Transport
 
@@ -85,7 +85,7 @@ and `reviewing` rows can only be claimed by id, and only by their assignee unles
 `blocked` is never claimable, and `done`/`canceled` are terminal: lists hide them unless
 asked, and an explicit claim of one refuses by name.
 
-## Ten tools
+## Twelve tools
 
 ### task_add
 
@@ -270,6 +270,26 @@ every task once. There are no section headings; an empty board prints just count
 No arguments. Roster lines `name last_seen <ms|never> last_task T<id|->`, newest
 activity first. `last_seen` is history, never liveness.
 
+### board_project_delete
+
+```json
+{"id": 2}
+```
+
+Deletes a project only when no task, including a closed task, carries its ID.
+Answers `deleted project 2`. A referenced ID refuses with its task count; an
+absent ID refuses by number. No actor is required, and no event is written.
+
+### board_agent_delete
+
+```json
+{"name": "bob"}
+```
+
+Removes a roster name if it holds no open task. Answers `deleted agent bob`.
+Closed task assignees and event history retain the name. A later write can
+register it again. No actor is required, and no event is written.
+
 ## Refusals
 
 Every refusal is one line with a stable prefix. Over MCP a refusal is a JSON-RPC error
@@ -287,6 +307,9 @@ task update has no field changes
 task T7 is done; nothing to release
 task T7 has no holder to release
 unknown assignee "nobody"; use new_actor=true to register the target
+project 2 still has tasks (count 3); move or detach them first
+agent "bob" still holds open tasks (count 2); release or reassign them first
+agent "ghost" does not exist
 comment must be nonempty
 task T4 does not exist
 task T7 is not an epic; an epic is a task with children

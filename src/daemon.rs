@@ -1,4 +1,4 @@
-//! `agentboard daemon`: the ten MCP tools over streamable HTTP, one process, one
+//! `agentboard daemon`: the twelve MCP tools over streamable HTTP, one process, one
 //! open board. The actor is the URL segment in `/mcp/<actor>`; the project is the
 //! tool argument, else `?project=ID` on that URL, else the whole board.
 //!

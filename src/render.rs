@@ -15,6 +15,14 @@ pub fn project_line(project: &Project) -> String {
     )
 }
 
+pub fn deleted_project(project: &Project) -> String {
+    format!("deleted project {}", project.project_id)
+}
+
+pub fn deleted_agent(agent: &Agent) -> String {
+    format!("deleted agent {}", agent.name)
+}
+
 /// Collapse whitespace and cut to `width`, marking the cut so a reader knows the
 /// text continues. Full text is available from `get --full` / `task_get(full=true)`.
 pub fn truncate(text: &str, width: usize) -> String {

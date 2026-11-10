@@ -6,6 +6,31 @@ fn key(id: u64) -> [u8; 8] {
 }
 
 impl Board {
+    pub fn delete_project(&self, id: u64) -> Result<Project> {
+        let mut txn = self.env.write_txn()?;
+        self.checked_metadata(&txn)?;
+        let project_key = key(id);
+        let raw = self
+            .projects
+            .get(&txn, &project_key)?
+            .ok_or(Error::MissingProject(id))?;
+        let project: Project = serde_json::from_slice(raw)?;
+        let mut count = 0_u64;
+        for entry in self.tasks.iter(&txn)? {
+            let (_, raw) = entry?;
+            let task: crate::domain::Task = serde_json::from_slice(raw)?;
+            if task.project_id == Some(id) {
+                count += 1;
+            }
+        }
+        if count > 0 {
+            return Err(Error::ProjectInUse { id, count });
+        }
+        self.projects.delete(&mut txn, &project_key)?;
+        txn.commit()?;
+        Ok(project)
+    }
+
     pub fn add_project(&self, input: NewProject) -> Result<Project> {
         domain::validate_project(&input.project_name, &input.project_path)?;
         let mut txn = self.env.write_txn()?;

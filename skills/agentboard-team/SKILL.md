@@ -13,7 +13,7 @@ serves HTTP MCP and the dashboard, with the file lock keeping writers honest.
 
 Pages here:
 
-- this manual: the board, the seats, the launcher, the wake loop, the ten tools
+- this manual: the board, the seats, the launcher, the wake loop, the twelve tools
 - `workflow.md`: how a task moves and who moves it
 - `roles.md`: manager, analyst, coder and reviewer: what each may run and never does
 
@@ -369,7 +369,7 @@ printed cursor while `more true`:
 agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 ```
 
-## Ten tools, same store as the CLI
+## Twelve tools, same store as the CLI
 
 | Tool | Use |
 | --- | --- |
@@ -383,6 +383,8 @@ agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
 | `board_brief` | epic progress, unparented active work, then project status counts; accepts `project` |
 | `board_agents` | roster with last activity and last task |
+| `board_project_delete` | remove a project after moving every linked task |
+| `board_agent_delete` | remove a roster entry with no open work |
 
 CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `wait`,
 `brief [--project ID]`, `agents`, `path`, `reset --yes`, `serve`. `ls` and `brief`

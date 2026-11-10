@@ -1,4 +1,4 @@
-//! MCP surface: 10 tools, text-only results, short acknowledgements.
+//! MCP surface: 12 tools, text-only results, short acknowledgements.
 //!
 //! Result shape is deliberate: reads are one line per task, writes answer with the
 //! changed record plus its event cursor. Agents pay tokens per byte.
@@ -179,6 +179,16 @@ pub struct GetArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EpicArgs {
     pub id: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectDeleteArgs {
+    pub id: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AgentDeleteArgs {
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -665,6 +675,42 @@ impl Board {
         let lines: Vec<String> = agents.iter().map(render::agent_line).collect();
         Ok(text(lines.join("\n")))
     }
+
+    #[tool(
+        name = "board_project_delete",
+        description = "Delete a project that no task carries"
+    )]
+    async fn board_project_delete(
+        &self,
+        Parameters(args): Parameters<ProjectDeleteArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let project = blocking(&self.board, move |board| {
+            board
+                .delete_project(args.id)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(err)?;
+        Ok(text(render::deleted_project(&project)))
+    }
+
+    #[tool(
+        name = "board_agent_delete",
+        description = "Remove a roster name that holds no open task"
+    )]
+    async fn board_agent_delete(
+        &self,
+        Parameters(args): Parameters<AgentDeleteArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let agent = blocking(&self.board, move |board| {
+            board
+                .delete_agent(&args.name)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(err)?;
+        Ok(text(render::deleted_agent(&agent)))
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -688,16 +734,18 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_surface_is_ten_tools_with_valid_schemas() {
+    fn the_tool_surface_is_twelve_tools_with_valid_schemas() {
         let server = Board::new(scratch_board("surface"), None);
         let tools = server.tool_router.list_all();
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         assert_eq!(
             names,
             vec![
+                "board_agent_delete",
                 "board_agents",
                 "board_brief",
                 "board_feed",
+                "board_project_delete",
                 "task_add",
                 "task_claim",
                 "task_comment",

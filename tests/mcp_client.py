@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP surface check: ten tools on one stdio server, no daemon, scratch board."""
+"""MCP surface check: twelve tools on one stdio server or daemon, scratch board."""
 
 import http.client
 import json
@@ -22,6 +22,8 @@ TOOLS = {
     "board_feed",
     "board_brief",
     "board_agents",
+    "board_project_delete",
+    "board_agent_delete",
 }
 
 passed = 0
@@ -197,7 +199,7 @@ def main():
 
         listed = server.send("tools/list", {})
         names = {tool["name"] for tool in listed["result"]["tools"]}
-        check("tools/list is the ten-tool surface", TOOLS, names)
+        check("tools/list is the twelve-tool surface", TOOLS, names)
         check("tools/list has no task_wait", False, "task_wait" in names)
         reply = server.send("tools/call", {"name": "task_wait", "arguments": {"ids": [1]}})
         check("task_wait call is refused", True, "error" in reply or bool(reply["result"].get("isError")))
@@ -355,6 +357,40 @@ def main():
             _, body = scoped.call("board_brief")
             has("board_brief defaults to AGENTBOARD_PROJECT", "B scoped row", body)
             check("board_brief environment scope excludes other project", False, "A scoped row" in body)
+        delete_db = os.path.join(scratch, "delete")
+        for name in ("A", "B"):
+            subprocess.run([BIN, "--db", delete_db, "project", "add", "--name", name, "--path", "/" + name], check=True, capture_output=True, text=True)
+        with Server(delete_db, "worker") as deleting:
+            deleting.start()
+            deleting.call("task_add", {"title": "linked", "project": 1})
+            reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 1}})
+            check("project delete in use is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
+            has("project delete in use count", "project 1 still has tasks (count 1); move or detach them first", json.dumps(reply))
+            error, body = deleting.call("board_project_delete", {"id": 2})
+            check("project delete success", (False, "deleted project 2"), (error, body))
+            reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 2}})
+            has("project delete missing", "project 2 does not exist", json.dumps(reply))
+            deleting.call("task_update", {"id": 1, "if_revision": 1, "clear_project": True})
+            error, body = deleting.call("board_project_delete", {"id": 1})
+            check("project delete after detach", (False, "deleted project 1"), (error, body))
+            deleting.call("task_add", {"title": "open", "assignee": "bob", "new_actor": True})
+            deleting.call("task_add", {"title": "closed", "assignee": "bob", "status": "done"})
+            reply = deleting.send("tools/call", {"name": "board_agent_delete", "arguments": {"name": "bob"}})
+            check("agent delete open holder is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
+            has("agent delete open count", 'agent \\"bob\\" still holds open tasks (count 1); release or reassign them first', json.dumps(reply))
+            reply = deleting.send("tools/call", {"name": "board_agent_delete", "arguments": {"name": "ghost"}})
+            has("agent delete missing", 'agent \\"ghost\\" does not exist', json.dumps(reply))
+            deleting.call("task_update", {"id": 2, "if_revision": 1, "clear_assignee": True})
+            error, body = deleting.call("board_agent_delete", {"name": "bob"})
+            check("agent delete success", (False, "deleted agent bob"), (error, body))
+            _, body = deleting.call("board_agents")
+            check("agent delete removes roster entry", False, "bob" in body)
+            _, body = deleting.call("task_get", {"id": 3})
+            has("agent delete keeps closed holder", "bob", body)
+            reply = deleting.send("tools/call", {"name": "board_agent_delete", "arguments": {}})
+            check("agent delete missing argument", True, bool(reply.get("result", {}).get("isError")))
+            reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {}})
+            check("project delete missing argument", True, bool(reply.get("result", {}).get("isError")))
         # CLI and MCP share one snapshot and renderer, with no intervening writes.
         with Server(os.path.join(scratch, "epics"), "worker") as epics:
             epics.start()

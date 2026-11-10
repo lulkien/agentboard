@@ -16,6 +16,7 @@ May:
   analyst split plan under the returned row
 - `task_list`, `task_get`, `task_epic`, `board_brief`, `board_agents`, `board_feed`
 - `task_comment` to record a decision
+- `board_project_delete` and `board_agent_delete` to remove unused registry entries
 - `task_update` with `force`+`reason` to reassign a stalled or quota-exhausted row
 - `hc`: start one named terminal per seat, send it its first prompt, read it, and
   kill and remove only the terminals it started

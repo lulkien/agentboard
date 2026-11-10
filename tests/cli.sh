@@ -590,6 +590,67 @@ out=$($B ls --project 1); code=$?
 check "project list filter exit" 0 "$code"
 has "project list returns linked task" "project one" "$out"
 
+fresh delete-project
+check "delete project creates first id" 1 "$("$B" project add --name A --path /a)"
+"$B" add open --project 1 >/dev/null
+"$B" add closed --project 1 --status done >/dev/null
+out=$("$B" project delete 1 2>&1); code=$?
+check "delete referenced project exit" 1 "$code"
+has "delete referenced project count" "project 1 still has tasks (count 2); move or detach them first" "$out"
+has "refused project remains" $'1\tA\t/a' "$("$B" project ls)"
+"$B" update 1 --if-revision 1 --clear-project >/dev/null
+"$B" update 2 --if-revision 1 --clear-project >/dev/null
+out=$("$B" project delete 1); code=$?
+check "delete unused project exit" 0 "$code"
+check "delete project success text" "deleted project 1" "$out"
+check "deleted project absent" "no projects" "$("$B" project ls)"
+out=$("$B" project delete 1 2>&1); code=$?
+check "repeat project delete exit" 1 "$code"
+has "repeat project delete missing" "project 1 does not exist" "$out"
+check "project ids never reused" 2 "$("$B" project add --name B --path /b)"
+out=$("$B" add stale --project 1 2>&1); code=$?
+check "deleted project cannot be assigned" 1 "$code"
+has "deleted project refusal" "unknown project 1" "$out"
+out=$("$B" project delete 2); code=$?
+check "unused project deletion exit" 0 "$code"
+check "unused project deletion text" "deleted project 2" "$out"
+out=$("$B" project delete 2x 2>&1); code=$?
+check "invalid project id usage" 2 "$code"
+out=$("$B" project delete 2>&1); code=$?
+check "missing project id usage" 2 "$code"
+
+fresh delete-agent
+"$B" add one --assignee bob --new-actor >/dev/null
+"$B" add two --assignee bob --status reviewing >/dev/null
+"$B" add closed --assignee bob --status done >/dev/null
+out=$("$B" agents delete bob 2>&1); code=$?
+check "open holder deletion exit" 1 "$code"
+has "open holder deletion count" 'agent "bob" still holds open tasks (count 2); release or reassign them first' "$out"
+has "refused agent remains" "bob" "$("$B" agents)"
+"$B" update 1 --if-revision 1 --clear-assignee >/dev/null
+"$B" update 2 --if-revision 1 --clear-assignee --force --reason cleanup >/dev/null
+out=$("$B" agents delete bob); code=$?
+check "agent deletion exit" 0 "$code"
+check "agent deletion text" "deleted agent bob" "$out"
+lacks "deleted agent leaves roster" "bob" "$("$B" agents)"
+has "closed row retains deleted name" "bob" "$("$B" get 3)"
+has "assignee index retains closed row" "closed" "$("$B" ls --assignee bob --all)"
+has "recipient history retains deleted name" "bob" "$("$B" feed --recipient bob --after 0)"
+out=$("$B" update 3 --if-revision 1 --title edited); code=$?
+check "closed row edit after agent delete" 0 "$code"
+out=$("$B" update 3 --if-revision 2 --status todo 2>&1); code=$?
+check "reopen deleted holder exit" 1 "$code"
+has "reopen deleted holder refusal" 'unknown assignee "bob"' "$out"
+out=$("$B" update 3 --if-revision 2 --status todo --new-actor); code=$?
+check "reopen with new actor exit" 0 "$code"
+has "new actor restored" "bob" "$("$B" agents)"
+out=$("$B" agents delete ghost 2>&1); code=$?
+check "unknown agent delete exit" 1 "$code"
+has "unknown agent delete text" 'agent "ghost" does not exist' "$out"
+out=$("$B" agents delete 2>&1); code=$?
+check "missing agent name usage" 2 "$code"
+has "bare agents still lists" "bob" "$("$B" agents)"
+
 
 fresh project-brief
 out=$("$B" project add --name A --path "$PWD"); code=$?

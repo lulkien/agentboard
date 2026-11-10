@@ -232,8 +232,11 @@ pub enum Cmd {
         #[arg(long, value_name = "ID")]
         project: Option<u64>,
     },
-    /// List registered actors
-    Agents,
+    /// List or delete registered actors
+    Agents {
+        #[command(subcommand)]
+        cmd: Option<AgentsCmd>,
+    },
     /// Print the resolved board directory
     Path,
     /// Discard this board and initialize an empty one
@@ -254,6 +257,11 @@ pub enum ProjectCmd {
     },
     /// List projects
     Ls,
+    /// Delete a project that no task carries
+    Delete {
+        #[arg(value_name = "ID")]
+        id: u64,
+    },
     /// Update a project
     Update {
         #[arg(value_name = "ID")]
@@ -262,6 +270,15 @@ pub enum ProjectCmd {
         name: Option<String>,
         #[arg(long, allow_hyphen_values = true)]
         path: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AgentsCmd {
+    /// Remove a name that holds no open task
+    Delete {
+        #[arg(value_name = "NAME", allow_hyphen_values = true)]
+        name: String,
     },
 }
 
