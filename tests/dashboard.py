@@ -286,6 +286,7 @@ def main() -> int:
             run_cli(db, "add", "Canceled fixture row", "--status", "canceled")
             status, html, _headers = request(port, "GET", "/")
             assert status == 200, f"GET / returned {status} after adding fixture rows"
+            css = request(port, "GET", "/assets/dashboard.css")[1]
             assert '<div class="page-head"><h1>Board</h1><p class="closed-summary">' in html, "Board title and closed summary are not in the page head"
             assert html.index('class="closed-summary"') < html.index('class="seat-bar"') < html.index('class="attention') < html.index('id="col-todo"'), "closed summary, seats, attention and kanban are out of order"
             closed_summary_html = html.split('class="closed-summary"', 1)[1].split('</p>', 1)[0]
@@ -324,13 +325,15 @@ def main() -> int:
             assert 'href="/tasks?status=todo">+40 more</a>' in todo_column, "todo column overflow link is wrong"
             blocked_card = kanban.split('href="/tasks/6"', 1)[1].split('</a>', 1)[0]
             reviewing_card = kanban.split('href="/tasks/7"', 1)[1].split('</a>', 1)[0]
-            assert 'class="card status-blocked"' in kanban and '<span class="card-flag">blocked</span>' in blocked_card, "blocked card lacks its visible flag"
-            assert '<span class="card-flag">reviewing</span>' in reviewing_card, "reviewing card lacks its visible flag"
+            assert 'class="card status-blocked"' in kanban and '<span class="visually-hidden">blocked</span>' in blocked_card, "blocked card lacks its visually hidden status"
+            assert '<span class="visually-hidden">reviewing</span>' in reviewing_card, "reviewing card lacks its visually hidden status"
+            assert 'class="card-flag"' not in html and 'card-flag' not in css, "redundant card flags remain in markup or CSS"
             todo_card = todo_column.split('class="card status-todo"', 1)[1].split('</a>', 1)[0]
             assert '<span class="visually-hidden">todo</span>' in todo_card and 'class="card-flag"' not in todo_card, "ordinary todo card has a visible flag or no hidden status"
             card3 = kanban.split('href="/tasks/3"', 1)[1].split('</a>', 1)[0]
             assert f'title="{escaped_dangerous_title}"' in card3 and f'class="card-title">{escaped_dangerous_title}</span>' in card3, "T3 escaped title is missing from the card title and text"
-            assert 'alice&lt;&amp;' in card3 and 'in T1' in card3 and 'class="card-project">dashboard</span>' in card3 and '<time datetime="' in card3, "T3 card metadata is incomplete or unescaped"
+            assert re.search(r'<span class="card-head">.*?<time datetime="[^"]+" title="[^"]+">[^<]+</time></span><span class="card-title">', kanban, re.S), "card time is not in the card head"
+            assert 'alice&lt;&amp;' in card3 and 'in T1' in card3 and 'class="card-project">dashboard</span>' in card3 and '<time' not in card3.split('class="card-meta"', 1)[1], "T3 card metadata is incomplete or unescaped"
             assert f'title="{escaped_unbroken_title}"' in html, "full long unbroken title is missing from its card title attribute"
             assert f'title="{long_spaced_title}"' in html, "separate long spaced title fixture is missing from a card title attribute"
             assert 'href="/tasks?status=done"' in html and 'href="/tasks?status=canceled"' in html, "closed row is missing done or canceled links"
@@ -356,6 +359,11 @@ def main() -> int:
             footer = html.split("<footer>", 1)[1].split("</footer>", 1)[0]
             assert re.search(r'<button[^>]*>Change theme</button>', footer) and "current theme" in request(port, "GET", "/assets/theme.js")[1], "theme button label or mode accessibility is missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
+            assert re.search(r"\.column-head\.status-blocked\s*\{[^}]*background-image:none", dashboard_css), "blocked column heading retains its hatch"
+            assert re.search(r"\.card-list > \.empty\s*\{[^}]*border:1px dashed", dashboard_css), "empty card slot lacks its dashed shape"
+            assert re.search(r"(?m)^\.card\s*\{[^}]*background:var\(--strip\)", dashboard_css), "card does not own its background rule"
+            assert not re.search(r"\.panel\s*,\s*\.card", dashboard_css), "shared panel/card padding rule remains"
+            assert re.search(r"\.column-more\s*\{[^}]*min-height:36px", dashboard_css), "more row is not strip shaped"
             assert re.search(r"\.page-head\s*\{[^}]*display:flex[^}]*flex-wrap:wrap", dashboard_css), "page head does not wrap its title and aside"
             assert re.search(r"\.status-chip\s*\{[^}]*min-height:36px", dashboard_css), "status chips are shorter than 36px"
             assert re.search(r"@media\s*\(max-width:650px\)\s*\{[^}]*\.topbar\s*\{[^}]*position:static", dashboard_css), "phone topbar remains sticky"

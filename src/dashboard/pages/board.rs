@@ -219,11 +219,6 @@ pub(super) fn board_page(
 fn render_card(task: &Task, project: Option<u64>, projects: &[Project], now_ms: i64) -> Fragment {
     let status = task.status.as_str();
     let href = html::url(&format!("/tasks/{}", task.id), project);
-    let flag_class = if matches!(task.status, Status::Blocked | Status::Reviewing) {
-        "card-flag"
-    } else {
-        "visually-hidden"
-    };
     let parent = task
         .parent_id
         .map_or_else(Fragment::empty, |id| CARD_PARENT.fill(&[("id", text(id))]));
@@ -245,7 +240,6 @@ fn render_card(task: &Task, project: Option<u64>, projects: &[Project], now_ms: 
         ("title", text(&task.title)),
         ("glyph", text(html::status_glyph(task.status))),
         ("id", text(task.id)),
-        ("flag_class", text(flag_class)),
         ("status", text(status)),
         ("title_text", text(&task.title)),
         (
