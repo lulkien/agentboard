@@ -2,12 +2,14 @@ use agentboard::store::{Board, ListFilter, MAX_LIST_LIMIT};
 
 use super::routes::{Page, Route};
 
+mod board;
 mod detail;
 mod epics;
 mod feed;
 mod tasks;
 mod time;
 
+use board::board_page;
 use detail::detail;
 use epics::epics;
 use feed::feed;
@@ -33,6 +35,15 @@ pub fn render(board: &Board, route: Route) -> Result<String, PageError> {
         .list_projects()
         .map_err(|e| PageError::Store(e.to_string()))?;
     match route.page {
+        Page::Board => {
+            let overview = board
+                .overview(project, 8)
+                .map_err(|e| PageError::Store(e.to_string()))?;
+            let agents = board
+                .agents()
+                .map_err(|e| PageError::Store(e.to_string()))?;
+            Ok(board_page(&overview, &agents, project, &projects))
+        }
         Page::Epics => {
             let brief = board
                 .brief_for_project(0, project)
@@ -58,7 +69,18 @@ pub fn render(board: &Board, route: Route) -> Result<String, PageError> {
                     offset: filters.offset,
                 })
                 .map_err(|e| PageError::Store(e.to_string()))?;
-            Ok(tasks(&page, &filters, &projects))
+            let counts = board
+                .status_counts(&ListFilter {
+                    status: filters.status,
+                    assignee: filters.assignee.as_deref(),
+                    parent: filters.parent,
+                    project,
+                    include_terminal: true,
+                    limit: PAGE_SIZE,
+                    offset: 0,
+                })
+                .map_err(|e| PageError::Store(e.to_string()))?;
+            Ok(tasks(&page, &counts, &filters, &projects))
         }
         Page::Detail(id) => detail(board, id, project, &projects),
         Page::Feed => feed(board, route.filters, &projects),

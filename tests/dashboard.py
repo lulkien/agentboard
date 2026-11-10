@@ -123,11 +123,20 @@ def main() -> int:
                 raise AssertionError("dashboard did not accept connections")
 
             assert status == 200, f"GET / returned {status}"
-            assert "Epics" in html and 'href="/tasks?parent=1"' in html, "epics tab or drill-down link is missing"
-            assert "&lt;script&gt;alert(&#39;epic&#39;)&lt;/script&gt;" in html, "epic title was not escaped"
-            assert "1 / 6 done" in html, "epic direct-child progress is wrong"
-            assert 'max="6" value="1"' in html, "epic progress bar values are wrong"
-            assert 'class="active" href="/epics"' in html, "epics tab was not marked active"
+            assert "Needs attention" in html and 'class="active" href="/"' in html, "board home is missing"
+            attention = html.split('class="attention panel"', 1)[1].split('</section>', 1)[0]
+            assert attention.index("Blocked child") < attention.index("Reviewing child"), "attention order is wrong"
+            assert "alice&lt;&amp;" in html and 'href="/tasks/3"' in html, "alice seat or held task is missing"
+            assert "manager" in html and all(f'href="/tasks/{task_id}"' in html for task_id in (4, 5, 6)), "manager seat or held tasks are missing"
+            for status_name, expected in (("todo", 48), ("planning", 1), ("implementing", 1), ("blocked", 1), ("reviewing", 1)):
+                assert f'id="bay-{status_name}">{status_name} {expected}' in html, f"{status_name} lane count is wrong"
+            assert 'href="/tasks?status=todo">+40 more</a>' in html, "todo lane overflow link is wrong"
+            status, epics_home, _headers = request(port, "GET", "/epics")
+            assert status == 200 and "Epics" in epics_home and 'href="/tasks?parent=1"' in epics_home, "epics route or drill-down link is missing"
+            assert "&lt;script&gt;alert(&#39;epic&#39;)&lt;/script&gt;" in epics_home, "epic title was not escaped"
+            assert "1 / 6 done" in epics_home, "epic direct-child progress is wrong"
+            assert 'max="6" value="1"' in epics_home, "epic progress bar values are wrong"
+            assert 'class="active" href="/epics"' in epics_home, "epics tab was not marked active"
             assert "/assets/dashboard.css" in html and "/assets/theme.js" in html, "embedded theme assets are missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
             assert "prefers-color-scheme" in dashboard_css, "system theme defaults are missing"
@@ -150,7 +159,7 @@ def main() -> int:
                 assert len(badges) == body.count('class="badge status-'), f"{path} has malformed status badge"
                 for status_name, badge in badges:
                     assert status_name in badge, f"{path} badge lacks {status_name} text"
-            for path in ["/tasks", "/epics", "/tasks/3", "/feed"]:
+            for path in ["/", "/tasks", "/epics", "/tasks/3", "/feed"]:
                 scoped_status, scoped, _headers = request(port, "GET", f"{path}?project=1")
                 assert scoped_status == 200, f"{path}?project=1 returned {scoped_status}"
                 links = [html_lib.unescape(href) for href in re.findall(r'href="(/[^"]+)"', scoped)]
@@ -172,6 +181,10 @@ def main() -> int:
 
             status, tasks, _headers = request(port, "GET", "/tasks")
             assert status == 200 and 'class="active" href="/tasks"' in tasks, "tasks tab is missing or inactive"
+            chips = re.findall(r'<a class="status-chip(?: status-[a-z]+)?"[^>]*>([^<]+)</a>', tasks)
+            assert chips == ["All 53", "todo 48", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 1", "canceled 0"], f"task status counts are wrong: {chips}"
+            status, active_todo, _headers = request(port, "GET", "/tasks?status=todo")
+            assert status == 200 and 'class="status-chip status-todo" href="/tasks?status=todo" aria-current="true"' in active_todo, "active status chip is missing"
             assert 'href="/tasks?offset=20"' in tasks, "next-page link is missing"
             first_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', tasks)]
             assert first_ids == list(range(53, 33, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
@@ -239,6 +252,8 @@ def main() -> int:
             assert status == 404, f"unknown path returned {status}"
             status, child_tasks, _headers = request(port, "GET", "/tasks?parent=1")
             assert status == 200 and "Done child" in child_tasks and "Page task 00" not in child_tasks, "parent filter failed"
+            child_chips = re.findall(r'<a class="status-chip(?: status-[a-z]+)?"[^>]*>([^<]+)</a>', child_tasks)
+            assert child_chips[0] == "All 6" and sum(int(chip.rsplit(" ", 1)[1]) for chip in child_chips[1:]) == 6, f"parent status chips are wrong: {child_chips}"
             child_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', child_tasks)]
             assert len(child_ids) > 1 and child_ids == sorted(child_ids, reverse=True), f"multi-row parent filter is not newest-first: {child_ids}"
             status, all_tasks, _headers = request(port, "GET", "/tasks")

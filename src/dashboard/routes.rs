@@ -3,6 +3,7 @@ use agentboard::store::Cursor;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Page {
+    Board,
     Epics,
     Tasks,
     Detail(u64),
@@ -15,7 +16,7 @@ pub struct Route {
     pub filters: Filters,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Filters {
     pub project: Option<u64>,
     pub status: Option<Status>,
@@ -28,7 +29,9 @@ pub struct Filters {
 }
 
 pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
-    let page = if matches!(path, "/" | "/epics") {
+    let page = if path == "/" {
+        Page::Board
+    } else if path == "/epics" {
         Page::Epics
     } else if path == "/tasks" {
         Page::Tasks
@@ -99,7 +102,7 @@ pub fn parse(path: &str, query: &str) -> Result<Route, ()> {
         }
     }
     let allowed = match page {
-        Page::Epics | Page::Detail(_) => [7].as_slice(),
+        Page::Board | Page::Epics | Page::Detail(_) => [7].as_slice(),
         Page::Tasks => [0, 1, 2, 3, 7].as_slice(),
         Page::Feed => [4, 5, 6, 7].as_slice(),
     };

@@ -7,8 +7,51 @@ use super::PAGE_SIZE;
 use crate::dashboard::html;
 use crate::dashboard::routes::{Filters, Page};
 
-pub(super) fn tasks(page: &TaskPage, filters: &Filters, projects: &[Project]) -> String {
-    let mut body = String::from(
+pub(super) fn tasks(
+    page: &TaskPage,
+    counts: &[(Status, u64)],
+    filters: &Filters,
+    projects: &[Project],
+) -> String {
+    let total: u64 = counts.iter().map(|(_, count)| count).sum();
+    let mut body = format!(
+        "<nav class=\"status-chips\" aria-label=\"Task status\"><a class=\"status-chip\" href=\"{}\"{}>All {total}</a>",
+        html::escape(&html::query_url(
+            &Filters {
+                status: None,
+                ..filters.clone()
+            },
+            None
+        )),
+        if filters.status.is_none() {
+            " aria-current=\"true\""
+        } else {
+            ""
+        }
+    );
+    for (status, count) in counts {
+        let href = html::query_url(
+            &Filters {
+                status: Some(*status),
+                ..filters.clone()
+            },
+            None,
+        );
+        let _ = write!(
+            body,
+            "<a class=\"status-chip status-{}\" href=\"{}\"{}>{} {count}</a>",
+            status.as_str(),
+            html::escape(&href),
+            if filters.status == Some(*status) {
+                " aria-current=\"true\""
+            } else {
+                ""
+            },
+            status.as_str()
+        );
+    }
+    body.push_str("</nav>");
+    body.push_str(
         "<section class=\"panel\"><form id=\"task-filter\" method=\"get\" action=\"/tasks\"><label>Status<select name=\"status\"><option value=\"\">All statuses</option>",
     );
     for status in Status::ALL {

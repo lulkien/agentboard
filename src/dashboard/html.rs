@@ -28,12 +28,19 @@ pub fn shell(
 ) -> String {
     let mut out = String::with_capacity(content.len() + 1200);
     let safe_title = escape(title);
+    let board_url = escape(&url("/", project));
     let epics_url = escape(&url("/epics", project));
     let tasks_url = escape(&url("/tasks", project));
     let feed_url = escape(&url("/feed", project));
     let _ = write!(
         out,
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"{epics_url}\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"{epics_url}\"{}>Epics</a><a class=\"{}\" href=\"{tasks_url}\"{}>Tasks</a><a class=\"{}\" href=\"{feed_url}\"{}>Feed</a></nav>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>{safe_title} | Agentboard</title><link rel=\"stylesheet\" href=\"/assets/dashboard.css\"><script defer src=\"/assets/theme.js\"></script></head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a><header class=\"topbar\"><a class=\"brand\" href=\"{board_url}\">Agentboard</a><nav aria-label=\"Main navigation\"><a class=\"{}\" href=\"{board_url}\"{}>Board</a><a class=\"{}\" href=\"{epics_url}\"{}>Epics</a><a class=\"{}\" href=\"{tasks_url}\"{}>Tasks</a><a class=\"{}\" href=\"{feed_url}\"{}>Feed</a></nav>",
+        if active == Page::Board { "active" } else { "" },
+        if active == Page::Board {
+            " aria-current=\"page\""
+        } else {
+            ""
+        },
         if active == Page::Epics { "active" } else { "" },
         if active == Page::Epics {
             " aria-current=\"page\""
@@ -58,6 +65,7 @@ pub fn shell(
         }
     );
     let action = match active {
+        Page::Board => "/",
         Page::Epics => "/epics",
         Page::Tasks => "/tasks",
         Page::Detail(_) => "/tasks",
