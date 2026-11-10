@@ -138,6 +138,9 @@ fi
 binary_gate bash tests/race.sh
 want '^ok: [0-9]+ processes claimed [0-9]+ tasks'
 
+binary_gate bash tests/migrate.sh
+want '^(migrate: [0-9]+/[0-9]+ passed \(scratch LMDB, stepwise\)|SKIP migrate: Python lmdb unavailable offline \(use uv run --with lmdb\))$'
+
 gate bash tests/skills-install.sh
 want '^[0-9]+/[0-9]+ passed \(skills installer\)$'
 

@@ -171,12 +171,12 @@ fn format_and_map_size_refuse_before_any_task_decode() {
     txn.commit().unwrap();
     assert!(matches!(
         board.get(1),
-        Err(Error::FormatMismatch { expected: FORMAT_VERSION, found }) if found == FORMAT_VERSION + 1
+        Err(Error::FormatMismatch { expected: FORMAT_VERSION, found, .. }) if found == FORMAT_VERSION + 1
     ));
     drop(board);
     assert!(matches!(
         Board::open_with_options(scratch.path(), options()),
-        Err(Error::FormatMismatch { expected: FORMAT_VERSION, found }) if found == FORMAT_VERSION + 1
+        Err(Error::FormatMismatch { expected: FORMAT_VERSION, found, .. }) if found == FORMAT_VERSION + 1
     ));
     let reset = Board::reset(scratch.path(), options());
     assert!(
@@ -846,7 +846,8 @@ fn version_one_board_is_refused_as_needing_migration() {
         error,
         Error::FormatMismatch {
             expected: 2,
-            found: 1
+            found: 1,
+            ..
         }
     ));
     assert!(error.to_string().contains("migrate"));

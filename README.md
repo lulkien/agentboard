@@ -35,6 +35,24 @@ with `cc`.
   bigger board means a bigger map before it is created.
 - Board format 2 stores eight named databases, including the board-assigned
   project registry. Format 1 boards must be migrated before opening with this version.
+
+To migrate a format 1 board, close every process using it and back up its directory.
+Run the standalone script with Python's `lmdb` package in an isolated `uv`
+environment:
+
+```bash
+uv run --with lmdb python3 scripts/migrate-board.py --db DIR --dry-run \
+  --map lean-display-server=1 --map /abs/path/lean-display-server=1
+uv run --with lmdb python3 scripts/migrate-board.py --db DIR \
+  --map lean-display-server=1 --map /abs/path/lean-display-server=1
+```
+
+Repeat `--map PATH=ID` for every nonempty task path. Aliases may share an ID.
+The script creates one project record per ID, preferring an absolute alias as its
+registered path. It refuses unmapped paths without changing board data, checks
+the lifetime lock for attached clients, and applies one transaction per version
+step. A completed step survives a later failure; rerun the script to continue.
+An already current board prints `up to date`.
 - `agentboard reset --yes` discards the board. It refuses while another process
   holds it, and it refuses to delete a directory with unknown files in it.
 

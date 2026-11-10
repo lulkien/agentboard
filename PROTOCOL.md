@@ -5,7 +5,10 @@ codes. The store that implements this is described in `AGENTS.md`; running a tea
 is described in `skills/agentboard-team`.
 
 The board uses format 2 and eight named LMDB databases. Format 1 boards refuse
-to open until migrated. Projects are managed through the CLI only; MCP remains
+to open until migrated with `scripts/migrate-board.py` (`uv run --with lmdb
+python3 scripts/migrate-board.py --db DIR --map PATH=ID`). The refusal names
+the board path and both format versions; a newer board asks for a newer binary.
+Projects are managed through the CLI only; MCP remains
 at ten tools.
 
 ## Transport

@@ -105,6 +105,7 @@ pub enum Error {
     FormatMismatch {
         expected: u32,
         found: u32,
+        path: PathBuf,
     },
     Unstamped,
     ForeignBoard,
@@ -156,7 +157,8 @@ impl std::fmt::Display for Error {
             Self::EnvironmentAlreadyOpen => f.write_str("LMDB environment already open in this process; reuse its Board handle"),
             Self::MapFull => f.write_str("LMDB map full; set AGENTBOARD_MAP_SIZE_MB for a fresh board or reset this disposable board with a larger size"),
             Self::ReadersFull => f.write_str("LMDB reader slots exhausted (limit 256)"),
-            Self::FormatMismatch { expected, found } => write!(f, "board format {found} is incompatible with expected {expected}; migrate the board before opening it"),
+            Self::FormatMismatch { expected, found, path } if found > expected => write!(f, "board {} has format {found}, but this binary expects {expected}; the binary is older than the board, so upgrade the binary (do not migrate)", path.display()),
+            Self::FormatMismatch { expected, found, path } => write!(f, "board {} has format {found}, but this binary expects {expected}; run python3 scripts/migrate-board.py --db {} to migrate it", path.display(), path.display()),
             Self::Unstamped => f.write_str("unstamped board; inspect it before board reset --yes"),
             Self::ForeignBoard => f.write_str("directory is not an agentboard LMDB board"),
             Self::UnknownEntry(name) => write!(
@@ -380,7 +382,7 @@ impl Board {
                     .ok_or(Error::Unstamped)?;
                 let raw = meta.get(txn, ENVELOPE_KEY)?.ok_or(Error::Unstamped)?;
                 let envelope: Metadata = serde_json::from_slice(raw)?;
-                check_metadata(&envelope, options)?;
+                check_metadata(&envelope, options, &path)?;
                 let tasks = opener
                     .open_database::<Bytes, Bytes>(txn, Some("tasks"))?
                     .ok_or(Error::Corrupt("missing tasks database"))?;
@@ -456,6 +458,7 @@ impl Board {
             BoardOptions {
                 map_size_mb: actual_map_mb,
             },
+            &self.path,
         )?;
         Ok(metadata)
     }
@@ -515,7 +518,7 @@ pub(super) fn write_metadata(db: Db, txn: &mut heed::RwTxn<'_>, metadata: &Metad
     Ok(())
 }
 
-fn check_metadata(metadata: &Metadata, options: BoardOptions) -> Result<()> {
+fn check_metadata(metadata: &Metadata, options: BoardOptions, path: &Path) -> Result<()> {
     if metadata.application != APPLICATION {
         return Err(Error::ForeignBoard);
     }
@@ -523,6 +526,7 @@ fn check_metadata(metadata: &Metadata, options: BoardOptions) -> Result<()> {
         return Err(Error::FormatMismatch {
             expected: FORMAT_VERSION,
             found: metadata.format_version,
+            path: path.to_owned(),
         });
     }
     if metadata.map_size_mb != options.map_size_mb {
