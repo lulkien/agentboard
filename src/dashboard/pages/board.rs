@@ -1,14 +1,12 @@
 use agentboard::domain::{Project, Status, Task};
 use agentboard::store::{Agent, Overview};
 
-use super::time::format_timestamp;
+use super::time::format_age;
 use crate::dashboard::{
     html,
     routes::Page,
     template::{Fragment, Template, html as html_slot, text},
 };
-
-const SEAT_CAP: usize = 5;
 
 const BOARD: Template = Template::new("board", include_str!("../templates/board.html"));
 const ATTENTION: Template = Template::new(
@@ -29,15 +27,17 @@ const MORE_TASKS: Template = Template::new(
     include_str!("../templates/board-more-tasks.html"),
 );
 const SEATS: Template = Template::new("board-seats", include_str!("../templates/board-seats.html"));
-const SEAT: Template = Template::new("board-seat", include_str!("../templates/board-seat.html"));
-const HELD: Template = Template::new(
-    "board-seat-held",
-    include_str!("../templates/board-seat-held.html"),
+const SEAT_HELD: Template = Template::new(
+    "board-seat-chip-held",
+    include_str!("../templates/board-seat-chip-held.html"),
 );
-const IDLE: Template = Template::new("board-idle", include_str!("../templates/board-idle.html"));
-const LAST_SEEN: Template = Template::new(
-    "board-last-seen",
-    include_str!("../templates/board-last-seen.html"),
+const SEAT_IDLE: Template = Template::new(
+    "board-seat-chip-idle",
+    include_str!("../templates/board-seat-chip-idle.html"),
+);
+const EMPTY_SEATS: Template = Template::new(
+    "board-seats-empty",
+    include_str!("../templates/board-seats-empty.html"),
 );
 const BAYS: Template = Template::new("board-bays", include_str!("../templates/board-bays.html"));
 const BAY: Template = Template::new("board-bay", include_str!("../templates/board-bay.html"));
@@ -55,6 +55,7 @@ pub(super) fn board_page(
     agents: &[Agent],
     project: Option<u64>,
     projects: &[Project],
+    now_ms: i64,
 ) -> Fragment {
     let attention_items: Fragment = overview
         .attention
@@ -91,52 +92,36 @@ pub(super) fn board_page(
         }
     }
     names.sort_unstable();
+    let empty_seats = if names.is_empty() {
+        EMPTY_SEATS.fill(&[])
+    } else {
+        Fragment::empty()
+    };
     let seats: Fragment = names
         .into_iter()
         .map(|name| {
             let held = overview.held.iter().find(|held| held.assignee == name);
             if let Some(held) = held {
-                let items: Fragment = held
-                    .tasks
-                    .iter()
-                    .take(SEAT_CAP)
-                    .map(|task| strip_item(task, project))
-                    .collect();
-                let list = HELD.fill(&[("items", html_slot(items))]);
-                let more = if held.total > SEAT_CAP {
-                    let href =
-                        html::url(&format!("/tasks?assignee={}", html::encode(name)), project);
-                    MORE.fill(&[("href", text(href)), ("count", text(held.total - SEAT_CAP))])
-                } else {
-                    Fragment::empty()
-                };
-                SEAT.fill(&[
+                let href = html::url(&format!("/tasks?assignee={}", html::encode(name)), project);
+                SEAT_HELD.fill(&[
+                    ("href", text(href)),
                     ("name", text(name)),
-                    ("content", html_slot(list)),
-                    ("more", html_slot(more)),
+                    ("count", text(held.total)),
                 ])
             } else {
-                let last_seen = agents
+                let age = agents
                     .iter()
                     .find(|agent| agent.name == name)
                     .and_then(|agent| agent.last_seen_ms)
-                    .map_or_else(Fragment::empty, |ts| {
-                        LAST_SEEN.fill(&[
-                            // Template normalization trims source indentation, so preserve this space as slot data.
-                            ("space", text(" ")),
-                            ("timestamp", text(format_timestamp(ts))),
-                        ])
-                    });
-                let idle = IDLE.fill(&[("last_seen", html_slot(last_seen))]);
-                SEAT.fill(&[
-                    ("name", text(name)),
-                    ("content", html_slot(idle)),
-                    ("more", html_slot(Fragment::empty())),
-                ])
+                    .map_or_else(String::new, |ts| format!(" {}", format_age(now_ms, ts)));
+                SEAT_IDLE.fill(&[("name", text(name)), ("age", text(age))])
             }
         })
         .collect();
-    let seats = SEATS.fill(&[("seats", html_slot(seats))]);
+    let seats = SEATS.fill(&[
+        ("seats", html_slot(seats)),
+        ("empty", html_slot(empty_seats)),
+    ]);
 
     let bays: Fragment = overview
         .lanes

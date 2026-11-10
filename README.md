@@ -192,7 +192,7 @@ is the supported mode; binding a non-loopback address is refused unless
 `--allow-non-loopback` is passed deliberately. Requests with an unrelated Host
 header are refused to prevent DNS-rebinding reads. The
 `agentboard serve` command remains MCP over stdio and its 10-tool surface is
-unchanged. The dashboard routes are `/` (board with attention, seats and status bays),
+unchanged. The dashboard routes are `/` (board with seats, attention and status columns),
 `/epics` (epic overview), `/tasks`
 (filtered and paged task list), `/tasks/ID` (task details and recent activity),
 and `/feed` (board event history). `/assets/dashboard.css` and `/assets/theme.js`

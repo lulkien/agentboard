@@ -1,4 +1,7 @@
-use agentboard::store::{Board, ListFilter, MAX_LIST_LIMIT};
+use agentboard::{
+    domain::now_ms,
+    store::{Board, ListFilter, MAX_LIST_LIMIT},
+};
 
 use super::routes::{Page, Route};
 use super::template::Fragment;
@@ -43,7 +46,7 @@ pub fn render(board: &Board, route: Route) -> Result<Fragment, PageError> {
             let agents = board
                 .agents()
                 .map_err(|e| PageError::Store(e.to_string()))?;
-            Ok(board_page(&overview, &agents, project, &projects))
+            Ok(board_page(&overview, &agents, project, &projects, now_ms()))
         }
         Page::Epics => {
             let brief = board

@@ -185,8 +185,10 @@ def main() -> int:
         db = Path(temp) / "board"
         READ_ONLY_DB = db
         run_cli(db, "project", "add", "--name", "dashboard", "--path", "/dashboard")
-        long_unbroken_title = "T90" + "x" * 195 + "<&"
-        escaped_unbroken_title = html_lib.escape(long_unbroken_title, quote=True)
+        long_unbroken_title = "Epic <script>alert('epic')</script> T90" + "x" * 140 + "<&"
+        escaped_unbroken_title = html_lib.escape(long_unbroken_title, quote=True).replace("&#x27;", "&#39;")
+        escaped_epic_title = "Epic <script>alert('epic')</script>"
+        escaped_epic_title_html = html_lib.escape(escaped_epic_title, quote=True).replace("&#x27;", "&#39;")
         long_spaced_title = "T90 long title " + "words " * 30 + "words"
         run_cli(db, "add", long_unbroken_title)
         run_cli(db, "add", "Done child", "--parent", "1", "--status", "done")
@@ -267,8 +269,15 @@ def main() -> int:
             assert "Needs attention" in html and 'class="active" href="/"' in html, "board home is missing"
             attention = html.split('class="attention panel"', 1)[1].split('</section>', 1)[0]
             assert attention.index("Blocked child") < attention.index("Reviewing child"), "attention order is wrong"
-            assert "alice&lt;&amp;" in html and 'href="/tasks/3"' in html, "alice seat or held task is missing"
-            assert "manager" in html and all(f'href="/tasks/{task_id}"' in html for task_id in (4, 5, 6)), "manager seat or held tasks are missing"
+            assert html.index('class="seat-bar') < html.index('class="attention') < html.index('id="bay-todo"'), "seat bar, attention rail and status bays are out of order"
+            assert '<span class="seat-name">manager</span> <span class="seat-count">3</span>' in html, "manager held-task count is missing from seat bar"
+            assert '<span class="seat-name">alice&lt;&amp;</span> <span class="seat-count">1</span>' in html, "escaped Alice held-task count is missing from seat bar"
+            assert 'href="/tasks?assignee=alice%3C%26"' in html, "Alice seat chip does not link to her filtered task list"
+            assert "seat-rack" not in html, "old seat rack is still rendered"
+            status, project_two_board, _headers = request(port, "GET", "/?project=2")
+            assert status == 200 and '<span class="seat-chip idle" title="manager">' in project_two_board, "unheld manager seat is not idle"
+            manager_idle = project_two_board.split('<span class="seat-chip idle" title="manager">', 1)[1].split("</li>", 1)[0]
+            assert '<span class="seat-name">manager</span> idle' in manager_idle and 'class="seat-count"' not in manager_idle, "idle manager chip has a count or malformed label"
             for status_name, expected in (("todo", 50), ("planning", 1), ("implementing", 1), ("blocked", 1), ("reviewing", 1)):
                 assert f'id="bay-{status_name}">{status_name} {expected}' in html, f"{status_name} lane count is wrong"
             assert 'href="/tasks?status=todo">+42 more</a>' in html, "todo lane overflow link is wrong"
@@ -277,6 +286,7 @@ def main() -> int:
             status, epics_home, _headers = request(port, "GET", "/epics")
             assert status == 200 and "Epics" in epics_home and 'href="/tasks?parent=1"' in epics_home, "epics route or drill-down link is missing"
             assert f'title="{escaped_unbroken_title}"' in epics_home and f'>{escaped_unbroken_title}</span>' in epics_home, "long unbroken epic title was clipped or escaped incorrectly"
+            assert escaped_epic_title_html in epics_home, "script-like epic title is not escaped in the epic strip"
             assert "1 / 6 done" in epics_home, "epic direct-child progress is wrong"
             assert 'role="img" aria-label="1 of 6 direct children done"' in epics_home, "epic rollup is not accessible"
             assert epics_home.count("<rect ") == 6, "epic rollup did not include each populated status"
@@ -294,6 +304,9 @@ def main() -> int:
             footer = html.split("<footer>", 1)[1].split("</footer>", 1)[0]
             assert re.search(r'<button[^>]*>Change theme</button>', footer) and "current theme" in request(port, "GET", "/assets/theme.js")[1], "theme button label or mode accessibility is missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
+            assert re.search(r"\.seat-name\s*\{[^}]*text-overflow:ellipsis[^}]*min-width:0", dashboard_css), "seat names can overflow their chips"
+            assert re.search(r"\.attention \.strip-list\s*\{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)", dashboard_css), "attention rail is not a two-column strip grid"
+            assert re.search(r"@media\s*\(max-width:899px\)\s*\{[^}]*\.attention \.strip-list\s*\{[^}]*grid-template-columns:1fr", dashboard_css), "attention rail does not collapse to one column on narrow screens"
             assert re.search(r"\.topbar\s*\{[^}]*position:sticky[^}]*top:0[^}]*z-index:\d+[^}]*background:var\(--strip\)", dashboard_css), "top bar is not sticky, layered and opaque"
             assert "scroll-padding-top:70px" in dashboard_css and "scroll-margin-top:70px" in dashboard_css, "anchors do not account for the sticky header"
             assert re.search(r"\.header-control\s*\{[^}]*min-height:40px[^}]*padding:\.5rem \.75rem[^}]*font:inherit", dashboard_css), "header control sizing is not shared"
