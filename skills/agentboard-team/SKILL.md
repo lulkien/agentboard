@@ -376,17 +376,24 @@ agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
-| `board_brief` | epic progress, unparented active work, then global status counts |
+| `board_brief` | epic progress, unparented active work, then project status counts; accepts `project` |
 | `board_agents` | roster with last activity and last task |
 
 CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `wait`,
-`brief`, `agents`, `path`, `reset --yes`, `serve`. Exit codes: `0` ok, `1` refused,
+`brief [--project ID]`, `agents`, `path`, `reset --yes`, `serve`. `ls` and `brief`
+scope to the selected project: explicit ID, then `AGENTBOARD_PROJECT`, then a registered
+project path matching the current directory; otherwise they show the whole board.
+Exit codes: `0` ok, `1` refused,
 `3` no ready tasks or a wait timeout.
 
 Use `task_epic` (CLI `epic ID`) to read an umbrella's direct children as status
 counts and done/total progress. Any task with children is an epic; nested epics
 also appear in `board_brief`. Brief puts epic progress first, unparented active
-work next, and global counts last. Close or drop all direct children before
+work next, and scoped status counts last. The manager passes the selected project
+to `board_brief`; adapters resolve it from an explicit ID, `AGENTBOARD_PROJECT`,
+or a registered project path matching the current directory, in that order. With
+no match, the whole board is summarized. `board_agents` remains board-wide. Close
+or drop all direct children before
 closing an umbrella; force does not bypass that store rule. Creating or reparenting
 a child under a done or canceled parent refuses, even with force. To attach more
 work, the manager must change that parent back to an open status and retry the

@@ -744,6 +744,91 @@ fn projects_receive_stable_board_ids_and_update_atomically() {
 }
 
 #[test]
+fn project_brief_scopes_counts_active_rows_and_epic_rollups() {
+    use crate::domain::NewProject;
+
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let project_a = board
+        .add_project(NewProject {
+            project_name: "A".into(),
+            project_path: "/project-a".into(),
+        })
+        .unwrap();
+    let project_b = board
+        .add_project(NewProject {
+            project_name: "B".into(),
+            project_path: "/project-b".into(),
+        })
+        .unwrap();
+    let add = |title: &str, status, project_id, parent_id, assignee: Option<&str>| {
+        let mut task = draft(assignee);
+        task.title = title.into();
+        task.status = status;
+        task.project_id = Some(project_id);
+        task.parent_id = parent_id;
+        board.add("manager", task, false, 1).unwrap().task
+    };
+    let epic = add("A epic", Status::Todo, project_a.project_id, None, None);
+    add(
+        "A child",
+        Status::Planning,
+        project_a.project_id,
+        Some(epic.id),
+        Some("manager"),
+    );
+    add(
+        "B active",
+        Status::Implementing,
+        project_b.project_id,
+        None,
+        Some("manager"),
+    );
+    let cross_project_epic = add(
+        "A cross-project epic",
+        Status::Todo,
+        project_a.project_id,
+        None,
+        None,
+    );
+    add(
+        "B child",
+        Status::Done,
+        project_b.project_id,
+        Some(cross_project_epic.id),
+        None,
+    );
+
+    let brief = board
+        .brief_for_project(10, Some(project_a.project_id))
+        .unwrap();
+    let count = |status| {
+        brief
+            .counts
+            .iter()
+            .find(|(row, _)| *row == status)
+            .map(|(_, count)| *count)
+            .unwrap()
+    };
+    assert_eq!(count(Status::Todo), 2);
+    assert_eq!(count(Status::Planning), 1);
+    assert_eq!(count(Status::Implementing), 0);
+    assert_eq!(brief.epics.len(), 2);
+    assert_eq!(brief.epics[0].total, 1);
+    assert_eq!(brief.epics[1].task.id, cross_project_epic.id);
+    assert_eq!(brief.epics[1].total, 0);
+    assert_eq!(brief.active.len(), 0);
+
+    let brief = board
+        .brief_for_project(10, Some(project_b.project_id))
+        .unwrap();
+    assert_eq!(brief.counts.iter().map(|(_, n)| n).sum::<u64>(), 2);
+    assert_eq!(brief.active.len(), 1);
+    assert_eq!(brief.active[0].title, "B active");
+    assert!(brief.epics.is_empty());
+}
+
+#[test]
 fn version_one_board_is_refused_as_needing_migration() {
     let scratch = Scratch::new();
     let board = Board::open_with_options(scratch.path(), options()).unwrap();

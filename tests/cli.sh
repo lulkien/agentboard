@@ -621,5 +621,36 @@ out=$($B ls --project 1); code=$?
 check "project list filter exit" 0 "$code"
 has "project list returns linked task" "project one" "$out"
 
+
+fresh project-brief
+out=$("$B" project add --name A --path "$PWD"); code=$?
+check "brief project A registered" 0 "$code"
+out=$("$B" project add --name B --path "$S/project-b"); code=$?
+check "brief project B registered" 0 "$code"
+out=$("$B" add "A open row" --project 1 --status planning --assignee manager); code=$?
+check "brief project A row created" 0 "$code"
+out=$("$B" add "B open row" --project 2 --status blocked --assignee manager); code=$?
+check "brief project B row created" 0 "$code"
+out=$(AGENTBOARD_PROJECT=2 "$B" brief --project 1); code=$?
+check "explicit brief project wins over environment" 0 "$code"
+has "explicit brief includes project A" "A open row" "$out"
+lacks "explicit brief excludes project B" "B open row" "$out"
+out=$(AGENTBOARD_PROJECT=1 "$B" brief); code=$?
+check "brief defaults to environment project" 0 "$code"
+has "environment brief includes project A" "A open row" "$out"
+lacks "environment brief excludes project B" "B open row" "$out"
+out=$(AGENTBOARD_PROJECT=2 "$B" ls); code=$?
+check "task list defaults to environment project" 0 "$code"
+has "environment list includes project B" "B open row" "$out"
+lacks "environment list excludes project A" "A open row" "$out"
+out=$(env -u AGENTBOARD_PROJECT "$B" brief); code=$?
+check "brief defaults to matching cwd project" 0 "$code"
+has "cwd brief includes project A" "A open row" "$out"
+lacks "cwd brief excludes project B" "B open row" "$out"
+out=$(cd "$S" && env -u AGENTBOARD_PROJECT "$B" --db "$AGENTBOARD_DB" brief); code=$?
+check "brief without project resolution uses whole board" 0 "$code"
+has "whole-board brief includes project A" "A open row" "$out"
+has "whole-board brief includes project B" "B open row" "$out"
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]

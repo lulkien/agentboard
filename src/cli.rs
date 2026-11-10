@@ -227,7 +227,10 @@ pub enum Cmd {
         timeout: u64,
     },
     /// Counts by status plus active work
-    Brief,
+    Brief {
+        #[arg(long, value_name = "ID")]
+        project: Option<u64>,
+    },
     /// List registered actors
     Agents,
     /// Print the resolved board directory

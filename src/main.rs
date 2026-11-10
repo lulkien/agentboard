@@ -179,6 +179,7 @@ fn run(
         }) => {
             let status = parse_status(status.as_deref())?;
             let board = open(&path)?;
+            let project = agentboard::server::resolve_project(&board, project)?;
             let page = board
                 .list(&ListFilter {
                     status,
@@ -435,9 +436,12 @@ fn run(
             };
             Ok((render::wait_text(&outcome), code))
         }
-        Some(Cmd::Brief) => {
+        Some(Cmd::Brief { project }) => {
             let board = open(&path)?;
-            let brief = board.brief(10).map_err(|e| e.to_string())?;
+            let project = agentboard::server::resolve_project(&board, project)?;
+            let brief = board
+                .brief_for_project(10, project)
+                .map_err(|e| e.to_string())?;
             Ok((render::brief_text(&brief), ExitCode::SUCCESS))
         }
         Some(Cmd::Agents) => {

@@ -25,12 +25,15 @@ The two workflows differ in one line: in herdr the manager renames a tab and wai
 for its shell prompt, and seats are tabs driven with `herdr agent prompt`; in hc the
 seat is a named terminal and `hc send` waits for the program to pause.
 
-1. Confirm the board: MCP `board_brief` and `board_agents`. An empty board is
-   information, not an error.
+1. Resolve the active project before managing seats. Pass its ID to `board_brief`
+   and `task_list`; otherwise the adapters use `AGENTBOARD_PROJECT`, then match
+   the process working directory to a registered project path. If none matches,
+   the summary covers the whole board. Check the selected project against the
+   repository before launching or assigning seats. `board_agents` is board-wide.
 2. Launch only the seats this work needs and register each seat's MCP server with
    its board name (`agentboard serve --actor <seat>`). The manual's launch sections
-   have the exact commands and the preferred-model table (Claude Opus/Sonnet 5.5
-   with seat effort, Codex Sol/Luna with profile effort).
+   have the exact commands and preferred-model table (Claude Opus/Sonnet 5.5;
+   Codex Sol with model and effort supplied by each seat profile).
    - herdr: one tab per seat and never split panes; pass those flags after `--` on
      `herdr agent start`.
    - hc: one named terminal per seat and never two agents in one terminal; pass

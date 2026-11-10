@@ -3,6 +3,7 @@
 //! Result shape is deliberate: reads are one line per task, writes answer with the
 //! changed record plus its event cursor. Agents pay tokens per byte.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -20,6 +21,32 @@ use crate::store::{
 
 const NAME: &str = "agentboard";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Resolve the adapter's project scope without making the store depend on
+/// process environment or the caller's working directory.
+pub fn resolve_project(board: &BoardHandle, explicit: Option<u64>) -> Result<Option<u64>, String> {
+    if explicit.is_some() {
+        return Ok(explicit);
+    }
+    if let Ok(raw) = std::env::var("AGENTBOARD_PROJECT") {
+        let id = raw
+            .parse::<u64>()
+            .map_err(|_| format!("AGENTBOARD_PROJECT must be a numeric project id, got {raw:?}"))?;
+        return Ok(Some(id));
+    }
+    let Ok(cwd) = std::env::current_dir() else {
+        return Ok(None);
+    };
+    let cwd = normalized_path(&cwd);
+    let projects = board.list_projects().map_err(|error| error.to_string())?;
+    Ok(projects.into_iter().find_map(|project| {
+        (normalized_path(Path::new(&project.project_path)) == cwd).then_some(project.project_id)
+    }))
+}
+
+fn normalized_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
 
 fn text(body: String) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(body)])
@@ -101,6 +128,13 @@ pub struct ListArgs {
     pub limit: Option<usize>,
     #[serde(default)]
     pub offset: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BriefArgs {
+    /// Restrict the summary to this project ID
+    #[serde(default)]
+    pub project: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -264,7 +298,7 @@ impl Board {
 
     #[tool(
         name = "task_list",
-        description = "List tasks by status, assignee, parent or path"
+        description = "List tasks by status, assignee, parent or project"
     )]
     async fn task_list(
         &self,
@@ -284,6 +318,7 @@ impl Board {
             ..
         } = args;
         let page = blocking(&self.board, move |board| {
+            let project = resolve_project(board, project)?;
             board
                 .list(&ListFilter {
                     status,
@@ -551,9 +586,15 @@ impl Board {
         name = "board_brief",
         description = "Epic progress, unparented active tasks, then counts by status"
     )]
-    async fn board_brief(&self) -> Result<CallToolResult, ErrorData> {
+    async fn board_brief(
+        &self,
+        Parameters(args): Parameters<BriefArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let brief = blocking(&self.board, move |board| {
-            board.brief(10).map_err(|e| e.to_string())
+            let project = resolve_project(board, args.project)?;
+            board
+                .brief_for_project(10, project)
+                .map_err(|e| e.to_string())
         })
         .await
         .map_err(err)?;

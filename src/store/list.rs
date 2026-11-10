@@ -68,13 +68,23 @@ impl Board {
         &self,
         txn: &ReadTxn<'_>,
     ) -> Result<HashMap<u64, [u64; Status::ALL.len()]>> {
+        self.child_counts_for_project(txn, None)
+    }
+
+    fn child_counts_for_project(
+        &self,
+        txn: &ReadTxn<'_>,
+        project: Option<u64>,
+    ) -> Result<HashMap<u64, [u64; Status::ALL.len()]>> {
         let mut counts = HashMap::new();
         for entry in self.tasks.iter(txn)? {
             let (_, raw) = entry?;
             let task: Task = serde_json::from_slice(raw)?;
             if let Some(parent) = task.parent_id {
-                counts.entry(parent).or_insert([0; Status::ALL.len()])
-                    [keys::status_code(task.status) as usize] += 1;
+                let child_counts = counts.entry(parent).or_insert([0; Status::ALL.len()]);
+                if project.is_none() || task.project_id == project {
+                    child_counts[keys::status_code(task.status) as usize] += 1;
+                }
             }
         }
         Ok(counts)
@@ -164,9 +174,14 @@ impl Board {
 
     /// Derived epic progress and unparented active work, with global counts.
     pub fn brief(&self, active_limit: usize) -> Result<Brief> {
+        self.brief_for_project(active_limit, None)
+    }
+
+    /// Derived epic progress and active work for one project, or the whole board.
+    pub fn brief_for_project(&self, active_limit: usize, project: Option<u64>) -> Result<Brief> {
         let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
-        let children = self.child_counts(&txn)?;
+        let children = self.child_counts_for_project(&txn, project)?;
         let cursor = Cursor {
             instance_id: metadata.instance_id,
             seq: metadata.next_event_seq.saturating_sub(1),
@@ -177,6 +192,9 @@ impl Board {
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
             let task: Task = serde_json::from_slice(raw)?;
+            if project.is_some() && task.project_id != project {
+                continue;
+            }
             counts[keys::status_code(task.status) as usize] += 1;
             if let Some(child_counts) = children.get(&task.id) {
                 epics.push(rollup(task, child_counts, cursor.clone()));

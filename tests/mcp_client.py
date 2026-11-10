@@ -52,8 +52,10 @@ def has(name, needle, hay):
 
 
 class Server:
-    def __init__(self, db, actor, args=()):
+    def __init__(self, db, actor, args=(), extra_env=None):
         env = dict(os.environ, AGENTBOARD_DB=db, AGENTBOARD_ACTOR=actor)
+        if extra_env:
+            env.update(extra_env)
         self.proc = subprocess.Popen(
             [BIN, "--db", db, "serve", *args],
             stdin=subprocess.PIPE,
@@ -259,6 +261,32 @@ def main():
             _, body = flag_server.call("board_agents", {})
             has("flag actor registers bob", "bob", body)
             check("flag actor wins over the environment", False, "alice" in body)
+        project_db = os.path.join(scratch, "project-scope")
+        for name, path in [("A", "/project-a"), ("B", "/project-b")]:
+            subprocess.run(
+                [BIN, "--db", project_db, "project", "add", "--name", name, "--path", path],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        with Server(
+            project_db, "worker", extra_env={"AGENTBOARD_PROJECT": "2"}
+        ) as scoped:
+            scoped.start()
+            scoped.call("task_add", {"title": "A scoped row", "status": "reviewing", "project": 1})
+            scoped.call("task_add", {"title": "B scoped row", "status": "reviewing", "project": 2})
+            _, body = scoped.call("task_list", {"project": 1})
+            has("task_list explicit project beats environment", "A scoped row", body)
+            check("task_list explicit project excludes environment row", False, "B scoped row" in body)
+            _, body = scoped.call("task_list")
+            has("task_list defaults to AGENTBOARD_PROJECT", "B scoped row", body)
+            check("task_list environment scope excludes other project", False, "A scoped row" in body)
+            _, body = scoped.call("board_brief", {"project": 1})
+            has("board_brief accepts explicit project", "A scoped row", body)
+            check("board_brief explicit project excludes other project", False, "B scoped row" in body)
+            _, body = scoped.call("board_brief")
+            has("board_brief defaults to AGENTBOARD_PROJECT", "B scoped row", body)
+            check("board_brief environment scope excludes other project", False, "A scoped row" in body)
         # CLI and MCP share one snapshot and renderer, with no intervening writes.
         with Server(os.path.join(scratch, "epics"), "worker") as epics:
             epics.start()

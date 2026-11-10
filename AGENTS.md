@@ -36,13 +36,13 @@ and uses scratch boards; the dashboard test starts its own local listener.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 98 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 99 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` (default binary) | `314/314 passed (cli, lmdb)` |
-| `AGENTBOARD_TEST_BIN=target/release/agentboard` with `bash tests/cli.sh` (dashboard-feature binary) | `316/316 passed (cli, lmdb)` |
+| `bash tests/cli.sh` (default binary) | `333/333 passed (cli, lmdb)` |
+| `AGENTBOARD_TEST_BIN=target/release/agentboard` with `bash tests/cli.sh` (dashboard-feature binary) | `335/335 passed (cli, lmdb)` |
 | `python3 tests/dashboard.py` (feature binary) | `dashboard: all checks passed (read-only HTTP, filters, paging, escaping, bounds)` |
-| `python3 tests/mcp_client.py` | `180/180 passed (mcp, lmdb)` |
+| `python3 tests/mcp_client.py` | `188/188 passed (mcp, lmdb)` |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/seats-install.sh` | `220/220 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
