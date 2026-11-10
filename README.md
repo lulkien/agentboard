@@ -2,10 +2,11 @@
 
 One board shared by a team of CLI agents. A manager adds work, workers claim it,
 everyone reads the same event feed. The board is a single LMDB directory: no
-background daemon or database server. The default CLI and MCP transport stay local;
+background daemon or database server. `agentboard serve` is MCP on stdio;
+`agentboard daemon` is the same ten tools over local HTTP for every seat at once;
 an optional dashboard feature serves a read-only page over HTTP.
 
-10 MCP tools, 15 default CLI commands plus the optional dashboard, one store behind both.
+10 MCP tools, 16 default CLI commands plus the optional dashboard, one store behind both.
 
 ## Why it exists
 
@@ -104,6 +105,7 @@ agentboard project add --name NAME --path PATH
 agentboard project ls
 agentboard project update ID [--name NAME] [--path PATH]
 agentboard serve
+agentboard daemon [IP:PORT] [--allow-non-loopback]
 agentboard dashboard [IP:PORT] [--db PATH]
 ```
 
@@ -175,6 +177,18 @@ agentboard: forced update requires a reason
 agentboard: unknown assignee "nobody"; use new_actor=true to register the target
 agentboard: task T7 has no holder to release
 ```
+
+## Daemon
+
+`agentboard daemon [IP:PORT] [--allow-non-loopback]` (default `127.0.0.1:8765`) is a
+foreground process that opens the board once and serves the ten MCP tools over
+streamable HTTP at `/mcp/<actor>`. The URL segment is the seat's name, so one
+process serves every seat and each write is attributed to its URL name. The
+project is the tool argument, else `?project=ID` on the MCP URL, else the whole
+board; the daemon's own environment and working directory are never read. The
+startup line and `GET /api/health` print the resolved board path and instance id.
+While it runs it holds the board open, so `reset` and migration refuse until it
+is stopped. See `PROTOCOL.md` for the guard and the stateless mode.
 
 ## Optional dashboard
 

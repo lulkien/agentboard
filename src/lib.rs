@@ -2,6 +2,7 @@
 //! store, a CLI and an MCP server on one board.
 
 pub mod cli;
+pub mod daemon;
 pub mod domain;
 pub mod render;
 pub mod server;

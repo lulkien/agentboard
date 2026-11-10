@@ -79,6 +79,10 @@ fn run(
     let actor = actor_name(actor);
     match cmd {
         None | Some(Cmd::Serve) => serve(path, actor),
+        Some(Cmd::Daemon {
+            address,
+            allow_non_loopback,
+        }) => daemon(path, address, allow_non_loopback),
         #[cfg(feature = "dashboard")]
         Some(Cmd::Dashboard {
             address,
@@ -476,6 +480,22 @@ fn serve(path: PathBuf, actor: Option<String>) -> Result<(String, ExitCode), Str
             .waiting()
             .await
             .map_err(|error| format!("mcp server: {error}"))?;
+        Ok((String::new(), ExitCode::SUCCESS))
+    })
+}
+
+fn daemon(
+    path: PathBuf,
+    address: std::net::SocketAddr,
+    allow_non_loopback: bool,
+) -> Result<(String, ExitCode), String> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("runtime: {e}"))?;
+    runtime.block_on(async move {
+        let board = open(&path)?;
+        agentboard::daemon::serve(board, address, allow_non_loopback).await?;
         Ok((String::new(), ExitCode::SUCCESS))
     })
 }

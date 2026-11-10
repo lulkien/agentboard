@@ -56,6 +56,14 @@ else
     has "feature-off refusal names dashboard" "unrecognized subcommand 'dashboard'" "$out"
 fi
 
+# --- daemon CLI skeleton (the HTTP behaviour is proved by tests/daemon.py) -----
+out=$("$B" daemon --help 2>&1); code=$?
+check "daemon --help exits 0" 0 "$code"
+has "daemon help names the default address" "127.0.0.1:8765" "$out"
+out=$("$B" daemon 0.0.0.0:0 --db "$S/daemon-board" 2>&1); code=$?
+check "daemon refuses a non-loopback bind" 1 "$code"
+has "daemon refusal names the flag" "--allow-non-loopback" "$out"
+
 # --- path and add ----------------------------------------------------------
 fresh a
 out=$("$B" path) || bad "path exit"

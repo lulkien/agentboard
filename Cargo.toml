@@ -16,13 +16,15 @@ dashboard = []
 
 [dependencies]
 # No colour stack: help and errors are plain text on purpose.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
 clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
 heed = "0.23.0"
-rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-io"] }
+http = "1"
+rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [profile.release]
 opt-level = 2

@@ -1,10 +1,11 @@
 //! Read-only HTTP dashboard for an existing agentboard.
 
 use std::io::{self, Read, Write};
-use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use agentboard::daemon::host_allowed;
 use agentboard::store::{Board, BoardOptions};
 
 mod html;
@@ -271,39 +272,6 @@ fn respond(stream: &mut TcpStream, board: &Board, bound_address: SocketAddr) -> 
     };
     let body = body.into_string();
     response(stream, "200 OK", "text/html; charset=utf-8", &body)
-}
-
-fn host_allowed(host: &str, bound_address: SocketAddr) -> bool {
-    let host = host.trim();
-    if host
-        .parse::<SocketAddr>()
-        .is_ok_and(|candidate| candidate == bound_address)
-    {
-        return true;
-    }
-    let bare_ip = host
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .unwrap_or(host);
-    if bare_ip
-        .parse::<IpAddr>()
-        .is_ok_and(|candidate| candidate == bound_address.ip())
-    {
-        return true;
-    }
-    let (name, port) = match host.rsplit_once(':') {
-        Some((name, raw_port)) if !name.contains(':') => {
-            let Ok(port) = raw_port.parse::<u16>() else {
-                return false;
-            };
-            (name, Some(port))
-        }
-        _ => (host, None),
-    };
-    if port.is_some_and(|port| port != bound_address.port()) {
-        return false;
-    }
-    name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1"
 }
 
 enum ReadResult {

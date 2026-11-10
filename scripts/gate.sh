@@ -130,6 +130,12 @@ want '^[0-9]+/[0-9]+ passed \(cli, lmdb\)$'
 binary_gate python3 tests/mcp_client.py
 want '^[0-9]+/[0-9]+ passed \(mcp, lmdb\)$'
 
+binary_gate env AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py
+want '^[0-9]+/[0-9]+ passed \(mcp-http, lmdb\)$'
+
+binary_gate python3 tests/daemon.py
+want '^daemon: [0-9]+/[0-9]+ passed \(http, lmdb\)$'
+
 if [ "$dashboard_feature" -eq 1 ]; then
   binary_gate python3 tests/dashboard.py
   want '^dashboard: all checks passed \(read-only HTTP, filters, paging, escaping, bounds\)$'

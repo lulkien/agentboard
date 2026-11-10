@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MCP surface check: ten tools on one stdio server, no daemon, scratch board."""
 
+import http.client
 import json
 import os
 import subprocess
@@ -8,6 +9,7 @@ import sys
 import tempfile
 
 BIN = os.environ.get("AGENTBOARD_TEST_BIN", os.path.join(os.getcwd(), "target/debug/agentboard"))
+HTTP = os.environ.get("AGENTBOARD_MCP_TRANSPORT") == "http"
 PROTOCOL = "2025-11-25"
 TOOLS = {
     "task_add",
@@ -51,7 +53,7 @@ def has(name, needle, hay):
         bad(name, f"missing {needle!r} in {hay[:400]!r}")
 
 
-class Server:
+class StdioServer:
     def __init__(self, db, actor, args=(), extra_env=None):
         env = dict(os.environ, AGENTBOARD_DB=db, AGENTBOARD_ACTOR=actor)
         if extra_env:
@@ -116,6 +118,72 @@ class Server:
     def __exit__(self, *exc):
         self.close()
         return False
+
+
+class HttpServer:
+    """Same send/call interface over `agentboard daemon`: one daemon per instance.
+
+    The seat name is the URL segment; a daemon never reads its own environment, so
+    an exported AGENTBOARD_PROJECT becomes `?project=` on the URL instead.
+    """
+
+    def __init__(self, db, actor, args=(), extra_env=None):
+        args = list(args)
+        if "--actor" in args:
+            actor = args[args.index("--actor") + 1]
+        project = (extra_env or {}).get("AGENTBOARD_PROJECT")
+        self.path = f"/mcp/{actor}" + (f"?project={project}" if project else "")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTBOARD_")}
+        self.proc = subprocess.Popen(
+            [BIN, "--db", db, "daemon", "127.0.0.1:0"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            text=True,
+        )
+        line = self.proc.stdout.readline()
+        if "listening on http://" not in line:
+            raise SystemExit(f"daemon did not start: {line!r} {self.proc.stderr.read()}")
+        host, port = line.split("http://")[1].split()[0].rsplit(":", 1)
+        self.conn = http.client.HTTPConnection(host, int(port), timeout=30)
+        self.seq = 0
+
+    def send(self, method, params=None, notification=False):
+        message = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            message["params"] = params
+        if not notification:
+            self.seq += 1
+            message["id"] = self.seq
+        self.conn.request(
+            "POST",
+            self.path,
+            json.dumps(message),
+            {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+        )
+        response = self.conn.getresponse()
+        body = response.read().decode()
+        if notification:
+            return None
+        if response.status != 200:
+            raise SystemExit(f"daemon answered {response.status}: {body}")
+        return json.loads(body)
+
+    call = StdioServer.call
+    start = StdioServer.start
+
+    def close(self):
+        self.conn.close()
+        self.proc.kill()
+        self.proc.wait()
+        self.proc.stdout.close()
+        self.proc.stderr.close()
+
+    __enter__ = StdioServer.__enter__
+    __exit__ = StdioServer.__exit__
+
+
+Server = HttpServer if HTTP else StdioServer
 
 
 def main():
@@ -459,7 +527,7 @@ def main():
     finally:
         server.close()
 
-    print(f"{passed}/{passed + failed} passed (mcp, lmdb)")
+    print(f"{passed}/{passed + failed} passed ({'mcp-http' if HTTP else 'mcp'}, lmdb)")
     return 0 if failed == 0 else 1
 
 

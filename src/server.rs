@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
+use rmcp::model::{
+    CallToolResult, ContentBlock, Extensions, Implementation, ServerCapabilities, ServerConfig,
+};
 use rmcp::schemars::JsonSchema;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use serde::Deserialize;
@@ -42,6 +44,35 @@ pub fn resolve_project(board: &BoardHandle, explicit: Option<u64>) -> Result<Opt
     Ok(projects.into_iter().find_map(|project| {
         (normalized_path(Path::new(&project.project_path)) == cwd).then_some(project.project_id)
     }))
+}
+
+/// Identity and project of one HTTP request. The daemon puts it in the request
+/// extensions; stdio has none and falls back to `--actor`, the environment and cwd.
+#[derive(Clone, Debug)]
+pub struct RequestScope {
+    pub actor: String,
+    pub project: Option<u64>,
+}
+
+fn request_scope(extensions: &Extensions) -> Option<RequestScope> {
+    extensions
+        .get::<http::request::Parts>()?
+        .extensions
+        .get::<RequestScope>()
+        .cloned()
+}
+
+/// Project for a call: an HTTP request never reads the daemon's environment or
+/// working directory, only its argument, then the project on its URL.
+fn call_project(
+    board: &BoardHandle,
+    explicit: Option<u64>,
+    scope: Option<&RequestScope>,
+) -> Result<Option<u64>, String> {
+    match scope {
+        Some(scope) => Ok(explicit.or(scope.project)),
+        None => resolve_project(board, explicit),
+    }
 }
 
 fn normalized_path(path: &Path) -> PathBuf {
@@ -239,19 +270,24 @@ pub struct FeedArgs {
 #[tool_router]
 impl Board {
     pub fn new(board: BoardHandle, actor: Option<String>) -> Self {
+        Self::shared(Arc::new(board), actor)
+    }
+
+    pub fn shared(board: Arc<BoardHandle>, actor: Option<String>) -> Self {
         Self {
             tool_router: Self::tool_router(),
-            board: Arc::new(board),
+            board,
             actor,
         }
     }
 
-    /// The actor this invocation writes as: `--actor` wins over the environment,
-    /// so a wrapper that passes a flag is not silently overridden by an exported
-    /// variable.
-    fn actor_name(&self) -> Result<String, String> {
-        self.actor
-            .clone()
+    /// The actor this invocation writes as: the HTTP request's URL name, else
+    /// `--actor`, which wins over the environment so a wrapper that passes a flag
+    /// is not silently overridden by an exported variable.
+    fn actor_name(&self, scope: Option<&RequestScope>) -> Result<String, String> {
+        scope
+            .map(|scope| scope.actor.clone())
+            .or_else(|| self.actor.clone())
             .filter(|name| !name.trim().is_empty())
             .or_else(actor_from_env)
             .ok_or_else(|| {
@@ -266,8 +302,10 @@ impl Board {
     async fn task_add(
         &self,
         Parameters(args): Parameters<AddArgs>,
+        extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = self.actor_name().map_err(err)?;
+        let scope = request_scope(&extensions);
+        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
         let status = match args.status.as_deref() {
             Some(raw) => Status::parse(raw).map_err(|e| err(e.to_string()))?,
             None => Status::Todo,
@@ -303,7 +341,9 @@ impl Board {
     async fn task_list(
         &self,
         Parameters(args): Parameters<ListArgs>,
+        extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
+        let scope = request_scope(&extensions);
         let status = match args.status.as_deref() {
             Some(raw) => Some(Status::parse(raw).map_err(|e| err(e.to_string()))?),
             None => None,
@@ -318,7 +358,7 @@ impl Board {
             ..
         } = args;
         let page = blocking(&self.board, move |board| {
-            let project = resolve_project(board, project)?;
+            let project = call_project(board, project, scope.as_ref())?;
             board
                 .list(&ListFilter {
                     status,
@@ -388,8 +428,10 @@ impl Board {
     async fn task_update(
         &self,
         Parameters(mut args): Parameters<UpdateArgs>,
+        extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = self.actor_name().map_err(err)?;
+        let scope = request_scope(&extensions);
+        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
         let status = match args.status.as_deref() {
             Some(raw) => Some(Status::parse(raw).map_err(|e| err(e.to_string()))?),
             None => None,
@@ -508,8 +550,10 @@ impl Board {
     async fn task_claim(
         &self,
         Parameters(args): Parameters<ClaimArgs>,
+        extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = self.actor_name().map_err(err)?;
+        let scope = request_scope(&extensions);
+        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
         let outcome = blocking(&self.board, move |board| {
             board
                 .claim(&actor, args.id, now_ms())
@@ -530,8 +574,10 @@ impl Board {
     async fn task_comment(
         &self,
         Parameters(args): Parameters<CommentArgs>,
+        extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = self.actor_name().map_err(err)?;
+        let scope = request_scope(&extensions);
+        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
         let event = blocking(&self.board, move |board| {
             board
                 .comment(&actor, args.id, &args.body, now_ms())
@@ -589,9 +635,11 @@ impl Board {
     async fn board_brief(
         &self,
         Parameters(args): Parameters<BriefArgs>,
+        extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
+        let scope = request_scope(&extensions);
         let brief = blocking(&self.board, move |board| {
-            let project = resolve_project(board, args.project)?;
+            let project = call_project(board, args.project, scope.as_ref())?;
             board
                 .brief_for_project(10, project)
                 .map_err(|e| e.to_string())

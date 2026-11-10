@@ -1,6 +1,5 @@
 //! CLI types. Validation and rules live in the store; this file is argv only.
 
-#[cfg(feature = "dashboard")]
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -44,6 +43,15 @@ pub struct Cli {
 pub enum Cmd {
     /// MCP server on stdio (the default with no command)
     Serve,
+    /// MCP server over streamable HTTP at /mcp/<actor>, one process for every seat
+    Daemon {
+        /// Address to listen on
+        #[arg(value_name = "IP:PORT", default_value = "127.0.0.1:8765")]
+        address: SocketAddr,
+        /// Permit binding to a non-loopback interface (/mcp still serves loopback peers only)
+        #[arg(long)]
+        allow_non_loopback: bool,
+    },
     /// Manage board projects
     Project {
         #[command(subcommand)]
