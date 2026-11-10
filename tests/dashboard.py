@@ -438,6 +438,7 @@ def main() -> int:
             assert status == 200 and 'class="active" href="/tasks"' in tasks, "tasks tab is missing or inactive"
             assert '<td class="path">&lt;b&gt;p&amp;&quot;&lt;/b&gt;</td>' in tasks and '<td class="path">2</td>' not in tasks, "tasks table project column shows a project id instead of its name"
             assert escaped_unbroken_title in tasks and long_spaced_title in tasks, "long titles are missing from the tasks table"
+            assert 'class="table-scroll"><table class="task-table"' in tasks and re.search(r"\.table-scroll\s*\{[^}]*overflow-x:auto", dashboard_css) and re.search(r"\.task-table\s*\{[^}]*width:max-content[^}]*min-width:100%", dashboard_css) and not re.search(r"(?:\.path\s*,\s*td|td)\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "tasks table must preserve intrinsic cell widths and scroll inside its wrapper without per-letter wrapping"
             assert re.search(r"\.strip-list\s*>\s*li\s*\{[^}]*min-width:0", dashboard_css), "strip list items keep their intrinsic min-content width"
             assert re.search(r"\.strip-title\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "strip titles do not permit long words to shrink"
             assert re.search(r"\.issue-header h2\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "unbroken detail titles can overflow their page"
