@@ -20,6 +20,17 @@ pub fn shell(
     project: Option<u64>,
     projects: &[Project],
 ) -> Fragment {
+    shell_with_aside(title, active, Fragment::empty(), content, project, projects)
+}
+
+pub fn shell_with_aside(
+    title: &str,
+    active: Page,
+    aside: Fragment,
+    content: Fragment,
+    project: Option<u64>,
+    projects: &[Project],
+) -> Fragment {
     let board_url = url("/", project);
     let epics_url = url("/epics", project);
     let tasks_url = url("/tasks", project);
@@ -88,6 +99,7 @@ pub fn shell(
             }),
         ),
         ("project_options", html_slot(project_options)),
+        ("head_aside", html_slot(aside)),
         ("content", html_slot(content)),
     ])
 }

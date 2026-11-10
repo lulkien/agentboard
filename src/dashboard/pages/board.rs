@@ -199,19 +199,21 @@ pub(super) fn board_page(
             ])
         })
         .collect();
-    let kanban = KANBAN.fill(&[
-        ("columns", html_slot(columns)),
-        (
-            "closed",
-            html_slot(CLOSED_ROW.fill(&[("items", html_slot(closed_items))])),
-        ),
-    ]);
+    let closed_summary = CLOSED_ROW.fill(&[("items", html_slot(closed_items))]);
+    let kanban = KANBAN.fill(&[("columns", html_slot(columns))]);
     let body = BOARD.fill(&[
         ("attention", html_slot(attention)),
         ("seats", html_slot(seats)),
         ("bays", html_slot(kanban)),
     ]);
-    html::shell("Board", Page::Board, body, project, projects)
+    html::shell_with_aside(
+        "Board",
+        Page::Board,
+        closed_summary,
+        body,
+        project,
+        projects,
+    )
 }
 
 fn render_card(task: &Task, project: Option<u64>, projects: &[Project], now_ms: i64) -> Fragment {

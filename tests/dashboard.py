@@ -283,8 +283,20 @@ def main() -> int:
             escaped_epic_id = run_cli(db, "add", escaped_epic_title).split()[1].removeprefix("T")
             run_cli(db, "add", "Escaped epic child", "--parent", escaped_epic_id, "--status", "done")
             run_cli(db, "update", escaped_epic_id, "--if-revision", "1", "--status", "canceled")
+            run_cli(db, "add", "Canceled fixture row", "--status", "canceled")
             status, html, _headers = request(port, "GET", "/")
             assert status == 200, f"GET / returned {status} after adding fixture rows"
+            assert '<div class="page-head"><h1>Board</h1><p class="closed-summary">' in html, "Board title and closed summary are not in the page head"
+            assert html.index('class="closed-summary"') < html.index('class="seat-bar"') < html.index('class="attention') < html.index('id="col-todo"'), "closed summary, seats, attention and kanban are out of order"
+            closed_summary_html = html.split('class="closed-summary"', 1)[1].split('</p>', 1)[0]
+            assert re.search(r'href="/tasks\?status=done"><span aria-hidden="true">✓</span> done <span class="closed-count">2</span>', html), f"done summary link or fixture count is wrong: {closed_summary_html}"
+            assert re.search(r'href="/tasks\?status=canceled"><span aria-hidden="true">✕</span> canceled <span class="closed-count">2</span>', html), "canceled summary link or fixture count is wrong"
+            assert 'class="closed-row"' not in html and 'class="seat-bar panel"' not in html and 'class="seat-bar"' in html, "closed row remains in the kanban or seat bar retains its panel"
+            status, project_one_head, _headers = request(port, "GET", "/?project=1")
+            assert status == 200 and 'href="/tasks?status=done&amp;project=1"' in project_one_head and 'href="/tasks?status=canceled&amp;project=1"' in project_one_head, "scoped closed summary links do not retain their project"
+            for page_path in ("/epics", "/tasks", "/tasks/3", "/feed"):
+                page_status, page_html, _headers = request(port, "GET", page_path)
+                assert page_status == 200 and '<div class="page-head"><h1>' in page_html and "</h1></div>" in page_html, f"{page_path} does not render an empty page-head aside"
             assert "Needs attention" in html and 'class="active" href="/"' in html, "board home is missing"
             attention = html.split('class="attention panel"', 1)[1].split('</section>', 1)[0]
             assert attention.index("Blocked child") < attention.index("Reviewing child"), "attention order is wrong"
@@ -306,7 +318,7 @@ def main() -> int:
             assert column_ids == sorted(column_ids), "kanban columns are not in status order"
             for status_name, expected in (("todo", 48), ("planning", 1), ("implementing", 1), ("blocked", 1), ("reviewing", 1)):
                 assert re.search(rf'id="col-{status_name}"><span aria-hidden="true">.</span> {status_name} <span class="column-count">{expected}</span>', html), f"{status_name} column count or glyph is wrong"
-            kanban = html.split('class="kanban"', 1)[1].split('class="closed-row"', 1)[0]
+            kanban = html.split('class="kanban"', 1)[1].split("</main>", 1)[0]
             todo_column = kanban.split('id="col-todo"', 1)[1].split('</section>', 1)[0]
             assert todo_column.count('class="card status-todo"') == 8, "todo column does not render exactly eight cards"
             assert 'href="/tasks?status=todo">+40 more</a>' in todo_column, "todo column overflow link is wrong"
@@ -344,6 +356,11 @@ def main() -> int:
             footer = html.split("<footer>", 1)[1].split("</footer>", 1)[0]
             assert re.search(r'<button[^>]*>Change theme</button>', footer) and "current theme" in request(port, "GET", "/assets/theme.js")[1], "theme button label or mode accessibility is missing"
             dashboard_css = request(port, "GET", "/assets/dashboard.css")[1]
+            assert re.search(r"\.page-head\s*\{[^}]*display:flex[^}]*flex-wrap:wrap", dashboard_css), "page head does not wrap its title and aside"
+            assert re.search(r"\.status-chip\s*\{[^}]*min-height:36px", dashboard_css), "status chips are shorter than 36px"
+            assert re.search(r"@media\s*\(max-width:650px\)\s*\{[^}]*\.topbar\s*\{[^}]*position:static", dashboard_css), "phone topbar remains sticky"
+            phone_rules = dashboard_css.split("@media (max-width:650px)", 1)[1].split("@media (prefers-reduced-motion", 1)[0]
+            assert ".seat-chip,.status-chip { min-height:44px; }" in phone_rules, "phone chips are shorter than 44px"
             assert re.search(r"\.timeline\s*>\s*li::before\s*\{[^}]*background:var\(--implementing\)", dashboard_css), "direct timeline events are missing their marker rule"
             assert re.search(r"\.seat-name\s*\{[^}]*text-overflow:ellipsis[^}]*min-width:0", dashboard_css), "seat names can overflow their chips"
             assert re.search(r"\.kanban\s*\{[^}]*grid-template-columns:repeat\(5,minmax\(0,1fr\)\)", dashboard_css), "kanban does not use five shrinkable columns"
@@ -412,7 +429,7 @@ def main() -> int:
             assert re.search(r"\.strip-title\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "strip titles do not permit long words to shrink"
             assert re.search(r"\.issue-header h2\s*\{[^}]*overflow-wrap:anywhere", dashboard_css), "unbroken detail titles can overflow their page"
             chips = re.findall(r'<a class="status-chip(?: status-[a-z]+)?"[^>]*>([^<]+)</a>', tasks)
-            assert chips == ["All 55", "todo 48", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 2", "canceled 1"], f"task status counts are wrong: {chips}"
+            assert chips == ["All 56", "todo 48", "planning 1", "implementing 1", "blocked 1", "reviewing 1", "done 2", "canceled 2"], f"task status counts are wrong: {chips}"
             status, active_todo, _headers = request(port, "GET", "/tasks?status=todo")
             assert status == 200 and 'class="status-chip status-todo" href="/tasks?status=todo" aria-current="true"' in active_todo, "active status chip is missing"
             pager = re.search(r'<nav class="pagination"[^>]*>(.*?)</nav>', tasks)
@@ -427,7 +444,7 @@ def main() -> int:
             assert escaped_dangerous_title in last_page, "independent escaped script title is missing from the tasks table"
             assert "Previous</a>" not in tasks and "Next</a>" not in tasks, "pager still renders text links"
             first_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', tasks)]
-            assert first_ids == list(range(55, 35, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
+            assert first_ids == list(range(56, 36, -1)), f"task page 1 is not strictly newest-first: {first_ids}"
 
             status, detail, _headers = request(port, "GET", "/tasks/3")
             assert status == 200, f"task detail returned {status}"
@@ -487,7 +504,7 @@ def main() -> int:
             assert status == 200 and "Page task 20" in second_page, "offset paging did not advance"
             assert "Page task 00" not in second_page, "offset page repeats the first page"
             second_ids = [int(task_id) for task_id in re.findall(r'href="/tasks/(\d+)">T\d+</a>', second_page)]
-            assert second_ids == list(range(35, 15, -1)), f"task page 2 has a gap, duplicate, or wrong order: {second_ids}"
+            assert second_ids == list(range(36, 16, -1)), f"task page 2 has a gap, duplicate, or wrong order: {second_ids}"
             assert not set(first_ids) & set(second_ids) and first_ids[-1] - 1 == second_ids[0], "task pages overlap or have a gap"
             run_cli(db, "update", other_project_task, "--if-revision", "1", "--project", "1")
             change_status, change_detail, _headers = request(port, "GET", f"/tasks/{other_project_task}")
@@ -570,11 +587,11 @@ def main() -> int:
             nested_status, nested_epics, _headers = request(port, "GET", "/epics")
             assert nested_status == 200 and 'class="epic-row depth-1"' in nested_epics and ">in T1</a>" in nested_epics, "nested epic was not indented under its parent"
             run_cli(db, "add", "Scoped epic", "--project", "1")
-            run_cli(db, "add", "Scoped child", "--parent", "57", "--project", "1")
-            run_cli(db, "add", "Foreign child", "--parent", "57", "--project", "2")
+            run_cli(db, "add", "Scoped child", "--parent", "58", "--project", "1")
+            run_cli(db, "add", "Foreign child", "--parent", "58", "--project", "2")
             scoped_epics_status, scoped_epics, _headers = request(port, "GET", "/epics?project=1")
             assert scoped_epics_status == 200 and "Scoped child" in scoped_epics and "Foreign child" not in scoped_epics, "epic child strips ignored project scope"
-            assert 'href="/tasks/58?project=1"' in scoped_epics, "scoped epic child link dropped its project"
+            assert 'href="/tasks/59?project=1"' in scoped_epics, "scoped epic child link dropped its project"
 
             if BASELINE:
                 compare_baseline(db, port, BASELINE)
