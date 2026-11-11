@@ -275,6 +275,9 @@
       ? Object.entries(values) : [];
     if (rows.length === 0) return h('p', { class: 'meta' }, 'Task fields updated');
     return h('ul', { class: 'change-list' }, rows.map(([field, pair]) => {
+      if (pair && typeof pair.old_chars === 'number' && typeof pair.new_chars === 'number') {
+        return h('li', null, h('strong', null, field), `: ${pair.old_chars} → ${pair.new_chars} chars`);
+      }
       const old = pair && 'old' in pair ? show(field, pair.old, projects) : '';
       const next = pair && 'new' in pair ? show(field, pair.new, projects) : '';
       return h('li', null, h('strong', null, field), `: ${old} → ${next}`);

@@ -82,7 +82,7 @@ impl Board {
                 kind: EventKind::Created,
                 timestamp_ms: now_ms,
                 recipient: task.assignee.clone(),
-                payload: serde_json::json!({ "task": task }),
+                payload: created_payload(&task)?,
             },
         )?;
         metadata.next_task_id = task_id.checked_add(1).ok_or(Error::CounterOverflow)?;
@@ -648,7 +648,7 @@ impl Board {
         self.add_indexes(txn, next)
     }
 
-    fn append_event(
+    pub(super) fn append_event(
         &self,
         txn: &mut heed::RwTxn<'_>,
         metadata: &mut Metadata,
@@ -683,8 +683,6 @@ fn changes(old: &Task, next: &Task) -> Result<serde_json::Value> {
     let mut changed = serde_json::Map::new();
     for field in [
         "title",
-        "description",
-        "goal",
         "status",
         "priority",
         "assignee",
@@ -704,7 +702,32 @@ fn changes(old: &Task, next: &Task) -> Result<serde_json::Value> {
             );
         }
     }
+    for (field, before, after) in [
+        ("description", &old.description, &next.description),
+        ("goal", &old.goal, &next.goal),
+    ] {
+        if before != after {
+            changed.insert(field.into(), text_sizes(before, after));
+        }
+    }
     Ok(changed.into())
+}
+
+fn text_sizes(before: &str, after: &str) -> serde_json::Value {
+    serde_json::json!({
+        "old_chars": before.chars().count(),
+        "new_chars": after.chars().count(),
+    })
+}
+
+fn created_payload(task: &Task) -> Result<serde_json::Value> {
+    let mut task_value = serde_json::to_value(task)?;
+    let fields = task_value
+        .as_object_mut()
+        .ok_or(Error::Corrupt("task is not a JSON object"))?;
+    fields.insert("description".into(), text_sizes("", &task.description));
+    fields.insert("goal".into(), text_sizes("", &task.goal));
+    Ok(serde_json::json!({ "task": task_value }))
 }
 
 /// Report edits stay out of `changes`: the payload names the field and the size
@@ -721,14 +744,9 @@ fn report_changes(old: &Task, next: &Task, mode: &str) -> serde_json::Value {
         ),
     ] {
         if before != after {
-            reports.insert(
-                field.into(),
-                serde_json::json!({
-                    "mode": mode,
-                    "old_chars": before.chars().count(),
-                    "new_chars": after.chars().count(),
-                }),
-            );
+            let mut sizes = text_sizes(before, after);
+            sizes["mode"] = serde_json::Value::String(mode.to_owned());
+            reports.insert(field.into(), sizes);
         }
     }
     reports.into()

@@ -607,6 +607,9 @@ free-form JSON; this is not a format change and needs no migration.
 **Reopens if** someone needs to diff a description across revisions. The answer
 then is a separate history record, not a larger feed.
 
+**Status: done** in T305: created and updated events record description and goal
+character counts, and the task timeline renders those size pairs.
+
 ### D2. Text gets size limits, enforced on write only
 
 **Decision.** Limits in characters, counted the way the title limit is:

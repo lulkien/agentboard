@@ -100,6 +100,8 @@ title, a title over 200 characters, an unknown status, a self-parent, and an
 unknown assignee without `new_actor`, and a project id must exist. A direct parent must exist and be nonterminal.
 Creating or newly reparenting under a `done` or `canceled` parent refuses; the
 manager explicitly reopens the parent first, then retries. Parents never auto-reopen.
+The `created` event includes the task fields, with `description` and `goal` represented
+by `{ "old_chars": 0, "new_chars": N }` size pairs rather than their text.
 
 ### task_list
 
@@ -187,6 +189,9 @@ Answers `ok`, the record and `cursor <instance>:<seq>`. Rules, each with its own
   event carries `reports`, naming each changed field with `mode`, `old_chars` and
   `new_chars`; the text itself never enters the event or the feed. Only
   `task_get(full=true)` prints reports.
+- Changed `description` and `goal` fields in `changes` carry `old_chars` and
+  `new_chars` character counts; the text itself is omitted. Other changed fields
+  retain their old and new values.
 - No field change and no comment is `task update has no field changes`.
 - An unknown target assignee needs `new_actor`.
 - An explicit `done` or `canceled` status update checks direct children in the

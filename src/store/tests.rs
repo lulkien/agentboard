@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Barrier, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::domain::{Event, EventKind};
 use crate::domain::{NewProject, NewTask, Status, TaskPatch};
 
 use super::open::{FORMAT_VERSION, Metadata, write_metadata};
@@ -81,6 +82,133 @@ fn draft(assignee: Option<&str>) -> NewTask {
         assignee: assignee.map(str::to_owned),
         parent_id: None,
         project_id: None,
+    }
+}
+
+#[test]
+fn description_goal_events_record_sizes_and_created_text_is_omitted() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let mut input = draft(None);
+    input.description = "create-marker".into();
+    input.goal = "create-goal".into();
+    let created = board.add("manager", input, false, 1).unwrap();
+    assert_eq!(
+        created.event.payload["task"]["description"],
+        serde_json::json!({"old_chars":0,"new_chars":13})
+    );
+    assert_eq!(
+        created.event.payload["task"]["goal"],
+        serde_json::json!({"old_chars":0,"new_chars":11})
+    );
+    assert_eq!(created.event.payload["task"]["title"], "Prepare a patch");
+    assert!(!created.event.payload.to_string().contains("create-marker"));
+
+    let description = format!("D1MARK{}", "x".repeat(4090));
+    let goal = "goal-marker".to_owned();
+    let updated = board
+        .update(UpdateInput {
+            id: created.task.id,
+            actor: "manager",
+            expected_revision: created.task.revision,
+            patch: &TaskPatch {
+                title: Some("Retitled".into()),
+                description: Some(description.clone()),
+                goal: Some(goal.clone()),
+                ..TaskPatch::default()
+            },
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 2,
+        })
+        .unwrap();
+    assert_eq!(
+        updated.event.payload["changes"]["description"],
+        serde_json::json!({"old_chars":13,"new_chars":4096})
+    );
+    assert_eq!(
+        updated.event.payload["changes"]["goal"],
+        serde_json::json!({"old_chars":11,"new_chars":11})
+    );
+    assert_eq!(
+        updated.event.payload["changes"]["title"]["old"],
+        "Prepare a patch"
+    );
+    assert!(!updated.event.payload.to_string().contains("D1MARK"));
+    let next = "B1MARK".to_owned() + &"y".repeat(4090);
+    let second = board
+        .update(UpdateInput {
+            id: updated.task.id,
+            actor: "manager",
+            expected_revision: updated.task.revision,
+            patch: &TaskPatch {
+                description: Some(next),
+                ..TaskPatch::default()
+            },
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 3,
+        })
+        .unwrap();
+    assert_eq!(
+        second.event.payload["changes"]["description"]["old_chars"],
+        4096
+    );
+    assert_eq!(
+        second.event.payload["changes"]["description"]["new_chars"],
+        4096
+    );
+}
+
+#[test]
+fn legacy_full_text_events_still_read_and_render() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let added = board.add("manager", draft(None), false, 1).unwrap();
+    let mut metadata = board.metadata().unwrap();
+    let mut txn = board.env.write_txn().unwrap();
+    let mut appended = Vec::new();
+    for (kind, payload) in [
+        (
+            EventKind::Updated,
+            serde_json::json!({"changes":{"description":{"old":"a","new":"b"}}}),
+        ),
+        (
+            EventKind::Created,
+            serde_json::json!({"task":{"id":added.task.id,"description":"legacy text"}}),
+        ),
+    ] {
+        let event = board
+            .append_event(
+                &mut txn,
+                &mut metadata,
+                Event {
+                    seq: 0,
+                    task_id: added.task.id,
+                    actor: "manager".into(),
+                    kind,
+                    timestamp_ms: 7,
+                    recipient: None,
+                    payload,
+                },
+            )
+            .unwrap();
+        assert!(
+            crate::render::event_line(&event, true)
+                .starts_with(&format!("{} 7 manager", event.seq))
+        );
+        appended.push(event);
+    }
+    write_metadata(board.meta, &mut txn, &metadata).unwrap();
+    txn.commit().unwrap();
+    for event in appended {
+        assert_eq!(board.event(event.seq).unwrap(), Some(event));
     }
 }
 

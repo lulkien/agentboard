@@ -717,5 +717,25 @@ check "brief without project resolution uses whole board" 0 "$code"
 has "whole-board brief includes project A" "A open row" "$out"
 has "whole-board brief includes project B" "B open row" "$out"
 
+# --- D1: descriptions and goals stay out of event payloads ----------------
+fresh d1
+"$B" add "D1 size event task" >/dev/null
+description_a="D1_A_$(printf 'a%.0s' {1..4090})"
+description_b="D1_B_$(printf 'b%.0s' {1..4090})"
+size_before=$(stat -c %s "$AGENTBOARD_DB/data.mdb")
+revision=1
+for i in {1..200}; do
+  if (( i % 2 )); then value=$description_a; else value=$description_b; fi
+  "$B" update 1 --if-revision "$revision" --description "$value" >/dev/null || bad "D1 update $i failed"
+  revision=$((revision + 1))
+done
+size_after=$(stat -c %s "$AGENTBOARD_DB/data.mdb")
+growth=$((size_after - size_before))
+if (( growth < 1048576 )); then ok; else bad "D1 event payload growth: $growth bytes"; fi
+out=$("$B" feed --task 1 --after 0 --limit 500 --full)
+lacks "D1 feed omits description A" D1_A_ "$out"
+lacks "D1 feed omits description B" D1_B_ "$out"
+check "D1 feed includes created plus 200 updates" 201 "$(printf '%s\n' "$out" | rtk rg -c 'T1')"
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]
