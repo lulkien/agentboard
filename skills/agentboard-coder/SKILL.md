@@ -34,8 +34,12 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
    branch, and never switch to another task's branch.
 
    Before handing the row to review, run the goal's own command and every check
-   it names. Keep each command's real output line in the coder report, and leave
-   `target/release/agentboard` built from the committed code for the reviewer.
+   it names. Keep each command's real output line in the coder report. After the
+   last commit (and after any amend), run `cargo build --release`; record
+   `stat -c %Y target/release/agentboard` and `git log -1 --format=%ct HEAD`
+   (the binary timestamp must be larger), plus the final output line from
+   `bash scripts/gate.sh` and
+   `TMPDIR=$(mktemp -d /tmp/agentboard/scratch/review.XXXXXX) PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt`.
    The reviewer reopens a row handed over without the required checks, their
    output, or that current release binary.
 4. Write the coder report and the short comment in the same call:
