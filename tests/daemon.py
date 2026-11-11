@@ -220,10 +220,17 @@ def api_checks(scratch):
         status, epics = get_json(daemon, "/api/epics")
         check("epics are 200", 200, status)
         by_id = {e["task"]["id"]: e for e in epics["epics"]}
-        check("epic ids", [1, 54], sorted(by_id))
+        check("epic ids", [1, 54], [e["task"]["id"] for e in epics["epics"]])
         check("epic children are capped at 4 with the total", (4, 6), (len(by_id[1]["children"]["tasks"]), by_id[1]["children"]["total"]))
         check("epic rollup", (1, 6), (by_id[1]["done"], by_id[1]["total"]))
         check("epic depth is 0 for a root", 0, by_id[1]["depth"])
+        check("epic 1 child ids", [3, 2, 4, 5], [t["id"] for t in by_id[1]["children"]["tasks"]])
+        check("epic row keys", {"task", "depth", "counts", "done", "total", "children"}, set(by_id[1]))
+        check("epic children keys", {"total", "tasks"}, set(by_id[1]["children"]))
+        check("epic 1 counts", {"todo": 1, "planning": 1, "implementing": 1, "blocked": 1, "reviewing": 1, "done": 1, "canceled": 0}, {x["status"]: x["count"] for x in by_id[1]["counts"]})
+        check("epic 54 children", ([55], 1, 1), ([t["id"] for t in by_id[54]["children"]["tasks"]], by_id[54]["children"]["total"], by_id[54]["done"]))
+        check("project 1 epics empty", {"project": 1, "epics": []}, get_json(daemon, "/api/epics?project=1")[1])
+        check("project 2 epics empty", {"project": 2, "epics": []}, get_json(daemon, "/api/epics?project=2")[1])
 
         # Feed: newest page, before paging, filters, project isolation.
         status, newest = get_json(daemon, "/api/feed")

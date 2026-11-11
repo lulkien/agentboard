@@ -201,6 +201,9 @@ events from its first event and skip up to the watermark
 
 ### 6. `/api/epics` runs one full scan per epic
 
+**Status: done**: `/api/epics` uses one snapshot and one task-table walk, then
+reads each epic by key. The daemon shape checks and store walk counter pass.
+
 `epics_json` calls `brief_for_project` (two task scans) and then `board.list` with
 a `parent` filter once per epic (`src/daemon/api.rs:135`). With no status or
 assignee, `list` reads every task id and decodes every task

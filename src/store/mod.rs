@@ -1,6 +1,7 @@
 //! Heed permits one open environment per path in a process; share a `Board`
 //! handle when a process has multiple callers.
 
+mod epics;
 mod feed;
 pub mod keys;
 mod list;
@@ -10,6 +11,7 @@ mod projects;
 mod tasks;
 mod wait;
 
+pub use epics::{EpicRow, Epics};
 pub use feed::{Cursor, FeedFilter, FeedPage, OlderFeedPage, WAIT_MAX_MS};
 pub use list::{Brief, DEFAULT_LIST_LIMIT, Epic, ListFilter, MAX_LIST_LIMIT, TaskPage};
 pub use open::{Board, BoardOptions, Error, Metadata, ResetOutcome, Result};

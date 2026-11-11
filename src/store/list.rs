@@ -77,7 +77,7 @@ fn status_counts(counts: &[u64; Status::ALL.len()]) -> Vec<(Status, u64)> {
         .collect()
 }
 
-fn rollup(task: Task, counts: &[u64; Status::ALL.len()], cursor: Cursor) -> Epic {
+pub(super) fn rollup(task: Task, counts: &[u64; Status::ALL.len()], cursor: Cursor) -> Epic {
     Epic {
         task,
         counts: status_counts(counts),

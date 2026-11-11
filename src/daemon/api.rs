@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use crate::domain::{Event, Status, Task, now_ms};
 use crate::routes::{self, Filters, Page, Route};
 use crate::store::{
-    Board, Cursor, Epic, Error as StoreError, FeedFilter, ListFilter, MAX_LIST_LIMIT, TaskPage,
+    Board, Cursor, EpicRow, Error as StoreError, FeedFilter, ListFilter, MAX_LIST_LIMIT, TaskPage,
 };
 
 use super::App;
@@ -130,27 +130,22 @@ fn board_json(board: &Board, route: Route) -> Result<Value, ApiError> {
 
 fn epics_json(board: &Board, route: Route) -> Result<Value, ApiError> {
     let project = route.filters.project;
-    let brief = board.brief_for_project(0, project)?;
-    let mut rows = Vec::with_capacity(brief.epics.len());
-    for epic in &brief.epics {
-        let children = board.list(&ListFilter {
-            status: None,
-            assignee: None,
-            parent: Some(epic.task.id),
-            project,
-            include_terminal: true,
-            limit: CHILD_STRIP_CAP,
-            offset: 0,
-        })?;
-        rows.push(json!({
-            "task": summary(&epic.task),
-            "depth": epic_depth(epic, &brief.epics).min(MAX_EPIC_DEPTH),
-            "counts": counts(&epic.counts),
-            "done": epic.done,
-            "total": epic.total,
-            "children": { "total": children.total, "tasks": summaries(&children.tasks) },
-        }));
-    }
+    let epics = board.epics(project, CHILD_STRIP_CAP)?;
+    let rows = epics
+        .rows
+        .iter()
+        .map(|row| {
+            let epic = &row.epic;
+            json!({
+                "task": summary(&epic.task),
+                "depth": epic_depth(row, &epics.rows).min(MAX_EPIC_DEPTH),
+                "counts": counts(&epic.counts),
+                "done": epic.done,
+                "total": epic.total,
+                "children": { "total": row.children_total, "tasks": summaries(&row.children) },
+            })
+        })
+        .collect::<Vec<_>>();
     Ok(json!({ "project": project, "epics": rows }))
 }
 
@@ -312,15 +307,15 @@ fn events(events: &[Event]) -> Vec<Value> {
         .collect()
 }
 
-fn epic_depth(epic: &Epic, epics: &[Epic]) -> usize {
+fn epic_depth(epic: &EpicRow, epics: &[EpicRow]) -> usize {
     let mut depth = 0;
-    let mut parent = epic.task.parent_id;
+    let mut parent = epic.epic.task.parent_id;
     while let Some(id) = parent {
-        let Some(ancestor) = epics.iter().find(|candidate| candidate.task.id == id) else {
+        let Some(ancestor) = epics.iter().find(|candidate| candidate.epic.task.id == id) else {
             break;
         };
         depth += 1;
-        parent = ancestor.task.parent_id;
+        parent = ancestor.epic.task.parent_id;
         if depth >= epics.len() {
             break;
         }

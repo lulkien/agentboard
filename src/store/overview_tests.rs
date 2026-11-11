@@ -248,6 +248,113 @@ fn status_counts_ignore_status_but_honour_project_parent_assignee() {
 }
 
 #[test]
+fn epics_read_model_matches_brief_and_counts_one_task_walk() {
+    let scratch = Scratch::new();
+    let board = board(&scratch);
+    let p1 = project(&board, "epics-a");
+    let p2 = project(&board, "epics-b");
+    let epic_a = add(&board, "A", Status::Todo, 2, None, None, p1, 1);
+    let epic_b = add(&board, "B", Status::Todo, 0, None, Some(epic_a), p1, 2);
+    let mut expected_tasks = 2;
+    for (i, status) in [
+        Status::Done,
+        Status::Canceled,
+        Status::Todo,
+        Status::Blocked,
+        Status::Reviewing,
+        Status::Planning,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        add(
+            &board,
+            "child",
+            status,
+            5 - i as i32,
+            status.requires_assignee().then_some("manager"),
+            Some(epic_a),
+            p1,
+            3 + i as i64,
+        );
+        expected_tasks += 1;
+    }
+    add(
+        &board,
+        "foreign",
+        Status::Done,
+        0,
+        None,
+        Some(epic_a),
+        p2,
+        20,
+    );
+    add(
+        &board,
+        "only foreign child",
+        Status::Todo,
+        0,
+        None,
+        Some(add(&board, "C", Status::Todo, 3, None, None, p1, 21)),
+        p2,
+        22,
+    );
+    expected_tasks += 3;
+
+    for scope in [None, Some(p1), Some(p2)] {
+        let got = board.epics(scope, 4).unwrap();
+        assert_eq!(got.tasks_visited, expected_tasks);
+        let old = board.brief_for_project(0, scope).unwrap();
+        assert_eq!(
+            got.rows.iter().map(|r| r.epic.task.id).collect::<Vec<_>>(),
+            old.epics.iter().map(|e| e.task.id).collect::<Vec<_>>()
+        );
+        for (row, epic) in got.rows.iter().zip(old.epics.iter()) {
+            assert_eq!(row.epic.total, epic.total);
+            assert_eq!(row.epic.done, epic.done);
+            assert_eq!(
+                row.epic.counts.iter().map(|(_, n)| n).collect::<Vec<_>>(),
+                epic.counts.iter().map(|(_, n)| n).collect::<Vec<_>>()
+            );
+            let listed = board
+                .list(&ListFilter {
+                    status: None,
+                    assignee: None,
+                    parent: Some(epic.task.id),
+                    project: scope,
+                    include_terminal: true,
+                    limit: 4,
+                    offset: 0,
+                })
+                .unwrap();
+            assert_eq!(row.children_total, listed.total);
+            assert_eq!(
+                row.children.iter().map(|t| t.id).collect::<Vec<_>>(),
+                listed.tasks.iter().map(|t| t.id).collect::<Vec<_>>()
+            );
+        }
+        if scope == Some(p1) {
+            let c = got.rows.iter().find(|r| r.epic.task.title == "C").unwrap();
+            assert_eq!(c.children_total, 0);
+        }
+    }
+    let a = board
+        .epics(None, 4)
+        .unwrap()
+        .rows
+        .into_iter()
+        .find(|r| r.epic.task.id == epic_a)
+        .unwrap();
+    assert_eq!(a.children.len(), 4);
+    assert_eq!(a.children_total, 8);
+    assert_eq!(
+        a.children.iter().map(|t| t.priority).collect::<Vec<_>>(),
+        vec![0, 0, 0, 1]
+    );
+    assert_eq!(epic_b, a.children[0].id);
+}
+
+#[test]
 fn feed_in_project_pages_back_without_gaps_or_foreign_rows() {
     let scratch = Scratch::new();
     let board = board(&scratch);
