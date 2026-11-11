@@ -2529,6 +2529,70 @@ fn wait_expands_an_epic_and_requeries_children_on_every_poll() {
 }
 
 #[test]
+fn wait_rereads_rows_only_when_the_event_sequence_moves() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    board
+        .add("manager", draft("epic", Status::Todo, 0, None), false, 0)
+        .unwrap();
+    for (title, status, assignee) in [
+        ("child one", Status::Implementing, Some("coder")),
+        ("child two", Status::Todo, None),
+    ] {
+        let mut child = draft(title, status, 0, assignee);
+        child.parent_id = Some(1);
+        board.add("manager", child, assignee.is_some(), 1).unwrap();
+    }
+
+    let idle = board
+        .wait_tasks(&WaitSpec {
+            ids: &[1],
+            epic: true,
+            statuses: &done_and_canceled(),
+            after: None,
+            timeout_ms: 300,
+            assignee: None,
+        })
+        .unwrap();
+    assert!(!idle.matched);
+    assert_eq!(idle.full_polls, 1);
+    assert_eq!(
+        idle.rows
+            .iter()
+            .map(|row| (row.task.id, row.task.status))
+            .collect::<Vec<_>>(),
+        vec![(2, Status::Implementing), (3, Status::Todo)]
+    );
+
+    let changed = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(100));
+            board.comment("manager", 2, "still working", 10).unwrap();
+        });
+        board
+            .wait_tasks(&WaitSpec {
+                ids: &[1],
+                epic: true,
+                statuses: &done_and_canceled(),
+                after: None,
+                timeout_ms: 400,
+                assignee: None,
+            })
+            .unwrap()
+    });
+    assert!(!changed.matched);
+    assert_eq!(changed.full_polls, 2);
+    assert_eq!(
+        changed
+            .rows
+            .iter()
+            .map(|row| (row.task.id, row.task.status))
+            .collect::<Vec<_>>(),
+        vec![(2, Status::Implementing), (3, Status::Todo)]
+    );
+}
+
+#[test]
 fn wait_refuses_a_foreign_watermark_and_accepts_a_bare_sequence() {
     let scratch = Scratch::new();
     let other = Scratch::new();

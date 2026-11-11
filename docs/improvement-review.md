@@ -168,6 +168,8 @@ they are felt.
 
 ### 5. `wait --epic` scans every task 40 times a second
 
+**Status: done**: wait polls the event sequence each tick and re-reads the rows only when it moved; handoff and event reads seek from the watermark.
+
 `watched_ids` resolves an epic's children by iterating the whole `tasks` database
 and JSON-decoding every record, descriptions and reports included
 (`src/store/wait.rs:231`). `wait_tasks` calls it on every poll, and the poll

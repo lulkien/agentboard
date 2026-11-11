@@ -2,6 +2,7 @@
 //! a wanted status, any one of them is handed off (when asked), or the deadline
 //! expires.
 
+use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 use crate::domain::{Event, EventKind, Status, Task, validate_actor};
@@ -71,6 +72,9 @@ pub struct WaitOutcome {
     /// The board's high sequence at the moment the wait returned.
     pub cursor: Cursor,
     pub waited_ms: u64,
+    /// How many times the watched rows were re-read: one initial poll, then one
+    /// for each event sequence move observed while waiting.
+    pub full_polls: u64,
 }
 
 /// Parse a CSV of wanted statuses: trimmed, deduplicated, in board order. Both
@@ -103,9 +107,10 @@ struct Poll {
 impl Board {
     /// Block until every watched row is in one of `spec.statuses`, any watched row
     /// is handed off when `spec.assignee` asks for it, or the deadline expires.
-    /// The watched set is re-resolved on every poll, so a child added mid-epic
-    /// joins the set. Each poll opens one read transaction and drops it before
-    /// sleeping, so a parked waiter holds nothing and blocks no writer.
+    /// The watched set is re-resolved whenever the event sequence moves, so a
+    /// child added mid-epic joins the set. Each poll opens one read transaction
+    /// and drops it before sleeping, so a parked waiter holds nothing and blocks
+    /// no writer.
     pub fn wait_tasks(&self, spec: &WaitSpec<'_>) -> Result<WaitOutcome> {
         if spec.statuses.is_empty() {
             return Err(Error::WaitWithoutStatus);
@@ -120,8 +125,9 @@ impl Board {
         }
         let deadline = (spec.timeout_ms != 0).then(|| Duration::from_millis(spec.timeout_ms));
         let started = Instant::now();
+        let mut poll = self.wait_poll(&since, spec, &wanted)?;
+        let mut full_polls = 1;
         loop {
-            let poll = self.wait_poll(&since, spec, &wanted)?;
             let elapsed = started.elapsed();
             if poll.matched {
                 return Ok(WaitOutcome {
@@ -131,23 +137,30 @@ impl Board {
                     since,
                     cursor: poll.cursor,
                     waited_ms: elapsed.as_millis() as u64,
+                    full_polls,
                 });
             }
-            let Some(deadline) = deadline else {
-                std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
-                continue;
+            let sleep = if let Some(deadline) = deadline {
+                if elapsed >= deadline {
+                    return Ok(WaitOutcome {
+                        matched: false,
+                        wanted,
+                        rows: poll.rows,
+                        since,
+                        cursor: poll.cursor,
+                        waited_ms: elapsed.as_millis() as u64,
+                        full_polls,
+                    });
+                }
+                (deadline - elapsed).min(Duration::from_millis(POLL_INTERVAL_MS))
+            } else {
+                Duration::from_millis(POLL_INTERVAL_MS)
             };
-            if elapsed >= deadline {
-                return Ok(WaitOutcome {
-                    matched: false,
-                    wanted,
-                    rows: poll.rows,
-                    since,
-                    cursor: poll.cursor,
-                    waited_ms: elapsed.as_millis() as u64,
-                });
+            std::thread::sleep(sleep);
+            if self.cursor_now()?.seq != poll.cursor.seq {
+                poll = self.wait_poll(&since, spec, &wanted)?;
+                full_polls += 1;
             }
-            std::thread::sleep((deadline - elapsed).min(Duration::from_millis(POLL_INTERVAL_MS)));
         }
     }
 
@@ -248,21 +261,28 @@ impl Board {
     /// Fill a row's events after the watermark, or its newest event at or below it.
     fn wait_events(&self, txn: &ReadTxn<'_>, row: &mut WaitRow, since: &Cursor) -> Result<()> {
         let mut fresh = Vec::new();
-        let mut newest_below = None;
-        for entry in self
-            .events_by_task
-            .prefix_iter(txn, &keys::task(row.task.id))?
-        {
-            let (key, _) = entry?;
-            let seq = index_seq(key)?;
-            if seq > since.seq {
-                fresh.push(seq);
-            } else {
-                newest_below = Some(seq);
+        let start = since.seq.checked_add(1);
+        if let Some(start) = start {
+            let lo = keys::event_by_task(row.task.id, start);
+            let hi = keys::event_by_task(row.task.id, u64::MAX);
+            for entry in self
+                .events_by_task
+                .range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
+            {
+                let (key, _) = entry?;
+                fresh.push(index_seq(key)?);
             }
         }
         if fresh.is_empty() {
-            if let Some(seq) = newest_below {
+            let lo = keys::event_by_task(row.task.id, 0);
+            let hi = keys::event_by_task(row.task.id, since.seq);
+            if let Some(entry) = self
+                .events_by_task
+                .rev_range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
+                .next()
+            {
+                let (key, _) = entry?;
+                let seq = index_seq(key)?;
                 row.last = Some(self.wait_event(txn, seq)?);
             }
             return Ok(());
@@ -288,12 +308,17 @@ impl Board {
         since: &Cursor,
         target: AssigneeMatch<'_>,
     ) -> Result<Option<String>> {
-        for entry in self.events_by_task.prefix_iter(txn, &keys::task(id))? {
+        let Some(start) = since.seq.checked_add(1) else {
+            return Ok(None);
+        };
+        let lo = keys::event_by_task(id, start);
+        let hi = keys::event_by_task(id, u64::MAX);
+        for entry in self
+            .events_by_task
+            .range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
+        {
             let (key, _) = entry?;
             let seq = index_seq(key)?;
-            if seq <= since.seq {
-                continue;
-            }
             let event = self.wait_event(txn, seq)?;
             if event.kind != EventKind::Updated {
                 continue;
