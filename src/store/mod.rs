@@ -16,7 +16,7 @@ pub use feed::{Cursor, FeedFilter, FeedPage, OlderFeedPage, WAIT_MAX_MS};
 pub use list::{Brief, DEFAULT_LIST_LIMIT, Epic, ListFilter, MAX_LIST_LIMIT, TaskPage};
 pub use open::{Board, BoardOptions, Error, Metadata, ResetOutcome, Result};
 pub use overview::{Held, Lane, Overview};
-pub use tasks::{Added, Agent, ClaimOutcome, ReleaseInput, UpdateInput, Updated};
+pub use tasks::{Added, Agent, ClaimOutcome, UpdateInput, Updated};
 pub use wait::{AssigneeMatch, MAX_WAIT_EVENTS, WaitOutcome, WaitRow, WaitSpec, parse_status_csv};
 
 #[cfg(test)]

@@ -137,6 +137,8 @@ class HttpServer:
         project = (extra_env or {}).get("AGENTBOARD_PROJECT")
         self.path = f"/mcp/{actor}" + (f"?project={project}" if project else "")
         env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTBOARD_")}
+        if extra_env and "AGENTBOARD_MAP_SIZE_MB" in extra_env:
+            env["AGENTBOARD_MAP_SIZE_MB"] = extra_env["AGENTBOARD_MAP_SIZE_MB"]
         self.proc = subprocess.Popen(
             [BIN, "--db", db, "daemon", "127.0.0.1:0"],
             stdout=subprocess.PIPE,
@@ -575,6 +577,25 @@ def main():
             is_error, body = releases.call("task_update", {"id": 2, "if_revision": 1, "status": "review", "force": True, "reason": "test legacy input"})
             has("legacy review input prints reviewing", "reviewing", body)
             print("task_update release: todo record, -32602 held and holder-less refusals")
+
+        fault_env = {"AGENTBOARD_MAP_SIZE_MB": "1"}
+        with Server(os.path.join(scratch, "typed-errors"), "manager", extra_env=fault_env) as faults:
+            faults.start()
+            faults.call("task_add", {"title": "survives store fault"})
+            reply = faults.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 0, "title": "stale"}})
+            check("store refusal uses invalid params", -32602, reply.get("error", {}).get("code"))
+            error = None
+            for index in range(16):
+                reply = faults.send("tools/call", {"name": "task_add", "arguments": {"title": f"fills map {index}", "description": "x" * (256 * 1024)}})
+                if "error" in reply:
+                    error = reply["error"]
+                    break
+            check("store fault uses internal error", -32603, (error or {}).get("code"))
+            has("store fault preserves map-size guidance", "AGENTBOARD_MAP_SIZE_MB", (error or {}).get("message", ""))
+            is_error, body = faults.call("task_get", {"id": 1})
+            check("server survives a store fault", False, is_error)
+            has("surviving row remains readable", "survives store fault", body)
+            print("typed store errors: refusal -32602, map full -32603")
     finally:
         server.close()
 

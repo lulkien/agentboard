@@ -9,8 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::domain::{Error as DomainError, EventKind, NewTask, Status, TaskPatch};
 
 use super::{
-    AssigneeMatch, Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, ReleaseInput,
-    UpdateInput, WAIT_MAX_MS, WaitSpec, parse_status_csv,
+    AssigneeMatch, Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, UpdateInput,
+    WAIT_MAX_MS, WaitSpec, parse_status_csv,
 };
 
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
@@ -115,6 +115,7 @@ fn agent_delete_refuses_open_holders_and_keeps_closed_rows_editable() {
                 assignee: Some(None),
                 ..TaskPatch::default()
             },
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -149,6 +150,7 @@ fn agent_delete_refuses_open_holders_and_keeps_closed_rows_editable() {
                 title: Some("still editable".into()),
                 ..TaskPatch::default()
             },
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -160,7 +162,7 @@ fn agent_delete_refuses_open_holders_and_keeps_closed_rows_editable() {
     assert_eq!(edited.assignee.as_deref(), Some("bob"));
     assert!(
         matches!(board.update(UpdateInput { id: edited.id, actor: "manager", expected_revision: edited.revision,
-        patch: &status_patch(Status::Todo), force: false, force_reason: None, new_actor: false, comment: None, now_ms: 14 }),
+        patch: &status_patch(Status::Todo), release: false, force: false, force_reason: None, new_actor: false, comment: None, now_ms: 14 }),
         Err(Error::UnknownAssignee(name)) if name == "bob")
     );
     board
@@ -169,6 +171,7 @@ fn agent_delete_refuses_open_holders_and_keeps_closed_rows_editable() {
             actor: "manager",
             expected_revision: edited.revision,
             patch: &status_patch(Status::Todo),
+            release: false,
             force: false,
             force_reason: None,
             new_actor: true,
@@ -184,6 +187,7 @@ fn agent_delete_refuses_open_holders_and_keeps_closed_rows_editable() {
             actor: "manager",
             expected_revision: edited.revision + 1,
             patch: &status_patch(Status::Done),
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -299,6 +303,7 @@ fn stale_update_and_quota_takeover() {
             actor: "alice",
             expected_revision: 1,
             patch: &review,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -320,6 +325,7 @@ fn stale_update_and_quota_takeover() {
             actor: "manager",
             expected_revision: 2,
             patch: &takeover,
+            release: false,
             force: true,
             force_reason: Some("quota"),
             new_actor: true,
@@ -347,6 +353,7 @@ fn stale_update_and_quota_takeover() {
             actor: "alice",
             expected_revision: 2,
             patch: &title,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -364,6 +371,7 @@ fn stale_update_and_quota_takeover() {
             actor: "alice",
             expected_revision: 3,
             patch: &title,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -397,6 +405,7 @@ fn forced_own_task_records_the_reason_without_a_handoff() {
             actor: "alice",
             expected_revision: 1,
             patch: &title,
+            release: false,
             force: true,
             force_reason: Some("manager correction"),
             new_actor: false,
@@ -428,7 +437,10 @@ fn holder_releases_a_row_to_todo_in_one_write() {
     assert_eq!(claimed.task.revision, 2);
     let before = board.metadata().unwrap();
     let released = board
-        .release(ReleaseInput {
+        .update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: task.id,
             actor: "alice",
             expected_revision: 2,
@@ -496,7 +508,10 @@ fn foreign_release_without_force_refuses_and_changes_nothing() {
     let before_task = board.get(task.id).unwrap().unwrap();
     let before_meta = board.metadata().unwrap();
     assert!(matches!(
-        board.release(ReleaseInput {
+        board.update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: task.id,
             actor: "bob",
             expected_revision: 2,
@@ -526,7 +541,10 @@ fn forced_release_records_the_reason() {
         .task;
     board.claim("alice", Some(task.id), 1).unwrap();
     assert!(matches!(
-        board.release(ReleaseInput {
+        board.update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: task.id,
             actor: "manager",
             expected_revision: 2,
@@ -538,7 +556,10 @@ fn forced_release_records_the_reason() {
         Err(Error::Domain(DomainError::MissingForceReason))
     ));
     assert!(matches!(
-        board.release(ReleaseInput {
+        board.update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: task.id,
             actor: "manager",
             expected_revision: 2,
@@ -550,7 +571,10 @@ fn forced_release_records_the_reason() {
         Err(Error::Domain(DomainError::ForceReasonWithoutForce))
     ));
     let released = board
-        .release(ReleaseInput {
+        .update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: task.id,
             actor: "manager",
             expected_revision: 2,
@@ -583,7 +607,10 @@ fn blocked_row_with_a_holder_releases_to_todo() {
         .unwrap()
         .task;
     let released = board
-        .release(ReleaseInput {
+        .update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: task.id,
             actor: "alice",
             expected_revision: 1,
@@ -621,7 +648,10 @@ fn terminal_and_holderless_rows_refuse_a_release_without_writing() {
         .task;
     let before_meta = board.metadata().unwrap();
     assert!(matches!(
-        board.release(ReleaseInput {
+        board.update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: closed.id,
             actor: "manager",
             expected_revision: 1,
@@ -636,7 +666,10 @@ fn terminal_and_holderless_rows_refuse_a_release_without_writing() {
         }) if id == closed.id
     ));
     assert!(matches!(
-        board.release(ReleaseInput {
+        board.update(UpdateInput {
+            patch: &TaskPatch::default(),
+            release: true,
+            new_actor: false,
             id: free.id,
             actor: "manager",
             expected_revision: 1,
@@ -746,6 +779,7 @@ fn list_filters_pages_and_brief_counts() {
             actor: "manager",
             expected_revision: 1,
             patch: &parent,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -908,6 +942,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
             actor: "manager",
             expected_revision: 1,
             patch: &parent,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -926,6 +961,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
                 actor: "manager",
                 expected_revision: 1,
                 patch: &status_patch(Status::Canceled),
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -940,6 +976,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
             actor: "manager",
             expected_revision: 1,
             patch: &status_patch(Status::Done),
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -976,6 +1013,7 @@ fn reopening_under_terminal_parent_is_atomic() {
                     actor: "manager",
                     expected_revision,
                     patch,
+                    release: false,
                     force,
                     force_reason: force.then_some("override"),
                     new_actor: true,
@@ -1047,6 +1085,7 @@ fn reopening_walks_nested_parents_top_down() {
             actor: "manager",
             expected_revision: 1,
             patch: &status_patch(Status::Done),
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1063,6 +1102,7 @@ fn reopening_walks_nested_parents_top_down() {
             actor: "manager",
             expected_revision: 2,
             patch: &status_patch(Status::Todo),
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1151,6 +1191,7 @@ fn terminal_parent_attachments_are_atomic() {
                     actor: "outsider",
                     expected_revision: 1,
                     patch: &patch,
+                    release: false,
                     force,
                     force_reason: force.then_some("override"),
                     new_actor: true,
@@ -1186,6 +1227,7 @@ fn terminal_parent_attachments_are_atomic() {
                 actor: "manager",
                 expected_revision: 1,
                 patch: &status_patch(Status::Todo),
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -1205,6 +1247,7 @@ fn terminal_parent_attachments_are_atomic() {
                     parent_id: Some(Some(parent.id)),
                     ..TaskPatch::default()
                 },
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -1220,6 +1263,7 @@ fn terminal_parent_attachments_are_atomic() {
                 actor: "manager",
                 expected_revision: 2,
                 patch: &status_patch(status),
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -1238,6 +1282,7 @@ fn terminal_parent_attachments_are_atomic() {
                         parent_id: Some(parent_id),
                         ..TaskPatch::default()
                     },
+                    release: false,
                     force: false,
                     force_reason: None,
                     new_actor: false,
@@ -1284,6 +1329,7 @@ fn nonterminal_parents_accept_both_attachments() {
                     parent_id: Some(Some(parent.id)),
                     ..TaskPatch::default()
                 },
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -1332,6 +1378,7 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
                     actor: if force { "outsider" } else { "manager" },
                     expected_revision: 1,
                     patch: &patch,
+                    release: false,
                     force,
                     force_reason: force.then_some("override"),
                     new_actor: true,
@@ -1361,6 +1408,7 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
             actor: "manager",
             expected_revision: 1,
             patch: &title,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1375,6 +1423,7 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
                 actor: "manager",
                 expected_revision: 1,
                 patch: &status_patch(Status::Canceled),
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -1390,6 +1439,7 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
                 actor: "manager",
                 expected_revision: revision,
                 patch: &status_patch(status),
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -1413,6 +1463,7 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
                 title: Some("terminal edit".into()),
                 ..TaskPatch::default()
             },
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1426,6 +1477,7 @@ fn epic_close_gate_is_atomic_and_force_cannot_bypass() {
             actor: "manager",
             expected_revision: 5,
             patch: &TaskPatch::default(),
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1461,6 +1513,7 @@ fn feed_pages_without_gaps_and_keeps_recipient_history() {
             actor: "manager",
             expected_revision: task.revision,
             patch: &handoff,
+            release: false,
             force: true,
             force_reason: Some("assign"),
             new_actor: true,
@@ -1479,6 +1532,7 @@ fn feed_pages_without_gaps_and_keeps_recipient_history() {
             actor: "manager",
             expected_revision: current.revision,
             patch: &later,
+            release: false,
             force: true,
             force_reason: Some("reassign"),
             new_actor: true,
@@ -1725,6 +1779,7 @@ fn review_handoff_stays_on_one_task_with_generic_statuses() {
             actor: "coder",
             expected_revision: claimed.task.revision,
             patch: &to_review,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: true,
@@ -1750,6 +1805,7 @@ fn review_handoff_stays_on_one_task_with_generic_statuses() {
             actor: "reviewer",
             expected_revision: current.revision,
             patch: &back_to_coder,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1981,6 +2037,7 @@ fn filtered_feed_without_a_cursor_returns_the_newest_match() {
             actor: "manager",
             expected_revision: 1,
             patch: &handoff,
+            release: false,
             force: true,
             force_reason: Some("assign"),
             new_actor: true,
@@ -2129,6 +2186,7 @@ fn feed_before_pages_filtered_matches_without_gaps_or_boundary_duplicates() {
             actor: "manager",
             expected_revision: 1,
             patch: &patch,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -2372,6 +2430,7 @@ fn wait_returns_the_events_of_a_row_moved_during_the_wait() {
                     actor: "manager",
                     expected_revision: 1,
                     patch: &status_patch(Status::Done),
+                    release: false,
                     force: false,
                     force_reason: None,
                     new_actor: false,
@@ -2427,6 +2486,7 @@ fn wait_caps_one_rows_event_lines_and_counts_the_rest_as_omitted() {
             actor: "manager",
             expected_revision: 1,
             patch: &status_patch(Status::Done),
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -2561,6 +2621,7 @@ fn wait_expands_an_epic_and_requeries_children_on_every_poll() {
                         actor: "manager",
                         expected_revision: 1,
                         patch: &status_patch(Status::Done),
+                        release: false,
                         force: false,
                         force_reason: None,
                         new_actor: false,
@@ -2771,6 +2832,7 @@ fn reassign(board: &Board, id: u64, actor: &str, revision: u64, to: &str) {
                 assignee: Some(Some(to.into())),
                 ..TaskPatch::default()
             },
+            release: false,
             force: false,
             force_reason: None,
             new_actor: true,
@@ -2884,7 +2946,10 @@ fn wait_assignee_ignores_handoffs_before_the_watermark_and_releases() {
         scope.spawn(|| {
             std::thread::sleep(Duration::from_millis(80));
             board
-                .release(ReleaseInput {
+                .update(UpdateInput {
+                    patch: &TaskPatch::default(),
+                    release: true,
+                    new_actor: false,
                     id: 1,
                     actor: "coder",
                     expected_revision: 2,

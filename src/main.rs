@@ -9,8 +9,8 @@ use rmcp::ServiceExt;
 
 use agentboard::domain::{self, EventKind, NewProject, NewTask, Status, TaskPatch};
 use agentboard::store::{
-    AssigneeMatch, Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput,
-    UpdateInput, WaitSpec, parse_status_csv,
+    AssigneeMatch, Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, UpdateInput,
+    WaitSpec, parse_status_csv,
 };
 use agentboard::{cli, render};
 
@@ -62,16 +62,15 @@ fn need_actor(actor: Option<String>) -> Result<String, String> {
     })
 }
 
-fn open(path: &PathBuf) -> Result<Board, String> {
-    Board::open_with_options(path, BoardOptions::from_env().map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+fn open(path: &PathBuf) -> agentboard::store::Result<Board> {
+    Board::open_with_options(path, BoardOptions::from_env()?)
 }
 
 fn run(
     db: Option<PathBuf>,
     actor: Option<String>,
     cmd: Option<Cmd>,
-) -> Result<(String, ExitCode), String> {
+) -> Result<(String, ExitCode), Box<dyn std::error::Error>> {
     let path = board_path(db)?;
     let actor = actor_name(actor);
     match cmd {
@@ -85,16 +84,14 @@ fn run(
             let board = open(&path)?;
             match cmd {
                 ProjectCmd::Add { name, path } => {
-                    let project = board
-                        .add_project(NewProject {
-                            project_name: name,
-                            project_path: path,
-                        })
-                        .map_err(|e| e.to_string())?;
+                    let project = board.add_project(NewProject {
+                        project_name: name,
+                        project_path: path,
+                    })?;
                     Ok((project.project_id.to_string(), ExitCode::SUCCESS))
                 }
                 ProjectCmd::Ls => {
-                    let projects = board.list_projects().map_err(|e| e.to_string())?;
+                    let projects = board.list_projects()?;
                     let output = if projects.is_empty() {
                         "no projects".to_owned()
                     } else {
@@ -107,13 +104,11 @@ fn run(
                     Ok((output, ExitCode::SUCCESS))
                 }
                 ProjectCmd::Delete { id } => {
-                    let project = board.delete_project(id).map_err(|e| e.to_string())?;
+                    let project = board.delete_project(id)?;
                     Ok((render::deleted_project(&project), ExitCode::SUCCESS))
                 }
                 ProjectCmd::Update { id, name, path } => {
-                    let project = board
-                        .update_project(id, name, path)
-                        .map_err(|e| e.to_string())?;
+                    let project = board.update_project(id, name, path)?;
                     Ok((render::project_line(&project), ExitCode::SUCCESS))
                 }
             }
@@ -122,8 +117,8 @@ fn run(
             if !yes {
                 return Err("reset discards the board; pass --yes to confirm".into());
             }
-            let options = BoardOptions::from_env().map_err(|e| e.to_string())?;
-            let outcome = Board::reset(&path, options).map_err(|e| e.to_string())?;
+            let options = BoardOptions::from_env()?;
+            let outcome = Board::reset(&path, options)?;
             Ok((
                 format!(
                     "reset {}\nnew board instance {}",
@@ -157,9 +152,7 @@ fn run(
                 parent_id: parent,
                 project_id: project,
             };
-            let added = board
-                .add(&actor, input, new_actor, now_ms())
-                .map_err(|e| e.to_string())?;
+            let added = board.add(&actor, input, new_actor, now_ms())?;
             Ok((
                 format!(
                     "ok\n{}\ncursor {}",
@@ -181,17 +174,15 @@ fn run(
             let status = parse_status(status.as_deref())?;
             let board = open(&path)?;
             let project = agentboard::server::resolve_project(&board, project)?;
-            let page = board
-                .list(&ListFilter {
-                    status,
-                    assignee: assignee.as_deref(),
-                    parent,
-                    project,
-                    include_terminal: all,
-                    limit,
-                    offset,
-                })
-                .map_err(|e| e.to_string())?;
+            let page = board.list(&ListFilter {
+                status,
+                assignee: assignee.as_deref(),
+                parent,
+                project,
+                include_terminal: all,
+                limit,
+                offset,
+            })?;
             let mut lines: Vec<String> = page.tasks.iter().map(render::task_line).collect();
             if lines.is_empty() {
                 lines.push("no tasks".into());
@@ -208,14 +199,13 @@ fn run(
         }
         Some(Cmd::Epic { id }) => {
             let board = open(&path)?;
-            let epic = board.epic(id).map_err(|e| e.to_string())?;
+            let epic = board.epic(id)?;
             Ok((render::epic_text(&epic), ExitCode::SUCCESS))
         }
         Some(Cmd::Get { id, full }) => {
             let board = open(&path)?;
             let task = board
-                .get(id)
-                .map_err(|e| e.to_string())?
+                .get(id)?
                 .ok_or_else(|| format!("task T{id} does not exist"))?;
             Ok((render::task_record(&task, full), ExitCode::SUCCESS))
         }
@@ -248,62 +238,10 @@ fn run(
         }) => {
             let actor = need_actor(actor)?;
             let status = parse_status(status.as_deref())?;
-            if clear_assignee && assignee.is_some() {
-                return Err("choose --assignee or --clear-assignee, not both".into());
-            }
-            if clear_parent && parent.is_some() {
-                return Err("choose --parent or --clear-parent, not both".into());
-            }
-            if clear_project && project.is_some() {
-                return Err("choose --project or --clear-project, not both".into());
-            }
-            if release && (status.is_some() || assignee.is_some() || clear_assignee) {
-                return Err(
-                    "choose --release or --status/--assignee/--clear-assignee, not both".into(),
-                );
-            }
-            // A release writes the row itself; a field flag beside it would be read
-            // and discarded, so name the conflict instead of dropping the argument.
-            if release
-                && (title.is_some()
-                    || description.is_some()
-                    || goal.is_some()
-                    || analyst_report.is_some()
-                    || analyst_report_file.is_some()
-                    || coder_report.is_some()
-                    || coder_report_file.is_some()
-                    || reviewer_report.is_some()
-                    || reviewer_report_file.is_some()
-                    || priority.is_some()
-                    || parent.is_some()
-                    || clear_parent
-                    || project.is_some()
-                    || clear_project)
-            {
-                return Err("choose --release or a field change, not both".into());
-            }
+            let assignee = domain::set_or_clear("assignee", assignee, clear_assignee)?;
+            let parent = domain::set_or_clear("parent", parent, clear_parent)?;
+            let project = domain::set_or_clear("project", project, clear_project)?;
             let board = open(&path)?;
-            if release {
-                let released = board
-                    .release(ReleaseInput {
-                        id,
-                        actor: &actor,
-                        expected_revision: if_revision,
-                        force,
-                        force_reason: reason.as_deref(),
-                        comment: comment.as_deref(),
-                        now_ms: now_ms(),
-                    })
-                    .map_err(|e| e.to_string())?;
-                return Ok((
-                    format!(
-                        "ok\n{}\ncursor {}",
-                        render::task_record(&released.task, false),
-                        released.event.seq
-                    ),
-                    ExitCode::SUCCESS,
-                ));
-            }
             let analyst_report =
                 merge_report("analyst-report", analyst_report, analyst_report_file)?;
             let coder_report = merge_report("coder-report", coder_report, coder_report_file)?;
@@ -319,35 +257,22 @@ fn run(
                 replace_reports: replace_report,
                 status,
                 priority,
-                assignee: if clear_assignee {
-                    Some(None)
-                } else {
-                    assignee.map(Some)
-                },
-                parent_id: if clear_parent {
-                    Some(None)
-                } else {
-                    parent.map(Some)
-                },
-                project_id: if clear_project {
-                    Some(None)
-                } else {
-                    project.map(Some)
-                },
+                assignee,
+                parent_id: parent,
+                project_id: project,
             };
-            let updated = board
-                .update(UpdateInput {
-                    id,
-                    actor: &actor,
-                    expected_revision: if_revision,
-                    patch: &patch,
-                    force,
-                    force_reason: reason.as_deref(),
-                    new_actor,
-                    comment: comment.as_deref(),
-                    now_ms: now_ms(),
-                })
-                .map_err(|e| e.to_string())?;
+            let updated = board.update(UpdateInput {
+                id,
+                actor: &actor,
+                expected_revision: if_revision,
+                patch: &patch,
+                release,
+                force,
+                force_reason: reason.as_deref(),
+                new_actor,
+                comment: comment.as_deref(),
+                now_ms: now_ms(),
+            })?;
             Ok((
                 format!(
                     "ok\n{}\ncursor {}",
@@ -360,10 +285,7 @@ fn run(
         Some(Cmd::Claim { id }) => {
             let actor = need_actor(actor)?;
             let board = open(&path)?;
-            match board
-                .claim(&actor, id, now_ms())
-                .map_err(|e| e.to_string())?
-            {
+            match board.claim(&actor, id, now_ms())? {
                 ClaimOutcome::NoWork => Ok(("no ready tasks".into(), ExitCode::from(3))),
                 outcome => Ok((render::claim_line(&outcome), ExitCode::SUCCESS)),
             }
@@ -376,9 +298,7 @@ fn run(
             let actor = need_actor(actor)?;
             let text = read_body(body, body_file)?;
             let board = open(&path)?;
-            let event = board
-                .comment(&actor, id, &text, now_ms())
-                .map_err(|e| e.to_string())?;
+            let event = board.comment(&actor, id, &text, now_ms())?;
             Ok((format!("ok\ncursor {}", event.seq), ExitCode::SUCCESS))
         }
         Some(Cmd::Feed {
@@ -400,11 +320,9 @@ fn run(
                 limit,
             };
             let page = if let Some(wait) = wait {
-                board
-                    .wait(&filter, wait.saturating_mul(1000))
-                    .map_err(|e| e.to_string())?
+                board.wait(&filter, wait.saturating_mul(1000))?
             } else {
-                board.feed(&filter).map_err(|e| e.to_string())?
+                board.feed(&filter)?
             };
             Ok((render::feed_page(&page, full), ExitCode::SUCCESS))
         }
@@ -418,19 +336,17 @@ fn run(
         }) => {
             let statuses = wait_statuses(status.as_deref())?;
             let board = open(&path)?;
-            let outcome = board
-                .wait_tasks(&WaitSpec {
-                    ids: &ids,
-                    epic,
-                    statuses: &statuses,
-                    after: after.as_deref(),
-                    timeout_ms: timeout.saturating_mul(1000),
-                    assignee: assignee.as_ref().map(|name| {
-                        name.as_deref()
-                            .map_or(AssigneeMatch::Any, AssigneeMatch::To)
-                    }),
-                })
-                .map_err(|e| e.to_string())?;
+            let outcome = board.wait_tasks(&WaitSpec {
+                ids: &ids,
+                epic,
+                statuses: &statuses,
+                after: after.as_deref(),
+                timeout_ms: timeout.saturating_mul(1000),
+                assignee: assignee.as_ref().map(|name| {
+                    name.as_deref()
+                        .map_or(AssigneeMatch::Any, AssigneeMatch::To)
+                }),
+            })?;
             let code = if outcome.matched {
                 ExitCode::SUCCESS
             } else {
@@ -441,18 +357,16 @@ fn run(
         Some(Cmd::Brief { project }) => {
             let board = open(&path)?;
             let project = agentboard::server::resolve_project(&board, project)?;
-            let brief = board
-                .brief_for_project(10, project)
-                .map_err(|e| e.to_string())?;
+            let brief = board.brief_for_project(10, project)?;
             Ok((render::brief_text(&brief), ExitCode::SUCCESS))
         }
         Some(Cmd::Agents { cmd }) => {
             let board = open(&path)?;
             if let Some(AgentsCmd::Delete { name }) = cmd {
-                let agent = board.delete_agent(&name).map_err(|e| e.to_string())?;
+                let agent = board.delete_agent(&name)?;
                 return Ok((render::deleted_agent(&agent), ExitCode::SUCCESS));
             }
-            let agents = board.agents().map_err(|e| e.to_string())?;
+            let agents = board.agents()?;
             if agents.is_empty() {
                 return Ok(("no actors".into(), ExitCode::SUCCESS));
             }
@@ -462,15 +376,16 @@ fn run(
     }
 }
 
-fn serve(path: PathBuf, actor: Option<String>) -> Result<(String, ExitCode), String> {
+fn serve(
+    path: PathBuf,
+    actor: Option<String>,
+) -> Result<(String, ExitCode), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("runtime: {e}"))?;
     runtime.block_on(async move {
-        let board =
-            Board::open_with_options(&path, BoardOptions::from_env().map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+        let board = Board::open_with_options(&path, BoardOptions::from_env()?)?;
         let server = agentboard::server::Board::new(board, actor);
         let running = server
             .serve(rmcp::transport::stdio())
@@ -488,7 +403,7 @@ fn daemon(
     path: PathBuf,
     address: std::net::SocketAddr,
     allow_non_loopback: bool,
-) -> Result<(String, ExitCode), String> {
+) -> Result<(String, ExitCode), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

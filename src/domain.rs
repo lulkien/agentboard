@@ -142,6 +142,7 @@ pub enum Error {
     InvalidProjectName,
     InvalidProjectPath,
     EmptyProjectPatch,
+    SetAndClear(&'static str),
 }
 
 impl std::fmt::Display for Error {
@@ -194,6 +195,7 @@ impl std::fmt::Display for Error {
                 "project path must be nonempty, trimmed, and contain no control characters",
             ),
             Self::EmptyProjectPatch => f.write_str("project update has no field changes"),
+            Self::SetAndClear(field) => write!(f, "choose {field} or clear_{field}, not both"),
         }
     }
 }
@@ -484,6 +486,29 @@ pub struct TaskPatch {
     pub project_id: Option<Option<u64>>,
 }
 
+impl TaskPatch {
+    pub fn is_empty(&self) -> bool {
+        *self
+            == Self {
+                replace_reports: self.replace_reports,
+                ..Self::default()
+            }
+    }
+}
+
+pub fn set_or_clear<T>(
+    field: &'static str,
+    set: Option<T>,
+    clear: bool,
+) -> Result<Option<Option<T>>, Error> {
+    match (set, clear) {
+        (Some(_), true) => Err(Error::SetAndClear(field)),
+        (_, true) => Ok(Some(None)),
+        (Some(value), false) => Ok(Some(Some(value))),
+        (None, false) => Ok(None),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
@@ -553,6 +578,79 @@ mod tests {
             parent_id: None,
             project_id: None,
         }
+    }
+
+    #[test]
+    fn patch_emptiness_and_set_clear_rules_are_shared() {
+        assert!(TaskPatch::default().is_empty());
+        assert!(
+            TaskPatch {
+                replace_reports: true,
+                ..TaskPatch::default()
+            }
+            .is_empty()
+        );
+        let one_field = vec![
+            TaskPatch {
+                title: Some("t".into()),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                description: Some("d".into()),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                goal: Some("g".into()),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                analyst_report: Some("a".into()),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                coder_report: Some("c".into()),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                reviewer_report: Some("r".into()),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                status: Some(Status::Done),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                priority: Some(1),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                assignee: Some(None),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                parent_id: Some(None),
+                ..TaskPatch::default()
+            },
+            TaskPatch {
+                project_id: Some(None),
+                ..TaskPatch::default()
+            },
+        ];
+        assert!(one_field.iter().all(|patch| !patch.is_empty()));
+        assert_eq!(
+            set_or_clear("assignee", Some("a"), false),
+            Ok(Some(Some("a")))
+        );
+        assert_eq!(set_or_clear::<&str>("assignee", None, true), Ok(Some(None)));
+        assert_eq!(set_or_clear::<&str>("assignee", None, false), Ok(None));
+        assert_eq!(
+            set_or_clear("assignee", Some("a"), true),
+            Err(Error::SetAndClear("assignee"))
+        );
+        assert_eq!(
+            Error::SetAndClear("assignee").to_string(),
+            "choose assignee or clear_assignee, not both"
+        );
     }
 
     #[test]

@@ -195,6 +195,7 @@ fn task_head_decodes_scan_fields_without_allocating_long_text() {
                 reviewer_report: Some("reviewer report with \"quotes\", \\\\ and 🧪\n".repeat(100)),
                 ..TaskPatch::default()
             },
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -498,6 +499,7 @@ fn project_delete_refuses_referenced_projects_and_never_reuses_ids() {
                     project_id: Some(None),
                     ..TaskPatch::default()
                 },
+                release: false,
                 force: false,
                 force_reason: None,
                 new_actor: false,
@@ -916,10 +918,104 @@ fn full_map_aborts_write_and_preserves_prior_rows() {
     let error = board.add("manager", huge, false, 1).unwrap_err();
     assert!(matches!(error, Error::MapFull));
     assert!(error.to_string().contains("AGENTBOARD_MAP_SIZE_MB"));
+    assert!(!error.is_refusal());
     assert!(board.get(1).unwrap().is_some());
     assert_eq!(board.get(2).unwrap(), None);
     assert_eq!(board.metadata().unwrap().next_task_id, 2);
     assert_eq!(board.event(2).unwrap(), None);
+}
+
+#[test]
+fn release_with_field_change_is_refused_before_writing() {
+    assert!(
+        Error::Domain(crate::domain::Error::StaleRevision {
+            expected: 1,
+            actual: 2
+        })
+        .is_refusal()
+    );
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let held = board.add("manager", draft(None), false, 1).unwrap().task;
+    let working = board
+        .update(UpdateInput {
+            id: held.id,
+            actor: "manager",
+            expected_revision: held.revision,
+            patch: &TaskPatch {
+                status: Some(Status::Implementing),
+                assignee: Some(Some("coder".into())),
+                ..TaskPatch::default()
+            },
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: true,
+            comment: None,
+            now_ms: 2,
+        })
+        .unwrap()
+        .task;
+    let patch = TaskPatch {
+        priority: Some(5),
+        ..TaskPatch::default()
+    };
+    let error = board
+        .update(UpdateInput {
+            id: working.id,
+            actor: "manager",
+            expected_revision: working.revision,
+            patch: &patch,
+            release: true,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 3,
+        })
+        .unwrap_err();
+    assert!(matches!(error, Error::ReleaseWithFieldChange));
+    assert!(error.is_refusal());
+    assert_eq!(board.get(working.id).unwrap().unwrap(), working);
+    let missing_patch = TaskPatch {
+        title: Some("x".into()),
+        ..TaskPatch::default()
+    };
+    assert!(matches!(
+        board.update(UpdateInput {
+            id: 999,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &missing_patch,
+            release: true,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 4,
+        }),
+        Err(Error::ReleaseWithFieldChange)
+    ));
+    let reports_only = TaskPatch {
+        replace_reports: true,
+        ..TaskPatch::default()
+    };
+    let released = board
+        .update(UpdateInput {
+            id: working.id,
+            actor: "coder",
+            expected_revision: working.revision,
+            patch: &reports_only,
+            release: true,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 5,
+        })
+        .unwrap();
+    assert_eq!(released.task.status, Status::Todo);
+    assert_eq!(released.task.assignee, None);
 }
 
 #[test]
@@ -972,6 +1068,7 @@ fn updates_replace_both_index_keys_and_record_only_real_handoffs() {
             actor: "alice",
             expected_revision: 1,
             patch: &working_patch,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -992,6 +1089,7 @@ fn updates_replace_both_index_keys_and_record_only_real_handoffs() {
             actor: "alice",
             expected_revision: 2,
             patch: &review_patch,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: true,
@@ -1049,6 +1147,7 @@ fn updates_replace_both_index_keys_and_record_only_real_handoffs() {
             actor: "manager",
             expected_revision: 3,
             patch: &title_patch,
+            release: false,
             force: true,
             force_reason: Some("scope correction"),
             new_actor: false,
@@ -1079,6 +1178,7 @@ fn failed_update_preserves_indexes_and_parent_acyclicity() {
             actor: "manager",
             expected_revision: 1,
             patch: &cycle,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1093,7 +1193,7 @@ fn failed_update_preserves_indexes_and_parent_acyclicity() {
     };
     assert!(matches!(
         board.update(UpdateInput {
-            id: 1, actor: "manager", expected_revision: 1, patch: &unknown,
+            id: 1, actor: "manager", expected_revision: 1, patch: &unknown, release: false,
             force: false, force_reason: None, new_actor: false, comment: None, now_ms: 2,
         }),
         Err(Error::UnknownAssignee(name)) if name == "not-registered"
@@ -1358,6 +1458,7 @@ fn report_handoff_lands_in_one_revision_with_a_lean_event_marker() {
             actor: "coder",
             expected_revision: 1,
             patch: &patch,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,
@@ -1394,6 +1495,7 @@ fn report_handoff_lands_in_one_revision_with_a_lean_event_marker() {
             actor: "coder",
             expected_revision: 2,
             patch: &patch,
+            release: false,
             force: false,
             force_reason: None,
             new_actor: false,

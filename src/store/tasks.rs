@@ -26,20 +26,10 @@ pub struct UpdateInput<'a> {
     pub actor: &'a str,
     pub expected_revision: u64,
     pub patch: &'a TaskPatch,
+    pub release: bool,
     pub force: bool,
     pub force_reason: Option<&'a str>,
     pub new_actor: bool,
-    pub comment: Option<&'a str>,
-    pub now_ms: i64,
-}
-
-/// Return one held row to `todo` with no owner, in one write.
-pub struct ReleaseInput<'a> {
-    pub id: u64,
-    pub actor: &'a str,
-    pub expected_revision: u64,
-    pub force: bool,
-    pub force_reason: Option<&'a str>,
     pub comment: Option<&'a str>,
     pub now_ms: i64,
 }
@@ -102,6 +92,12 @@ impl Board {
     }
 
     pub fn update(&self, input: UpdateInput<'_>) -> Result<Updated> {
+        if input.release {
+            if !input.patch.is_empty() {
+                return Err(Error::ReleaseWithFieldChange);
+            }
+            return self.release(input);
+        }
         let mut txn = self.env.write_txn()?;
         let mut metadata = self.checked_metadata(&txn)?;
         let old = self
@@ -109,7 +105,7 @@ impl Board {
             .ok_or(Error::MissingTask(input.id))?;
         // A comment with no field change is a comment, not a no-op: it lands as an
         // event and leaves the revision alone, exactly like `comment`.
-        if patch_is_empty(input.patch)
+        if input.patch.is_empty()
             && let Some(comment) = input.comment
         {
             if input.force || input.force_reason.is_some() || input.new_actor {
@@ -209,7 +205,7 @@ impl Board {
     /// a foreign actor needs `force` and a reason, exactly like any other write
     /// to a protected row, so no seat strips a live holder's row silently.
     /// A terminal row and a holder-less row refuse before anything is written.
-    pub fn release(&self, input: ReleaseInput<'_>) -> Result<Updated> {
+    fn release(&self, input: UpdateInput<'_>) -> Result<Updated> {
         let txn = self.env.write_txn()?;
         let mut metadata = self.checked_metadata(&txn)?;
         let old = self
@@ -736,18 +732,4 @@ fn report_changes(old: &Task, next: &Task, mode: &str) -> serde_json::Value {
         }
     }
     reports.into()
-}
-
-fn patch_is_empty(patch: &crate::domain::TaskPatch) -> bool {
-    patch.title.is_none()
-        && patch.description.is_none()
-        && patch.goal.is_none()
-        && patch.analyst_report.is_none()
-        && patch.coder_report.is_none()
-        && patch.reviewer_report.is_none()
-        && patch.status.is_none()
-        && patch.priority.is_none()
-        && patch.assignee.is_none()
-        && patch.parent_id.is_none()
-        && patch.project_id.is_none()
 }

@@ -570,14 +570,19 @@ check "done row release text" "agentboard: task T3 is done; nothing to release" 
 "$B" update 4 --if-revision 1 --status implementing --assignee coder >/dev/null
 out=$("$B" update 4 --if-revision 2 --release --status todo 2>&1); code=$?
 check "--release with --status exit" 1 "$code"
-has "--release with --status text" "choose --release or --status/--assignee/--clear-assignee, not both" "$out"
+has "--release with --status text" "choose release or a field change, not both" "$out"
 out=$("$B" update 4 --if-revision 2 --release --assignee bob 2>&1); code=$?
 check "--release with --assignee exit" 1 "$code"
 out=$("$B" update 4 --if-revision 2 --release --priority 5 2>&1); code=$?
 check "--release with --priority exit" 1 "$code"
 check "--release with --priority text" \
-    "agentboard: choose --release or a field change, not both" "$out"
+    "agentboard: choose release or a field change, not both" "$out"
 check "--release with --priority changes nothing" \
+    "T4 implementing prio  100 coder      still held" "$("$B" ls | rtk rg '^T4 ')"
+out=$("$B" update 4 --if-revision 2 --release --title stolen 2>&1); code=$?
+check "--release with --title exit" 1 "$code"
+check "--release with --title text" "agentboard: choose release or a field change, not both" "$out"
+check "--release with --title changes nothing" \
     "T4 implementing prio  100 coder      still held" "$("$B" ls | rtk rg '^T4 ')"
 out=$(AGENTBOARD_ACTOR=other "$B" update 4 --if-revision 2 --title "stolen" 2>&1); code=$?
 check "foreign write on a live holder exit" 1 "$code"

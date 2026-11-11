@@ -18,7 +18,7 @@ use serde::Deserialize;
 use crate::domain::{EventKind, NewTask, Status, TaskPatch};
 use crate::render;
 use crate::store::{
-    Board as BoardHandle, ClaimOutcome, FeedFilter, ListFilter, ReleaseInput, UpdateInput,
+    Board as BoardHandle, ClaimOutcome, Error as StoreError, FeedFilter, ListFilter, UpdateInput,
 };
 
 const NAME: &str = "agentboard";
@@ -26,21 +26,24 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Resolve the adapter's project scope without making the store depend on
 /// process environment or the caller's working directory.
-pub fn resolve_project(board: &BoardHandle, explicit: Option<u64>) -> Result<Option<u64>, String> {
+pub fn resolve_project(
+    board: &BoardHandle,
+    explicit: Option<u64>,
+) -> crate::store::Result<Option<u64>> {
     if explicit.is_some() {
         return Ok(explicit);
     }
     if let Ok(raw) = std::env::var("AGENTBOARD_PROJECT") {
         let id = raw
             .parse::<u64>()
-            .map_err(|_| format!("AGENTBOARD_PROJECT must be a numeric project id, got {raw:?}"))?;
+            .map_err(|_| StoreError::InvalidProjectEnv(raw.clone()))?;
         return Ok(Some(id));
     }
     let Ok(cwd) = std::env::current_dir() else {
         return Ok(None);
     };
     let cwd = normalized_path(&cwd);
-    let projects = board.list_projects().map_err(|error| error.to_string())?;
+    let projects = board.list_projects()?;
     Ok(projects.into_iter().find_map(|project| {
         (normalized_path(Path::new(&project.project_path)) == cwd).then_some(project.project_id)
     }))
@@ -68,7 +71,7 @@ fn call_project(
     board: &BoardHandle,
     explicit: Option<u64>,
     scope: Option<&RequestScope>,
-) -> Result<Option<u64>, String> {
+) -> crate::store::Result<Option<u64>> {
     match scope {
         Some(scope) => Ok(explicit.or(scope.project)),
         None => resolve_project(board, explicit),
@@ -89,14 +92,29 @@ fn err(message: String) -> ErrorData {
 
 /// Store work is synchronous and LMDB serialises writers, so every call runs off
 /// the async runtime threads.
-async fn blocking<T: Send + 'static>(
+impl From<StoreError> for ErrorData {
+    fn from(error: StoreError) -> Self {
+        if error.is_refusal() {
+            Self::invalid_params(error.to_string(), None)
+        } else {
+            Self::internal_error(error.to_string(), None)
+        }
+    }
+}
+
+async fn blocking<T, E>(
     board: &Arc<BoardHandle>,
-    f: impl FnOnce(&BoardHandle) -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
+    f: impl FnOnce(&BoardHandle) -> Result<T, E> + Send + 'static,
+) -> Result<T, ErrorData>
+where
+    T: Send + 'static,
+    E: Into<ErrorData> + Send + 'static,
+{
     let board = Arc::clone(board);
     tokio::task::spawn_blocking(move || f(&board))
         .await
-        .map_err(|error| format!("task join: {error}"))?
+        .map_err(|error| ErrorData::internal_error(format!("task join: {error}"), None))?
+        .map_err(Into::into)
 }
 
 fn actor_from_env() -> Option<String> {
@@ -334,16 +352,13 @@ impl Board {
             parent_id: args.parent,
             project_id: args.project,
         };
-        let (added, cursor) = blocking(&self.board, move |board| {
-            let added = board
-                .add(&actor, input, args.new_actor, now_ms())
-                .map_err(|e| e.to_string())?;
-            let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
+        let (added, cursor) = blocking(&self.board, move |board| -> crate::store::Result<_> {
+            let added = board.add(&actor, input, args.new_actor, now_ms())?;
+            let instance = board.metadata()?.instance_id;
             let cursor = format!("{instance}:{}", added.event.seq);
             Ok((added, cursor))
         })
-        .await
-        .map_err(err)?;
+        .await?;
         Ok(text(format!(
             "ok\n{}\ncursor {}",
             render::task_record(&added.task, false),
@@ -377,20 +392,17 @@ impl Board {
         } = args;
         let page = blocking(&self.board, move |board| {
             let project = call_project(board, project, scope.as_ref())?;
-            board
-                .list(&ListFilter {
-                    status,
-                    assignee: assignee.as_deref(),
-                    parent,
-                    project,
-                    include_terminal: all,
-                    limit: limit.unwrap_or(20),
-                    offset: offset.unwrap_or(0),
-                })
-                .map_err(|e| e.to_string())
+            board.list(&ListFilter {
+                status,
+                assignee: assignee.as_deref(),
+                parent,
+                project,
+                include_terminal: all,
+                limit: limit.unwrap_or(20),
+                offset: offset.unwrap_or(0),
+            })
         })
-        .await
-        .map_err(err)?;
+        .await?;
         let mut lines: Vec<String> = page.tasks.iter().map(render::task_line).collect();
         if lines.is_empty() {
             lines.push("no tasks".into());
@@ -415,12 +427,9 @@ impl Board {
         &self,
         Parameters(args): Parameters<GetArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let task = blocking(&self.board, move |board| {
-            board.get(args.id).map_err(|e| e.to_string())
-        })
-        .await
-        .map_err(err)?
-        .ok_or_else(|| err(format!("task T{} does not exist", args.id)))?;
+        let task = blocking(&self.board, move |board| board.get(args.id))
+            .await?
+            .ok_or_else(|| err(format!("task T{} does not exist", args.id)))?;
         Ok(text(render::task_record(&task, args.full)))
     }
 
@@ -433,11 +442,7 @@ impl Board {
         &self,
         Parameters(args): Parameters<EpicArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let epic = blocking(&self.board, move |board| {
-            board.epic(args.id).map_err(|e| e.to_string())
-        })
-        .await
-        .map_err(err)?;
+        let epic = blocking(&self.board, move |board| board.epic(args.id)).await?;
         Ok(text(render::epic_text(&epic)))
     }
 
@@ -447,7 +452,7 @@ impl Board {
     )]
     async fn task_update(
         &self,
-        Parameters(mut args): Parameters<UpdateArgs>,
+        Parameters(args): Parameters<UpdateArgs>,
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
         let scope = request_scope(&extensions);
@@ -456,66 +461,12 @@ impl Board {
             Some(raw) => Some(Status::parse(raw).map_err(|e| err(e.to_string()))?),
             None => None,
         };
-        if args.assignee.is_some() && args.clear_assignee {
-            return Err(err("choose assignee or clear_assignee, not both".into()));
-        }
-        if args.parent.is_some() && args.clear_parent {
-            return Err(err("choose parent or clear_parent, not both".into()));
-        }
-        if args.project.is_some() && args.clear_project {
-            return Err(err("choose project or clear_project, not both".into()));
-        }
-        if args.release && (status.is_some() || args.assignee.is_some() || args.clear_assignee) {
-            return Err(err(
-                "choose release or status/assignee/clear_assignee, not both".into(),
-            ));
-        }
-        // A release writes the row itself; a field flag beside it would be read
-        // and discarded, so name the conflict instead of dropping the argument.
-        if args.release
-            && (args.title.is_some()
-                || args.description.is_some()
-                || args.goal.is_some()
-                || args.analyst_report.is_some()
-                || args.coder_report.is_some()
-                || args.reviewer_report.is_some()
-                || args.priority.is_some()
-                || args.parent.is_some()
-                || args.clear_parent
-                || args.project.is_some()
-                || args.clear_project)
-        {
-            return Err(err("choose release or a field change, not both".into()));
-        }
-        if args.release {
-            // Taken, not borrowed: the closure below owns what it sends, and the
-            // field path that follows is unreachable once `release` is set.
-            let reason = args.reason.take();
-            let comment = args.comment.take();
-            let (released, cursor) = blocking(&self.board, move |board| {
-                let released = board
-                    .release(ReleaseInput {
-                        id: args.id,
-                        actor: &actor,
-                        expected_revision: args.if_revision,
-                        force: args.force,
-                        force_reason: reason.as_deref(),
-                        comment: comment.as_deref(),
-                        now_ms: now_ms(),
-                    })
-                    .map_err(|e| e.to_string())?;
-                let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
-                let cursor = format!("{instance}:{}", released.event.seq);
-                Ok((released, cursor))
-            })
-            .await
-            .map_err(err)?;
-            return Ok(text(format!(
-                "ok\n{}\ncursor {}",
-                render::task_record(&released.task, false),
-                cursor
-            )));
-        }
+        let assignee = crate::domain::set_or_clear("assignee", args.assignee, args.clear_assignee)
+            .map_err(|error| err(error.to_string()))?;
+        let parent = crate::domain::set_or_clear("parent", args.parent, args.clear_parent)
+            .map_err(|error| err(error.to_string()))?;
+        let project = crate::domain::set_or_clear("project", args.project, args.clear_project)
+            .map_err(|error| err(error.to_string()))?;
         let patch = TaskPatch {
             title: args.title,
             description: args.description,
@@ -526,42 +477,28 @@ impl Board {
             replace_reports: args.replace_report,
             status,
             priority: args.priority,
-            assignee: if args.clear_assignee {
-                Some(None)
-            } else {
-                args.assignee.map(Some)
-            },
-            parent_id: if args.clear_parent {
-                Some(None)
-            } else {
-                args.parent.map(Some)
-            },
-            project_id: if args.clear_project {
-                Some(None)
-            } else {
-                args.project.map(Some)
-            },
+            assignee,
+            parent_id: parent,
+            project_id: project,
         };
-        let (updated, cursor) = blocking(&self.board, move |board| {
-            let updated = board
-                .update(UpdateInput {
-                    id: args.id,
-                    actor: &actor,
-                    expected_revision: args.if_revision,
-                    patch: &patch,
-                    force: args.force,
-                    force_reason: args.reason.as_deref(),
-                    new_actor: args.new_actor,
-                    comment: args.comment.as_deref(),
-                    now_ms: now_ms(),
-                })
-                .map_err(|e| e.to_string())?;
-            let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
+        let (updated, cursor) = blocking(&self.board, move |board| -> crate::store::Result<_> {
+            let updated = board.update(UpdateInput {
+                id: args.id,
+                actor: &actor,
+                expected_revision: args.if_revision,
+                patch: &patch,
+                release: args.release,
+                force: args.force,
+                force_reason: args.reason.as_deref(),
+                new_actor: args.new_actor,
+                comment: args.comment.as_deref(),
+                now_ms: now_ms(),
+            })?;
+            let instance = board.metadata()?.instance_id;
             let cursor = format!("{instance}:{}", updated.event.seq);
             Ok((updated, cursor))
         })
-        .await
-        .map_err(err)?;
+        .await?;
         Ok(text(format!(
             "ok\n{}\ncursor {}",
             render::task_record(&updated.task, false),
@@ -581,12 +518,9 @@ impl Board {
         let scope = request_scope(&extensions);
         let actor = self.actor_name(scope.as_ref()).map_err(err)?;
         let outcome = blocking(&self.board, move |board| {
-            board
-                .claim(&actor, args.id, now_ms())
-                .map_err(|e| e.to_string())
+            board.claim(&actor, args.id, now_ms())
         })
-        .await
-        .map_err(err)?;
+        .await?;
         if matches!(outcome, ClaimOutcome::NoWork) {
             return Ok(text("no ready tasks".into()));
         }
@@ -604,15 +538,12 @@ impl Board {
     ) -> Result<CallToolResult, ErrorData> {
         let scope = request_scope(&extensions);
         let actor = self.actor_name(scope.as_ref()).map_err(err)?;
-        let cursor = blocking(&self.board, move |board| {
-            let event = board
-                .comment(&actor, args.id, &args.body, now_ms())
-                .map_err(|e| e.to_string())?;
-            let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
+        let cursor = blocking(&self.board, move |board| -> crate::store::Result<_> {
+            let event = board.comment(&actor, args.id, &args.body, now_ms())?;
+            let instance = board.metadata()?.instance_id;
             Ok(format!("{instance}:{}", event.seq))
         })
-        .await
-        .map_err(err)?;
+        .await?;
         Ok(text(format!("ok\ncursor {cursor}")))
     }
 
@@ -646,14 +577,12 @@ impl Board {
                 after: after.as_deref(),
                 limit: limit.unwrap_or(50),
             };
-            let page = match wait {
+            match wait {
                 Some(seconds) if seconds > 0 => board.wait(&filter, seconds.saturating_mul(1000)),
                 _ => board.feed(&filter),
-            };
-            page.map_err(|e| e.to_string())
+            }
         })
-        .await
-        .map_err(err)?;
+        .await?;
         Ok(text(render::feed_page(&page, full)))
     }
 
@@ -670,12 +599,9 @@ impl Board {
         let scope = request_scope(&extensions);
         let brief = blocking(&self.board, move |board| {
             let project = call_project(board, args.project, scope.as_ref())?;
-            board
-                .brief_for_project(10, project)
-                .map_err(|e| e.to_string())
+            board.brief_for_project(10, project)
         })
-        .await
-        .map_err(err)?;
+        .await?;
         Ok(text(render::brief_text(&brief)))
     }
 
@@ -685,11 +611,7 @@ impl Board {
         annotations(read_only_hint = true)
     )]
     async fn board_agents(&self) -> Result<CallToolResult, ErrorData> {
-        let agents = blocking(&self.board, move |board| {
-            board.agents().map_err(|e| e.to_string())
-        })
-        .await
-        .map_err(err)?;
+        let agents = blocking(&self.board, move |board| board.agents()).await?;
         if agents.is_empty() {
             return Ok(text("no actors".into()));
         }
@@ -706,13 +628,7 @@ impl Board {
         &self,
         Parameters(args): Parameters<ProjectDeleteArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let project = blocking(&self.board, move |board| {
-            board
-                .delete_project(args.id)
-                .map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(err)?;
+        let project = blocking(&self.board, move |board| board.delete_project(args.id)).await?;
         Ok(text(render::deleted_project(&project)))
     }
 
@@ -725,13 +641,7 @@ impl Board {
         &self,
         Parameters(args): Parameters<AgentDeleteArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let agent = blocking(&self.board, move |board| {
-            board
-                .delete_agent(&args.name)
-                .map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(err)?;
+        let agent = blocking(&self.board, move |board| board.delete_agent(&args.name)).await?;
         Ok(text(render::deleted_agent(&agent)))
     }
 }

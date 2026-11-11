@@ -143,6 +143,8 @@ would remove the DNS-rebinding protection.
 
 ### 4. Every MCP failure is "invalid params"
 
+**Status: done** in T303: store errors stay typed to the adapter, which maps refusals to `-32602` and faults to `-32603`.
+
 `server.rs` turns every store error into a string and then into
 `ErrorData::invalid_params` (`src/server.rs:86`). That is right for a refusal, and
 `PROTOCOL.md` says so. It is wrong for an I/O error, a full map, a corrupt record
@@ -358,6 +360,8 @@ case). Seat cards then never need the variable.
 ## Code structure
 
 ### 12. Argument-conflict rules live in both adapters
+
+**Status: done** in T303: one store update entry point handles release conflicts, while shared patch helpers cover empty and set/clear rules.
 
 `AGENTS.md` says to put behaviour in the store "so a rule exists once". These
 rules are written twice, once per adapter, with slightly different wording:

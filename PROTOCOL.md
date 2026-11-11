@@ -296,6 +296,9 @@ Every refusal is one line with a stable prefix. Over MCP a refusal is a JSON-RPC
 (`-32602`, invalid params) whose message is the same text; a tool result is never
 `isError: true`. The CLI prints `agentboard: <text>` and exits `1`. Samples:
 
+A server fault (I/O, full map, corrupt record, or panicked blocking task) is a
+JSON-RPC error `-32603` with the store's text; the CLI also exits `1`.
+
 ```
 actor required: pass --actor or set AGENTBOARD_ACTOR (names are board addresses)
 unknown task status: "queued"
@@ -304,6 +307,7 @@ task is held by alice; --force with a reason takes it, or --release --force with
 forced update requires a reason
 force reason requires force=true
 task update has no field changes
+choose release or a field change, not both
 task T7 is done; nothing to release
 task T7 has no holder to release
 unknown assignee "nobody"; use new_actor=true to register the target

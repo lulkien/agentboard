@@ -95,6 +95,8 @@ pub enum Error {
     Json(serde_json::Error),
     Domain(domain::Error),
     InvalidMapSize(String),
+    InvalidProjectEnv(String),
+    ReleaseWithFieldChange,
     MapSizeMismatch {
         configured_mb: usize,
         stored_mb: usize,
@@ -163,6 +165,8 @@ impl std::fmt::Display for Error {
             Self::Json(error) => write!(f, "invalid board JSON: {error}"),
             Self::Domain(error) => write!(f, "{error}"),
             Self::InvalidMapSize(raw) => write!(f, "invalid AGENTBOARD_MAP_SIZE_MB: {raw}"),
+            Self::InvalidProjectEnv(raw) => write!(f, "AGENTBOARD_PROJECT must be a numeric project id, got {raw:?}"),
+            Self::ReleaseWithFieldChange => f.write_str("choose release or a field change, not both"),
             Self::MapSizeMismatch { configured_mb, stored_mb } => write!(f, "AGENTBOARD_MAP_SIZE_MB mismatch: configured {configured_mb} MiB, board uses {stored_mb} MiB"),
             Self::EnvironmentAlreadyOpen => f.write_str("LMDB environment already open in this process; reuse its Board handle"),
             Self::MapFull => f.write_str("LMDB map full; set AGENTBOARD_MAP_SIZE_MB for a fresh board or reset this disposable board with a larger size"),
@@ -210,6 +214,53 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl Error {
+    pub fn is_refusal(&self) -> bool {
+        match self {
+            Self::Io(_)
+            | Self::Lmdb(_)
+            | Self::Json(_)
+            | Self::InvalidMapSize(_)
+            | Self::MapSizeMismatch { .. }
+            | Self::EnvironmentAlreadyOpen
+            | Self::MapFull
+            | Self::ReadersFull
+            | Self::FormatMismatch { .. }
+            | Self::Unstamped
+            | Self::ForeignBoard
+            | Self::UnknownEntry(_)
+            | Self::Corrupt(_)
+            | Self::CounterOverflow
+            | Self::ResetBusy
+            | Self::UnsafePath(_)
+            | Self::Domain(domain::Error::RevisionOverflow) => false,
+            Self::Domain(_)
+            | Self::InvalidProjectEnv(_)
+            | Self::ReleaseWithFieldChange
+            | Self::EmptyComment
+            | Self::CommentOnlyDiscardedOptions
+            | Self::InvalidCursor(_)
+            | Self::CursorInstanceMismatch
+            | Self::WaitWithoutStatus
+            | Self::WaitWithoutTask
+            | Self::UnknownAssignee(_)
+            | Self::MissingAgent(_)
+            | Self::AgentHoldsOpenTasks { .. }
+            | Self::MissingTask(_)
+            | Self::MissingProject(_)
+            | Self::ProjectInUse { .. }
+            | Self::NotReleasable { .. }
+            | Self::NoHolder(_)
+            | Self::NotEpic(_)
+            | Self::EpicOpenChildren { .. }
+            | Self::MissingParent(_)
+            | Self::ParentTerminal { .. }
+            | Self::ReopenUnderTerminalParent { .. }
+            | Self::ParentCycle(_) => true,
+        }
+    }
+}
 
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
