@@ -44,7 +44,9 @@ impl Drop for Scratch {
 }
 
 fn options() -> BoardOptions {
-    BoardOptions { map_size_mb: 8 }
+    BoardOptions {
+        map_size_mb: Some(8),
+    }
 }
 
 fn draft(title: &str, status: Status, priority: i32, assignee: Option<&str>) -> NewTask {

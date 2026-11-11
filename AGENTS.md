@@ -36,20 +36,20 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 119 passed; 0 failed; 2 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 122 passed; 0 failed; 2 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `399/399 passed (cli, lmdb)` |
+| `bash tests/cli.sh` | `415/415 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `223/223 passed (mcp, lmdb)` |
 | `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `223/223 passed (mcp-http, lmdb)` |
-| `python3 tests/daemon.py` | `daemon: 326/326 passed (http, lmdb)` (scratch boards, loopback port 0) |
+| `python3 tests/daemon.py` | `daemon: 329/329 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 32/32 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
 | `bash tests/seats-install.sh` | `242/242 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/start-agentboard-manager.sh` | `51/51 passed (manager launcher)` (stub `herdr` and `hc`; no live pane or terminal) |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 153 CLI names, 153 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 161 CLI names, 153 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
@@ -118,8 +118,8 @@ have both adapters call it, so a rule exists once.
 - Give every free-text argv slot `allow_hyphen_values` and numeric slots the same,
   or `add "- dash title"` and `--priority -3` are rejected as flags. `tests/cli.sh`
   exists to catch exactly that.
-- There is no map growth in place: a full map fails the write atomically and names
-  `AGENTBOARD_MAP_SIZE_MB`. Set it before the board is created.
+- A full map fails the write atomically. Stop every client, then use `grow`;
+  `AGENTBOARD_MAP_SIZE_MB` matters only when creating a board.
 - `reset` must take the exclusive lock before it scans for unknown files, or a
   stray file turns disposal into a half-deleted board.
 - A bare sequence cursor (for example `--after 0`) means "this board", so history
@@ -155,7 +155,7 @@ have both adapters call it, so a rule exists once.
 - The daemon's actor and project are per request (`RequestScope` in the request
   extensions): never read `AGENTBOARD_ACTOR`, `AGENTBOARD_PROJECT` or the cwd for an
   HTTP call. `tests/daemon.py` mutation-checks both the guard and the actor read.
-- A resident daemon holds the board's lifetime lock: `reset` and migration refuse
+- A resident daemon holds the board's lifetime lock: `reset`, `grow` and migration refuse
   until it is stopped.
 
 ## Git

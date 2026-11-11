@@ -34,10 +34,10 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
   apart, so they share one identity and the revision guard is the only brake.
 - Every CLI seat and the daemon point at the same `AGENTBOARD_DB`. Different
   directories are different boards that cannot see each other.
-- Stop the daemon before `agentboard reset` or board migration; its lifetime lock
+- Stop the daemon before `agentboard reset`, `agentboard grow` or board migration; its lifetime lock
   makes either operation refuse while it is running. Start it again afterward.
-- The map size is fixed at creation (`AGENTBOARD_MAP_SIZE_MB`, default 1024);
-  there is no growth in place.
+- `AGENTBOARD_MAP_SIZE_MB` (default 1024) sets creation size; stop every client and
+  use `agentboard grow --map-size-mb MB` to enlarge an existing board.
 
 ## The seats
 
@@ -387,7 +387,8 @@ agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 | `board_agent_delete` | remove a roster entry with no open work |
 
 CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `wait`,
-`brief [--project ID]`, `agents`, `path`, `reset --yes`, `serve`. `ls` and `brief`
+`brief [--project ID]`, `agents`, `path`, `reset --yes`,
+`grow --map-size-mb MB`, `serve`. `ls` and `brief`
 scope to the selected project: explicit ID, then `AGENTBOARD_PROJECT`, then a registered
 project path matching the current directory; otherwise they show the whole board.
 Exit codes: `0` ok, `1` refused,

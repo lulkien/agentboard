@@ -32,8 +32,8 @@ with `cc`.
   `$XDG_STATE_HOME/agentboard/lmdb` (`~/.local/state/agentboard/lmdb` by default).
 - Files inside: `data.mdb`, `lock.mdb`, `lifetime.lock`. Anything else makes the
   directory foreign, and the store refuses it by name rather than guessing.
-- Map size: `AGENTBOARD_MAP_SIZE_MB`, default 1024. There is no growth in place; a
-  bigger board means a bigger map before it is created.
+- Map size: `AGENTBOARD_MAP_SIZE_MB`, default 1024, applies when creating a board.
+  Stop every client and run `agentboard grow --map-size-mb MB` to enlarge one.
 - `agentboard reset --yes` discards the board. It refuses while another process,
   including a running daemon, holds it, or when unknown files are present.
 - Board format 2 stores eight named databases, including the board-assigned
@@ -105,6 +105,7 @@ agentboard agents
 agentboard agents delete NAME
 agentboard path
 agentboard reset --yes
+agentboard grow --map-size-mb MB
 agentboard project add --name NAME --path PATH
 agentboard project ls
 agentboard project update ID [--name NAME] [--path PATH]
@@ -202,8 +203,7 @@ process serves every seat and each write is attributed to its URL name. The
 project is the tool argument, else `?project=ID` on the MCP URL, else the whole
 board; the daemon's own environment and working directory are never read. The
 startup line and `GET /api/health` print the resolved board path and instance id. The dashboard footer has an off-by-default **Live update** toggle that polls its `cursor` every 5 s and reloads the page when it moves.
-While it runs it holds the board open, so `reset` and migration refuse until it
-is stopped. See `PROTOCOL.md` for the guard and the stateless mode.
+While it runs it holds the board open, so `reset`, `grow` and migration refuse until it is stopped. See `PROTOCOL.md` for the guard and the stateless mode.
 
 The same port serves a read-only JSON API: `GET /api/board`, `/api/epics`,
 `/api/tasks`, `/api/tasks/ID`, `/api/feed` and `/api/projects`, all accepting

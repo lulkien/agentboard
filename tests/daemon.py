@@ -454,6 +454,11 @@ def main():
         check("unknown MCP query matches API query refusal", 400, daemon.rpc("/mcp/alice?foo=1", "tools/list")[0])
 
         # reset against a resident daemon is the busy refusal.
+        before_grow = int(daemon.call("/mcp/alice", "task_list").split("total ")[1].split()[0])
+        grow = cli(db, "grow", "--map-size-mb", "4096")
+        check("grow against the daemon's board exits 1", 1, grow.returncode)
+        has("grow names the busy refusal", "another client is attached", grow.stderr)
+        check("the board survived the refused grow", before_grow, int(daemon.call("/mcp/alice", "task_list").split("total ")[1].split()[0]))
         reset = cli(db, "reset", "--yes")
         check("reset against the daemon's board exits 1", 1, reset.returncode)
         has("reset names the busy refusal", "another client is attached", reset.stderr)

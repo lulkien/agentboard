@@ -34,7 +34,13 @@ impl Drop for Scratch {
 }
 
 fn board(scratch: &Scratch) -> Board {
-    Board::open_with_options(&scratch.0, BoardOptions { map_size_mb: 8 }).unwrap()
+    Board::open_with_options(
+        &scratch.0,
+        BoardOptions {
+            map_size_mb: Some(8),
+        },
+    )
+    .unwrap()
 }
 
 fn project(board: &Board, name: &str) -> u64 {

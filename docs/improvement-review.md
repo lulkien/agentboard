@@ -355,6 +355,9 @@ the metadata envelope, so the variable carries no information after creation.
 variable only when it is set and disagrees (keep the mismatch refusal for that
 case). Seat cards then never need the variable.
 
+**Status: done in T307.** Existing boards use their stored map size when the
+environment variable is unset; an explicitly mismatched value still refuses.
+
 ---
 
 ## Code structure
@@ -651,6 +654,9 @@ editable in its other fields.
 lifetime lock exactly as `reset` does, refuses while any client is attached,
 refuses a size that is not larger, reopens the environment with the new size and
 rewrites `map_size_mb` in the metadata in one commit. With it:
+
+**Status: done in T307.** `grow` persists the larger LMDB map and metadata size
+under the exclusive lifetime lock while preserving the board instance id.
 
 - Finding 11 lands at the same time: an existing board opens at its stored size,
   and `AGENTBOARD_MAP_SIZE_MB` matters only when a board is created. Otherwise

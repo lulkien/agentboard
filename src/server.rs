@@ -656,8 +656,13 @@ mod tests {
     fn scratch_board(name: &str) -> BoardHandle {
         let path = std::env::temp_dir().join(format!("agentboard-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
-        BoardHandle::open_with_options(&path, crate::store::BoardOptions { map_size_mb: 8 })
-            .expect("scratch board")
+        BoardHandle::open_with_options(
+            &path,
+            crate::store::BoardOptions {
+                map_size_mb: Some(8),
+            },
+        )
+        .expect("scratch board")
     }
 
     #[test]

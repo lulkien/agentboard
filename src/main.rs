@@ -130,6 +130,19 @@ fn run(
                 ExitCode::SUCCESS,
             ))
         }
+        Some(Cmd::Grow { map_size_mb }) => {
+            let outcome = Board::grow(&path, map_size_mb)?;
+            Ok((
+                format!(
+                    "grew {} from {} MiB to {} MiB\nboard instance {}",
+                    outcome.path.display(),
+                    outcome.old_map_size_mb,
+                    outcome.new_map_size_mb,
+                    outcome.instance_id
+                ),
+                ExitCode::SUCCESS,
+            ))
+        }
         Some(Cmd::Add {
             title,
             description,

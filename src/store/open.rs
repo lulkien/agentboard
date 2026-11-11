@@ -26,17 +26,9 @@ const DATABASE_NAMES: [&str; 8] = [
     "projects",
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct BoardOptions {
-    pub map_size_mb: usize,
-}
-
-impl Default for BoardOptions {
-    fn default() -> Self {
-        Self {
-            map_size_mb: DEFAULT_MAP_SIZE_MB,
-        }
-    }
+    pub map_size_mb: Option<usize>,
 }
 
 impl BoardOptions {
@@ -46,7 +38,9 @@ impl BoardOptions {
                 let map_size_mb = raw
                     .parse()
                     .map_err(|_| Error::InvalidMapSize(raw.clone()))?;
-                let options = Self { map_size_mb };
+                let options = Self {
+                    map_size_mb: Some(map_size_mb),
+                };
                 options.map_size_bytes()?;
                 Ok(options)
             }
@@ -56,13 +50,17 @@ impl BoardOptions {
     }
 
     fn map_size_bytes(self) -> Result<usize> {
-        if self.map_size_mb == 0 {
-            return Err(Error::InvalidMapSize(self.map_size_mb.to_string()));
-        }
-        self.map_size_mb
-            .checked_mul(1024 * 1024)
-            .ok_or_else(|| Error::InvalidMapSize(self.map_size_mb.to_string()))
+        mib_to_bytes(self.map_size_mb.unwrap_or(DEFAULT_MAP_SIZE_MB))
     }
+}
+
+fn mib_to_bytes(map_size_mb: usize) -> Result<usize> {
+    if map_size_mb == 0 {
+        return Err(Error::InvalidMapSize(map_size_mb.to_string()));
+    }
+    map_size_mb
+        .checked_mul(1024 * 1024)
+        .ok_or_else(|| Error::InvalidMapSize(map_size_mb.to_string()))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -164,7 +162,12 @@ pub enum Error {
     },
     ParentCycle(u64),
     CounterOverflow,
-    ResetBusy,
+    Busy(&'static str),
+    GrowNotLarger {
+        requested_mb: usize,
+        stored_mb: usize,
+    },
+    MissingBoard(PathBuf),
     UnsafePath(PathBuf),
 }
 
@@ -180,7 +183,7 @@ impl std::fmt::Display for Error {
             Self::ReleaseWithFieldChange => f.write_str("choose release or a field change, not both"),
             Self::MapSizeMismatch { configured_mb, stored_mb } => write!(f, "AGENTBOARD_MAP_SIZE_MB mismatch: configured {configured_mb} MiB, board uses {stored_mb} MiB"),
             Self::EnvironmentAlreadyOpen => f.write_str("LMDB environment already open in this process; reuse its Board handle"),
-            Self::MapFull => f.write_str("LMDB map full; set AGENTBOARD_MAP_SIZE_MB for a fresh board or reset this disposable board with a larger size"),
+            Self::MapFull => f.write_str("LMDB map full; stop every client and run agentboard grow --map-size-mb N with N above the current size (a new board takes its size from AGENTBOARD_MAP_SIZE_MB)"),
             Self::ReadersFull => f.write_str("LMDB reader slots exhausted (limit 256)"),
             Self::FormatMismatch { expected, found, path } if found > expected => write!(f, "board {} has format {found}, but this binary expects {expected}; the binary is older than the board, so upgrade the binary (do not migrate)", path.display()),
             Self::FormatMismatch { expected, found, path } => write!(f, "board {} has format {found}, but this binary expects {expected}; run `uv run --with lmdb python3 scripts/migrate-board.py --db {} --dry-run` to inspect the migration, then repeat without `--dry-run` to apply it", path.display(), path.display()),
@@ -219,7 +222,9 @@ impl std::fmt::Display for Error {
             Self::ReopenUnderTerminalParent { id, parent, status } => write!(f, "parent T{parent} is {}; reopen it before reopening T{id}", status.as_str()),
             Self::ParentCycle(id) => write!(f, "task T{id} parent link would create a cycle"),
             Self::CounterOverflow => f.write_str("board ID counter overflow"),
-            Self::ResetBusy => f.write_str("board reset refused: another client is attached"),
+            Self::Busy(op) => write!(f, "board {op} refused: another client is attached"),
+            Self::GrowNotLarger { requested_mb, stored_mb } => write!(f, "board grow refused: {requested_mb} MiB is not larger than the current {stored_mb} MiB"),
+            Self::MissingBoard(path) => write!(f, "no board at {}; grow needs an existing board", path.display()),
             Self::UnsafePath(path) => write!(f, "board reset refused to follow symlink {}", path.display()),
         }
     }
@@ -245,7 +250,9 @@ impl Error {
             | Self::Corrupt(_)
             | Self::MissingDatabase(_)
             | Self::CounterOverflow
-            | Self::ResetBusy
+            | Self::Busy(_)
+            | Self::GrowNotLarger { .. }
+            | Self::MissingBoard(_)
             | Self::UnsafePath(_)
             | Self::Domain(domain::Error::RevisionOverflow) => false,
             Self::Domain(_)
@@ -337,6 +344,14 @@ pub struct ResetOutcome {
     pub new_instance_id: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GrowOutcome {
+    pub path: PathBuf,
+    pub instance_id: String,
+    pub old_map_size_mb: usize,
+    pub new_map_size_mb: usize,
+}
+
 impl Board {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_options(path, BoardOptions::from_env()?)
@@ -417,6 +432,7 @@ impl Board {
             heed::Error::EnvAlreadyOpened => Error::EnvironmentAlreadyOpen,
             other => Error::from(other),
         })?;
+        let mut stored_map_size_mb = None;
         let (
             meta,
             tasks,
@@ -430,7 +446,7 @@ impl Board {
             let wtxn = env.write_txn()?;
             env.create_databases_and_commit(wtxn, |opener, txn| -> Result<_> {
                 let meta = opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[0]))?;
-                let envelope = Metadata::fresh(options.map_size_mb)?;
+                let envelope = Metadata::fresh(options.map_size_mb.unwrap_or(DEFAULT_MAP_SIZE_MB))?;
                 meta.put(txn, ENVELOPE_KEY, &serde_json::to_vec(&envelope)?)?;
                 let tasks = opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[1]))?;
                 let events =
@@ -465,7 +481,8 @@ impl Board {
                     .ok_or(Error::Unstamped)?;
                 let raw = meta.get(txn, ENVELOPE_KEY)?.ok_or(Error::Unstamped)?;
                 let envelope: Metadata = serde_json::from_slice(raw)?;
-                check_metadata(&envelope, options, &path)?;
+                check_metadata(&envelope, options.map_size_mb, &path)?;
+                stored_map_size_mb = Some(envelope.map_size_mb);
                 let tasks = opener
                     .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[1]))?
                     .ok_or(Error::MissingDatabase(DATABASE_NAMES[1]))?;
@@ -500,7 +517,15 @@ impl Board {
             })?
             .unwrap_commit()
         };
-        if env.info().map_size != options.map_size_bytes()? {
+        let expected = if fresh {
+            options.map_size_bytes()?
+        } else {
+            stored_map_size_mb
+                .ok_or(Error::Unstamped)?
+                .checked_mul(1024 * 1024)
+                .ok_or(Error::Corrupt("map size overflow"))?
+        };
+        if env.info().map_size != expected {
             return Err(Error::Corrupt(
                 "LMDB map size disagrees with board metadata",
             ));
@@ -536,37 +561,19 @@ impl Board {
         if actual_map_mb * 1024 * 1024 != actual_map_size {
             return Err(Error::Corrupt("LMDB map size is not a whole MiB"));
         }
-        check_metadata(
-            &metadata,
-            BoardOptions {
-                map_size_mb: actual_map_mb,
-            },
-            &self.path,
-        )?;
+        check_metadata(&metadata, Some(actual_map_mb), &self.path)?;
         Ok(metadata)
     }
 
     pub fn reset(path: impl AsRef<Path>, options: BoardOptions) -> Result<ResetOutcome> {
         options.map_size_bytes()?;
         let path = prepare_path(path.as_ref())?;
-        let lock = open_lifetime_lock(&path)?;
+        let lock = lock_exclusive(&path, "reset")?;
         // The attached-client refusal wins over a directory complaint, and the
         // directory is re-checked under the exclusive lock so a stray file cannot
         // turn the disposal into a half-deleted board.
         // A client that is closing can hold the lock for a moment; give the
         // exclusive request a short, bounded grace before calling it attached.
-        let mut waited = 0;
-        loop {
-            match lock.try_lock() {
-                Ok(()) => break,
-                Err(fs::TryLockError::WouldBlock) if waited < 20 => {
-                    waited += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(fs::TryLockError::WouldBlock) => return Err(Error::ResetBusy),
-                Err(fs::TryLockError::Error(error)) => return Err(Error::Io(error)),
-            }
-        }
         refuse_unknown_entries(&path)?;
         let old_instance_id = inspect_for_reset(&path)?;
         for name in ["data.mdb", "lock.mdb"] {
@@ -587,6 +594,57 @@ impl Board {
             new_instance_id,
         })
     }
+
+    pub fn grow(path: impl AsRef<Path>, map_size_mb: usize) -> Result<GrowOutcome> {
+        let bytes = mib_to_bytes(map_size_mb)?;
+        let input = path.as_ref();
+        if !input.join("data.mdb").exists() {
+            return Err(Error::MissingBoard(input.to_owned()));
+        }
+        let path = prepare_path(input)?;
+        let lock = lock_exclusive(&path, "grow")?;
+        let board = Self::open_locked(path.clone(), BoardOptions { map_size_mb: None }, lock)?;
+        let old = board.metadata()?;
+        if map_size_mb <= old.map_size_mb {
+            return Err(Error::GrowNotLarger {
+                requested_mb: map_size_mb,
+                stored_mb: old.map_size_mb,
+            });
+        }
+        // SAFETY: no transaction is open and the exclusive lifetime lock prevents other mappings.
+        unsafe {
+            board.env.resize(bytes)?;
+        }
+        let read = read_txn(&board.env)?;
+        let mut metadata = read_metadata(board.meta, &read)?;
+        drop(read);
+        let mut txn = board.env.write_txn()?;
+        metadata.map_size_mb = map_size_mb;
+        write_metadata(board.meta, &mut txn, &metadata)?;
+        txn.commit()?;
+        board.metadata()?;
+        Ok(GrowOutcome {
+            path,
+            instance_id: old.instance_id,
+            old_map_size_mb: old.map_size_mb,
+            new_map_size_mb: map_size_mb,
+        })
+    }
+}
+
+fn lock_exclusive(path: &Path, operation: &'static str) -> Result<File> {
+    let lock = open_lifetime_lock(path)?;
+    for waited in 0..=20 {
+        match lock.try_lock() {
+            Ok(()) => return Ok(lock),
+            Err(fs::TryLockError::WouldBlock) if waited < 20 => {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
+            Err(fs::TryLockError::WouldBlock) => return Err(Error::Busy(operation)),
+            Err(fs::TryLockError::Error(error)) => return Err(Error::Io(error)),
+        }
+    }
+    unreachable!()
 }
 
 pub(super) fn read_metadata(db: Db, txn: &ReadTxn<'_>) -> Result<Metadata> {
@@ -601,7 +659,7 @@ pub(super) fn write_metadata(db: Db, txn: &mut heed::RwTxn<'_>, metadata: &Metad
     Ok(())
 }
 
-fn check_metadata(metadata: &Metadata, options: BoardOptions, path: &Path) -> Result<()> {
+fn check_metadata(metadata: &Metadata, configured: Option<usize>, path: &Path) -> Result<()> {
     if metadata.application != APPLICATION {
         return Err(Error::ForeignBoard);
     }
@@ -612,9 +670,9 @@ fn check_metadata(metadata: &Metadata, options: BoardOptions, path: &Path) -> Re
             path: path.to_owned(),
         });
     }
-    if metadata.map_size_mb != options.map_size_mb {
+    if let Some(configured_mb) = configured.filter(|n| *n != metadata.map_size_mb) {
         return Err(Error::MapSizeMismatch {
-            configured_mb: options.map_size_mb,
+            configured_mb,
             stored_mb: metadata.map_size_mb,
         });
     }

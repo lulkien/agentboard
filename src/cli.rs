@@ -248,6 +248,11 @@ pub enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Grow the board's map; needs every other client stopped
+    Grow {
+        #[arg(long = "map-size-mb", value_name = "MB")]
+        map_size_mb: usize,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -42,7 +42,80 @@ impl Drop for Scratch {
 }
 
 fn options() -> BoardOptions {
-    BoardOptions { map_size_mb: 8 }
+    BoardOptions {
+        map_size_mb: Some(8),
+    }
+}
+
+#[test]
+fn existing_board_opens_at_stored_size_without_a_configured_size() {
+    let scratch = Scratch::new();
+    drop(
+        Board::open_with_options(
+            scratch.path(),
+            BoardOptions {
+                map_size_mb: Some(16),
+            },
+        )
+        .unwrap(),
+    );
+    let board = Board::open_with_options(scratch.path(), BoardOptions::default()).unwrap();
+    assert_eq!(board.metadata().unwrap().map_size_mb, 16);
+    assert_eq!(board.env.info().map_size, 16 * 1024 * 1024);
+}
+
+#[test]
+fn grow_persists_size_keeps_instance_and_refuses_non_growth() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(
+        scratch.path(),
+        BoardOptions {
+            map_size_mb: Some(1),
+        },
+    )
+    .unwrap();
+    let instance = board.metadata().unwrap().instance_id;
+    let task = board.add("manager", draft(None), false, 1).unwrap().task;
+    drop(board);
+    assert!(matches!(
+        Board::grow(scratch.path(), 1),
+        Err(Error::GrowNotLarger { .. })
+    ));
+    let outcome = Board::grow(scratch.path(), 8).unwrap();
+    assert_eq!(outcome.instance_id, instance);
+    let board = Board::open_with_options(scratch.path(), BoardOptions::default()).unwrap();
+    assert_eq!(board.metadata().unwrap().map_size_mb, 8);
+    assert_eq!(
+        board.get(task.id).unwrap().unwrap().title,
+        "Prepare a patch"
+    );
+}
+
+#[test]
+fn grow_refuses_invalid_missing_and_attached_boards_without_mutation() {
+    let scratch = Scratch::new();
+    assert!(matches!(
+        Board::grow(scratch.path(), 0),
+        Err(Error::InvalidMapSize(_))
+    ));
+    assert!(matches!(
+        Board::grow(scratch.path(), 8),
+        Err(Error::MissingBoard(_))
+    ));
+    assert!(!scratch.path().join("data.mdb").exists());
+
+    let board = Board::open_with_options(
+        scratch.path(),
+        BoardOptions {
+            map_size_mb: Some(1),
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        Board::grow(scratch.path(), 2),
+        Err(Error::Busy("grow"))
+    ));
+    assert_eq!(board.metadata().unwrap().map_size_mb, 1);
 }
 
 #[cfg(target_os = "linux")]
@@ -725,7 +798,12 @@ fn format_and_map_size_refuse_before_any_task_decode() {
     board.add("manager", draft(None), false, 0).unwrap();
     drop(board);
     assert!(matches!(
-        Board::open_with_options(scratch.path(), BoardOptions { map_size_mb: 16 }),
+        Board::open_with_options(
+            scratch.path(),
+            BoardOptions {
+                map_size_mb: Some(16)
+            }
+        ),
         Err(Error::MapSizeMismatch {
             configured_mb: 16,
             stored_mb: 8
@@ -767,7 +845,7 @@ fn reset_refuses_attached_board_and_retries_interrupted_disposal() {
     board.add("manager", draft(None), false, 0).unwrap();
     assert!(matches!(
         Board::reset(scratch.path(), options()),
-        Err(Error::ResetBusy)
+        Err(Error::Busy("reset"))
     ));
     assert!(board.get(1).unwrap().is_some());
     drop(board);
@@ -887,7 +965,7 @@ fn reset_is_excluded_by_another_process() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(matches!(refused, Some(Err(Error::ResetBusy))));
+    assert!(matches!(refused, Some(Err(Error::Busy("reset")))));
     let board = Board::open_with_options(&board_path, options()).unwrap();
     assert!(board.get(1).unwrap().is_some());
     drop(board);
@@ -944,7 +1022,11 @@ fn opening_board_reclaims_reader_slots_from_killed_processes() {
                 break;
             }
             if let Some(status) = child.try_wait().unwrap() {
-                panic!("reader {reader} exited before reading the board: {status}");
+                let output = child.wait_with_output().unwrap();
+                panic!(
+                    "reader {reader} exited before reading the board: {status}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
@@ -1038,7 +1120,9 @@ fn killed_reader_worker() {
 #[test]
 fn full_map_aborts_write_and_preserves_prior_rows() {
     let scratch = Scratch::new();
-    let options = BoardOptions { map_size_mb: 1 };
+    let options = BoardOptions {
+        map_size_mb: Some(1),
+    };
     let board = Board::open_with_options(scratch.path(), options).unwrap();
     board.add("manager", draft(None), false, 0).unwrap();
     let mut full = false;
@@ -1052,6 +1136,7 @@ fn full_map_aborts_write_and_preserves_prior_rows() {
             Err(error) => {
                 assert!(matches!(error, Error::MapFull));
                 assert!(error.to_string().contains("AGENTBOARD_MAP_SIZE_MB"));
+                assert!(error.to_string().contains("agentboard grow"));
                 assert!(!error.is_refusal());
                 full = true;
                 break;
@@ -1713,7 +1798,7 @@ fn reset_refuses_unknown_directory_entry_and_preserves_the_board() {
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
     let outcome = Board::reset(scratch.path(), options());
     assert!(
-        matches!(outcome, Err(Error::ResetBusy)),
+        matches!(outcome, Err(Error::Busy("reset"))),
         "expected ResetBusy, got {outcome:?}"
     );
     assert_eq!(board.get(1).unwrap().unwrap().title, "Prepare a patch");

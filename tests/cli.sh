@@ -761,5 +761,41 @@ lacks "D1 feed omits description A" D1_A_ "$out"
 lacks "D1 feed omits description B" D1_B_ "$out"
 check "D1 feed includes created plus 200 updates" 201 "$(printf '%s\n' "$out" | rtk rg -c 'T1')"
 
+# --- grow (D3, finding 11) -----------------------------------------------
+fresh grow
+AGENTBOARD_MAP_SIZE_MB=1 "$B" add seed >/dev/null
+big=$(python3 -c 'print("x" * 32768)')
+full=0
+for i in {1..32}; do
+  out=$("$B" add "map filler $i" --description "$big" --goal "$big" 2>&1); code=$?
+  if (( code != 0 )); then full=1; break; fi
+done
+check "small map refuses a write" 1 "$full"
+has "map-full advice names grow" "agentboard grow" "$out"
+has "map-full advice keeps creation variable" "AGENTBOARD_MAP_SIZE_MB" "$out"
+cursor=$("$B" feed | rtk rg '^cursor ' | sed 's/^cursor //')
+out=$("$B" grow --map-size-mb 1 2>&1); code=$?
+check "equal grow refuses" 1 "$code"
+has "equal grow explains size refusal" "not larger" "$out"
+out=$("$B" grow --map-size-mb 0 2>&1); code=$?
+check "zero grow refuses" 1 "$code"
+out=$("$B" --db "$S/no-board" grow --map-size-mb 8 2>&1); code=$?
+check "missing board grow refuses" 1 "$code"
+has "missing board grow names path" "no board at" "$out"
+[ ! -e "$S/no-board/data.mdb" ] && ok || bad "missing-board grow created an LMDB board"
+out=$("$B" grow --map-size-mb 8)
+has "grow enlarges the map" "from 1 MiB to 8 MiB" "$out"
+"$B" add "map filler after grow" --description "$big" --goal "$big" >/dev/null || bad "write after grow failed"
+out=$("$B" feed --after "$cursor")
+code=$?
+check "pre-grow cursor still belongs to the board" 0 "$code"
+check "pre-grow cursor sees post-grow event" 1 "$(printf '%s\n' "$out" | rtk rg -c '^[0-9]+ ')"
+has "stored row opens with variable unset" "seed" "$("$B" get 1)"
+out=$(AGENTBOARD_MAP_SIZE_MB=1 "$B" ls 2>&1); code=$?
+check "disagreeing explicit size refuses" 1 "$code"
+has "explicit size mismatch remains clear" "mismatch" "$out"
+out=$(AGENTBOARD_MAP_SIZE_MB=8 "$B" ls 2>&1); code=$?
+check "matching explicit size opens" 0 "$code"
+
 echo "$pass/$n passed (cli, lmdb)"
 [ "$fail" -eq 0 ]
