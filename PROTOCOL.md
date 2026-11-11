@@ -224,8 +224,10 @@ Answers `ok`, the record and `cursor <instance>:<seq>`. Rules, each with its own
 
 With no id, claims the first eligible task in `(priority, id)` order and answers the
 work order, or `no ready tasks` when nothing is eligible. With an id, claims that
-task and refuses `held by NAME` when another actor holds it, `not claimable` when
-its status cannot be claimed. Claiming a `todo` row assigned to you starts the work:
+task and refuses `held by NAME` when another actor holds it, or `<status> cannot be
+claimed` (for example `blocked cannot be claimed`) when its status does not allow a
+claim. Either refusal is an error (CLI exit 1, MCP `-32602`), never an `ok` answer.
+Claiming a `todo` row assigned to you starts the work:
 it becomes `implementing`, the revision moves and a `claimed` event lands. Claiming a row
 you already hold in `implementing` or `reviewing` changes nothing and appends no event.
 
