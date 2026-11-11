@@ -411,6 +411,8 @@ reason") or let the adapter supply the argument spelling.
 
 ### 15. Tool metadata is thinner than it needs to be
 
+**Status: done** in T304.
+
 `tools/list` returns no annotations on any of the twelve tools, and most
 arguments have no description:
 

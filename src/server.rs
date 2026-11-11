@@ -129,6 +129,7 @@ pub struct AddArgs {
     /// todo | planning | implementing | blocked | reviewing | done | canceled
     #[serde(default)]
     pub status: Option<String>,
+    #[schemars(description = "Lower values run first.")]
     #[serde(default)]
     pub priority: Option<i32>,
     #[serde(default)]
@@ -216,6 +217,7 @@ pub struct UpdateArgs {
     pub replace_report: bool,
     #[serde(default)]
     pub status: Option<String>,
+    #[schemars(description = "Lower values run first.")]
     #[serde(default)]
     pub priority: Option<i32>,
     #[serde(default)]
@@ -259,8 +261,10 @@ pub struct CommentArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FeedArgs {
+    #[schemars(description = "Event cursor as <instance>:<seq>; 0 replays history.")]
     #[serde(default)]
     pub after: Option<String>,
+    #[schemars(description = "Event kind: created, updated, claimed, or commented.")]
     #[serde(default)]
     pub kind: Option<String>,
     #[serde(default)]
@@ -330,23 +334,27 @@ impl Board {
             parent_id: args.parent,
             project_id: args.project,
         };
-        let added = blocking(&self.board, move |board| {
-            board
+        let (added, cursor) = blocking(&self.board, move |board| {
+            let added = board
                 .add(&actor, input, args.new_actor, now_ms())
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
+            let cursor = format!("{instance}:{}", added.event.seq);
+            Ok((added, cursor))
         })
         .await
         .map_err(err)?;
         Ok(text(format!(
             "ok\n{}\ncursor {}",
             render::task_record(&added.task, false),
-            added.event.seq
+            cursor
         )))
     }
 
     #[tool(
         name = "task_list",
-        description = "List tasks by status, assignee, parent or project"
+        description = "List tasks by status, assignee, parent or project",
+        annotations(read_only_hint = true)
     )]
     async fn task_list(
         &self,
@@ -400,7 +408,8 @@ impl Board {
 
     #[tool(
         name = "task_get",
-        description = "One task with its revision; full text on request"
+        description = "One task with its revision; full text on request",
+        annotations(read_only_hint = true)
     )]
     async fn task_get(
         &self,
@@ -417,7 +426,8 @@ impl Board {
 
     #[tool(
         name = "task_epic",
-        description = "One epic with direct-child status counts and progress"
+        description = "One epic with direct-child status counts and progress",
+        annotations(read_only_hint = true)
     )]
     async fn task_epic(
         &self,
@@ -482,8 +492,8 @@ impl Board {
             // field path that follows is unreachable once `release` is set.
             let reason = args.reason.take();
             let comment = args.comment.take();
-            let released = blocking(&self.board, move |board| {
-                board
+            let (released, cursor) = blocking(&self.board, move |board| {
+                let released = board
                     .release(ReleaseInput {
                         id: args.id,
                         actor: &actor,
@@ -493,14 +503,17 @@ impl Board {
                         comment: comment.as_deref(),
                         now_ms: now_ms(),
                     })
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string())?;
+                let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
+                let cursor = format!("{instance}:{}", released.event.seq);
+                Ok((released, cursor))
             })
             .await
             .map_err(err)?;
             return Ok(text(format!(
                 "ok\n{}\ncursor {}",
                 render::task_record(&released.task, false),
-                released.event.seq
+                cursor
             )));
         }
         let patch = TaskPatch {
@@ -529,8 +542,8 @@ impl Board {
                 args.project.map(Some)
             },
         };
-        let updated = blocking(&self.board, move |board| {
-            board
+        let (updated, cursor) = blocking(&self.board, move |board| {
+            let updated = board
                 .update(UpdateInput {
                     id: args.id,
                     actor: &actor,
@@ -542,14 +555,17 @@ impl Board {
                     comment: args.comment.as_deref(),
                     now_ms: now_ms(),
                 })
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
+            let cursor = format!("{instance}:{}", updated.event.seq);
+            Ok((updated, cursor))
         })
         .await
         .map_err(err)?;
         Ok(text(format!(
             "ok\n{}\ncursor {}",
             render::task_record(&updated.task, false),
-            updated.event.seq
+            cursor
         )))
     }
 
@@ -588,19 +604,22 @@ impl Board {
     ) -> Result<CallToolResult, ErrorData> {
         let scope = request_scope(&extensions);
         let actor = self.actor_name(scope.as_ref()).map_err(err)?;
-        let event = blocking(&self.board, move |board| {
-            board
+        let cursor = blocking(&self.board, move |board| {
+            let event = board
                 .comment(&actor, args.id, &args.body, now_ms())
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            let instance = board.metadata().map_err(|e| e.to_string())?.instance_id;
+            Ok(format!("{instance}:{}", event.seq))
         })
         .await
         .map_err(err)?;
-        Ok(text(format!("ok\ncursor {}", event.seq)))
+        Ok(text(format!("ok\ncursor {cursor}")))
     }
 
     #[tool(
         name = "board_feed",
-        description = "Events after a cursor, filtered by task, kind or recipient; optional wait"
+        description = "Events after a cursor, filtered by task, kind or recipient; optional wait",
+        annotations(read_only_hint = true)
     )]
     async fn board_feed(
         &self,
@@ -640,7 +659,8 @@ impl Board {
 
     #[tool(
         name = "board_brief",
-        description = "Epic progress, unparented active tasks, then counts by status"
+        description = "Epic progress, unparented active tasks, then counts by status",
+        annotations(read_only_hint = true)
     )]
     async fn board_brief(
         &self,
@@ -661,7 +681,8 @@ impl Board {
 
     #[tool(
         name = "board_agents",
-        description = "Registered actor names, newest activity first"
+        description = "Registered actor names, newest activity first",
+        annotations(read_only_hint = true)
     )]
     async fn board_agents(&self) -> Result<CallToolResult, ErrorData> {
         let agents = blocking(&self.board, move |board| {
@@ -678,7 +699,8 @@ impl Board {
 
     #[tool(
         name = "board_project_delete",
-        description = "Delete a project that no task carries"
+        description = "Delete a project that no task carries",
+        annotations(destructive_hint = true)
     )]
     async fn board_project_delete(
         &self,
@@ -696,7 +718,8 @@ impl Board {
 
     #[tool(
         name = "board_agent_delete",
-        description = "Remove a roster name that holds no open task"
+        description = "Remove a roster name that holds no open task",
+        annotations(destructive_hint = true)
     )]
     async fn board_agent_delete(
         &self,

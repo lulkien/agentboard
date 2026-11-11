@@ -95,7 +95,7 @@ asked, and an explicit claim of one refuses by name.
  "parent": 3, "project": 1, "new_actor": false}
 ```
 
-Answers `ok`, the record, and `cursor N` for the created event. Refuses an empty
+Answers `ok`, the record, and `cursor <instance>:<seq>` for the created event. Refuses an empty
 title, a title over 200 characters, an unknown status, a self-parent, and an
 unknown assignee without `new_actor`, and a project id must exist. A direct parent must exist and be nonterminal.
 Creating or newly reparenting under a `done` or `canceled` parent refuses; the
@@ -157,7 +157,7 @@ refuses `task T7 does not exist`. Reads append no events.
  "new_actor": false}
 ```
 
-Answers `ok`, the record and the event cursor. Rules, each with its own refusal:
+Answers `ok`, the record and `cursor <instance>:<seq>`. Rules, each with its own refusal:
 
 - `if_revision` must equal the stored revision, or `stale task revision <given>; current
   revision is <stored>`.
@@ -231,7 +231,7 @@ you already hold in `implementing` or `reviewing` changes nothing and appends no
 {"id": 7, "body": "..."}
 ```
 
-Answers `ok` and the event cursor. The revision does not move. An empty comment
+Answers `ok` and `cursor <instance>:<seq>`. The revision does not move. An empty comment
 refuses.
 
 ### board_feed

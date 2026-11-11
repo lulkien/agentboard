@@ -4,6 +4,7 @@
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -201,13 +202,22 @@ def main():
         names = {tool["name"] for tool in listed["result"]["tools"]}
         check("tools/list is the twelve-tool surface", TOOLS, names)
         check("tools/list has no task_wait", False, "task_wait" in names)
+        tools_by_name = {tool["name"]: tool for tool in listed["result"]["tools"]}
+        read_tools = {"task_list", "task_get", "task_epic", "board_feed", "board_brief", "board_agents"}
+        delete_tools = {"board_project_delete", "board_agent_delete"}
+        check("read-only tool annotations", read_tools, {name for name, tool in tools_by_name.items() if tool.get("annotations", {}).get("readOnlyHint") is True})
+        check("destructive tool annotations", delete_tools, {name for name, tool in tools_by_name.items() if tool.get("annotations", {}).get("destructiveHint") is True})
+        check("priority argument description", True, "lower" in tools_by_name["task_add"]["inputSchema"]["properties"]["priority"]["description"].lower())
+        check("after argument description", True, "instance" in tools_by_name["board_feed"]["inputSchema"]["properties"]["after"]["description"] and "0" in tools_by_name["board_feed"]["inputSchema"]["properties"]["after"]["description"])
+        check("kind argument values", True, all(value in tools_by_name["board_feed"]["inputSchema"]["properties"]["kind"]["description"] for value in ("created", "updated", "claimed", "commented")))
         reply = server.send("tools/call", {"name": "task_wait", "arguments": {"ids": [1]}})
         check("task_wait call is refused", True, "error" in reply or bool(reply["result"].get("isError")))
 
         is_error, body = server.call("task_add", {"title": "mcp task", "description": "full text here"})
         check("task_add is not an error", False, is_error)
         has("task_add returns the record", "T1 todo", body)
-        has("task_add returns a cursor", "cursor 1", body)
+        cursor_match = re.search(r"cursor ([0-9a-f]+:[0-9]+)", body)
+        check("task_add returns an instance cursor", True, cursor_match is not None)
 
         is_error, body = server.call("task_list")
         check("task_list is not an error", False, is_error)
@@ -227,6 +237,7 @@ def main():
 
         is_error, body = server.call("task_comment", {"id": 1, "body": "notes from mcp"})
         has("task_comment acknowledges", "ok", body)
+        check("task_comment returns an instance cursor", True, re.search(r"cursor [0-9a-f]+:[0-9]+", body) is not None)
 
         is_error, body = server.call("board_feed", {"kind": "commented"})
         has("board_feed finds the comment", "notes from mcp", body)
@@ -242,7 +253,11 @@ def main():
         check("stale revision is an error", True, is_error)
         has("stale revision names the numbers", "stale task revision 1", body)
 
-        is_error, body = server.call("task_update", {"id": 1, "if_revision": 2, "force": True, "title": "x"})
+        is_error, body = server.call("task_update", {"id": 1, "if_revision": 2, "title": "updated"})
+        check("task_update returns an instance cursor", False, is_error)
+        check("task_update cursor has instance shape", True, re.search(r"cursor [0-9a-f]+:[0-9]+", body) is not None)
+
+        is_error, body = server.call("task_update", {"id": 1, "if_revision": 3, "force": True, "title": "x"})
         check("force without reason is an error", True, is_error)
         has("force without reason asks for one", "reason", body)
 

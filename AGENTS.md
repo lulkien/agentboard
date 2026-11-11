@@ -40,8 +40,8 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` | `380/380 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `201/201 passed (mcp, lmdb)` |
-| `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `201/201 passed (mcp-http, lmdb)` |
+| `python3 tests/mcp_client.py` | `209/209 passed (mcp, lmdb)` |
+| `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `209/209 passed (mcp-http, lmdb)` |
 | `python3 tests/daemon.py` | `daemon: 325/325 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 32/32 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
