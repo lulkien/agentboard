@@ -92,6 +92,9 @@ impl Board {
     }
 
     pub fn update(&self, input: UpdateInput<'_>) -> Result<Updated> {
+        if let Some(comment) = input.comment {
+            domain::check_len("comment", comment, domain::MAX_TEXT_CHARS)?;
+        }
         if input.release {
             if !input.patch.is_empty() {
                 return Err(Error::ReleaseWithFieldChange);
@@ -604,6 +607,7 @@ impl Board {
         if text.trim().is_empty() {
             return Err(Error::EmptyComment);
         }
+        domain::check_len("comment", text, domain::MAX_TEXT_CHARS)?;
         let mut txn = self.env.write_txn()?;
         let mut metadata = self.checked_metadata(&txn)?;
         if self.tasks.get(&txn, &keys::task(id))?.is_none() {

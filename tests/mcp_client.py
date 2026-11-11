@@ -220,6 +220,12 @@ def main():
         has("task_add returns the record", "T1 todo", body)
         cursor_match = re.search(r"cursor ([0-9a-f]+:[0-9]+)", body)
         check("task_add returns an instance cursor", True, cursor_match is not None)
+        is_error, body = server.call("task_add", {"title": "oversize", "description": "d" * 32769})
+        check("oversized description uses invalid params", True, is_error)
+        has("oversized description names size and limit", "description is 32769 characters; the limit is 32768", body)
+        is_error, body = server.call("task_comment", {"id": 1, "body": "c" * 32769})
+        check("oversized comment uses invalid params", True, is_error)
+        has("oversized comment names size and limit", "comment is 32769 characters; the limit is 32768", body)
 
         is_error, body = server.call("task_list")
         check("task_list is not an error", False, is_error)
@@ -582,11 +588,14 @@ def main():
         with Server(os.path.join(scratch, "typed-errors"), "manager", extra_env=fault_env) as faults:
             faults.start()
             faults.call("task_add", {"title": "survives store fault"})
+            reply = faults.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 1, "coder_report": "r" * (262 * 1024 + 1)}})
+            check("oversized report uses invalid params", -32602, reply.get("error", {}).get("code"))
+            has("oversized report names its limit", "coder_report is 268289 characters; the limit is 262144", reply.get("error", {}).get("message", ""))
             reply = faults.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 0, "title": "stale"}})
             check("store refusal uses invalid params", -32602, reply.get("error", {}).get("code"))
             error = None
             for index in range(16):
-                reply = faults.send("tools/call", {"name": "task_add", "arguments": {"title": f"fills map {index}", "description": "x" * (256 * 1024)}})
+                reply = faults.send("tools/call", {"name": "task_add", "arguments": {"title": f"fills map {index}", "description": "界" * 32768, "goal": "界" * 32768}})
                 if "error" in reply:
                     error = reply["error"]
                     break

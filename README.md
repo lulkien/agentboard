@@ -136,6 +136,10 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   `--title`, `--description`, `--goal`, `--priority`, `--parent`, `--clear-parent`,
   `--project`, `--clear-project` or a report flag beside it refuses; pick one or the other.
 - `comment` appends an event and never moves the revision.
+- Text writes limit descriptions, goals, comments, force reasons and update
+  comments to 32,768 characters each, and each report to 262,144 characters total.
+  Counts use Unicode characters; existing oversized values remain readable and
+  can be edited through other fields.
 - `epic` shows a task's direct-child status counts and done/total progress. Epics
   are derived from parent links; any task with children is an epic, including a
   nested or closed task. Closing an epic as `done` or `canceled` requires every

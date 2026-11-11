@@ -612,6 +612,9 @@ character counts, and the task timeline renders those size pairs.
 
 ### D2. Text gets size limits, enforced on write only
 
+**Status: done** in T306: descriptions, goals, comments, force reasons, update
+comments and reports are bounded on write; oversized stored rows remain readable.
+
 **Decision.** Limits in characters, counted the way the title limit is:
 
 | Field | Limit |

@@ -14,6 +14,17 @@ pub fn now_ms() -> i64 {
 
 pub const MAX_ACTOR_CHARS: usize = 64;
 pub const MAX_TITLE_CHARS: usize = 200;
+pub const MAX_TEXT_CHARS: usize = 32_768;
+pub const MAX_REPORT_CHARS: usize = 262_144;
+
+pub fn check_len(field: &'static str, text: &str, limit: usize) -> Result<(), Error> {
+    let size = text.chars().count();
+    if size > limit {
+        Err(Error::TooLong { field, size, limit })
+    } else {
+        Ok(())
+    }
+}
 
 /// Joins two report sections. The seat writes its own heading; the board only
 /// separates sections, so a report stays readable without relying on blank lines.
@@ -125,6 +136,11 @@ pub enum Error {
     InvalidAssignee,
     EmptyTitle,
     InvalidTitle,
+    TooLong {
+        field: &'static str,
+        size: usize,
+        limit: usize,
+    },
     UnknownStatus(String),
     EmptyReport,
     SelfParent,
@@ -132,8 +148,13 @@ pub enum Error {
     UnknownProject(u64),
     MissingForceReason,
     ForceReasonWithoutForce,
-    Held { holder: String },
-    StaleRevision { expected: u64, actual: u64 },
+    Held {
+        holder: String,
+    },
+    StaleRevision {
+        expected: u64,
+        actual: u64,
+    },
     NotClaimable(Status),
     ClosedAssignee(Status),
     UnknownEventKind(String),
@@ -160,6 +181,9 @@ impl std::fmt::Display for Error {
                 f,
                 "task title must be trimmed, have no control characters, and be at most {MAX_TITLE_CHARS} characters"
             ),
+            Self::TooLong { field, size, limit } => {
+                write!(f, "{field} is {size} characters; the limit is {limit}")
+            }
             Self::UnknownStatus(value) => write!(f, "unknown task status: {value:?}"),
             Self::EmptyReport => f.write_str("report body must be nonempty when appending"),
             Self::UnknownEventKind(value) => write!(f, "unknown event kind: {value:?}"),
@@ -255,6 +279,8 @@ pub struct NewTask {
 impl Task {
     pub fn new(id: u64, actor: &str, input: NewTask, now_ms: i64) -> Result<Self, Error> {
         validate_actor(actor)?;
+        check_len("description", &input.description, MAX_TEXT_CHARS)?;
+        check_len("goal", &input.goal, MAX_TEXT_CHARS)?;
         let task = Self {
             id,
             title: input.title,
@@ -373,6 +399,15 @@ impl Task {
         if !force && force_reason.is_some() {
             return Err(Error::ForceReasonWithoutForce);
         }
+        if let Some(reason) = force_reason {
+            check_len("reason", reason, MAX_TEXT_CHARS)?;
+        }
+        if let Some(description) = &patch.description {
+            check_len("description", description, MAX_TEXT_CHARS)?;
+        }
+        if let Some(goal) = &patch.goal {
+            check_len("goal", goal, MAX_TEXT_CHARS)?;
+        }
         if !force
             && let Some(holder) = self
                 .assignee
@@ -409,10 +444,22 @@ impl Task {
             next.project_id = project_id;
         }
         let mut report_mode = None;
-        for (report, body) in [
-            (&mut next.analyst_report, patch.analyst_report.as_deref()),
-            (&mut next.coder_report, patch.coder_report.as_deref()),
-            (&mut next.reviewer_report, patch.reviewer_report.as_deref()),
+        for (field, report, body) in [
+            (
+                "analyst_report",
+                &mut next.analyst_report,
+                patch.analyst_report.as_deref(),
+            ),
+            (
+                "coder_report",
+                &mut next.coder_report,
+                patch.coder_report.as_deref(),
+            ),
+            (
+                "reviewer_report",
+                &mut next.reviewer_report,
+                patch.reviewer_report.as_deref(),
+            ),
         ] {
             let Some(body) = body else { continue };
             report_mode = Some(if patch.replace_reports {
@@ -431,6 +478,7 @@ impl Task {
                 report.push_str(REPORT_SEPARATOR);
                 report.push_str(body);
             }
+            check_len(field, report, MAX_REPORT_CHARS)?;
         }
         next.validate()?;
         if next.status.is_terminal() && next.assignee != self.assignee {
@@ -1079,6 +1127,152 @@ mod tests {
         let mut input = draft();
         input.title = "x".repeat(MAX_TITLE_CHARS + 1);
         assert_eq!(Task::new(1, "manager", input, 0), Err(Error::InvalidTitle));
+    }
+
+    #[test]
+    fn text_limits_apply_to_new_and_changed_values_only() {
+        let at_limit = "界".repeat(MAX_TEXT_CHARS);
+        let mut input = draft();
+        input.description.clone_from(&at_limit);
+        input.goal.clone_from(&at_limit);
+        let task = Task::new(1, "manager", input, 0).unwrap();
+        for (field, value) in [
+            ("description", at_limit.as_str()),
+            ("goal", at_limit.as_str()),
+        ] {
+            assert_eq!(value.chars().count(), MAX_TEXT_CHARS);
+            let patch = if field == "description" {
+                TaskPatch {
+                    description: Some(format!("{value}界")),
+                    ..TaskPatch::default()
+                }
+            } else {
+                TaskPatch {
+                    goal: Some(format!("{value}界")),
+                    ..TaskPatch::default()
+                }
+            };
+            assert_eq!(
+                task.apply("manager", 1, &patch, false, None, 1),
+                Err(Error::TooLong {
+                    field,
+                    size: MAX_TEXT_CHARS + 1,
+                    limit: MAX_TEXT_CHARS
+                })
+            );
+        }
+        let mut oversized = draft();
+        oversized.description = "x".repeat(MAX_TEXT_CHARS + 1);
+        assert_eq!(
+            Task::new(1, "manager", oversized, 0),
+            Err(Error::TooLong {
+                field: "description",
+                size: MAX_TEXT_CHARS + 1,
+                limit: MAX_TEXT_CHARS
+            })
+        );
+        let mut oversized = draft();
+        oversized.goal = "x".repeat(MAX_TEXT_CHARS + 1);
+        assert_eq!(
+            Task::new(1, "manager", oversized, 0),
+            Err(Error::TooLong {
+                field: "goal",
+                size: MAX_TEXT_CHARS + 1,
+                limit: MAX_TEXT_CHARS
+            })
+        );
+        let reason = "r".repeat(MAX_TEXT_CHARS + 1);
+        assert_eq!(
+            task.apply(
+                "manager",
+                1,
+                &TaskPatch {
+                    title: Some("renamed".into()),
+                    ..TaskPatch::default()
+                },
+                true,
+                Some(&reason),
+                1
+            ),
+            Err(Error::TooLong {
+                field: "reason",
+                size: MAX_TEXT_CHARS + 1,
+                limit: MAX_TEXT_CHARS
+            })
+        );
+    }
+
+    #[test]
+    fn report_limit_bounds_resulting_total_for_append_and_replace() {
+        let task = Task::new(1, "manager", draft(), 0).unwrap();
+        let body = "x".repeat(MAX_REPORT_CHARS - REPORT_SEPARATOR.chars().count() - 1);
+        let seeded = task
+            .apply(
+                "manager",
+                1,
+                &TaskPatch {
+                    coder_report: Some(body),
+                    ..TaskPatch::default()
+                },
+                false,
+                None,
+                1,
+            )
+            .unwrap()
+            .task;
+        let final_body = "y".to_owned();
+        let accepted = seeded
+            .apply(
+                "manager",
+                2,
+                &TaskPatch {
+                    coder_report: Some(final_body.clone()),
+                    ..TaskPatch::default()
+                },
+                false,
+                None,
+                2,
+            )
+            .unwrap()
+            .task;
+        assert_eq!(accepted.coder_report.chars().count(), MAX_REPORT_CHARS);
+        assert_eq!(
+            accepted.apply(
+                "manager",
+                3,
+                &TaskPatch {
+                    coder_report: Some("z".into()),
+                    ..TaskPatch::default()
+                },
+                false,
+                None,
+                3
+            ),
+            Err(Error::TooLong {
+                field: "coder_report",
+                size: MAX_REPORT_CHARS + REPORT_SEPARATOR.chars().count() + 1,
+                limit: MAX_REPORT_CHARS
+            })
+        );
+        assert_eq!(
+            task.apply(
+                "manager",
+                1,
+                &TaskPatch {
+                    coder_report: Some("x".repeat(MAX_REPORT_CHARS + 1)),
+                    replace_reports: true,
+                    ..TaskPatch::default()
+                },
+                false,
+                None,
+                1
+            ),
+            Err(Error::TooLong {
+                field: "coder_report",
+                size: MAX_REPORT_CHARS + 1,
+                limit: MAX_REPORT_CHARS
+            })
+        );
     }
 
     #[test]

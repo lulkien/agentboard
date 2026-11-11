@@ -6,7 +6,7 @@ use std::sync::{Barrier, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::{Event, EventKind};
-use crate::domain::{NewProject, NewTask, Status, TaskPatch};
+use crate::domain::{MAX_TEXT_CHARS, NewProject, NewTask, Status, TaskPatch};
 
 use super::open::{FORMAT_VERSION, Metadata, write_metadata};
 use super::{Board, BoardOptions, Error, UpdateInput};
@@ -1041,16 +1041,188 @@ fn full_map_aborts_write_and_preserves_prior_rows() {
     let options = BoardOptions { map_size_mb: 1 };
     let board = Board::open_with_options(scratch.path(), options).unwrap();
     board.add("manager", draft(None), false, 0).unwrap();
-    let mut huge = draft(None);
-    huge.description = "x".repeat(2 * 1024 * 1024);
-    let error = board.add("manager", huge, false, 1).unwrap_err();
-    assert!(matches!(error, Error::MapFull));
-    assert!(error.to_string().contains("AGENTBOARD_MAP_SIZE_MB"));
-    assert!(!error.is_refusal());
+    let mut full = false;
+    for index in 0..16 {
+        let mut large = draft(None);
+        large.title = format!("Large row {index}");
+        large.description = "界".repeat(MAX_TEXT_CHARS);
+        large.goal = "界".repeat(MAX_TEXT_CHARS);
+        match board.add("manager", large, false, index + 1) {
+            Ok(_) => {}
+            Err(error) => {
+                assert!(matches!(error, Error::MapFull));
+                assert!(error.to_string().contains("AGENTBOARD_MAP_SIZE_MB"));
+                assert!(!error.is_refusal());
+                full = true;
+                break;
+            }
+        }
+    }
+    assert!(full, "expected the map to fill");
     assert!(board.get(1).unwrap().is_some());
-    assert_eq!(board.get(2).unwrap(), None);
-    assert_eq!(board.metadata().unwrap().next_task_id, 2);
-    assert_eq!(board.event(2).unwrap(), None);
+    let next_id = board.metadata().unwrap().next_task_id;
+    assert_eq!(board.get(next_id).unwrap(), None);
+    assert_eq!(board.event(next_id).unwrap(), None);
+}
+
+#[test]
+fn oversized_legacy_text_remains_readable_and_other_fields_editable() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let added = board.add("manager", draft(None), false, 0).unwrap();
+    let mut legacy = added.task;
+    legacy.description = "d".repeat(MAX_TEXT_CHARS + 1);
+    legacy.coder_report = "r".repeat(crate::domain::MAX_REPORT_CHARS + 1);
+    let mut txn = board.env.write_txn().unwrap();
+    board
+        .tasks
+        .put(
+            &mut txn,
+            &super::keys::task(legacy.id),
+            &serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+    txn.commit().unwrap();
+    assert_eq!(
+        board.get(legacy.id).unwrap().unwrap().description,
+        legacy.description
+    );
+    let title = TaskPatch {
+        title: Some("Edited legacy row".into()),
+        ..TaskPatch::default()
+    };
+    let edited = board
+        .update(UpdateInput {
+            id: legacy.id,
+            actor: "manager",
+            expected_revision: 1,
+            patch: &title,
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 1,
+        })
+        .unwrap();
+    assert_eq!(edited.task.title, "Edited legacy row");
+    let too_long = TaskPatch {
+        description: Some("d".repeat(MAX_TEXT_CHARS + 1)),
+        ..TaskPatch::default()
+    };
+    assert!(matches!(
+        board.update(UpdateInput {
+            id: legacy.id,
+            actor: "manager",
+            expected_revision: 2,
+            patch: &too_long,
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 2
+        }),
+        Err(Error::Domain(crate::domain::Error::TooLong {
+            field: "description",
+            ..
+        }))
+    ));
+    let report = TaskPatch {
+        coder_report: Some("append".into()),
+        ..TaskPatch::default()
+    };
+    assert!(matches!(
+        board.update(UpdateInput {
+            id: legacy.id,
+            actor: "manager",
+            expected_revision: 2,
+            patch: &report,
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 2
+        }),
+        Err(Error::Domain(crate::domain::Error::TooLong {
+            field: "coder_report",
+            ..
+        }))
+    ));
+    let comment = "c".repeat(MAX_TEXT_CHARS + 1);
+    let accepted_comment = "c".repeat(MAX_TEXT_CHARS);
+    board
+        .comment("manager", legacy.id, &accepted_comment, 2)
+        .unwrap();
+    let before_refusals = board.metadata().unwrap().next_event_seq;
+    assert!(matches!(
+        board.comment("manager", legacy.id, &comment, 2),
+        Err(Error::Domain(crate::domain::Error::TooLong {
+            field: "comment",
+            ..
+        }))
+    ));
+    assert!(matches!(
+        board.update(UpdateInput {
+            id: legacy.id,
+            actor: "manager",
+            expected_revision: 2,
+            patch: &TaskPatch::default(),
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: Some(&comment),
+            now_ms: 2
+        }),
+        Err(Error::Domain(crate::domain::Error::TooLong {
+            field: "comment",
+            ..
+        }))
+    ));
+    let title_with_comment = TaskPatch {
+        title: Some("Still unchanged".into()),
+        ..TaskPatch::default()
+    };
+    assert!(matches!(
+        board.update(UpdateInput {
+            id: legacy.id,
+            actor: "manager",
+            expected_revision: 2,
+            patch: &title_with_comment,
+            release: false,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: Some(&comment),
+            now_ms: 2
+        }),
+        Err(Error::Domain(crate::domain::Error::TooLong {
+            field: "comment",
+            ..
+        }))
+    ));
+    assert!(matches!(
+        board.update(UpdateInput {
+            id: legacy.id,
+            actor: "manager",
+            expected_revision: 2,
+            patch: &TaskPatch::default(),
+            release: true,
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: Some(&comment),
+            now_ms: 2
+        }),
+        Err(Error::Domain(crate::domain::Error::TooLong {
+            field: "comment",
+            ..
+        }))
+    ));
+    assert_eq!(board.metadata().unwrap().next_event_seq, before_refusals);
+    assert_eq!(board.get(legacy.id).unwrap().unwrap().revision, 2);
 }
 
 #[test]

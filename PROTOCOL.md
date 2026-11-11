@@ -72,6 +72,12 @@ A task is a record: `id`, `title`, `description`, `goal`, `analyst_report`,
 one per accepted field change. The three reports are long-form seat notes; a board
 written before they existed loads with each one empty.
 
+The write boundary rejects descriptions, goals, comment text and force reasons
+longer than 32,768 Unicode characters. A report may occupy at most 262,144
+characters after an append or replacement. The error identifies the text field,
+its measured length and its ceiling. Reads do not apply these ceilings to stored
+records, which keeps older data accessible and lets unrelated fields be changed.
+
 Statuses, in board order: `todo`, `planning`, `implementing`, `blocked`, `reviewing`,
 `done`, `canceled`. `done` and `canceled` are terminal; lists hide them unless asked.
 The legacy input names `in_progress` and `review` are still accepted as

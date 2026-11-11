@@ -146,6 +146,29 @@ out=$("$B" update 1 --if-revision 6 --analyst-report " " 2>&1); code=$?
 check "empty report append exit" 1 "$code"
 has "empty report append text" "report body must be nonempty when appending" "$out"
 
+# --- bounded free text writes -------------------------------------------
+fresh limits
+at_limit=$(python3 -c 'print("界" * 32768, end="")')
+over_limit=$(python3 -c 'print("d" * 32769, end="")')
+python3 -c 'print("d" * 32769, end="")' > "$S/over-limit"
+"$B" add "at limit" --description "$at_limit" >/dev/null
+out=$("$B" add "over limit" --description "$over_limit" 2>&1); code=$?
+check "oversized description exits 1" 1 "$code"
+has "oversized description names field size and limit" "description is 32769 characters; the limit is 32768" "$out"
+out=$("$B" add "over limit goal" --goal "$over_limit" 2>&1); code=$?
+check "oversized goal exits 1" 1 "$code"
+has "oversized goal names field size and limit" "goal is 32769 characters; the limit is 32768" "$out"
+out=$("$B" comment 1 --body-file "$S/over-limit" 2>&1); code=$?
+check "oversized comment exits 1" 1 "$code"
+has "oversized comment names size and limit" "comment is 32769 characters; the limit is 32768" "$out"
+python3 -c 'print("r" * 200000, end="")' > "$S/report"
+"$B" update 1 --if-revision 1 --coder-report-file "$S/report" >/dev/null
+append_to_limit=$(python3 -c 'print("y" * 62137, end="")')
+"$B" update 1 --if-revision 2 --coder-report "$append_to_limit" >/dev/null
+out=$("$B" update 1 --if-revision 3 --coder-report "x" 2>&1); code=$?
+check "report total over limit exits 1" 1 "$code"
+has "report refusal names field and limit" "coder_report is 262152 characters; the limit is 262144" "$out"
+
 # --- a negative priority is a value, and history is reachable -------------
 fresh d3
 "$B" add "urgent" --priority -3 >/dev/null
