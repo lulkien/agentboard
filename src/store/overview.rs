@@ -44,7 +44,7 @@ impl Board {
             #[cfg(test)]
             super::note_task_read();
             let head: TaskHead<'_> = serde_json::from_slice(raw)?;
-            if project.is_some() && head.project_id != project {
+            if project.is_some() && Some(head.project_id) != project {
                 continue;
             }
             counts[keys::status_code(head.status) as usize] += 1;

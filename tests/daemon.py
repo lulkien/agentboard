@@ -117,6 +117,8 @@ def api_checks(scratch):
     db = os.path.join(scratch, "api")
 
     def add(*args):
+        if "--project" not in args:
+            args = (*args, "--project", "0")
         out = cli(db, "--actor", "manager", "add", *args)
         assert out.returncode == 0, out.stderr
         return out.stdout.split()[1].removeprefix("T")
@@ -384,11 +386,11 @@ def static_checks(daemon):
 def cursor_checks(scratch):
     """Live update polls /api/health: its cursor must move on a write."""
     db = os.path.join(scratch, "live")
-    cli(db, "--actor", "manager", "add", "first")
+    cli(db, "--actor", "manager", "add", "first", "--project", "0")
     daemon = Daemon(db)
     try:
         before = json.loads(daemon.request("GET", "/api/health")[1])["cursor"]
-        cli(db, "--actor", "manager", "add", "second")
+        cli(db, "--actor", "manager", "add", "second", "--project", "0")
         after = json.loads(daemon.request("GET", "/api/health")[1])["cursor"]
         ok("health cursor moves after a write", before != after)
         check("health cursor is stable without a write", after, json.loads(daemon.request("GET", "/api/health")[1])["cursor"])
@@ -420,8 +422,8 @@ def main():
 
         # Identity is the URL segment: two seats interleaved on one daemon.
         daemon.rpc("/mcp/alice", "initialize", {"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "c", "version": "0"}})
-        daemon.call("/mcp/alice", "task_add", {"title": "from alice"})
-        daemon.call("/mcp/bob", "task_add", {"title": "from bob"})
+        daemon.call("/mcp/alice?project=0", "task_add", {"title": "from alice"})
+        daemon.call("/mcp/bob?project=0", "task_add", {"title": "from bob"})
         daemon.call("/mcp/alice", "task_comment", {"id": 2, "body": "alice on bob's row"})
         daemon.call("/mcp/bob", "task_comment", {"id": 1, "body": "bob on alice's row"})
         feed = daemon.call("/mcp/alice", "board_feed", {"after": "0"})
@@ -434,7 +436,7 @@ def main():
         has("roster has alice", "alice", agents)
         has("roster has bob", "bob", agents)
         escaped = urllib.parse.quote("al ice<&", safe="")
-        daemon.call("/mcp/" + escaped, "task_add", {"title": "odd name"})
+        daemon.call("/mcp/" + escaped + "?project=0", "task_add", {"title": "odd name"})
         has("the actor segment is percent-decoded", "al ice<&", daemon.call("/mcp/alice", "board_agents"))
 
         # Guard.
@@ -475,6 +477,7 @@ def main():
         before = json.loads(usage_daemon.request("GET", "/api/health")[1])["map"]["used_bytes"]
         cli_env = os.environ.copy()
         cli_env["AGENTBOARD_ACTOR"] = "manager"
+        cli_env["AGENTBOARD_PROJECT"] = "0"
         large_description = "x" * 30000
         for index in range(20):
             subprocess.check_call([BIN, "--db", usage_db, "add", f"large {index}", "--description", large_description], stdout=subprocess.DEVNULL, env=cli_env)
@@ -511,7 +514,7 @@ def main():
     cli(pdb, "project", "add", "--name", "B", "--path", here)
     cli(pdb, "--actor", "seed", "add", "A row", "--project", "1")
     cli(pdb, "--actor", "seed", "add", "B row", "--project", "2")
-    cli(pdb, "--actor", "seed", "add", "loose row")
+    cli(pdb, "--actor", "seed", "add", "loose row", "--project", "0")
     daemon = Daemon(pdb, extra_env={"AGENTBOARD_PROJECT": "2"}, cwd=here)
     try:
         listing = daemon.call("/mcp/w?project=1", "task_list")

@@ -7,6 +7,7 @@ B=${AGENTBOARD_TEST_BIN:-$PWD/target/debug/agentboard}
 S=$(mktemp -d "${TMPDIR:-/tmp}/agentboard-cli.XXXXXX")
 trap 'rm -rf "$S"' EXIT
 export AGENTBOARD_ACTOR=manager
+export AGENTBOARD_PROJECT=0
 unset AGENTBOARD_MAP_SIZE_MB
 n=0
 pass=0 fail=0
@@ -642,6 +643,9 @@ out=$("$B" project add --name "agentboard" --path "$PWD"); code=$?
 check "project add exit" 0 "$code"
 [[ "$out" =~ ^[0-9]+$ ]] && ok || bad "project add returns numeric id: '$out'"
 check "project add id" 1 "$out"
+out=$(env -u AGENTBOARD_PROJECT "$B" --db "$AGENTBOARD_DB" add "cwd project row"); code=$?
+check "task add from registered cwd exits" 0 "$code"
+has "task add from registered cwd uses project" "project 1" "$out"
 out=$("$B" project ls); code=$?
 check "project ls exit" 0 "$code"
 check "built-in standalone project is first" $'0\tstandalone\t' "$(printf '%s\n' "$out" | head -n1)"
@@ -664,6 +668,13 @@ has "unknown project refusal names id" "unknown project 999" "$out"
 out=$($B ls --project 1); code=$?
 check "project list filter exit" 0 "$code"
 has "project list returns linked task" "project one" "$out"
+mkdir -p "$S/unregistered"
+out=$(cd "$S/unregistered" && env -u AGENTBOARD_PROJECT "$B" --db "$AGENTBOARD_DB" add "no project" 2>&1); code=$?
+check "task add without project exits 1" 1 "$code"
+has "task add without project names standalone choice" "project 0" "$out"
+out=$(env -u AGENTBOARD_PROJECT "$B" --db "$AGENTBOARD_DB" update 1 --if-revision 1 --clear-project 2>&1); code=$?
+check "clear project exits 1" 1 "$code"
+has "clear project refusal names standalone choice" "project 0" "$out"
 
 fresh delete-project
 out=$("$B" project delete 0 2>&1); code=$?
@@ -673,10 +684,10 @@ check "delete project creates first id" 1 "$("$B" project add --name A --path /a
 "$B" add closed --project 1 --status done >/dev/null
 out=$("$B" project delete 1 2>&1); code=$?
 check "delete referenced project exit" 1 "$code"
-has "delete referenced project count" "project 1 still has tasks (count 2); move or detach them first" "$out"
+has "delete referenced project count" "project 1 still has tasks (count 2); move them first" "$out"
 has "refused project remains" $'1\tA\t/a' "$("$B" project ls)"
-"$B" update 1 --if-revision 1 --clear-project >/dev/null
-"$B" update 2 --if-revision 1 --clear-project >/dev/null
+"$B" update 1 --if-revision 1 --project 0 >/dev/null
+"$B" update 2 --if-revision 1 --project 0 >/dev/null
 out=$("$B" project delete 1); code=$?
 check "delete unused project exit" 0 "$code"
 check "delete project success text" "deleted project 1" "$out"

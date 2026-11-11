@@ -25,7 +25,7 @@ impl Board {
             #[cfg(test)]
             super::note_task_read();
             let task: TaskHead<'_> = serde_json::from_slice(raw)?;
-            if task.project_id == Some(id) {
+            if task.project_id == id {
                 count += 1;
             }
         }

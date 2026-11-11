@@ -58,7 +58,7 @@ fn draft(title: &str, status: Status, priority: i32, assignee: Option<&str>) -> 
         priority,
         assignee: assignee.map(str::to_owned),
         parent_id: None,
-        project_id: None,
+        project_id: Some(0),
     }
 }
 

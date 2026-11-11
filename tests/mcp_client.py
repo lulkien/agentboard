@@ -59,8 +59,12 @@ def has(name, needle, hay):
 class StdioServer:
     def __init__(self, db, actor, args=(), extra_env=None):
         env = dict(os.environ, AGENTBOARD_DB=db, AGENTBOARD_ACTOR=actor)
+        env.setdefault("AGENTBOARD_PROJECT", "0")
         if extra_env:
-            env.update(extra_env)
+            env.update({key: value for key, value in extra_env.items() if value is not None})
+            for key, value in extra_env.items():
+                if value is None:
+                    env.pop(key, None)
         self.proc = subprocess.Popen(
             [BIN, "--db", db, "serve", *args],
             stdin=subprocess.PIPE,
@@ -134,7 +138,7 @@ class HttpServer:
         args = list(args)
         if "--actor" in args:
             actor = args[args.index("--actor") + 1]
-        project = (extra_env or {}).get("AGENTBOARD_PROJECT")
+        project = (extra_env or {}).get("AGENTBOARD_PROJECT", "0")
         self.path = f"/mcp/{actor}" + (f"?project={project}" if project else "")
         env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTBOARD_")}
         if extra_env and "AGENTBOARD_MAP_SIZE_MB" in extra_env:
@@ -359,6 +363,16 @@ def main():
             has("flag actor registers bob", "bob", body)
             check("flag actor wins over the environment", False, "alice" in body)
         project_db = os.path.join(scratch, "project-scope")
+        unscoped_db = os.path.join(scratch, "unscoped-project-refusals")
+        with Server(unscoped_db, "worker", extra_env={"AGENTBOARD_PROJECT": None}) as unscoped:
+            unscoped.start()
+            reply = unscoped.send("tools/call", {"name": "task_add", "arguments": {"title": "no project"}})
+            check("task_add with no resolved project is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
+            error, body = unscoped.call("task_add", {"title": "standalone row", "project": 0})
+            check("task_add explicit project 0 succeeds", False, error)
+            reply = unscoped.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 1, "clear_project": True}})
+            check("task_update clear_project is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
+            has("clear_project refusal names standalone choice", "project 0", json.dumps(reply))
         for name, path in [("A", "/project-a"), ("B", "/project-b")]:
             subprocess.run(
                 [BIN, "--db", project_db, "project", "add", "--name", name, "--path", path],
@@ -392,14 +406,14 @@ def main():
             deleting.call("task_add", {"title": "linked", "project": 1})
             reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 1}})
             check("project delete in use is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
-            has("project delete in use count", "project 1 still has tasks (count 1); move or detach them first", json.dumps(reply))
+            has("project delete in use count", "project 1 still has tasks (count 1); move them first", json.dumps(reply))
             reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 0}})
             check("built-in project delete is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
             error, body = deleting.call("board_project_delete", {"id": 2})
             check("project delete success", (False, "deleted project 2"), (error, body))
             reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 2}})
             has("project delete missing", "project 2 does not exist", json.dumps(reply))
-            deleting.call("task_update", {"id": 1, "if_revision": 1, "clear_project": True})
+            deleting.call("task_update", {"id": 1, "if_revision": 1, "project": 0})
             error, body = deleting.call("board_project_delete", {"id": 1})
             check("project delete after detach", (False, "deleted project 1"), (error, body))
             deleting.call("task_add", {"title": "open", "assignee": "bob", "new_actor": True})

@@ -10,6 +10,7 @@ TASKS=${TASKS:-24}
 S=$(mktemp -d "${TMPDIR:-/tmp}/agentboard-race.XXXXXX")
 trap 'rm -rf "$S"' EXIT
 export AGENTBOARD_DB="$S/board"
+export AGENTBOARD_PROJECT=0
 unset AGENTBOARD_MAP_SIZE_MB
 
 AGENTBOARD_ACTOR=manager "$B" add "seed" >/dev/null

@@ -19,6 +19,17 @@ pub const MAX_REPORT_CHARS: usize = 262_144;
 pub const STANDALONE_PROJECT_ID: u64 = 0;
 pub const STANDALONE_PROJECT_NAME: &str = "standalone";
 
+fn deserialize_project_id<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(STANDALONE_PROJECT_ID))
+}
+
+fn standalone_project_id() -> u64 {
+    STANDALONE_PROJECT_ID
+}
+
 pub fn check_len(field: &'static str, text: &str, limit: usize) -> Result<(), Error> {
     let size = text.chars().count();
     if size > limit {
@@ -147,6 +158,7 @@ pub enum Error {
     EmptyReport,
     SelfParent,
     MissingAssignee(Status),
+    MissingProject,
     UnknownProject(u64),
     MissingForceReason,
     ForceReasonWithoutForce,
@@ -193,6 +205,9 @@ impl std::fmt::Display for Error {
             Self::MissingAssignee(status) => {
                 write!(f, "{} requires an assignee", status.as_str())
             }
+            Self::MissingProject => f.write_str(
+                "project required; choose project 0 (standalone) when no project applies",
+            ),
             Self::UnknownProject(id) => write!(f, "unknown project {id}"),
             Self::MissingForceReason => f.write_str("forced update requires a reason"),
             Self::ForceReasonWithoutForce => f.write_str("force reason requires force=true"),
@@ -260,7 +275,11 @@ pub struct Task {
     pub reporter: String,
     pub assignee: Option<String>,
     pub parent_id: Option<u64>,
-    pub project_id: Option<u64>,
+    #[serde(
+        default = "standalone_project_id",
+        deserialize_with = "deserialize_project_id"
+    )]
+    pub project_id: u64,
     pub revision: u64,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
@@ -283,6 +302,7 @@ impl Task {
         validate_actor(actor)?;
         check_len("description", &input.description, MAX_TEXT_CHARS)?;
         check_len("goal", &input.goal, MAX_TEXT_CHARS)?;
+        let project_id = input.project_id.ok_or(Error::MissingProject)?;
         let task = Self {
             id,
             title: input.title,
@@ -296,7 +316,7 @@ impl Task {
             reporter: actor.to_owned(),
             assignee: input.assignee,
             parent_id: input.parent_id,
-            project_id: input.project_id,
+            project_id,
             revision: 1,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
@@ -443,7 +463,7 @@ impl Task {
             next.parent_id = parent_id;
         }
         if let Some(project_id) = patch.project_id {
-            next.project_id = project_id;
+            next.project_id = project_id.ok_or(Error::MissingProject)?;
         }
         let mut report_mode = None;
         for (field, report, body) in [
@@ -626,7 +646,7 @@ mod tests {
             priority: 100,
             assignee: None,
             parent_id: None,
-            project_id: None,
+            project_id: Some(0),
         }
     }
 
@@ -721,6 +741,29 @@ mod tests {
         let task = Task::new(1, "alice", draft(), 12).unwrap();
         assert_eq!(task.revision, 1);
         assert_eq!(task.reporter, "alice");
+    }
+
+    #[test]
+    fn task_creation_requires_a_resolved_project() {
+        let mut input = draft();
+        input.project_id = None;
+        assert_eq!(
+            Task::new(1, "manager", input, 0),
+            Err(Error::MissingProject)
+        );
+    }
+
+    #[test]
+    fn task_update_refuses_clearing_the_project() {
+        let task = Task::new(1, "manager", draft(), 0).unwrap();
+        let patch = TaskPatch {
+            project_id: Some(None),
+            ..TaskPatch::default()
+        };
+        assert_eq!(
+            task.apply("manager", 1, &patch, false, None, 1),
+            Err(Error::MissingProject)
+        );
     }
 
     #[test]

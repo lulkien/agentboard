@@ -153,6 +153,7 @@ fn run(
             let actor = need_actor(actor)?;
             let status = parse_status(status.as_deref())?.unwrap_or(Status::Todo);
             let board = open(&path)?;
+            let project = agentboard::server::resolve_project(&board, project)?;
             let input = NewTask {
                 title,
                 description,

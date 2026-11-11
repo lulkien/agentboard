@@ -67,9 +67,7 @@ pub fn task_record(task: &Task, full: bool) -> String {
     if let Some(parent) = task.parent_id {
         lines.push(format!("parent T{parent}"));
     }
-    if let Some(project_id) = task.project_id {
-        lines.push(format!("project {project_id}"));
-    }
+    lines.push(format!("project {}", task.project_id));
     for (name, value) in [
         ("description", task.description.as_str()),
         ("goal", task.goal.as_str()),

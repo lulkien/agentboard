@@ -65,7 +65,7 @@ impl Board {
         let mut metadata = metadata;
         let task_id = metadata.next_task_id;
         let task = Task::new(task_id, actor, input, now_ms)?;
-        self.require_project(&txn, task.project_id)?;
+        self.require_project(&txn, Some(task.project_id))?;
         if let Some(parent_id) = task.parent_id {
             self.check_attachment_parent(&txn, parent_id)?;
         }
@@ -144,7 +144,7 @@ impl Board {
             input.force_reason,
             input.now_ms,
         )?;
-        self.require_project(&txn, applied.task.project_id)?;
+        self.require_project(&txn, Some(applied.task.project_id))?;
         if input.patch.status.is_some_and(Status::is_terminal) {
             let counts = self.child_counts(&txn)?;
             let count = counts.get(&input.id).map_or(0, |counts| {

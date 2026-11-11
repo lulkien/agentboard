@@ -154,7 +154,7 @@ fn draft(assignee: Option<&str>) -> NewTask {
         priority: 10,
         assignee: assignee.map(str::to_owned),
         parent_id: None,
-        project_id: None,
+        project_id: Some(0),
     }
 }
 
@@ -318,7 +318,7 @@ fn task_head_decodes_scan_fields_without_allocating_long_text() {
             input.goal = "goal text with \"quotes\", \\\\ and non-ASCII é\n".repeat(100);
             input.status = status;
             input.parent_id = parent;
-            input.project_id = project;
+            input.project_id = Some(project.unwrap_or(0));
             let task = board.add("manager", input, true, now).unwrap().task;
             all_ids.push(task.id);
             task
@@ -440,7 +440,7 @@ fn task_head_decodes_scan_fields_without_allocating_long_text() {
                 .is_none_or(|parent| task.parent_id == Some(parent))
             && filter
                 .project
-                .is_none_or(|project| task.project_id == Some(project))
+                .is_none_or(|project| task.project_id == project)
     };
     for (assignee, parent, project) in [
         (None, None, None),
@@ -477,7 +477,7 @@ fn task_head_decodes_scan_fields_without_allocating_long_text() {
     for project in [None, Some(project_a), Some(project_b)] {
         let scoped: Vec<_> = full_tasks
             .iter()
-            .filter(|task| project.is_none_or(|id| task.project_id == Some(id)))
+            .filter(|task| project.is_none_or(|id| task.project_id == id))
             .cloned()
             .collect();
         let brief = board.brief_for_project(200, project).unwrap();
@@ -643,7 +643,7 @@ fn task_head_decodes_scan_fields_without_allocating_long_text() {
 
     let p1_count = full_tasks
         .iter()
-        .filter(|task| task.project_id == Some(project_a))
+        .filter(|task| task.project_id == project_a)
         .count() as u64;
     assert!(
         matches!(board.delete_project(project_a), Err(Error::ProjectInUse { id, count }) if id == project_a && count == p1_count)
@@ -666,6 +666,51 @@ fn task_head_decodes_scan_fields_without_allocating_long_text() {
             .map(|row| row.task)
             .collect::<Vec<_>>(),
         expected_wait
+    );
+}
+
+#[test]
+fn legacy_null_and_missing_project_ids_read_as_standalone() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let first = board.add("manager", draft(None), false, 1).unwrap().task;
+    let second = board.add("manager", draft(None), false, 2).unwrap().task;
+    let mut txn = board.env.write_txn().unwrap();
+    for (id, value) in [(first.id, Some(serde_json::Value::Null)), (second.id, None)] {
+        let key = super::keys::task(id);
+        let raw = board.tasks.get(&txn, &key).unwrap().unwrap();
+        let mut json: serde_json::Value = serde_json::from_slice(raw).unwrap();
+        if let Some(project_id) = value {
+            json["project_id"] = project_id;
+        } else {
+            json.as_object_mut().unwrap().remove("project_id");
+        }
+        board
+            .tasks
+            .put(&mut txn, &key, &serde_json::to_vec(&json).unwrap())
+            .unwrap();
+    }
+    txn.commit().unwrap();
+    assert_eq!(board.get(first.id).unwrap().unwrap().project_id, 0);
+    assert_eq!(board.get(second.id).unwrap().unwrap().project_id, 0);
+    let page = board
+        .list(&super::ListFilter {
+            status: None,
+            assignee: None,
+            parent: None,
+            project: Some(0),
+            include_terminal: true,
+            limit: 20,
+            offset: 0,
+        })
+        .unwrap();
+    assert_eq!(page.total, 2);
+    assert_eq!(
+        page.tasks
+            .iter()
+            .map(|task| task.project_id)
+            .collect::<Vec<_>>(),
+        [0, 0]
     );
 }
 
@@ -697,7 +742,7 @@ fn project_delete_refuses_referenced_projects_and_never_reuses_ids() {
                 actor: "manager",
                 expected_revision: task.revision,
                 patch: &TaskPatch {
-                    project_id: Some(None),
+                    project_id: Some(Some(0)),
                     ..TaskPatch::default()
                 },
                 release: false,

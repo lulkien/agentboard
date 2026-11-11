@@ -21,7 +21,22 @@ pub(super) struct TaskHead<'a> {
     #[serde(borrow)]
     pub assignee: Option<Cow<'a, str>>,
     pub parent_id: Option<u64>,
-    pub project_id: Option<u64>,
+    #[serde(
+        default = "standalone_project_id",
+        deserialize_with = "deserialize_project_id"
+    )]
+    pub project_id: u64,
+}
+
+fn deserialize_project_id<'de, D>(deserializer: D) -> std::result::Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(0))
+}
+
+fn standalone_project_id() -> u64 {
+    0
 }
 
 impl<'a> From<&'a Task> for TaskHead<'a> {
@@ -136,7 +151,7 @@ impl Board {
             let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if let Some(parent) = task.parent_id {
                 let child_counts = counts.entry(parent).or_insert([0; Status::ALL.len()]);
-                if project.is_none() || task.project_id == project {
+                if project.is_none() || Some(task.project_id) == project {
                     child_counts[keys::status_code(task.status) as usize] += 1;
                 }
             }
@@ -251,7 +266,7 @@ impl Board {
             #[cfg(test)]
             super::note_task_read();
             let task: TaskHead<'_> = serde_json::from_slice(raw)?;
-            if project.is_some() && task.project_id != project {
+            if project.is_some() && Some(task.project_id) != project {
                 continue;
             }
             counts[keys::status_code(task.status) as usize] += 1;
@@ -337,7 +352,7 @@ fn keep(filter: &ListFilter<'_>, task: &TaskHead<'_>) -> bool {
         return false;
     }
     if let Some(project) = filter.project
-        && task.project_id != Some(project)
+        && task.project_id != project
     {
         return false;
     }

@@ -45,7 +45,9 @@ pub fn resolve_project(
     let cwd = normalized_path(&cwd);
     let projects = board.list_projects()?;
     Ok(projects.into_iter().find_map(|project| {
-        (normalized_path(Path::new(&project.project_path)) == cwd).then_some(project.project_id)
+        (!project.project_path.is_empty()
+            && normalized_path(Path::new(&project.project_path)) == cwd)
+            .then_some(project.project_id)
     }))
 }
 
@@ -336,7 +338,7 @@ impl Board {
             Some(raw) => Status::parse(raw).map_err(|e| err(e.to_string()))?,
             None => Status::Todo,
         };
-        let input = NewTask {
+        let mut input = NewTask {
             title: args.title,
             description: args.description,
             goal: args.goal,
@@ -344,9 +346,10 @@ impl Board {
             priority: args.priority.unwrap_or(100),
             assignee: args.assignee,
             parent_id: args.parent,
-            project_id: args.project,
+            project_id: None,
         };
         let (added, cursor) = blocking(&self.board, move |board| -> crate::store::Result<_> {
+            input.project_id = call_project(board, args.project, scope.as_ref())?;
             let added = board.add(&actor, input, args.new_actor, domain::now_ms())?;
             let instance = board.metadata()?.instance_id;
             let cursor = format!("{instance}:{}", added.event.seq);

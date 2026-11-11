@@ -46,7 +46,7 @@ impl Board {
                 let group = groups
                     .entry(parent)
                     .or_insert(([0; Status::ALL.len()], Vec::new()));
-                if project.is_none() || head.project_id == project {
+                if project.is_none() || Some(head.project_id) == project {
                     group.0[keys::status_code(head.status) as usize] += 1;
                     group.1.push(serde_json::from_slice(raw)?);
                 }
@@ -57,7 +57,7 @@ impl Board {
             let Some(task) = self.read_task_in_txn(&txn, parent)? else {
                 continue;
             };
-            if project.is_some() && task.project_id != project {
+            if project.is_some() && Some(task.project_id) != project {
                 continue;
             }
             children.sort_by_key(|task| (task.priority, task.id));

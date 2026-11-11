@@ -413,8 +413,8 @@ impl Board {
                             let task = self
                                 .read_task_in_txn(&txn, event.task_id)?
                                 .ok_or(Error::Corrupt("event points to missing task"))?;
-                            projects.insert(event.task_id, task.project_id);
-                            task.project_id
+                            projects.insert(event.task_id, Some(task.project_id));
+                            Some(task.project_id)
                         }
                     };
                     if task_project == Some(project) {

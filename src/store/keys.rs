@@ -63,7 +63,7 @@ mod tests {
                 priority,
                 assignee: assignee.map(str::to_owned),
                 parent_id: None,
-                project_id: None,
+                project_id: Some(0),
             },
             0,
         )
