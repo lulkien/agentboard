@@ -110,7 +110,7 @@ The names `in_progress` and `review` are still accepted as input and read as
    files, evidence) and one short comment naming the branch and commit. The report
    holds the detail; the row stays the audit trail.
 4. Handoff: `task_update(id, if_revision, status="reviewing", assignee="reviewer")`.
-   The event carries `recipient`, which wakes the reviewer.
+   The event carries `recipient`; the manager reads the handoff and prompts the reviewer.
 5. Reviewer reads the last commit on the branch, then either `status="done"` with
    the verdict in its reviewer report, `status="implementing"`, `assignee="coder"`
    and its findings (below the cap), or `status="planning"`, `assignee="analyst"`

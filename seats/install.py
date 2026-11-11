@@ -348,10 +348,7 @@ def main():
         if os.path.lexists(rules_tmp):
             os.unlink(rules_tmp)
 
-    base = f"{codex_home}/config.toml"
-    if os.path.exists(base) and b"agentboard" not in read(base):
-        print(f"note: merge {src}/codex/base.config.toml into {base}", file=sys.stderr)
-    print("done: the codex base config is merged by hand; see seats/README.md")
+    print("done: seat profiles installed; see seats/README.md")
 
 
 main()

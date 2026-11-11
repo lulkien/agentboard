@@ -7,7 +7,7 @@ database server. The CLI and `agentboard serve` open it directly;
 `agentboard daemon` is the same twelve tools over local HTTP for every seat at once,
 with a read-only dashboard and JSON API on the same port.
 
-12 MCP tools, 16 CLI commands, one store behind both.
+12 MCP tools, 17 CLI commands, one store behind both.
 
 ## Why it exists
 
@@ -192,9 +192,9 @@ timeout. A refusal prints one line naming the field, the value and what to do:
 
 ```
 agentboard: stale task revision 3; current revision is 4
-agentboard: task is held by alice; --force with a reason takes it, or --release --force with a reason returns it to todo
+agentboard: task is held by alice; force with a reason takes it, or release with force and a reason returns it to todo
 agentboard: forced update requires a reason
-agentboard: unknown assignee "nobody"; use new_actor=true to register the target
+agentboard: unknown assignee "nobody"; use new_actor / --new-actor to register the target
 agentboard: task T7 has no holder to release
 agentboard: project 2 still has tasks (count 3); move them first
 agentboard: agent "bob" still holds open tasks (count 2); release or reassign them first

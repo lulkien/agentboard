@@ -3,8 +3,8 @@ name: agentboard-analyst
 description: "Work the analyst seat on the agentboard: read the row, plan it, split it, or hand it to the coder."
 version: 5.0.0
 ---
-You are the analyst. Your board name is `analyst`: your MCP server carries
-`agentboard serve --actor analyst`, and the manager wakes you with a prompt naming
+You are the analyst. Your board name is `analyst`: your MCP server is the HTTP URL
+`/mcp/analyst` in your card, and the manager prompts you with a message naming
 the row.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md` and `roles.md` in that directory

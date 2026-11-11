@@ -278,8 +278,9 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
 Optional `project` (an ID) limits it to one project. All epic rows first, each
 compact task row followed by `  done D/N`, then up to ten unparented non-epic tasks in `planning`, `implementing`, `blocked` or `reviewing`.
 Each section sorts by `(priority, id)`. Nested and terminal epics remain visible
-while they have children. The final line is the seven global status counts, counting
-every task once. There are no section headings; an empty board prints just counts.
+while they have children. The final line is status counts, scoped to the selected
+project when one is given and otherwise global, counting every task once. There are
+no section headings; an empty board prints map usage and counts.
 
 ### board_agents
 
@@ -319,14 +320,14 @@ JSON-RPC error `-32603` with the store's text; the CLI also exits `1`.
 actor required: pass --actor or set AGENTBOARD_ACTOR (names are board addresses)
 unknown task status: "queued"
 stale task revision 3; current revision is 4
-task is held by alice; --force with a reason takes it, or --release --force with a reason returns it to todo
+task is held by alice; force with a reason takes it, or release with force and a reason returns it to todo
 forced update requires a reason
 force reason requires force=true
 task update has no field changes
 choose release or a field change, not both
 task T7 is done; nothing to release
 task T7 has no holder to release
-unknown assignee "nobody"; use new_actor=true to register the target
+unknown assignee "nobody"; use new_actor / --new-actor to register the target
 project 2 still has tasks (count 3); move them first
 agent "bob" still holds open tasks (count 2); release or reassign them first
 agent "ghost" does not exist

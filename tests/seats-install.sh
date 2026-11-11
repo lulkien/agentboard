@@ -71,7 +71,7 @@ has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config
 same "fresh default.rules is the source block" "$src" "$rules"
 is "no separate agentboard.rules" test ! -e "$home/.codex/rules/agentboard.rules"
 has "fresh install says added" "added: $rules" "$tmp/out"
-has "done line kept" "done: the codex base config is merged by hand" "$tmp/out"
+has "done line kept" "done: seat profiles installed" "$tmp/out"
 
 # --- manager launcher link follows the same foreign-link rules ---------------
 newhome

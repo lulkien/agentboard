@@ -81,15 +81,15 @@ To start the manager in the current herdr pane, run the installed
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
-For Claude, analyst use Opus at high effort, coder uses Sonnet at medium effort,
-reviewer use Sonnet at medium effort. Codex loads each seat's model and effort
+For Claude, analyst and reviewer use Opus at high effort, and coder uses Sonnet at
+medium effort. Codex loads each seat's model and effort
 from its profile. Swap a model only when the human names a different one.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
 | analyst | `--model claude-opus-5-5 --effort high` | `-p analyst` (profile: gpt-6-sol, high) |
 | coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-luna, medium) |
-| reviewer | `--model claude-sonnet-5-5 --effort medium` | `-p reviewer` (profile: gpt-6-sol, medium) |
+| reviewer | `--model claude-opus-5-5 --effort high` | `-p reviewer` (profile: gpt-6-sol, medium) |
 
 ```bash
 export REPO=/path/to/repo
@@ -167,7 +167,7 @@ model only when the human names a different one.
 | Seat | Claude | Codex |
 | --- | --- | --- |
 | analyst | `--model claude-opus-5-5 --effort high` | `-p analyst` (profile: gpt-6-sol, high) |
-| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-sol, medium) |
+| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-luna, medium) |
 | reviewer | `--model claude-opus-5-5 --effort high` | `-p reviewer` (profile: gpt-6-sol, medium) |
 
 ```bash

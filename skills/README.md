@@ -43,9 +43,9 @@ anything else is left alone. A custom canonical directory
 redirects every alias, but the command bodies' default `~/.agents/skills` manual
 paths then need adjusting.
 
-Each seat's MCP entry must carry its board name: `agentboard serve --actor coder`
-(or the same in the client's MCP config), pointed at the shared `AGENTBOARD_DB`.
-That name is what the board attributes writes to and what the feed addresses.
+Each seat's MCP card carries its board name in the HTTP URL `/mcp/<seat>`, pointed
+at the shared board. That name is what the board attributes writes to and what the
+feed addresses.
 `seats/` holds the canonical client cards for those entries.
 
 `tests/skills-install.sh` proves the layout in isolated homes: five canonical

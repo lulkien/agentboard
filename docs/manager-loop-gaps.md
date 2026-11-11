@@ -12,8 +12,9 @@ landed since.
 Where it says "today", it means: during that epic, on this box, with the board at
 `~/.local/state/agentboard/lmdb`.
 
-**Status 2026-10-25.** Gap #1 (`agentboard wait` / `task_wait`) landed as `8a11dc1`,
-and gap #3 (`update --release` plus the self-describing holder refusal) as `3775ac9`.
+**Status 2026-10-25.** Gap #1 (`agentboard wait`, CLI only) landed as `8a11dc1`;
+the MCP `task_wait` tool was later removed (T80). Gap #3 (`update --release` plus
+the self-describing holder refusal) landed as `3775ac9`.
 The status-only wait still missed analyst→coder (status stays `in_progress`); that
 landed as `17a93e1` (store) and `32dd302` (CLI/MCP `--assignee` / `assignee=true`).
 Gaps #2, #4 and #5 are closed by decision rather than by code: the owner fixed the

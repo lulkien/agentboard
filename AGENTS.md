@@ -49,7 +49,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `51/51 passed (manager launcher)` |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 167 CLI names, 159 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 162 CLI names, 156 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
 | `bash scripts/gate.sh --prebuilt` | `GATES OK: 12 gates passed` (reviewer; venv on PATH) |
@@ -71,17 +71,19 @@ update the expectation here.
 - `src/store/` — the LMDB store: `open` (Board, options, reset,
   lifetime lock), `keys` (ordered byte codecs), `tasks` (add/update/release/claim/
   comment, index upkeep, events), `feed` (cursors, filters, bounded older-page read,
-  wait), `wait` (per-row
-  blocking wait that re-queries its watched set), `list` (list, brief,
+  wait), `wait` (per-row blocking wait that re-queries its watched set),
+  `epics` (epic rollups), `projects` (project registry),
+  `list` (list, brief,
   status counts), `overview` (dashboard lanes, attention and held work),
   `tests`/`m3_tests`/`overview_tests` (store proofs).
 - The board format is version 2 and uses eight named databases, including
   `projects`; format 1 boards refuse to open until migrated.
 - `src/render.rs` — the only place compact text is built, including the `…`
   truncation and the full-text path.
-- Epics are derived direct-child rollups in `store::epic`, shared by both
-  adapters. The terminal-update guard runs in the same write transaction before
-  roster, index and event writes; no epic flag or database is stored.
+- Epics are derived direct-child rollups shared by both adapters. `Board::epic` is
+  in `store::list`; `Board::epics` is in `store::epics`. The terminal-update guard
+  runs in the same write transaction before roster, index and event writes; no
+  epic flag or database is stored.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
 - `src/daemon.rs` — `agentboard daemon`: the same MCP adapter over streamable HTTP

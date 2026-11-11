@@ -9,7 +9,6 @@ its client gets a board identity.
 |---|---|---|
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
 | `codex/rules/agentboard.rules` | every codex seat | a marked block inside `$CODEX_HOME/rules/default.rules` |
-| `codex/base.config.toml` | every codex seat | merged into `$CODEX_HOME/config.toml` |
 | `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | `claude --mcp-config <file>` |
 | `grok/agentboard-mcp.toml` | grok (manager) | managed block in `~/.grok/config.toml` by `install.py` |
 | `systemd/agentboard.service` | shared HTTP daemon | linked to `~/.config/systemd/user/agentboard.service` |
@@ -19,9 +18,8 @@ its client gets a board identity.
     ./seats/install.py --force
 
 It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml` and
-each claude card to `~/.claude/<seat>-mcp.json`. The codex base config is not a
-link: it is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
-`[projects.*].trust_level`, `[notice]`) also lives. `install.py` refuses an existing
+each claude card to `~/.claude/<seat>-mcp.json`. Each Codex seat profile carries its
+own tool list and permissions. `install.py` refuses an existing
 file that is not a symlink into this repo, and `--force` replaces only the named
 destinations. A full install also links `seats/start-agentboard-manager` to
 `~/.local/bin/start-agentboard-manager`; `--grok-only` manages only the Grok MCP
@@ -89,9 +87,8 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 
 ## What every card carries
 
-- Commands, never home paths: `git`, `ferris-search`,
-  `codebase-memory-mcp` resolve on the seat's `PATH`. Check the one that matters
-  with `readlink -f "$(command -v agentboard)"`.
+- Tool names, never home paths: `git`, `ferris-search`, and
+  `codebase-memory-mcp` resolve on the seat's `PATH`.
 - Claude and Codex cards connect to `http://127.0.0.1:8765/mcp/<seat>`; Grok
   connects to `http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}`. The URL
   names the actor on every request. Keep `AGENTBOARD_SEAT` nonempty when set.
@@ -99,17 +96,12 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
   `task_get`, `task_epic`, `task_update`, `task_claim`, `task_comment`,
   `board_feed`, `board_brief`, `board_agents`, `board_project_delete`,
   `board_agent_delete`.
-- One actor per card. A base config must never carry `AGENTBOARD_ACTOR`: every
-  seat that reads it would write under that name.
+- One actor per card, named by the seat-specific MCP URL.
 
 ## Codex
 
-`approval_policy = "never"` and per-role filesystem permissions, configured with
-`sandbox_mode` or a named permissions profile, plus per-tool
-`approval_mode = "approve"` in the base config. Under `never` a tool with no
-approval mode is a hard error, and so is a tool left on `auto`: a seat's board reads
-(`board_feed`, `board_brief`, `task_epic`) must be `approve`. The base lists every
-board tool.
+Each seat profile defines its own approval policy, filesystem permissions, and
+board tool list.
 
 - analyst: the `seat-scratch` permission profile keeps the repository readable
   and permits writes only under `/tmp/agentboard/scratch`; create that directory
@@ -143,8 +135,8 @@ name the actor for each request. A Claude manager starts with
 ## Grok
 
 `./seats/install.py` installs the marked block from `seats/grok/agentboard-mcp.toml`
-into `~/.grok/config.toml`. The command is the portable `agentboard` and must be on
-the PATH Grok inherits. Its actor comes from `${AGENTBOARD_SEAT:-manager}`: unset
+into `~/.grok/config.toml`. It contains only the HTTP URL; its actor comes from
+`${AGENTBOARD_SEAT:-manager}`: unset
 uses `manager`, and a supplied value passes through unchanged. Never set
 `AGENTBOARD_SEAT` to an empty string. Grok is manager-only. In herdr, name a second manager's pane with
 `herdr tab create --env AGENTBOARD_SEAT=<name>`. In hc the name rides the argv of
@@ -152,8 +144,8 @@ its own terminal, because `hc run` has no environment flag:
 
     hc run --bg --name manager-2 -- env AGENTBOARD_SEAT=<name> grok --trust --always-approve
 
-An empty `AGENTBOARD_SEAT` passes through as empty, and agentboard refuses to write
-with `actor required: pass --actor or set AGENTBOARD_ACTOR`.
+An empty `AGENTBOARD_SEAT` produces an empty URL actor segment, which the daemon
+rejects as a missing route.
 
 The installer preserves the rest of the Grok config, its line endings and mode. It
 refuses malformed TOML, malformed markers, symlinked/non-regular config, and an

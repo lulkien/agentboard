@@ -107,7 +107,7 @@ Never:
 There is no direct message channel. Everything goes on the row:
 
 - a question is a comment plus `blocked`
-- a handoff is an assignment, which carries `recipient` and wakes the next seat
+- a handoff is an assignment that carries `recipient`; the manager prompts the next seat
 - a decision is a comment on the row it affects
 
 An agent that needs to reach a human writes the question on the row and waits; it

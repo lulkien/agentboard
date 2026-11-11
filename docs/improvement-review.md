@@ -18,8 +18,8 @@ Do these first:
 | --- | --- | --- | --- |
 | [1](#1-a-comment-only-update-skips-actor-validation) | A comment-only `update` writes an invalid actor name to the roster | bug, reproduced | **Done** `8744808` |
 | [2](#2-wait---assignee-can-miss-a-handoff-between-re-arms) | `wait --assignee` can miss a handoff that lands between two re-arms | loop gap | **Done** `f61ab67` |
-| [5](#5-wait---epic-scans-every-task-40-times-a-second) | `wait --epic` scans and decodes every task 40 times a second | performance, measured | a few lines in `wait.rs` |
-| [9](#9-a-full-map-has-no-way-out-except-reset) | A full map has no remedy except `reset`, and events grow faster than tasks | data lifecycle | decided, see D1 to D3 |
+| [5](#5-wait---epic-scans-every-task-40-times-a-second) | `wait --epic` scans and decodes every task 40 times a second | performance, measured | **Done** |
+| [9](#9-a-full-map-has-no-way-out-except-reset) | A full map has no remedy except `reset`, and events grow faster than tasks | data lifecycle | **Done**; decisions D1 to D3 |
 | [16](#16-protocolmd-has-drifted-from-the-code) | `PROTOCOL.md` has five stale statements the doc gates do not catch | docs | **Done** `567aed4`, see the note under it |
 
 ## How this was checked
@@ -412,9 +412,9 @@ uses adapter-neutral terms.
 The store renders one message for both adapters, so each adapter sometimes shows
 the other's syntax:
 
-- `task is held by alice; --force with a reason takes it, or --release --force …`
+- `task is held by alice; force with a reason takes it, or release with force and a reason returns it to todo`
   is shown to MCP callers, whose arguments are `force` and `release`.
-- `unknown assignee "nobody"; use new_actor=true to register the target` is shown
+- `unknown assignee "nobody"; use new_actor / --new-actor to register the target` is shown
   to CLI callers, whose flag is `--new-actor`.
 
 An agent reads these literally. Either phrase them neutrally ("force with a

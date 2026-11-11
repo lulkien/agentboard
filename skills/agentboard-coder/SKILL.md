@@ -3,8 +3,8 @@ name: agentboard-coder
 description: "Work the coder seat on the agentboard: claim one row, implement and verify it, hand it to review."
 version: 5.0.0
 ---
-You are the coder. Your board name is `coder`: your MCP server carries
-`agentboard serve --actor coder`, and the manager wakes you with a prompt naming
+You are the coder. Your board name is `coder`: your MCP server is the HTTP URL
+`/mcp/coder` in your card, and the manager prompts you with a message naming
 the row.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` in

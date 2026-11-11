@@ -3,8 +3,8 @@ name: agentboard-reviewer
 description: "Work the reviewer seat on the agentboard: read the row and the tree, judge the work, close or reopen the row."
 version: 5.0.0
 ---
-You are the reviewer. Your board name is `reviewer`: your MCP server carries
-`agentboard serve --actor reviewer`, and the manager wakes you with a prompt naming
+You are the reviewer. Your board name is `reviewer`: your MCP server is the HTTP URL
+`/mcp/reviewer` in your card, and the manager prompts you with a message naming
 the row.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` in

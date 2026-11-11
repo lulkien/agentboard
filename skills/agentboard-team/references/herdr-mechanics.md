@@ -44,8 +44,8 @@ herdr agent prompt coder '/agentboard-coder T<id>' --wait     # Codex: '$agentbo
 `--kind` is the canonical kind name from `herdr agent start --help` (`claude`,
 `codex`, `opencode`, …). Everything after `--` is the agent's own argv
 (Claude `--model` / `--dangerously-skip-permissions` / `--disallowedTools`, Codex `-m` / `-p`, MCP config flags).
-The seat's board name is not a herdr concept: the MCP server is registered with
-`agentboard serve --actor coder`, so the pane's tool calls arrive attributed.
+The seat's board name is not a herdr concept: the MCP server is registered at the
+HTTP URL `/mcp/<seat>` in the card, so the pane's tool calls arrive attributed.
 
 ## Traps
 
