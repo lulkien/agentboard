@@ -49,7 +49,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `51/51 passed (manager launcher)` |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 161 CLI names, 153 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 167 CLI names, 159 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
 | `bash scripts/gate.sh --prebuilt` | `GATES OK: 12 gates passed` (reviewer; venv on PATH) |
@@ -126,6 +126,9 @@ have both adapters call it, so a rule exists once.
 - A bare sequence cursor (for example `--after 0`) means "this board", so history
   replay works without knowing the instance id; a foreign `instance:seq` refuses
   with `CursorInstanceMismatch`.
+- Project `0` is the built-in `standalone` project. Old rows with a missing or
+  null project are read as 0 and are never rewritten by a migration; adapters
+  must resolve the project and must not default to 0.
 - A wait re-queries the watched rows on every poll and it is an ALL predicate: a
   frozen id list misses a child filed mid-epic, and an any-row match turns "every
   child terminal" into "the first child finished". Both mutations are caught by the

@@ -8,6 +8,7 @@ The board uses format 2 and eight named LMDB databases. Format 1 boards refuse
 to open until migrated with `scripts/migrate-board.py` (`uv run --with lmdb
 python3 scripts/migrate-board.py --db DIR --map PATH=ID`). The refusal names
 the board path and both format versions; a newer board asks for a newer binary.
+Project `0`, named `standalone`, is built in and cannot be renamed or deleted.
 Projects are added, listed and updated through the CLI only; both deletes are
 also tools.
 
@@ -50,7 +51,8 @@ way: unknown, duplicate or malformed keys and a key the endpoint does not take a
 400; a missing task, parent or `project` is 404; any non-GET method is 405. There
 is no write route. Bodies are JSON; task rows are summaries (`id`, `title`,
 `status`, `priority`, `assignee`, `parent_id`, `project_id`, `revision`,
-`created_at_ms`, `updated_at_ms`) with the client-facing status names, and only
+`created_at_ms`, `updated_at_ms`) with the client-facing status names. `project_id`
+is always an integer, including `0` for `standalone`, never `null`, and only
 `/api/tasks/ID` adds `description`, `goal`, `reporter` and the three reports.
 `counts` is every status as `{status, count}`. `/api/board` caps each lane,
 the attention list and each held list at 8 rows beside their `total`; `/api/tasks`
@@ -175,6 +177,9 @@ Answers `ok`, the record and `cursor <instance>:<seq>`. Rules, each with its own
   reason is recorded in the event.
 - `assignee` together with `clear_assignee` refuses, and likewise for `parent` and
   `project`: pick one.
+- Every task must have a project. `clear_project: true` refuses; choose another
+  project instead. `task_add` must resolve a project and refuses if none is
+  supplied or selected.
 - `release: true` puts a held row back in `todo` with no assignee, in one write: the
   revision moves, and one `updated` event carries `reason` and any `comment`. The
   holder may release its own row; another actor needs `force` with a reason, as for
@@ -322,7 +327,7 @@ choose release or a field change, not both
 task T7 is done; nothing to release
 task T7 has no holder to release
 unknown assignee "nobody"; use new_actor=true to register the target
-project 2 still has tasks (count 3); move or detach them first
+project 2 still has tasks (count 3); move them first
 agent "bob" still holds open tasks (count 2); release or reassign them first
 agent "ghost" does not exist
 comment must be nonempty

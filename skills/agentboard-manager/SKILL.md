@@ -25,11 +25,13 @@ The two workflows differ in one line: in herdr the manager renames a tab and wai
 for its shell prompt, and seats are tabs driven with `herdr agent prompt`; in hc the
 seat is a named terminal and `hc send` waits for the program to pause.
 
-1. Resolve the active project before managing seats. Pass its ID to `board_brief`
-   and `task_list`; otherwise the adapters use `AGENTBOARD_PROJECT`, then match
-   the process working directory to a registered project path. If none matches,
-   the summary covers the whole board. Check the selected project against the
-   repository before launching or assigning seats. `board_agents` is board-wide.
+1. Resolve the active project before managing seats. Run `agentboard project ls`,
+   choose the project whose registered path is the manager's current working
+   directory, or choose project `0` (`standalone`) if no path matches. Pass that
+   project ID to `board_brief`, `task_list`, and every `task_add`. HTTP seat cards
+   carry no `?project=` URL parameter, so the `task_add` argument is required.
+   Check the selected project against the repository before launching or
+   assigning seats. `board_agents` is board-wide.
 2. Check that the shared daemon is running on the intended board (`GET
    /api/health`) before launching HTTP seats. Each card's `/mcp/<seat>` URL
    supplies its actor, including Grok's `${AGENTBOARD_SEAT:-manager}` URL. The

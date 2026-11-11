@@ -154,7 +154,11 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   `(priority, id)` order. Map usage reports LMDB's high-water page mark and map
   size; reclaimed pages below that mark remain counted.
 - `project` manages the registry. Deletion refuses while any task still carries
-  its ID; move or detach those rows first. `ls` and `brief` choose the explicit
+  its ID; move those rows to another project first. Project `0` is the built-in
+  `standalone` project and cannot be deleted or renamed. `add` and `task_add`
+  resolve a project before writing and refuse when none is selected;
+  `update --clear-project` refuses because every task must belong to a project.
+  `ls` and `brief` choose the explicit
   project ID, then `AGENTBOARD_PROJECT`, then a registered path matching the cwd.
 - `feed` is the bus. It answers a page of events plus the cursor to pass as
   `--after`. With no cursor it returns the newest page of *matching* events and
@@ -192,7 +196,7 @@ agentboard: task is held by alice; --force with a reason takes it, or --release 
 agentboard: forced update requires a reason
 agentboard: unknown assignee "nobody"; use new_actor=true to register the target
 agentboard: task T7 has no holder to release
-agentboard: project 2 still has tasks (count 3); move or detach them first
+agentboard: project 2 still has tasks (count 3); move them first
 agentboard: agent "bob" still holds open tasks (count 2); release or reassign them first
 ```
 
@@ -209,7 +213,8 @@ While it runs it holds the board open, so `reset`, `grow` and migration refuse u
 
 The same port serves a read-only JSON API: `GET /api/board`, `/api/epics`,
 `/api/tasks`, `/api/tasks/ID`, `/api/feed` and `/api/projects`, all accepting
-`?project=ID`; `PROTOCOL.md` lists the shapes and refusals.
+`?project=ID`; task `project_id` values in the API are always integers, never
+`null`. `PROTOCOL.md` lists the shapes and refusals.
 
 ## Quota take-over
 

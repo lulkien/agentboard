@@ -391,6 +391,14 @@ CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `w
 `grow --map-size-mb MB`, `serve`. `ls` and `brief`
 scope to the selected project: explicit ID, then `AGENTBOARD_PROJECT`, then a registered
 project path matching the current directory; otherwise they show the whole board.
+Project `0` is called `standalone`; it is part of the board and its name and ID
+are fixed.
+The manager runs `agentboard project ls`, selects the row whose path matches its
+current working directory or project `0` when none matches, and passes that
+project on every `task_add`. The argument is required for HTTP seat cards because
+they carry no `?project=` URL parameter. `task_add` refuses without a resolved
+project, and `clear_project` refuses; move tasks to another project before
+deleting their current project.
 Exit codes: `0` ok, `1` refused,
 `3` no ready tasks or a wait timeout.
 
