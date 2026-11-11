@@ -39,7 +39,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `cargo test --offline --lib` | `test result: ok. 109 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `374/374 passed (cli, lmdb)` |
+| `bash tests/cli.sh` | `376/376 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `201/201 passed (mcp, lmdb)` |
 | `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `201/201 passed (mcp-http, lmdb)` |
 | `python3 tests/daemon.py` | `daemon: 318/318 passed (http, lmdb)` (scratch boards, loopback port 0) |

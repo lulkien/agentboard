@@ -22,7 +22,10 @@ out=$("$B" daemon --help 2>&1); code=$?
 check "daemon --help exits 0" 0 "$code"
 has "daemon help names the default address" "127.0.0.1:8765" "$out"
 out=$("$B" daemon 0.0.0.0:0 --db "$S/daemon-board" 2>&1); code=$?
-check "daemon refuses a non-loopback bind" 1 "$code"
+check "daemon refuses an unspecified bind" 1 "$code"
+has "daemon refusal names the unspecified address" "cannot bind the unspecified address 0.0.0.0; name one address" "$out"
+out=$("$B" daemon 192.168.1.50:0 --db "$S/daemon-board" 2>&1); code=$?
+check "daemon refuses a non-loopback bind without the flag" 1 "$code"
 has "daemon refusal names the flag" "--allow-non-loopback" "$out"
 
 # --- path and add ----------------------------------------------------------
