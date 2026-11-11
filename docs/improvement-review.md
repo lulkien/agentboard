@@ -511,6 +511,9 @@ counts are kept by hand in one place and checked in none.
 compare it with the output. The table then cannot drift, and a count that goes
 down is a failure someone has to acknowledge by editing the table.
 
+**Status: done in T309.** `gate.sh` reads each pinned result line from the
+`AGENTS.md` proof table and fails naming the expected and actual lines.
+
 ### 19. Nothing runs the gate automatically
 
 There is no CI configuration and no git hook; the gate runs when someone remembers

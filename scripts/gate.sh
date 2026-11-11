@@ -5,10 +5,9 @@
 #   bash scripts/gate.sh                         # every gate but latency
 #   bash scripts/gate.sh --full                  # also measure claim_latency
 #
-# Every gate must also print what the table beside it promises. A gate that
-# exits 0 with the wrong text is still a failure, because that text is what the
-# counts in AGENTS.md are read against; checking it here is what stops the
-# counts drifting by hand.
+# Pinned result lines are read from the AGENTS.md proof table: every backticked
+# span in a pinned row's Expected cell is accepted as a prefix of the output
+# line its locator regex finds. A count change fails until the table is edited.
 set -u
 
 usage() {
@@ -60,6 +59,48 @@ want() { # want <extended regex the command's output must contain>
   fi
 }
 
+expected() { # print the accepted result lines for a proof-table command key
+  awk -F'|' -v key="$1" '
+    /^\| / {
+      command_count = split($2, command_parts, "`")
+      if (command_count < 3 || command_parts[2] != key) next
+      expected_count = split($3, expected_parts, "`")
+      for (i = 2; i <= expected_count; i += 2) print expected_parts[i]
+    }
+  ' AGENTS.md
+}
+
+pin() { # pin <extended regex locating the result line in the output>
+  local actual key accepted found=0
+  actual=$(grep -E -- "$1" "$log" | tail -n 1)
+  if [ -z "$actual" ]; then
+    printf 'GATE FAILED: %s (output lacks %s)\n' "$current" "$1" >&2
+    exit 1
+  fi
+
+  key=${current#env }
+  accepted=$(expected "$key")
+  if [ -z "$accepted" ]; then
+    printf 'GATE FAILED: %s (AGENTS.md has no expected line for %s)\n' "$current" "$key" >&2
+    exit 1
+  fi
+
+  while IFS= read -r want_line; do
+    if [[ $actual == "$want_line"* ]]; then
+      found=1
+      break
+    fi
+  done <<< "$accepted"
+  [ "$found" -eq 1 ] && return 0
+
+  printf 'GATE FAILED: %s (output does not match AGENTS.md)\n' "$current" >&2
+  while IFS= read -r want_line; do
+    printf '  expected: %s\n' "$want_line" >&2
+  done <<< "$accepted"
+  printf '  actual:   %s\n' "$actual" >&2
+  exit 1
+}
+
 refuse() { # refuse <extended regex that must match nothing>
   if grep -Eq -- "$1" "$log"; then
     printf 'GATE FAILED: %s (output matches %s)\n' "$current" "$1" >&2
@@ -78,7 +119,7 @@ gate cargo fmt --check
 silent
 
 gate cargo test --offline --lib
-want '^test result: ok\. [0-9]+ passed; 0 failed'
+pin '^test result: '
 
 gate cargo clippy --offline --all-targets -- -D warnings
 refuse '^(warning|error)(\[|:)'
@@ -87,37 +128,37 @@ gate cargo build --release
 want 'Finished'
 
 gate bash tests/cli.sh
-want '^[0-9]+/[0-9]+ passed \(cli, lmdb\)$'
+pin '^[0-9]+/[0-9]+ passed \(cli, lmdb\)$'
 
 gate python3 tests/mcp_client.py
-want '^[0-9]+/[0-9]+ passed \(mcp, lmdb\)$'
+pin '^[0-9]+/[0-9]+ passed \(mcp, lmdb\)$'
 
 gate env AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py
-want '^[0-9]+/[0-9]+ passed \(mcp-http, lmdb\)$'
+pin '^[0-9]+/[0-9]+ passed \(mcp-http, lmdb\)$'
 
 gate python3 tests/daemon.py
-want '^daemon: [0-9]+/[0-9]+ passed \(http, lmdb\)$'
+pin '^daemon: [0-9]+/[0-9]+ passed \(http, lmdb\)$'
 
 gate bash tests/race.sh
-want '^ok: [0-9]+ processes claimed [0-9]+ tasks'
+pin '^ok: [0-9]+ processes claimed'
 
 gate bash tests/migrate.sh
-want '^(migrate: [0-9]+/[0-9]+ passed \(scratch LMDB, stepwise\)|SKIP migrate: Python lmdb unavailable offline \(use uv run --with lmdb\))$'
+pin '^(migrate: [0-9]+/[0-9]+ passed \(scratch LMDB, stepwise\)|SKIP migrate: Python lmdb unavailable offline \(use uv run --with lmdb\))$'
 
 gate bash tests/skills-install.sh
-want '^[0-9]+/[0-9]+ passed \(skills installer\)$'
+pin '^[0-9]+/[0-9]+ passed \(skills installer\)$'
 
 gate bash tests/seats-install.sh
-want '^[0-9]+/[0-9]+ passed \(seats installer\)$'
+pin '^[0-9]+/[0-9]+ passed \(seats installer\)$'
 
 gate bash tests/start-agentboard-manager.sh
-want '^[0-9]+/[0-9]+ passed \(manager launcher\)$'
+pin '^[0-9]+/[0-9]+ passed \(manager launcher\)$'
 
 gate python3 scripts/sync-tool-count.py --check
-want '^MCP router: [0-9]+ tools; published counts match$'
+pin '^MCP router: [0-9]+ tools; published counts match$'
 
 gate python3 tests/doc-names.py
-want '^doc-names: [0-9]+ pages, [0-9]+ CLI names, [0-9]+ MCP names passed$'
+pin '^doc-names: [0-9]+ pages, [0-9]+ CLI names, [0-9]+ MCP names passed$'
 
 gate python3 scripts/doc-overlap.py
 refuse '^FAIL'
