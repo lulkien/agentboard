@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Check usage pages against CLI help and MCP tools/list; never call board tools."""
 import argparse
-import json
 from pathlib import Path
 import re
 import subprocess
-import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'scripts'))
+from router_tools import tool_names
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--binary', default=str(ROOT / 'target/release/agentboard'))
 args = parser.parse_args()
@@ -20,33 +21,7 @@ for directory in sorted((ROOT / 'skills').iterdir()):
     if (directory / 'SKILL.md').exists():
         paths.extend(sorted(directory.rglob('*.md')))
 
-# An explicit scratch path overrides any caller AGENTBOARD_DB. The path is
-# nonexistent for either backend; tools/list needs no board operations.
-with tempfile.TemporaryDirectory(prefix='agentboard-doc-names-') as scratch:
-    with subprocess.Popen([args.binary, '--db', str(Path(scratch) / 'board')],
-                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True) as proc:
-        def rpc(seq, method, params):
-            proc.stdin.write(json.dumps(dict(jsonrpc='2.0', id=seq, method=method,
-                                            params=params)) + '\n')
-            proc.stdin.flush()
-            while True:
-                line = proc.stdout.readline()
-                assert line, 'MCP process closed before replying'
-                reply = json.loads(line)
-                if reply.get('id') == seq:
-                    assert 'result' in reply, reply
-                    return reply['result']
-        try:
-            rpc(1, 'initialize', dict(protocolVersion='2025-11-25', capabilities={},
-                                    clientInfo=dict(name='doc-names', version='1')))
-            proc.stdin.write(json.dumps(dict(jsonrpc='2.0',
-                                            method='notifications/initialized')) + '\n')
-            proc.stdin.flush()
-            tools = {tool['name'] for tool in rpc(2, 'tools/list', {})['tools']}
-        finally:
-            proc.stdin.close()
-            proc.wait(timeout=5)
+tools = tool_names(args.binary)
 
 help_cache = {}
 command_cache = {}

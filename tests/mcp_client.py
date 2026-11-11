@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP surface check: twelve tools on one stdio server or daemon, scratch board."""
+"""MCP surface check: twelve tools over daemon HTTP on a scratch board."""
 
 import http.client
 import json
@@ -10,7 +10,6 @@ import sys
 import tempfile
 
 BIN = os.environ.get("AGENTBOARD_TEST_BIN", os.path.join(os.getcwd(), "target/debug/agentboard"))
-HTTP = os.environ.get("AGENTBOARD_MCP_TRANSPORT") == "http"
 PROTOCOL = "2025-11-25"
 TOOLS = {
     "task_add",
@@ -56,88 +55,14 @@ def has(name, needle, hay):
         bad(name, f"missing {needle!r} in {hay[:400]!r}")
 
 
-class StdioServer:
-    def __init__(self, db, actor, args=(), extra_env=None):
-        env = dict(os.environ, AGENTBOARD_DB=db, AGENTBOARD_ACTOR=actor)
-        env.setdefault("AGENTBOARD_PROJECT", "0")
-        if extra_env:
-            env.update({key: value for key, value in extra_env.items() if value is not None})
-            for key, value in extra_env.items():
-                if value is None:
-                    env.pop(key, None)
-        self.proc = subprocess.Popen(
-            [BIN, "--db", db, "serve", *args],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            text=True,
-            bufsize=1,
-        )
-        self.seq = 0
-
-    def send(self, method, params=None, notification=False):
-        message = {"jsonrpc": "2.0", "method": method}
-        if params is not None:
-            message["params"] = params
-        if not notification:
-            self.seq += 1
-            message["id"] = self.seq
-        self.proc.stdin.write(json.dumps(message) + "\n")
-        self.proc.stdin.flush()
-        if notification:
-            return None
-        line = self.proc.stdout.readline()
-        if not line:
-            raise SystemExit(f"server closed the stream: {self.proc.stderr.read()}")
-        return json.loads(line)
-
-    def call(self, tool, arguments=None):
-        reply = self.send("tools/call", {"name": tool, "arguments": arguments or {}})
-        if "error" in reply:
-            return True, json.dumps(reply["error"])
-        result = reply["result"]
-        body = "".join(part.get("text", "") for part in result.get("content", []))
-        return bool(result.get("isError")), body
-
-    def start(self):
-        hello = self.send(
-            "initialize",
-            {
-                "protocolVersion": PROTOCOL,
-                "capabilities": {},
-                "clientInfo": {"name": "check", "version": "0"},
-            },
-        )
-        self.send("notifications/initialized", {}, notification=True)
-        return hello
-
-    def close(self):
-        try:
-            self.proc.stdin.close()
-            self.proc.wait(timeout=10)
-        except Exception:
-            self.proc.kill()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-        return False
-
-
-class HttpServer:
+class Server:
     """Same send/call interface over `agentboard daemon`: one daemon per instance.
 
     The seat name is the URL segment; a daemon never reads its own environment, so
-    an exported AGENTBOARD_PROJECT becomes `?project=` on the URL instead.
+    an exported AGENTBOARD_PROJECT is not read by the daemon; project scope is explicit or in the URL.
     """
 
-    def __init__(self, db, actor, args=(), extra_env=None):
-        args = list(args)
-        if "--actor" in args:
-            actor = args[args.index("--actor") + 1]
+    def __init__(self, db, actor, extra_env=None):
         project = (extra_env or {}).get("AGENTBOARD_PROJECT", "0")
         self.path = f"/mcp/{actor}" + (f"?project={project}" if project else "")
         env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTBOARD_")}
@@ -178,8 +103,19 @@ class HttpServer:
             raise SystemExit(f"daemon answered {response.status}: {body}")
         return json.loads(body)
 
-    call = StdioServer.call
-    start = StdioServer.start
+    def call(self, tool, arguments=None):
+        reply = self.send("tools/call", {"name": tool, "arguments": arguments or {}})
+        if "error" in reply:
+            return True, json.dumps(reply["error"])
+        result = reply["result"]
+        body = "".join(part.get("text", "") for part in result.get("content", []))
+        return bool(result.get("isError")), body
+
+    def start(self):
+        hello = self.send("initialize", {"protocolVersion": PROTOCOL, "capabilities": {},
+                            "clientInfo": {"name": "check", "version": "0"}})
+        self.send("notifications/initialized", {}, notification=True)
+        return hello
 
     def close(self):
         self.conn.close()
@@ -188,11 +124,12 @@ class HttpServer:
         self.proc.stdout.close()
         self.proc.stderr.close()
 
-    __enter__ = StdioServer.__enter__
-    __exit__ = StdioServer.__exit__
+    def __enter__(self):
+        return self
 
-
-Server = HttpServer if HTTP else StdioServer
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
 
 def main():
@@ -354,14 +291,6 @@ def main():
         check("assignee with clear_assignee is an error", True, is_error)
         has("assignee conflict names the choice", "not both", body)
 
-        # --actor beats the exported variable, so a wrapper flag is not ignored.
-        with Server(os.path.join(scratch, "board"), "alice", args=["--actor", "bob"]) as flag_server:
-            flag_server.start()
-            _, body = flag_server.call("task_add", {"title": "flagged actor"})
-            has("flag actor writes the task", "ok", body)
-            _, body = flag_server.call("board_agents", {})
-            has("flag actor registers bob", "bob", body)
-            check("flag actor wins over the environment", False, "alice" in body)
         project_db = os.path.join(scratch, "project-scope")
         unscoped_db = os.path.join(scratch, "unscoped-project-refusals")
         with Server(unscoped_db, "worker", extra_env={"AGENTBOARD_PROJECT": None}) as unscoped:
@@ -634,7 +563,7 @@ def main():
     finally:
         server.close()
 
-    print(f"{passed}/{passed + failed} passed ({'mcp-http' if HTTP else 'mcp'}, lmdb)")
+    print(f"{passed}/{passed + failed} passed (mcp, lmdb)")
     return 0 if failed == 0 else 1
 
 

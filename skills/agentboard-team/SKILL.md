@@ -24,9 +24,8 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
 
 - One directory per board: `$AGENTBOARD_DB`, else
   `~/.local/state/agentboard/lmdb`. `agentboard path` prints the resolved one.
-- A seat writes as its name: CLI uses `AGENTBOARD_ACTOR` or `--actor`; HTTP MCP
-  uses `/mcp/<seat>` in the card URL. Stdio `agentboard serve --actor coder` remains
-  available for one-shot use.
+- A seat writes as its name: CLI uses `AGENTBOARD_ACTOR` or `--actor`; MCP uses
+  `/mcp/<seat>` in the card URL.
 - Names identify a seat; they are not a credential. A name enters the roster when
   it first writes, and pointing a row at an unseen name needs `new_actor`, so a
   typo cannot invent a person.
@@ -388,7 +387,7 @@ agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 
 CLI parity: `add`, `ls`, `get`, `epic`, `update`, `claim`, `comment`, `feed`, `wait`,
 `brief [--project ID]`, `agents`, `path`, `reset --yes`,
-`grow --map-size-mb MB`, `serve`. `ls` and `brief`
+`grow --map-size-mb MB`, `daemon`. `ls` and `brief`
 scope to the selected project: explicit ID, then `AGENTBOARD_PROJECT`, then a registered
 project path matching the current directory; otherwise they show the whole board.
 Project `0` is called `standalone`; it is part of the board and its name and ID

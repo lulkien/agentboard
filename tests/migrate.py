@@ -88,11 +88,11 @@ def test_main():
         fixture(db)
         cursor = "fixture-instance:1"
         before = snapshot(db)
-        for verb in ("ls", "serve"):
-            result = run(str(BINARY), "--db", str(db), verb)
-            check(result.returncode != 0, f"v1 {verb} opened")
+        for args in (("ls",), ("daemon", "127.0.0.1:0")):
+            result = run(str(BINARY), "--db", str(db), *args)
+            check(result.returncode != 0, f"v1 {args[0]} opened")
             check("scripts/migrate-board.py" in result.stderr and str(db) in result.stderr,
-                  f"v1 {verb} lacked migration remedy: {result.stderr}")
+                  f"v1 {args[0]} lacked migration remedy: {result.stderr}")
         args = ("--map", "lean-display-server=1", "--map", "/abs/path/lean-display-server=1")
         result = command(db, *args, "--dry-run")
         check(result.returncode == 0 and "dry run" in result.stdout, result.stderr)
@@ -118,9 +118,6 @@ def test_main():
         check(result.returncode == 0 and "manager" in result.stdout, result.stderr)
         result = run(str(BINARY), "--db", str(db), "ls")
         check(result.returncode == 0, result.stderr)
-        result = run(str(BINARY), "--db", str(db), "serve")
-        check("mcp server: connection closed: initialize request" in result.stderr,
-              f"serve did not reach MCP startup: {result.stderr}")
         result = command(db, *args)
         check(result.returncode == 0 and "up to date" in result.stdout, result.stderr)
         env = lmdb.open(str(db), max_dbs=8, create=False)

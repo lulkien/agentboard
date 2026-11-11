@@ -1,7 +1,7 @@
 # AGENTS.md — changing this code
 
-agentboard is one Rust binary that is both a shared task board on an embedded LMDB
-directory and a bridge-free MCP server on stdio. This file is about CHANGING this
+agentboard is one Rust binary that is a shared task board on an embedded LMDB
+directory and an MCP server over local HTTP. This file is about CHANGING this
 tree, not about running a team with it.
 
 Read first:
@@ -39,20 +39,19 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `cargo test --offline --lib` | `test result: ok. 125 passed; 0 failed; 2 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `430/430 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `230/230 passed (mcp, lmdb)` |
-| `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `230/230 passed (mcp-http, lmdb)` |
+| `bash tests/cli.sh` | `434/434 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `227/227 passed (mcp, lmdb)` |
 | `python3 tests/daemon.py` | `daemon: 332/332 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
-| `bash tests/migrate.sh` | `migrate: 32/32 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
+| `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
 | `bash tests/seats-install.sh` | `255/255 passed (seats installer)` (isolated homes; no board writes) |
 | `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `51/51 passed (manager launcher)` |
 | `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 162 CLI names, 156 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 153 CLI names, 156 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
-| `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
-| `bash scripts/gate.sh --prebuilt` | `GATES OK: 12 gates passed` (reviewer; venv on PATH) |
+| `bash scripts/gate.sh` | `GATES OK: 15 gates passed`; with `--full` `GATES OK: 16 gates passed` |
+| `bash scripts/gate.sh --prebuilt` | `GATES OK: 11 gates passed` (reviewer; venv on PATH) |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 | `cargo test --offline --lib -- --ignored --nocapture large_board_reads_scale_with_relevant_work` | `large-board work: tasks=2510 api_reads=2520 wait_polls=1 wait_rows=250 feed_visits=3` |
 
@@ -111,9 +110,6 @@ have both adapters call it, so a rule exists once.
 - A `flock` exclusive→shared downgrade is a release, so a `reset` can unlink
   `data.mdb` inside it. Open compares `(dev, inode)` across the downgrade and
   retries; do not remove that check.
-- `serve()` returns a running service. Awaiting only that returns immediately and a
-  client sees its initialize reply followed by a closed stream; call
-  `.waiting().await`.
 - rmcp 3.5 accepts `initialize` for protocol `2025-11-25` with no `_meta`. The
   2026-07-28 draft drops `initialize` and demands inline
   `io.modelcontextprotocol/protocolVersion` and `clientCapabilities` in

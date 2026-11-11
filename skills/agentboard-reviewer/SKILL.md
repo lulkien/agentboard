@@ -88,7 +88,6 @@ You may run the repo suites that exercise an already-built binary:
 `bash tests/cli.sh`, `bash tests/seats-install.sh`,
 `bash tests/skills-install.sh`, `bash tests/start-agentboard-manager.sh`,
 `bash tests/race.sh`, `python3 tests/mcp_client.py`,
-`env AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py`,
 `python3 tests/daemon.py`, `bash tests/migrate.sh`,
 `bash scripts/gate.sh --prebuilt`, `python3 tests/doc-names.py`,
 `python3 scripts/sync-tool-count.py --check`, and `python3 scripts/doc-overlap.py`.

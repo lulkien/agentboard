@@ -94,7 +94,7 @@ fn router(board: Arc<Board>, bound: SocketAddr) -> Router {
     // Stateless: a resident process must not accumulate sessions from seats that
     // die without closing one, and the tools never push notifications. The guard
     // below owns the Host check, so rmcp's own list is switched off.
-    let server = McpBoard::shared(Arc::clone(&board), None);
+    let server = McpBoard::new(Arc::clone(&board));
     let config = StreamableHttpServerConfig::default()
         .with_legacy_session_mode(false)
         .with_json_response(true)

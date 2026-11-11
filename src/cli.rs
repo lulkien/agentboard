@@ -23,6 +23,7 @@ fn feed_wait_seconds(value: &str) -> Result<u64, String> {
     name = "agentboard",
     version,
     about = "Shared task board for a team of CLI agents",
+    arg_required_else_help = true,
     after_help = "Exit codes: 0 ok, 1 refused or failed, 2 usage, 3 no ready tasks or wait timeout. Mutations need an actor: --actor or $AGENTBOARD_ACTOR."
 )]
 pub struct Cli {
@@ -33,7 +34,7 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub actor: Option<String>,
     #[command(subcommand)]
-    pub cmd: Option<Cmd>,
+    pub cmd: Cmd,
 }
 
 #[derive(Subcommand, Debug)]
@@ -41,8 +42,6 @@ pub struct Cli {
 // the rest. The argv value lives for one parse; boxing it only adds indirection.
 #[allow(clippy::large_enum_variant)]
 pub enum Cmd {
-    /// MCP server on stdio (the default with no command)
-    Serve,
     /// MCP server over streamable HTTP at /mcp/<actor>, one process for every seat
     Daemon {
         /// Address to listen on
@@ -299,14 +298,14 @@ mod tests {
     fn blocking_wait_ceiling() {
         for (input, expected) in [("1", 1), ("300", 300)] {
             let cli = Cli::try_parse_from(["agentboard", "wait", "1", "--timeout", input]).unwrap();
-            let Some(Cmd::Wait { timeout, .. }) = cli.cmd else {
+            let Cmd::Wait { timeout, .. } = cli.cmd else {
                 panic!("expected wait")
             };
             assert_eq!(timeout, expected, "wait --timeout {input}");
         }
         for (input, expected) in [("1", 1), ("300", 300)] {
             let cli = Cli::try_parse_from(["agentboard", "feed", "--wait", input]).unwrap();
-            let Some(Cmd::Feed { wait, .. }) = cli.cmd else {
+            let Cmd::Feed { wait, .. } = cli.cmd else {
                 panic!("expected feed")
             };
             assert_eq!(wait, Some(expected), "feed --wait {input}");
@@ -326,12 +325,12 @@ mod tests {
             }
         }
         let cli = Cli::try_parse_from(["agentboard", "wait", "1"]).unwrap();
-        let Some(Cmd::Wait { timeout, .. }) = cli.cmd else {
+        let Cmd::Wait { timeout, .. } = cli.cmd else {
             panic!("expected wait")
         };
         assert!((1..=300).contains(&timeout));
         let cli = Cli::try_parse_from(["agentboard", "feed"]).unwrap();
-        assert!(matches!(cli.cmd, Some(Cmd::Feed { wait: None, .. })));
+        assert!(matches!(cli.cmd, Cmd::Feed { wait: None, .. }));
     }
 
     #[test]
@@ -339,8 +338,7 @@ mod tests {
         let parse = |extra: &[&str]| {
             let mut args = vec!["agentboard", "wait", "1"];
             args.extend_from_slice(extra);
-            let Some(Cmd::Wait { assignee, epic, .. }) = Cli::try_parse_from(args).unwrap().cmd
-            else {
+            let Cmd::Wait { assignee, epic, .. } = Cli::try_parse_from(args).unwrap().cmd else {
                 panic!("expected wait")
             };
             (assignee, epic)

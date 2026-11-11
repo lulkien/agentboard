@@ -12,34 +12,22 @@ Project `0`, named `standalone`, is built in and cannot be renamed or deleted.
 Projects are added, listed and updated through the CLI only; both deletes are
 also tools.
 
-## Transport
-
-`agentboard serve`, or `agentboard` with no command: MCP over stdio, protocol
-`2025-11-25`, tools capability only, no resources and no prompts. The process
-opens the board once at start; if the board cannot be opened the process exits `1`
-with one line on stderr.
-
-Identity comes from the process environment (`AGENTBOARD_ACTOR`) or from
-`agentboard serve --actor NAME`; the flag wins. A tool that mutates and has no
-actor fails with `actor required: start the server with --actor or set
-AGENTBOARD_ACTOR`.
-
 ## Daemon
 
 `agentboard daemon [ip:port] [--db PATH] [--allow-non-loopback]` serves the same twelve
-tools over streamable HTTP, stateless with JSON responses (no session ids), at
+tools over streamable HTTP, protocol `2025-11-25`, tools capability only, stateless
+with JSON responses (no session ids), at
 `POST /mcp/<actor>`. The percent-decoded segment is the actor; a missing or empty
-segment is 404. An actor-less stdio setting (`--actor`, `AGENTBOARD_ACTOR`) is not
-consulted for a request that has a URL name. `?project=ID` on that URL scopes
+segment is 404. `?project=ID` on that URL scopes
 `task_list` and `board_brief` when the call names no `project`; with neither, the
 whole board. The default address is `127.0.0.1:8765`; a non-loopback bind needs the
 flag, and a wildcard address (`0.0.0.0`, `[::]`) is refused: name one address.
+If the board cannot be opened, the process exits `1` with one line on stderr.
 
 One guard runs before every route: `Host` must be the bound address, `localhost` or
 `127.0.0.1` (else 421); a present `Origin` must be `http://` plus such a host (else
 403); `/mcp` answers loopback peers only, whatever the bind address (else 403).
-`GET /api/health` answers `{"board": PATH, "instance": ID, "cursor": CURSOR, "map": {"used_bytes": N, "size_bytes": M}}`. Map usage uses LMDB's last used page and page size. Stdio `serve` is
-unchanged.
+`GET /api/health` answers `{"board": PATH, "instance": ID, "cursor": CURSOR, "map": {"used_bytes": N, "size_bytes": M}}`. Map usage uses LMDB's last used page and page size.
 
 ### Read-only JSON API
 

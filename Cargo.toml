@@ -16,7 +16,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
 heed = "0.23.0"
 http = "1"
-rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 rust-embed = { version = "8", default-features = false, features = ["debug-embed"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

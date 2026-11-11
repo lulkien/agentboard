@@ -51,33 +51,25 @@ pub fn resolve_project(
     }))
 }
 
-/// Identity and project of one HTTP request. The daemon puts it in the request
-/// extensions; stdio has none and falls back to `--actor`, the environment and cwd.
+/// Identity and project of one HTTP request. The daemon puts it in the request extensions.
 #[derive(Clone, Debug)]
 pub struct RequestScope {
     pub actor: String,
     pub project: Option<u64>,
 }
 
-fn request_scope(extensions: &Extensions) -> Option<RequestScope> {
+fn request_scope(extensions: &Extensions) -> Result<RequestScope, ErrorData> {
     extensions
-        .get::<http::request::Parts>()?
-        .extensions
-        .get::<RequestScope>()
+        .get::<http::request::Parts>()
+        .and_then(|parts| parts.extensions.get::<RequestScope>())
         .cloned()
+        .ok_or_else(|| ErrorData::internal_error("missing request scope", None))
 }
 
 /// Project for a call: an HTTP request never reads the daemon's environment or
 /// working directory, only its argument, then the project on its URL.
-fn call_project(
-    board: &BoardHandle,
-    explicit: Option<u64>,
-    scope: Option<&RequestScope>,
-) -> crate::store::Result<Option<u64>> {
-    match scope {
-        Some(scope) => Ok(explicit.or(scope.project)),
-        None => resolve_project(board, explicit),
-    }
+fn call_project(explicit: Option<u64>, scope: &RequestScope) -> Option<u64> {
+    explicit.or(scope.project)
 }
 
 fn normalized_path(path: &Path) -> PathBuf {
@@ -119,18 +111,10 @@ where
         .map_err(Into::into)
 }
 
-fn actor_from_env() -> Option<String> {
-    std::env::var("AGENTBOARD_ACTOR")
-        .ok()
-        .filter(|name| !name.trim().is_empty())
-}
-
 #[derive(Clone)]
 pub struct Board {
     tool_router: ToolRouter<Self>,
     board: Arc<BoardHandle>,
-    /// Set by `agentboard serve --actor`; otherwise the environment decides.
-    actor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -297,30 +281,15 @@ pub struct FeedArgs {
 
 #[tool_router]
 impl Board {
-    pub fn new(board: BoardHandle, actor: Option<String>) -> Self {
-        Self::shared(Arc::new(board), actor)
-    }
-
-    pub fn shared(board: Arc<BoardHandle>, actor: Option<String>) -> Self {
+    pub fn new(board: Arc<BoardHandle>) -> Self {
         Self {
             tool_router: Self::tool_router(),
             board,
-            actor,
         }
     }
 
-    /// The actor this invocation writes as: the HTTP request's URL name, else
-    /// `--actor`, which wins over the environment so a wrapper that passes a flag
-    /// is not silently overridden by an exported variable.
-    fn actor_name(&self, scope: Option<&RequestScope>) -> Result<String, String> {
-        scope
-            .map(|scope| scope.actor.clone())
-            .or_else(|| self.actor.clone())
-            .filter(|name| !name.trim().is_empty())
-            .or_else(actor_from_env)
-            .ok_or_else(|| {
-                "actor required: start the server with --actor or set AGENTBOARD_ACTOR".to_owned()
-            })
+    fn actor_name(scope: &RequestScope) -> &str {
+        &scope.actor
     }
 
     #[tool(
@@ -332,8 +301,8 @@ impl Board {
         Parameters(args): Parameters<AddArgs>,
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let scope = request_scope(&extensions);
-        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
+        let scope = request_scope(&extensions)?;
+        let actor = Self::actor_name(&scope).to_owned();
         let status = match args.status.as_deref() {
             Some(raw) => Status::parse(raw).map_err(|e| err(e.to_string()))?,
             None => Status::Todo,
@@ -349,7 +318,7 @@ impl Board {
             project_id: None,
         };
         let (added, cursor) = blocking(&self.board, move |board| -> crate::store::Result<_> {
-            input.project_id = call_project(board, args.project, scope.as_ref())?;
+            input.project_id = call_project(args.project, &scope);
             let added = board.add(&actor, input, args.new_actor, domain::now_ms())?;
             let instance = board.metadata()?.instance_id;
             let cursor = format!("{instance}:{}", added.event.seq);
@@ -373,7 +342,7 @@ impl Board {
         Parameters(args): Parameters<ListArgs>,
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let scope = request_scope(&extensions);
+        let scope = request_scope(&extensions)?;
         let status = match args.status.as_deref() {
             Some(raw) => Some(Status::parse(raw).map_err(|e| err(e.to_string()))?),
             None => None,
@@ -388,7 +357,7 @@ impl Board {
             ..
         } = args;
         let page = blocking(&self.board, move |board| {
-            let project = call_project(board, project, scope.as_ref())?;
+            let project = call_project(project, &scope);
             board.list(&ListFilter {
                 status,
                 assignee: assignee.as_deref(),
@@ -452,8 +421,8 @@ impl Board {
         Parameters(args): Parameters<UpdateArgs>,
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let scope = request_scope(&extensions);
-        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
+        let scope = request_scope(&extensions)?;
+        let actor = Self::actor_name(&scope).to_owned();
         let status = match args.status.as_deref() {
             Some(raw) => Some(Status::parse(raw).map_err(|e| err(e.to_string()))?),
             None => None,
@@ -512,8 +481,8 @@ impl Board {
         Parameters(args): Parameters<ClaimArgs>,
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let scope = request_scope(&extensions);
-        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
+        let scope = request_scope(&extensions)?;
+        let actor = Self::actor_name(&scope).to_owned();
         let outcome = blocking(&self.board, move |board| {
             board.claim(&actor, args.id, domain::now_ms())
         })
@@ -533,8 +502,8 @@ impl Board {
         Parameters(args): Parameters<CommentArgs>,
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let scope = request_scope(&extensions);
-        let actor = self.actor_name(scope.as_ref()).map_err(err)?;
+        let scope = request_scope(&extensions)?;
+        let actor = Self::actor_name(&scope).to_owned();
         let cursor = blocking(&self.board, move |board| -> crate::store::Result<_> {
             let event = board.comment(&actor, args.id, &args.body, domain::now_ms())?;
             let instance = board.metadata()?.instance_id;
@@ -593,9 +562,9 @@ impl Board {
         Parameters(args): Parameters<BriefArgs>,
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
-        let scope = request_scope(&extensions);
+        let scope = request_scope(&extensions)?;
         let brief = blocking(&self.board, move |board| {
-            let project = call_project(board, args.project, scope.as_ref())?;
+            let project = call_project(args.project, &scope);
             board.brief_for_project(10, project)
         })
         .await?;
@@ -670,7 +639,7 @@ mod tests {
 
     #[test]
     fn the_tool_surface_is_twelve_tools_with_valid_schemas() {
-        let server = Board::new(scratch_board("surface"), None);
+        let server = Board::new(Arc::new(scratch_board("surface")));
         let tools = server.tool_router.list_all();
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         assert_eq!(
@@ -702,7 +671,7 @@ mod tests {
 
     #[test]
     fn every_tool_description_names_the_board_object() {
-        let server = Board::new(scratch_board("descriptions"), None);
+        let server = Board::new(Arc::new(scratch_board("descriptions")));
         for tool in server.tool_router.list_all() {
             let description = tool.description.clone().unwrap_or_default();
             assert!(!description.is_empty(), "{} has no description", tool.name);

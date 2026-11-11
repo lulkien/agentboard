@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use rmcp::ServiceExt;
 
 use agentboard::domain::{self, EventKind, NewProject, NewTask, Status, TaskPatch};
 use agentboard::store::{
@@ -71,18 +70,17 @@ fn open(path: &PathBuf) -> agentboard::store::Result<Board> {
 fn run(
     db: Option<PathBuf>,
     actor: Option<String>,
-    cmd: Option<Cmd>,
+    cmd: Cmd,
 ) -> Result<(String, ExitCode), Box<dyn std::error::Error>> {
     let path = board_path(db)?;
     let actor = actor_name(actor);
     match cmd {
-        None | Some(Cmd::Serve) => serve(path, actor),
-        Some(Cmd::Daemon {
+        Cmd::Daemon {
             address,
             allow_non_loopback,
-        }) => daemon(path, address, allow_non_loopback),
-        Some(Cmd::Path) => Ok((path.display().to_string(), ExitCode::SUCCESS)),
-        Some(Cmd::Project { cmd }) => {
+        } => daemon(path, address, allow_non_loopback),
+        Cmd::Path => Ok((path.display().to_string(), ExitCode::SUCCESS)),
+        Cmd::Project { cmd } => {
             let board = open(&path)?;
             match cmd {
                 ProjectCmd::Add { name, path } => {
@@ -111,7 +109,7 @@ fn run(
                 }
             }
         }
-        Some(Cmd::Reset { yes }) => {
+        Cmd::Reset { yes } => {
             if !yes {
                 return Err("reset discards the board; pass --yes to confirm".into());
             }
@@ -126,7 +124,7 @@ fn run(
                 ExitCode::SUCCESS,
             ))
         }
-        Some(Cmd::Grow { map_size_mb }) => {
+        Cmd::Grow { map_size_mb } => {
             let outcome = Board::grow(&path, map_size_mb)?;
             Ok((
                 format!(
@@ -139,7 +137,7 @@ fn run(
                 ExitCode::SUCCESS,
             ))
         }
-        Some(Cmd::Add {
+        Cmd::Add {
             title,
             description,
             goal,
@@ -149,7 +147,7 @@ fn run(
             parent,
             project,
             new_actor,
-        }) => {
+        } => {
             let actor = need_actor(actor)?;
             let status = parse_status(status.as_deref())?.unwrap_or(Status::Todo);
             let board = open(&path)?;
@@ -174,7 +172,7 @@ fn run(
                 ExitCode::SUCCESS,
             ))
         }
-        Some(Cmd::Ls {
+        Cmd::Ls {
             status,
             assignee,
             parent,
@@ -182,7 +180,7 @@ fn run(
             all,
             limit,
             offset,
-        }) => {
+        } => {
             let status = parse_status(status.as_deref())?;
             let board = open(&path)?;
             let project = agentboard::server::resolve_project(&board, project)?;
@@ -209,19 +207,19 @@ fn run(
             }
             Ok((lines.join("\n"), ExitCode::SUCCESS))
         }
-        Some(Cmd::Epic { id }) => {
+        Cmd::Epic { id } => {
             let board = open(&path)?;
             let epic = board.epic(id)?;
             Ok((render::epic_text(&epic), ExitCode::SUCCESS))
         }
-        Some(Cmd::Get { id, full }) => {
+        Cmd::Get { id, full } => {
             let board = open(&path)?;
             let task = board
                 .get(id)?
                 .ok_or_else(|| format!("task T{id} does not exist"))?;
             Ok((render::task_record(&task, full), ExitCode::SUCCESS))
         }
-        Some(Cmd::Update {
+        Cmd::Update {
             id,
             if_revision,
             title,
@@ -247,7 +245,7 @@ fn run(
             reason,
             comment,
             new_actor,
-        }) => {
+        } => {
             let actor = need_actor(actor)?;
             let status = parse_status(status.as_deref())?;
             let assignee = domain::set_or_clear("assignee", assignee, clear_assignee)?;
@@ -294,7 +292,7 @@ fn run(
                 ExitCode::SUCCESS,
             ))
         }
-        Some(Cmd::Claim { id }) => {
+        Cmd::Claim { id } => {
             let actor = need_actor(actor)?;
             let board = open(&path)?;
             match board.claim(&actor, id, domain::now_ms())? {
@@ -302,18 +300,18 @@ fn run(
                 outcome => Ok((render::claim_line(&outcome), ExitCode::SUCCESS)),
             }
         }
-        Some(Cmd::Comment {
+        Cmd::Comment {
             id,
             body,
             body_file,
-        }) => {
+        } => {
             let actor = need_actor(actor)?;
             let text = read_body(body, body_file)?;
             let board = open(&path)?;
             let event = board.comment(&actor, id, &text, domain::now_ms())?;
             Ok((format!("ok\ncursor {}", event.seq), ExitCode::SUCCESS))
         }
-        Some(Cmd::Feed {
+        Cmd::Feed {
             after,
             kind,
             recipient,
@@ -321,7 +319,7 @@ fn run(
             limit,
             full,
             wait,
-        }) => {
+        } => {
             let kind = parse_kind(kind.as_deref())?;
             let board = open(&path)?;
             let filter = FeedFilter {
@@ -338,14 +336,14 @@ fn run(
             };
             Ok((render::feed_page(&page, full), ExitCode::SUCCESS))
         }
-        Some(Cmd::Wait {
+        Cmd::Wait {
             ids,
             epic,
             status,
             assignee,
             after,
             timeout,
-        }) => {
+        } => {
             let statuses = wait_statuses(status.as_deref())?;
             let board = open(&path)?;
             let outcome = board.wait_tasks(&WaitSpec {
@@ -366,13 +364,13 @@ fn run(
             };
             Ok((render::wait_text(&outcome), code))
         }
-        Some(Cmd::Brief { project }) => {
+        Cmd::Brief { project } => {
             let board = open(&path)?;
             let project = agentboard::server::resolve_project(&board, project)?;
             let brief = board.brief_for_project(10, project)?;
             Ok((render::brief_text(&brief), ExitCode::SUCCESS))
         }
-        Some(Cmd::Agents { cmd }) => {
+        Cmd::Agents { cmd } => {
             let board = open(&path)?;
             if let Some(AgentsCmd::Delete { name }) = cmd {
                 let agent = board.delete_agent(&name)?;
@@ -386,29 +384,6 @@ fn run(
             Ok((lines.join("\n"), ExitCode::SUCCESS))
         }
     }
-}
-
-fn serve(
-    path: PathBuf,
-    actor: Option<String>,
-) -> Result<(String, ExitCode), Box<dyn std::error::Error>> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("runtime: {e}"))?;
-    runtime.block_on(async move {
-        let board = Board::open_with_options(&path, BoardOptions::from_env()?)?;
-        let server = agentboard::server::Board::new(board, actor);
-        let running = server
-            .serve(rmcp::transport::stdio())
-            .await
-            .map_err(|error| format!("mcp server: {error}"))?;
-        running
-            .waiting()
-            .await
-            .map_err(|error| format!("mcp server: {error}"))?;
-        Ok((String::new(), ExitCode::SUCCESS))
-    })
 }
 
 fn daemon(

@@ -22,6 +22,12 @@ fresh() { AGENTBOARD_DB="$S/board-$1"; export AGENTBOARD_DB; }
 out=$("$B" daemon --help 2>&1); code=$?
 check "daemon --help exits 0" 0 "$code"
 has "daemon help names the default address" "127.0.0.1:8765" "$out"
+out=$("$B" </dev/null 2>&1); code=$?
+check "bare command shows help and exits usage" 2 "$code"
+has "bare command prints usage" "Usage: agentboard" "$out"
+out=$("$B" serve 2>&1); code=$?
+check "removed serve command exits usage" 2 "$code"
+has "removed serve names the invalid subcommand" "unrecognized subcommand 'serve'" "$out"
 out=$("$B" daemon 0.0.0.0:0 --db "$S/daemon-board" 2>&1); code=$?
 check "daemon refuses an unspecified bind" 1 "$code"
 has "daemon refusal names the unspecified address" "cannot bind the unspecified address 0.0.0.0; name one address" "$out"

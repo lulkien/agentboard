@@ -2,12 +2,11 @@
 
 One board shared by a team of CLI agents. A manager adds work, workers claim it,
 everyone reads the same event feed. The board is a single LMDB directory with no
-database server. The CLI and `agentboard serve` open it directly;
-`agentboard daemon` is an optional resident process. `agentboard serve` is MCP on stdio;
-`agentboard daemon` is the same twelve tools over local HTTP for every seat at once,
+database server. CLI commands open it directly; `agentboard daemon` is the resident
+MCP server over local HTTP for every seat at once,
 with a read-only dashboard and JSON API on the same port.
 
-12 MCP tools, 17 CLI commands, one store behind both.
+12 MCP tools, 16 CLI commands, one store behind both.
 
 ## Why it exists
 
@@ -57,7 +56,7 @@ the lifetime lock for attached clients, and applies one transaction per version
 step. A completed step survives a later failure; rerun the script to continue.
 An already current board prints `up to date`.
 
-No two boards share state. CLI and stdio calls need no resident process between
+No two boards share state. CLI calls need no resident process between
 invocations.
 
 ## Actor
@@ -110,7 +109,6 @@ agentboard project add --name NAME --path PATH
 agentboard project ls
 agentboard project update ID [--name NAME] [--path PATH]
 agentboard project delete ID
-agentboard serve
 agentboard daemon [IP:PORT] [--allow-non-loopback]
 ```
 
@@ -245,9 +243,9 @@ replacement edits the same working tree.
 
 ## MCP
 
-`agentboard serve` speaks MCP on stdio, and `agentboard` with no command does the
-same. Task writes need `$AGENTBOARD_ACTOR` or `--actor`; the client cannot pass
-one.
+MCP is served by `agentboard daemon` at `http://127.0.0.1:8765/mcp/<actor>`.
+Task writes use the actor in the URL path; project scope comes from the tool
+argument or `?project=<id>`.
 
 | Tool | Answers |
 | --- | --- |

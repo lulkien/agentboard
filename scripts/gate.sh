@@ -158,9 +158,6 @@ pin '^[0-9]+/[0-9]+ passed \(cli, lmdb\)$'
 gate python3 tests/mcp_client.py
 pin '^[0-9]+/[0-9]+ passed \(mcp, lmdb\)$'
 
-gate env AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py
-pin '^[0-9]+/[0-9]+ passed \(mcp-http, lmdb\)$'
-
 gate python3 tests/daemon.py
 pin '^daemon: [0-9]+/[0-9]+ passed \(http, lmdb\)$'
 

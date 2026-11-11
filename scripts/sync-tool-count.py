@@ -1,41 +1,18 @@
 #!/usr/bin/env python3
 """Derive published tool counts from the compiled MCP router, without board calls."""
 import argparse
-import json
 from pathlib import Path
 import re
-import subprocess
+import sys
 
 root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(root / 'scripts'))
+from router_tools import tool_names
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--binary', default=str(root / 'target/release/agentboard'))
 parser.add_argument('--check', action='store_true')
 args = parser.parse_args()
-proc = subprocess.Popen([args.binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE, text=True)
-
-def rpc(seq, method, params):
-    proc.stdin.write(json.dumps(dict(jsonrpc='2.0', id=seq, method=method, params=params)) + '\n')
-    proc.stdin.flush()
-    while True:
-        line = proc.stdout.readline()
-        assert line, 'MCP process closed before replying'
-        reply = json.loads(line)
-        if reply.get('id') == seq:
-            assert 'result' in reply, reply
-            return reply['result']
-
-try:
-    rpc(1, 'initialize', dict(protocolVersion='2025-11-25', capabilities={},
-                              clientInfo=dict(name='tool-count', version='1')))
-    proc.stdin.write(json.dumps(dict(jsonrpc='2.0', method='notifications/initialized')) + '\n')
-    proc.stdin.flush()
-    count = len(rpc(2, 'tools/list', {})['tools'])
-finally:
-    proc.stdin.close()
-    proc.wait(timeout=5)
-    proc.stdout.close()
-    proc.stderr.close()
+count = len(tool_names(args.binary))
 
 changed = []
 words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
