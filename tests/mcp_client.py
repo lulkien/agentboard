@@ -220,6 +220,9 @@ def main():
         has("task_add returns the record", "T1 todo", body)
         cursor_match = re.search(r"cursor ([0-9a-f]+:[0-9]+)", body)
         check("task_add returns an instance cursor", True, cursor_match is not None)
+        is_error, body = server.call("task_add", {"title": "unknown assignee", "assignee": "nobody"})
+        check("unknown MCP assignee is refused", True, is_error)
+        has("unknown assignee advice matches CLI", 'use new_actor / --new-actor to register the target', body)
         is_error, body = server.call("task_add", {"title": "oversize", "description": "d" * 32769})
         check("oversized description uses invalid params", True, is_error)
         has("oversized description names size and limit", "description is 32769 characters; the limit is 32768", body)
@@ -540,6 +543,11 @@ def main():
             reply = releases.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 2, "release": True}})
             check("foreign release without force code", -32602, reply.get("error", {}).get("code"))
             has("foreign release names the holder", "held by coder", reply.get("error", {}).get("message", ""))
+            check(
+                "held refusal uses adapter-neutral advice",
+                "task is held by coder; force with a reason takes it, or release with force and a reason returns it to todo",
+                reply.get("error", {}).get("message", ""),
+            )
             is_error, before = releases.call("task_get", {"id": 1})
             reply = releases.send("tools/call", {"name": "task_update", "arguments": {"id": 1, "if_revision": 2, "release": True}})
             _, after = releases.call("task_get", {"id": 1})

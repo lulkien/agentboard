@@ -451,6 +451,7 @@ def main():
         check("a foreign Host wrote nothing", False, "mallory" in daemon.call("/mcp/alice", "board_agents"))
         check("a bad project is 400", 400, daemon.rpc("/mcp/alice?project=x", "tools/list")[0])
         check("a repeated project is 400", 400, daemon.rpc("/mcp/alice?project=1&project=1", "tools/list")[0])
+        check("unknown MCP query matches API query refusal", 400, daemon.rpc("/mcp/alice?foo=1", "tools/list")[0])
 
         # reset against a resident daemon is the busy refusal.
         reset = cli(db, "reset", "--yes")

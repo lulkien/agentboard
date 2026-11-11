@@ -383,6 +383,9 @@ one three-state value before it reaches the patch.
 
 ### 13. Small duplications
 
+**Status: done in T311.** The clock helper and LMDB name list are shared, and
+the MCP URL uses `routes::parse`; the optional `run` extraction was not needed.
+
 - `now_ms` exists three times: `src/domain.rs:9`, `src/main.rs:562`,
   `src/server.rs:108`. The server copy is a separate implementation.
 - `project_param` in `src/daemon.rs:180` is a second query parser beside
@@ -397,6 +400,9 @@ one three-state value before it reaches the patch.
 None of these is a bug. They are where the next drift will come from.
 
 ### 14. Refusal text mixes CLI and MCP vocabulary
+
+**Status: done in T311.** Shared refusal advice names both adapter spellings or
+uses adapter-neutral terms.
 
 The store renders one message for both adapters, so each adapter sometimes shows
 the other's syntax:

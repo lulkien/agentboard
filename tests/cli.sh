@@ -69,6 +69,7 @@ has "unknown status names the value" 'unknown task status: "queued"' "$out"
 out=$("$B" add "unknown assignee" --assignee nobody 2>&1); code=$?
 check "unknown assignee exit" 1 "$code"
 has "unknown assignee text" "unknown assignee" "$out"
+has "unknown assignee advice is adapter-neutral" 'use new_actor / --new-actor to register the target' "$out"
 out=$("$B" add "stranger" --assignee nobody --new-actor)
 has "new actor registers the name" "nobody" "$out"
 
@@ -273,10 +274,10 @@ out=$(AGENTBOARD_ACTOR=other "$B" update 3 --if-revision 1 --comment "still note
 has "a foreign holder can still comment" "ok" "$out"
 out=$("$B" update 3 --if-revision 1 --comment hi --force --reason x 2>&1); code=$?
 check "comment-only discarded force/reason exit" 1 "$code"
-has "comment-only refusal names discarded options" "--force, --reason or --new-actor" "$out"
+has "comment-only refusal names discarded options" "force, reason or new_actor" "$out"
 out=$("$B" update 3 --if-revision 1 --comment hi --new-actor 2>&1); code=$?
 check "comment-only discarded new-actor exit" 1 "$code"
-has "comment-only new-actor refusal names option" "--new-actor" "$out"
+has "comment-only new-actor refusal names option" "new_actor" "$out"
 out=$("$B" update 3 --if-revision 1 2>&1); code=$?
 check "no field and no comment exit" 1 "$code"
 has "no field and no comment text" "task update has no field changes" "$out"
@@ -615,7 +616,7 @@ check "--release with --title changes nothing" \
 out=$(AGENTBOARD_ACTOR=other "$B" update 4 --if-revision 2 --title "stolen" 2>&1); code=$?
 check "foreign write on a live holder exit" 1 "$code"
 has "held refusal names both recoverable paths" \
-    "held by coder; --force with a reason takes it, or --release --force with a reason returns it to todo" "$out"
+    "held by coder; force with a reason takes it, or release with force and a reason returns it to todo" "$out"
 out=$("$B" update 4 --if-revision 2 --release --force 2>&1); code=$?
 check "forced release without a reason exit" 1 "$code"
 has "forced release without a reason text" "forced update requires a reason" "$out"

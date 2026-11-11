@@ -173,35 +173,14 @@ async fn mcp_request(
     if actor.trim().is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let project = match project_param(request.uri().query()) {
-        Ok(project) => project,
-        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    let project = match crate::routes::parse("/", request.uri().query().unwrap_or("")) {
+        Ok(route) => route.filters.project,
+        Err(_) => return (StatusCode::BAD_REQUEST, "invalid query").into_response(),
     };
     request
         .extensions_mut()
         .insert(RequestScope { actor, project });
     app.mcp.handle(request).await.map(Body::new)
-}
-
-/// The `project` key of the MCP URL: absent is the whole board, anything but a
-/// single numeric id is refused rather than guessed.
-fn project_param(query: Option<&str>) -> Result<Option<u64>, &'static str> {
-    let mut project = None;
-    for pair in query
-        .unwrap_or("")
-        .split('&')
-        .filter(|pair| !pair.is_empty())
-    {
-        if let Some(raw) = pair.strip_prefix("project=") {
-            let id = raw
-                .parse::<u64>()
-                .map_err(|_| "project must be a numeric id")?;
-            if project.replace(id).is_some() {
-                return Err("project given twice");
-            }
-        }
-    }
-    Ok(project)
 }
 
 async fn health(State(app): State<App>) -> Response {
@@ -321,16 +300,6 @@ mod tests {
         for ip in ["192.168.1.9", "10.0.0.1", "2001:db8::1", "::ffff:10.0.0.1"] {
             assert!(!is_loopback(ip.parse().unwrap()), "{ip}");
         }
-    }
-
-    #[test]
-    fn the_url_project_is_one_numeric_id_or_nothing() {
-        assert_eq!(project_param(None), Ok(None));
-        assert_eq!(project_param(Some("other=1")), Ok(None));
-        assert_eq!(project_param(Some("project=7")), Ok(Some(7)));
-        assert!(project_param(Some("project=x")).is_err());
-        assert!(project_param(Some("project=")).is_err());
-        assert!(project_param(Some("project=1&project=2")).is_err());
     }
 
     #[test]

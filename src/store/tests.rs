@@ -1534,7 +1534,7 @@ fn existing_board_refuses_a_missing_named_database() {
     }
     assert!(matches!(
         Board::open_with_options(scratch.path(), options()),
-        Err(Error::Corrupt("missing tasks database"))
+        Err(Error::MissingDatabase("tasks"))
     ));
 }
 

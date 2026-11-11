@@ -154,7 +154,7 @@ fn run(
                 parent_id: parent,
                 project_id: project,
             };
-            let added = board.add(&actor, input, new_actor, now_ms())?;
+            let added = board.add(&actor, input, new_actor, domain::now_ms())?;
             Ok((
                 format!(
                     "ok\n{}\ncursor {}",
@@ -273,7 +273,7 @@ fn run(
                 force_reason: reason.as_deref(),
                 new_actor,
                 comment: comment.as_deref(),
-                now_ms: now_ms(),
+                now_ms: domain::now_ms(),
             })?;
             Ok((
                 format!(
@@ -287,7 +287,7 @@ fn run(
         Some(Cmd::Claim { id }) => {
             let actor = need_actor(actor)?;
             let board = open(&path)?;
-            match board.claim(&actor, id, now_ms())? {
+            match board.claim(&actor, id, domain::now_ms())? {
                 ClaimOutcome::NoWork => Ok(("no ready tasks".into(), ExitCode::from(3))),
                 outcome => Ok((render::claim_line(&outcome), ExitCode::SUCCESS)),
             }
@@ -300,7 +300,7 @@ fn run(
             let actor = need_actor(actor)?;
             let text = read_body(body, body_file)?;
             let board = open(&path)?;
-            let event = board.comment(&actor, id, &text, now_ms())?;
+            let event = board.comment(&actor, id, &text, domain::now_ms())?;
             Ok((format!("ok\ncursor {}", event.seq), ExitCode::SUCCESS))
         }
         Some(Cmd::Feed {
@@ -475,8 +475,4 @@ fn wait_statuses(raw: Option<&str>) -> Result<Vec<Status>, String> {
 fn parse_kind(raw: Option<&str>) -> Result<Option<EventKind>, String> {
     raw.map(|value| EventKind::parse(value).map_err(|e| e.to_string()))
         .transpose()
-}
-
-fn now_ms() -> i64 {
-    domain::now_ms()
 }

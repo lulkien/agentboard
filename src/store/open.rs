@@ -15,6 +15,16 @@ pub(super) const FORMAT_VERSION: u32 = 2;
 const APPLICATION: &str = "agentboard-lmdb";
 const ENVELOPE_KEY: &[u8] = b"envelope";
 const DEFAULT_MAP_SIZE_MB: usize = 1024;
+const DATABASE_NAMES: [&str; 8] = [
+    "meta",
+    "tasks",
+    "events",
+    "events_by_task",
+    "agents",
+    "tasks_by_status",
+    "tasks_by_assignee",
+    "projects",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoardOptions {
@@ -113,6 +123,7 @@ pub enum Error {
     ForeignBoard,
     UnknownEntry(String),
     Corrupt(&'static str),
+    MissingDatabase(&'static str),
     EmptyComment,
     CommentOnlyDiscardedOptions,
     InvalidCursor(String),
@@ -180,9 +191,10 @@ impl std::fmt::Display for Error {
                 "unexpected entry {name:?} in the board directory; a board holds only data.mdb, lock.mdb and lifetime.lock, so move it aside"
             ),
             Self::Corrupt(reason) => write!(f, "corrupt board: {reason}"),
+            Self::MissingDatabase(name) => write!(f, "corrupt board: missing {name} database"),
             Self::EmptyComment => f.write_str("comment must be nonempty"),
             Self::CommentOnlyDiscardedOptions => {
-                f.write_str("comment-only update cannot use --force, --reason or --new-actor")
+                f.write_str("comment-only update cannot use force, reason or new_actor")
             }
             Self::InvalidCursor(raw) => write!(f, "invalid feed cursor {raw:?}"),
             Self::CursorInstanceMismatch => {
@@ -190,7 +202,7 @@ impl std::fmt::Display for Error {
             }
             Self::WaitWithoutStatus => f.write_str("wait needs at least one wanted status"),
             Self::WaitWithoutTask => f.write_str("wait needs at least one task id"),
-            Self::UnknownAssignee(name) => write!(f, "unknown assignee {name:?}; use new_actor=true to register the target"),
+            Self::UnknownAssignee(name) => write!(f, "unknown assignee {name:?}; use new_actor / --new-actor to register the target"),
             Self::MissingAgent(name) => write!(f, "agent {name:?} does not exist"),
             Self::AgentHoldsOpenTasks { name, count } => write!(f, "agent {name:?} still holds open tasks (count {count}); release or reassign them first"),
             Self::MissingTask(id) => write!(f, "task T{id} does not exist"),
@@ -231,6 +243,7 @@ impl Error {
             | Self::ForeignBoard
             | Self::UnknownEntry(_)
             | Self::Corrupt(_)
+            | Self::MissingDatabase(_)
             | Self::CounterOverflow
             | Self::ResetBusy
             | Self::UnsafePath(_)
@@ -416,19 +429,22 @@ impl Board {
         ) = if fresh {
             let wtxn = env.write_txn()?;
             env.create_databases_and_commit(wtxn, |opener, txn| -> Result<_> {
-                let meta = opener.create_database::<Bytes, Bytes>(txn, Some("meta"))?;
+                let meta = opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[0]))?;
                 let envelope = Metadata::fresh(options.map_size_mb)?;
                 meta.put(txn, ENVELOPE_KEY, &serde_json::to_vec(&envelope)?)?;
-                let tasks = opener.create_database::<Bytes, Bytes>(txn, Some("tasks"))?;
-                let events = opener.create_database::<Bytes, Bytes>(txn, Some("events"))?;
+                let tasks = opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[1]))?;
+                let events =
+                    opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[2]))?;
                 let events_by_task =
-                    opener.create_database::<Bytes, Bytes>(txn, Some("events_by_task"))?;
-                let agents = opener.create_database::<Bytes, Bytes>(txn, Some("agents"))?;
+                    opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[3]))?;
+                let agents =
+                    opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[4]))?;
                 let tasks_by_status =
-                    opener.create_database::<Bytes, Bytes>(txn, Some("tasks_by_status"))?;
+                    opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[5]))?;
                 let tasks_by_assignee =
-                    opener.create_database::<Bytes, Bytes>(txn, Some("tasks_by_assignee"))?;
-                let projects = opener.create_database::<Bytes, Bytes>(txn, Some("projects"))?;
+                    opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[6]))?;
+                let projects =
+                    opener.create_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[7]))?;
                 Ok(CommitOrAbort::<_, ()>::Commit((
                     meta,
                     tasks,
@@ -445,32 +461,32 @@ impl Board {
             let rtxn = read_txn(&env)?;
             env.open_databases_and_commit(rtxn, |opener, txn| -> Result<_> {
                 let meta = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("meta"))?
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[0]))?
                     .ok_or(Error::Unstamped)?;
                 let raw = meta.get(txn, ENVELOPE_KEY)?.ok_or(Error::Unstamped)?;
                 let envelope: Metadata = serde_json::from_slice(raw)?;
                 check_metadata(&envelope, options, &path)?;
                 let tasks = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("tasks"))?
-                    .ok_or(Error::Corrupt("missing tasks database"))?;
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[1]))?
+                    .ok_or(Error::MissingDatabase(DATABASE_NAMES[1]))?;
                 let events = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("events"))?
-                    .ok_or(Error::Corrupt("missing events database"))?;
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[2]))?
+                    .ok_or(Error::MissingDatabase(DATABASE_NAMES[2]))?;
                 let events_by_task = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("events_by_task"))?
-                    .ok_or(Error::Corrupt("missing events_by_task database"))?;
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[3]))?
+                    .ok_or(Error::MissingDatabase(DATABASE_NAMES[3]))?;
                 let agents = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("agents"))?
-                    .ok_or(Error::Corrupt("missing agents database"))?;
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[4]))?
+                    .ok_or(Error::MissingDatabase(DATABASE_NAMES[4]))?;
                 let tasks_by_status = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("tasks_by_status"))?
-                    .ok_or(Error::Corrupt("missing tasks_by_status database"))?;
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[5]))?
+                    .ok_or(Error::MissingDatabase(DATABASE_NAMES[5]))?;
                 let tasks_by_assignee = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("tasks_by_assignee"))?
-                    .ok_or(Error::Corrupt("missing tasks_by_assignee database"))?;
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[6]))?
+                    .ok_or(Error::MissingDatabase(DATABASE_NAMES[6]))?;
                 let projects = opener
-                    .open_database::<Bytes, Bytes>(txn, Some("projects"))?
-                    .ok_or(Error::Corrupt("missing projects database"))?;
+                    .open_database::<Bytes, Bytes>(txn, Some(DATABASE_NAMES[7]))?
+                    .ok_or(Error::MissingDatabase(DATABASE_NAMES[7]))?;
                 Ok(CommitOrAbort::<_, ()>::Commit((
                     meta,
                     tasks,

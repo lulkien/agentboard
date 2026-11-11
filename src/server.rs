@@ -15,7 +15,7 @@ use rmcp::schemars::JsonSchema;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
-use crate::domain::{EventKind, NewTask, Status, TaskPatch};
+use crate::domain::{self, EventKind, NewTask, Status, TaskPatch};
 use crate::render;
 use crate::store::{
     Board as BoardHandle, ClaimOutcome, Error as StoreError, FeedFilter, ListFilter, UpdateInput,
@@ -121,12 +121,6 @@ fn actor_from_env() -> Option<String> {
     std::env::var("AGENTBOARD_ACTOR")
         .ok()
         .filter(|name| !name.trim().is_empty())
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_millis() as i64)
 }
 
 #[derive(Clone)]
@@ -353,7 +347,7 @@ impl Board {
             project_id: args.project,
         };
         let (added, cursor) = blocking(&self.board, move |board| -> crate::store::Result<_> {
-            let added = board.add(&actor, input, args.new_actor, now_ms())?;
+            let added = board.add(&actor, input, args.new_actor, domain::now_ms())?;
             let instance = board.metadata()?.instance_id;
             let cursor = format!("{instance}:{}", added.event.seq);
             Ok((added, cursor))
@@ -492,7 +486,7 @@ impl Board {
                 force_reason: args.reason.as_deref(),
                 new_actor: args.new_actor,
                 comment: args.comment.as_deref(),
-                now_ms: now_ms(),
+                now_ms: domain::now_ms(),
             })?;
             let instance = board.metadata()?.instance_id;
             let cursor = format!("{instance}:{}", updated.event.seq);
@@ -518,7 +512,7 @@ impl Board {
         let scope = request_scope(&extensions);
         let actor = self.actor_name(scope.as_ref()).map_err(err)?;
         let outcome = blocking(&self.board, move |board| {
-            board.claim(&actor, args.id, now_ms())
+            board.claim(&actor, args.id, domain::now_ms())
         })
         .await?;
         if matches!(outcome, ClaimOutcome::NoWork) {
@@ -539,7 +533,7 @@ impl Board {
         let scope = request_scope(&extensions);
         let actor = self.actor_name(scope.as_ref()).map_err(err)?;
         let cursor = blocking(&self.board, move |board| -> crate::store::Result<_> {
-            let event = board.comment(&actor, args.id, &args.body, now_ms())?;
+            let event = board.comment(&actor, args.id, &args.body, domain::now_ms())?;
             let instance = board.metadata()?.instance_id;
             Ok(format!("{instance}:{}", event.seq))
         })

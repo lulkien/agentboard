@@ -197,5 +197,6 @@ mod tests {
         assert!(parse("/feed", "offset=0").is_err());
         assert!(parse("/tasks", "project=0").is_err());
         assert!(parse("/tasks", "project=1&project=2").is_err());
+        assert!(parse("/", "foo=1").is_err());
     }
 }
