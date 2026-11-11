@@ -41,6 +41,8 @@ impl Board {
         let mut attention = Vec::new();
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
+            #[cfg(test)]
+            super::note_task_read();
             let head: TaskHead<'_> = serde_json::from_slice(raw)?;
             if project.is_some() && head.project_id != project {
                 continue;

@@ -307,12 +307,18 @@ impl Board {
         let mut events = Vec::new();
         let mut more = false;
         let mut scanned = start;
+        #[cfg(test)]
+        let mut events_visited = 0;
         while scanned <= high {
             let Some(raw) = self.events.get(&txn, &keys::task(scanned))? else {
                 scanned += 1;
                 continue;
             };
             let event: Event = serde_json::from_slice(raw)?;
+            #[cfg(test)]
+            {
+                events_visited += 1;
+            }
             if event.seq != scanned {
                 return Err(Error::Corrupt("event key/sequence mismatch"));
             }
@@ -339,7 +345,7 @@ impl Board {
             more,
             older: false,
             #[cfg(test)]
-            events_visited: 0,
+            events_visited,
         })
     }
 

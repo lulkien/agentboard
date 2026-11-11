@@ -309,6 +309,8 @@ impl Board {
     pub fn get(&self, id: u64) -> Result<Option<Task>> {
         let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;
+        #[cfg(test)]
+        super::note_task_read();
         let Some(raw) = self.tasks.get(&txn, &keys::task(id))? else {
             return Ok(None);
         };
@@ -411,6 +413,8 @@ impl Board {
     }
 
     pub(super) fn read_task_in_txn(&self, txn: &ReadTxn<'_>, id: u64) -> Result<Option<Task>> {
+        #[cfg(test)]
+        super::note_task_read();
         let Some(raw) = self.tasks.get(txn, &keys::task(id))? else {
             return Ok(None);
         };
@@ -610,6 +614,8 @@ impl Board {
         domain::check_len("comment", text, domain::MAX_TEXT_CHARS)?;
         let mut txn = self.env.write_txn()?;
         let mut metadata = self.checked_metadata(&txn)?;
+        #[cfg(test)]
+        super::note_task_read();
         if self.tasks.get(&txn, &keys::task(id))?.is_none() {
             return Err(Error::MissingTask(id));
         }

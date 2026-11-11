@@ -36,6 +36,8 @@ impl Board {
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
             #[cfg(test)]
+            super::note_task_read();
+            #[cfg(test)]
             {
                 tasks_visited += 1;
             }

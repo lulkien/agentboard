@@ -104,6 +104,8 @@ impl Board {
         let mut counts = [0_u64; Status::ALL.len()];
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
+            #[cfg(test)]
+            super::note_task_read();
             let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if keep(&without_status, &task) {
                 counts[keys::status_code(task.status) as usize] += 1;
@@ -128,6 +130,8 @@ impl Board {
         let mut counts = HashMap::new();
         for entry in self.tasks.iter(txn)? {
             let (_, raw) = entry?;
+            #[cfg(test)]
+            super::note_task_read();
             let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if let Some(parent) = task.parent_id {
                 let child_counts = counts.entry(parent).or_insert([0; Status::ALL.len()]);
@@ -199,6 +203,8 @@ impl Board {
         let mut tasks = Vec::with_capacity(limit);
         for entry in self.tasks.rev_iter(&txn)? {
             let (_, raw) = entry?;
+            #[cfg(test)]
+            super::note_task_read();
             let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if !keep(filter, &task) {
                 continue;
@@ -240,6 +246,8 @@ impl Board {
         let mut epics = Vec::new();
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
+            #[cfg(test)]
+            super::note_task_read();
             let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if project.is_some() && task.project_id != project {
                 continue;
@@ -293,6 +301,8 @@ impl Board {
         }
         for entry in self.tasks.iter(txn)? {
             let (key, _) = entry?;
+            #[cfg(test)]
+            super::note_task_read();
             ids.push(id_from_index_key(key, 0)?);
         }
         Ok(ids)

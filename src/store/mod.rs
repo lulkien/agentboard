@@ -1,6 +1,29 @@
 //! Heed permits one open environment per path in a process; share a `Board`
 //! handle when a process has multiple callers.
 
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static TASK_READS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+fn note_task_read() {
+    TASK_READS.with(|reads| reads.set(reads.get() + 1));
+}
+
+#[cfg(test)]
+pub(super) fn reset_task_reads() {
+    TASK_READS.with(|reads| reads.set(0));
+}
+
+#[cfg(test)]
+pub(super) fn task_reads() -> usize {
+    TASK_READS.with(Cell::get)
+}
+
 mod epics;
 mod feed;
 pub mod keys;

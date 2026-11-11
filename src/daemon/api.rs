@@ -149,6 +149,16 @@ fn epics_json(board: &Board, route: Route) -> Result<Value, ApiError> {
     Ok(json!({ "project": project, "epics": rows }))
 }
 
+#[cfg(test)]
+pub(super) fn epics_json_for_test(board: &Board, project: Option<u64>) -> Value {
+    let mut route = routes::parse("/epics", "").expect("static epics route is valid");
+    route.filters.project = project;
+    match epics_json(board, route) {
+        Ok(body) => body,
+        Err(_) => panic!("scratch-board epics request succeeds"),
+    }
+}
+
 fn tasks_json(board: &Board, route: Route) -> Result<Value, ApiError> {
     let Filters {
         project,

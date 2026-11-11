@@ -44,6 +44,11 @@ struct App {
     board: Arc<Board>,
 }
 
+#[cfg(test)]
+pub(crate) fn epics_json_for_test(board: &Board, project: Option<u64>) -> serde_json::Value {
+    api::epics_json_for_test(board, project)
+}
+
 /// Serve until the process is killed. `board` is the one open handle that every
 /// request shares.
 pub async fn serve(

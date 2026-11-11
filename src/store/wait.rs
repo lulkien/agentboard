@@ -242,6 +242,8 @@ impl Board {
             let mut children = 0;
             for entry in self.tasks.iter(txn)? {
                 let (_, raw) = entry?;
+                #[cfg(test)]
+                super::note_task_read();
                 let task: TaskHead<'_> = serde_json::from_slice(raw)?;
                 if task.parent_id == Some(id) {
                     ids.push(task.id);

@@ -36,7 +36,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 119 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 119 passed; 0 failed; 2 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` | `399/399 passed (cli, lmdb)` |
@@ -53,6 +53,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
+| `cargo test --offline --lib -- --ignored --nocapture large_board_reads_scale_with_relevant_work` | `large-board work: tasks=2510 api_reads=2520 wait_polls=1 wait_rows=250 feed_visits=3` |
 
 `AGENTBOARD_TEST_BIN` points any suite at another binary; the suites never touch a
 live board, because each one sets `AGENTBOARD_DB` to a fresh `mktemp` directory.

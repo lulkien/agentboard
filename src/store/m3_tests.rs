@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::domain::{Error as DomainError, EventKind, NewTask, Status, TaskPatch};
+use crate::domain::{Error as DomainError, EventKind, NewProject, NewTask, Status, TaskPatch};
 
 use super::{
     AssigneeMatch, Board, BoardOptions, ClaimOutcome, Error, FeedFilter, ListFilter, UpdateInput,
@@ -1995,6 +1995,97 @@ fn claim_latency_over_one_thousand_tasks() {
     assert!(
         p95 <= ceiling,
         "p95 {p95}ms exceeds the {ceiling}ms ceiling"
+    );
+}
+
+#[test]
+#[ignore = "measures large-board work counts; run with --ignored"]
+fn large_board_reads_scale_with_relevant_work() {
+    const EPICS: usize = 10;
+    const CHILDREN_PER_EPIC: usize = 250;
+    let task_count = EPICS * (CHILDREN_PER_EPIC + 1);
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let project_id = board
+        .add_project(NewProject {
+            project_name: "large-board".into(),
+            project_path: "/large-board".into(),
+        })
+        .unwrap()
+        .project_id;
+    let mut now = 0;
+    let mut epic_ids = Vec::with_capacity(EPICS);
+    let mut target_id = None;
+    for epic_index in 0..EPICS {
+        let mut epic = draft(&format!("epic {epic_index}"), Status::Todo, 0, None);
+        epic.project_id = Some(project_id);
+        now += 1;
+        let epic_id = board.add("manager", epic, true, now).unwrap().task.id;
+        epic_ids.push(epic_id);
+        for child_index in 0..CHILDREN_PER_EPIC {
+            let mut child = draft(
+                &format!("child {epic_index}-{child_index}"),
+                Status::Todo,
+                child_index as i32,
+                None,
+            );
+            child.parent_id = Some(epic_id);
+            child.project_id = Some(project_id);
+            now += 1;
+            let task_id = board.add("manager", child, true, now).unwrap().task.id;
+            if epic_index == 0 && child_index == 0 {
+                target_id = Some(task_id);
+            }
+        }
+    }
+    let target_id = target_id.unwrap();
+    board
+        .comment("manager", target_id, "target event one", now + 1)
+        .unwrap();
+    board
+        .comment("manager", target_id, "target event two", now + 2)
+        .unwrap();
+
+    super::reset_task_reads();
+    let epics_json = crate::daemon::epics_json_for_test(&board, Some(project_id));
+    assert_eq!(epics_json["epics"].as_array().unwrap().len(), EPICS);
+    let api_reads = super::task_reads();
+    assert!(api_reads >= task_count);
+    assert!(
+        api_reads <= task_count * 2,
+        "one /api/epics request read {api_reads} task records for {task_count} tasks"
+    );
+
+    let wait = board
+        .wait_tasks(&WaitSpec {
+            ids: &[epic_ids[0]],
+            epic: true,
+            statuses: &[Status::Done],
+            after: None,
+            timeout_ms: 125,
+            assignee: None,
+        })
+        .unwrap();
+    assert!(!wait.matched);
+    assert_eq!(wait.rows.len(), CHILDREN_PER_EPIC);
+    assert_eq!(wait.full_polls, 1);
+
+    let feed = board
+        .feed(&FeedFilter {
+            task: Some(target_id),
+            kind: Some(EventKind::Commented),
+            recipient: None,
+            after: Some("0"),
+            limit: 10,
+        })
+        .unwrap();
+    assert_eq!(feed.events.len(), 2);
+    assert_eq!(feed.events_visited, 3);
+    println!(
+        "large-board work: tasks={task_count} api_reads={api_reads} wait_polls={} wait_rows={} feed_visits={}",
+        wait.full_polls,
+        wait.rows.len(),
+        feed.events_visited,
     );
 }
 

@@ -516,6 +516,9 @@ tied to pushing, which is the owner's decision.
 
 ### 20. No test exercises a large board
 
+**Status: done**: the ignored 2,510-task proof counts `/api/epics` task reads,
+idle wait polls and task-filtered feed visits without elapsed-time assertions.
+
 Every suite uses a few dozen rows, so findings 5 to 8 are invisible to the gate.
 The ignored `claim_latency` test shows the pattern to follow: one ignored test
 that builds a few thousand tasks and asserts a gross ceiling on `wait --epic` CPU
