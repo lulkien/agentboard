@@ -502,6 +502,8 @@ time, in line with the existing trap about latency assertions.
 
 ### 21. A compiled Python file is tracked
 
+**Status: done**: the compiled file has been removed from the Git index.
+
 `tests/__pycache__/mcp_client.cpython-314.pyc` is in the index although
 `.gitignore` lists `__pycache__/`. It was added before the ignore rule.
 `git rm --cached` it.
