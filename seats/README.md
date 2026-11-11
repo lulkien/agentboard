@@ -87,8 +87,8 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 
 ## What every card carries
 
-- Tool names, never home paths: `git`, `ferris-search`, and
-  `codebase-memory-mcp` resolve on the seat's `PATH`.
+- Tool names, never home paths: `git` and `ferris-search` resolve on the Claude
+  seat's `PATH`.
 - Claude and Codex cards connect to `http://127.0.0.1:8765/mcp/<seat>`; Grok
   connects to `http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}`. The URL
   names the actor on every request. Keep `AGENTBOARD_SEAT` nonempty when set.

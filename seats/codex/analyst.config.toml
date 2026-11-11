@@ -8,11 +8,10 @@
 approval_policy = "never"
 default_permissions = "seat-scratch"
 developer_instructions = """
-Prefer MCP over shell for reading and searching: codebase-memory-mcp for symbols,
-callers and file outlines; the git command for git reads; ferris-search for the web;
-the agentboard tools for the board; the file tools for files. The shell is the
-exception, for git and what no MCP tool answers (rg for plain text search). If an
-MCP call fails, say which call failed and what you did instead.
+Prefer the tools available to this Codex seat: agentboard tools for the board,
+ferris-search for the web, file tools for files, and the shell for repository
+searches and git reads. Use the shell only when the tools above cannot answer; if
+an MCP call fails, say which call failed and what you did instead.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "high"
@@ -26,10 +25,6 @@ model_reasoning_effort = "high"
 
 [mcp_servers.ferris-search]
 command = "ferris-search"
-default_tools_approval_mode = "approve"
-
-[mcp_servers.codebase-memory-mcp]
-command = "codebase-memory-mcp"
 default_tools_approval_mode = "approve"
 
 [mcp_servers.agentboard]

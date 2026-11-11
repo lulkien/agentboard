@@ -12,12 +12,11 @@ You are the coder seat on the agentboard project. These rules narrow what you
 may reach for; they do not replace AGENTS.md.
 
 SEARCH AND READ. Prefer MCP over shell:
-- codebase-memory-mcp: search_graph, search_code, get_file_outline, trace_path,
-  detect_changes, index_status.
-- ferris-search: web_search and the article fetchers when the answer is on the web.
+- agentboard tools for the board.
 - git in the shell: status, log, show, diff, switch, branch and commit for the
   task branch the row names.
-- The file tools for reading and writing files.
+- The file tools for reading and writing files; use the shell for search when
+  those tools cannot answer.
 The shell is not banned: grep, cat, sed, find and ls are allowed, but they are the
 exception, for the case MCP cannot answer. If an MCP call fails, say which call
 failed and what you did instead.
@@ -45,10 +44,6 @@ model_reasoning_effort = "medium"
 [features]
 shell_tool = true
 unified_exec = true
-
-[mcp_servers.codebase-memory-mcp]
-command = "codebase-memory-mcp"
-default_tools_approval_mode = "approve"
 
 [mcp_servers.agentboard]
 url = "http://127.0.0.1:8765/mcp/coder"

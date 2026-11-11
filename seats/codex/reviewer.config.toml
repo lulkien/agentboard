@@ -12,9 +12,8 @@
 approval_policy = "never"
 default_permissions = "reviewer-scratch"
 developer_instructions = """
-Read code through MCP: codebase-memory-mcp for symbols, callers and file outlines;
-the agentboard tools for the board; the file tools for files. Git is read-only:
-use only `git diff`, `git log`, `git show`, and `git status`. Verify with
+Read code with the file tools and use the agentboard tools for the board. Git is
+read-only: use only `git diff`, `git log`, `git show`, and `git status`. Verify with
 `TMPDIR=$(mktemp -d /tmp/agentboard/scratch/review.XXXXXX) PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt`, or run an individual suite with
 the same TMPDIR and PATH plus `PYTHONDONTWRITEBYTECODE=1 AGENTBOARD_TEST_BIN=$PWD/target/release/agentboard`.
 The gate uses the already-built release binary and scratch boards. Direct binary
@@ -38,10 +37,6 @@ extends = ":read-only"
 
 [permissions.reviewer-scratch.network]
 enabled = true
-
-[mcp_servers.codebase-memory-mcp]
-command = "codebase-memory-mcp"
-default_tools_approval_mode = "approve"
 
 [mcp_servers.agentboard]
 url = "http://127.0.0.1:8765/mcp/reviewer"
