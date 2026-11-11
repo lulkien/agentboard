@@ -43,7 +43,9 @@ fn board_path(db: Option<PathBuf>) -> Result<PathBuf, String> {
     let base = match std::env::var("XDG_STATE_HOME") {
         Ok(base) => PathBuf::from(base),
         Err(_) => {
-            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".local/state")
+            let home = std::env::var("HOME")
+                .map_err(|_| "HOME is not set; pass --db or set AGENTBOARD_DB or XDG_STATE_HOME")?;
+            PathBuf::from(home).join(".local/state")
         }
     };
     Ok(base.join("agentboard/lmdb"))

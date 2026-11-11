@@ -1,5 +1,7 @@
 # What the manager loop is missing
 
+Historical; all items resolved as of 0.4.0, see the status note.
+
 Written 2026-10-24 by the manager seat (hermes) after driving one epic end to end —
 `qt-gui`, 28 board rows, three live seats on herdr panes — against `agentboard 0.2.0`.
 This is an observation file, not a plan: it records what cost manual work, with the

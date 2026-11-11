@@ -172,7 +172,7 @@ impl std::fmt::Display for Error {
             Self::MapFull => f.write_str("LMDB map full; set AGENTBOARD_MAP_SIZE_MB for a fresh board or reset this disposable board with a larger size"),
             Self::ReadersFull => f.write_str("LMDB reader slots exhausted (limit 256)"),
             Self::FormatMismatch { expected, found, path } if found > expected => write!(f, "board {} has format {found}, but this binary expects {expected}; the binary is older than the board, so upgrade the binary (do not migrate)", path.display()),
-            Self::FormatMismatch { expected, found, path } => write!(f, "board {} has format {found}, but this binary expects {expected}; run python3 scripts/migrate-board.py --db {} to migrate it", path.display(), path.display()),
+            Self::FormatMismatch { expected, found, path } => write!(f, "board {} has format {found}, but this binary expects {expected}; run `uv run --with lmdb python3 scripts/migrate-board.py --db {} --dry-run` to inspect the migration, then repeat without `--dry-run` to apply it", path.display(), path.display()),
             Self::Unstamped => f.write_str("unstamped board; inspect it before board reset --yes"),
             Self::ForeignBoard => f.write_str("directory is not an agentboard LMDB board"),
             Self::UnknownEntry(name) => write!(

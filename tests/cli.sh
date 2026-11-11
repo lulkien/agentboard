@@ -32,6 +32,11 @@ has "daemon refusal names the flag" "--allow-non-loopback" "$out"
 fresh a
 out=$("$B" path) || bad "path exit"
 check "path prints the resolved board" "$AGENTBOARD_DB" "$out"
+mkdir -p "$S/no-home"
+out=$(cd "$S/no-home" && env -u HOME -u XDG_STATE_HOME -u AGENTBOARD_DB "$B" ls 2>&1); code=$?
+check "missing HOME refuses board default" 1 "$code"
+has "missing HOME names HOME" "HOME" "$out"
+[ ! -e "$S/no-home/.local/state/agentboard/lmdb" ] && ok || bad "missing HOME created a board directory"
 out=$("$B" add "first task" --description "context here" --goal "done when green" --priority 5)
 has "add prints ok" "ok" "$out"
 has "add prints the record" "T1 todo" "$out"

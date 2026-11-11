@@ -528,20 +528,21 @@ time, in line with the existing trap about latency assertions.
 
 ## Small operational items
 
-- **`HOME` unset.** `board_path` falls back to `./.local/state/agentboard/lmdb`
-  (`src/main.rs:46`), which silently creates a board in the current directory.
-  Refuse by name instead.
+- **Done: `HOME` unset.** When neither `--db`/`AGENTBOARD_DB` nor
+  `XDG_STATE_HOME` supplies the board path, `board_path` requires `HOME` and
+  refuses by name instead of creating `./.local/state/agentboard/lmdb`
+  (`src/main.rs:46`).
 - **Daemon shutdown.** `axum::serve` runs without graceful shutdown
   (`src/daemon.rs:72`). LMDB is crash-safe, so no data is at risk, but an
   in-flight `board_feed(wait=…)` is cut mid-response on `systemctl stop`. A
   SIGTERM handler would need tokio's `signal` feature; low priority.
-- **Migration hint.** The format-mismatch refusal says to run
+- **Done: migration hint.** The format-mismatch refusal says to run
   `python3 scripts/migrate-board.py`, a path relative to this repository
   (`src/store/open.rs:170`). An installed binary has no such file nearby, and the
   README's working invocation is `uv run --with lmdb …`. Use that wording.
-- **Release profile.** `opt-level = 2` with no `strip` gives a 9.8 MB binary.
+- **Done: release profile.** `opt-level = 2` with no `strip` gives a 9.8 MB binary.
   `strip = true` is free. `lto` is optional and slows the build gate.
-- **Two polling constants.** `POLL_INTERVAL_MS = 25` is defined separately in
+- **Done: two polling constants.** `POLL_INTERVAL_MS = 25` is defined separately in
   `feed.rs` and `wait.rs`.
 
 ---

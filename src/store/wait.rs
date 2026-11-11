@@ -7,13 +7,11 @@ use std::time::{Duration, Instant};
 
 use crate::domain::{Event, EventKind, Status, Task, validate_actor};
 
+use super::POLL_INTERVAL_MS;
 use super::feed::Cursor;
 use super::keys;
 use super::list::TaskHead;
 use super::open::{Board, Error, ReadTxn, Result, read_txn};
-
-/// How often a parked waiter re-queries the rows it watches.
-const POLL_INTERVAL_MS: u64 = 25;
 
 /// The most event lines one watched row may contribute to an answer. A manager
 /// parked on an epic for half an hour would otherwise get every event of every

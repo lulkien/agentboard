@@ -6,12 +6,12 @@ use std::time::{Duration, Instant};
 
 use crate::domain::{Event, EventKind};
 
+use super::POLL_INTERVAL_MS;
 use super::keys;
 use super::open::{Board, Error, ReadTxn, Result, read_txn};
 
 /// The longest a single `wait` call blocks, per the spec.
 pub const WAIT_MAX_MS: u64 = 300_000;
-const POLL_INTERVAL_MS: u64 = 25;
 const DEFAULT_PAGE: usize = 50;
 const MAX_PAGE: usize = 500;
 
