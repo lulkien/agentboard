@@ -3,7 +3,7 @@
 The Codex rules are not a link: they are a marked block inside the user's own
 rules/default.rules, which Codex also appends to. Grok uses a marked block in its
 user config as well.
-usage: install.py [--force] [--grok-only]
+usage: install.py [--force] [--grok-only | --skip-grok]
 """
 import os
 import shutil
@@ -178,6 +178,7 @@ def grok_preflight(path, source):
 def main():
     force = False
     grok_only = False
+    skip_grok = False
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -185,10 +186,15 @@ def main():
             force = True
         elif arg == "--grok-only":
             grok_only = True
+        elif arg == "--skip-grok":
+            skip_grok = True
         else:
-            print("usage: install.py [--force] [--grok-only]", file=sys.stderr)
+            print("usage: install.py [--force] [--grok-only | --skip-grok]", file=sys.stderr)
             sys.exit(2)
         i += 1
+    if grok_only and skip_grok:
+        print("usage: --grok-only and --skip-grok are mutually exclusive", file=sys.stderr)
+        sys.exit(2)
     src = os.path.dirname(os.path.abspath(__file__))
     home = os.environ["HOME"]
     codex_home = os.environ.get("CODEX_HOME") or f"{home}/.codex"
@@ -246,9 +252,12 @@ def main():
             )
             refuse = True
     grok_source = read(grok_source_path)
-    grok_ok, grok_state = grok_preflight(grok_file, grok_source)
-    if not grok_ok:
-        refuse = True
+    if not skip_grok:
+        grok_ok, grok_state = grok_preflight(grok_file, grok_source)
+        if not grok_ok:
+            refuse = True
+    else:
+        grok_ok, grok_state = False, None
     grok_rendered = grok_source
     if grok_ok:
         current = read(grok_file) if os.path.isfile(grok_file) else b""
@@ -333,7 +342,8 @@ def main():
             link(f"{src}/claude/{seat}-mcp.json", f"{claude_home}/{seat}-mcp.json")
         link(f"{src}/start-agentboard-manager", f"{home}/.local/bin/start-agentboard-manager")
         link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")
-        install_grok_block()
+        if not skip_grok:
+            install_grok_block()
     finally:
         if os.path.lexists(rules_tmp):
             os.unlink(rules_tmp)

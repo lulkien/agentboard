@@ -25,7 +25,9 @@ link: it is merged into `$CODEX_HOME/config.toml`, where host state (`[tui]`,
 file that is not a symlink into this repo, and `--force` replaces only the named
 destinations. A full install also links `seats/start-agentboard-manager` to
 `~/.local/bin/start-agentboard-manager`; `--grok-only` manages only the Grok MCP
-block and does not install the launcher.
+block and does not install the launcher. Use `--skip-grok` to install or refresh
+everything else without reading or changing `~/.grok/config.toml`; it is mutually
+exclusive with `--grok-only`.
 The user unit is linked, never enabled or started. Start the daemon before launching
 HTTP seats and before merging these cards into a live checkout. Its default address
 is `127.0.0.1:8765`; check `/api/health` for the board path and instance. The unit

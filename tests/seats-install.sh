@@ -446,5 +446,39 @@ is "Grok preflight refusal links no Codex card" test ! -e "$home/.codex/coder.co
 is "Grok preflight refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
 is "Grok preflight refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
 
+# --- --skip-grok installs everything else without reading or changing Grok --
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok" "$home/.codex/rules"
+printf '[mcp_servers.agentboard]\ncommand = "foreign"\n' >"$grok"
+cp "$grok" "$tmp/grok-skip-before"
+sum=$(cksum <"$grok")
+inst --force --skip-grok; code=$?
+is "skip-grok full install exits successfully" test "$code" -eq 0
+is "skip-grok installs Codex rules block" grep -qF '# BEGIN AGENTBOARD RULES' "$rules"
+is "skip-grok installs Claude card" test -L "$home/.claude/coder-mcp.json"
+is "skip-grok installs Codex card" test -L "$home/.codex/coder.config.toml"
+same "skip-grok preserves foreign Grok bytes" "$tmp/grok-skip-before" "$grok"
+is "skip-grok preserves Grok checksum" test "$(cksum <"$grok")" = "$sum"
+is "skip-grok emits no Grok access diagnostic" test ! -s "$tmp/err"
+
+# The default full install keeps its existing refusal for that same entry.
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok" "$home/.codex/rules"
+printf '[mcp_servers.agentboard]\ncommand = "foreign"\n' >"$grok"
+cp "$grok" "$tmp/grok-default-before"
+inst --force; code=$?
+is "default full install refuses foreign Grok entry" test "$code" -eq 1
+same "default refusal preserves Grok bytes" "$tmp/grok-default-before" "$grok"
+has "default refusal keeps unmarked-entry message" 'unmarked [mcp_servers.agentboard] entry' "$tmp/err"
+is "default refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
+
+# Combining the mutually exclusive Grok modes is a usage error.
+newhome
+inst --skip-grok --grok-only; code=$?
+is "skip-grok with grok-only exits with usage error" test "$code" -eq 2
+has "conflicting Grok flags show usage error" 'mutually exclusive' "$tmp/err"
+
 echo "$((n - fail))/$n passed (seats installer)"
 [ "$fail" -eq 0 ]
