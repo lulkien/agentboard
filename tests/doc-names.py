@@ -78,6 +78,24 @@ def flags(prefix):
 
 errors = []
 cli_count = tool_count = 0
+
+# Keep the documented Task record in sync with its serialized Rust fields.
+domain_source = (ROOT / 'src/domain.rs').read_text()
+task_match = re.search(r'pub struct Task\s*\{([^}]*)\}', domain_source, re.S)
+if not task_match:
+    errors.append('src/domain.rs: cannot find pub struct Task')
+else:
+    serde_fields = re.findall(r'^\s*pub\s+([a-z][a-z0-9_]*):', task_match.group(1), re.M)
+    protocol = (ROOT / 'PROTOCOL.md').read_text()
+    documented_match = re.search(r'A task is a record:\s*((?:`[^`]+`(?:,\s*)?)+)', protocol)
+    if not documented_match:
+        errors.append('PROTOCOL.md: cannot find the task record field list')
+    else:
+        documented_fields = re.findall(r'`([^`]+)`', documented_match.group(1))
+        if documented_fields != serde_fields:
+            errors.append('PROTOCOL.md: task record fields do not match src/domain.rs Task serde fields; '
+                          f'documented {documented_fields}, serde {serde_fields}')
+
 for path in paths:
     fenced = False
     for number, line in enumerate(path.read_text().splitlines(), 1):

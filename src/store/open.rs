@@ -112,6 +112,7 @@ pub enum Error {
     UnknownEntry(String),
     Corrupt(&'static str),
     EmptyComment,
+    CommentOnlyDiscardedOptions,
     InvalidCursor(String),
     CursorInstanceMismatch,
     WaitWithoutStatus,
@@ -176,6 +177,9 @@ impl std::fmt::Display for Error {
             ),
             Self::Corrupt(reason) => write!(f, "corrupt board: {reason}"),
             Self::EmptyComment => f.write_str("comment must be nonempty"),
+            Self::CommentOnlyDiscardedOptions => {
+                f.write_str("comment-only update cannot use --force, --reason or --new-actor")
+            }
             Self::InvalidCursor(raw) => write!(f, "invalid feed cursor {raw:?}"),
             Self::CursorInstanceMismatch => {
                 f.write_str("feed cursor belongs to a different board; reset a cursor or reset the board")

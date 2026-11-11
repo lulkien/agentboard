@@ -243,6 +243,12 @@ has "comment-only update leaves the revision" "revision 1" "$out"
 has "comment-only update lands as a comment" "a note without a field change" "$("$B" feed --kind commented)"
 out=$(AGENTBOARD_ACTOR=other "$B" update 3 --if-revision 1 --comment "still notes")
 has "a foreign holder can still comment" "ok" "$out"
+out=$("$B" update 3 --if-revision 1 --comment hi --force --reason x 2>&1); code=$?
+check "comment-only discarded force/reason exit" 1 "$code"
+has "comment-only refusal names discarded options" "--force, --reason or --new-actor" "$out"
+out=$("$B" update 3 --if-revision 1 --comment hi --new-actor 2>&1); code=$?
+check "comment-only discarded new-actor exit" 1 "$code"
+has "comment-only new-actor refusal names option" "--new-actor" "$out"
 out=$("$B" update 3 --if-revision 1 2>&1); code=$?
 check "no field and no comment exit" 1 "$code"
 has "no field and no comment text" "task update has no field changes" "$out"

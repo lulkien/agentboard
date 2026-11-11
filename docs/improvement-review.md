@@ -57,9 +57,8 @@ These are worth keeping as they are:
 
 ### 1. A comment-only update skips actor validation
 
-**Status: done** in `8744808`. `touch_actor` calls `validate_actor`; `tests/cli.sh`
-covers the refusal and the roster. Still open from the "also note" below: refusing
-`--force` and `--reason` on a comment-only update.
+**Status: done** in `8744808`; the comment-only branch also refuses discarded
+`--force`, `--reason` and `--new-actor` options. `tests/cli.sh` covers both.
 
 `Board::update` has an early branch for "a comment with no field change". That
 branch calls `touch_actor` and appends the event without ever calling
@@ -442,9 +441,8 @@ arguments have no description:
 
 ### 16. `PROTOCOL.md` has drifted from the code
 
-**Status: done** in `567aed4`: the five lines are corrected and the count pattern in
-`scripts/sync-tool-count.py` accepts a number split across a line. Still open: the
-`tests/doc-names.py` check that the task field list equals `Task`'s serde fields.
+**Status: done** in `567aed4`; `tests/doc-names.py` now checks that the task field
+list equals `Task`'s serde fields.
 
 The two doc gates check tool names, CLI names and the published tool count. They
 did not catch these:

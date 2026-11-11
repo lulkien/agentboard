@@ -112,6 +112,9 @@ impl Board {
         if patch_is_empty(input.patch)
             && let Some(comment) = input.comment
         {
+            if input.force || input.force_reason.is_some() || input.new_actor {
+                return Err(Error::CommentOnlyDiscardedOptions);
+            }
             if comment.trim().is_empty() {
                 return Err(Error::EmptyComment);
             }
