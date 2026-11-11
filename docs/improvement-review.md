@@ -227,6 +227,9 @@ The API handler then builds JSON from it and does no further reads.
 
 ### 7. A filtered feed reads the whole event log
 
+**Status: done**: task-filtered pages walk `events_by_task` and apply
+remaining filters only to that task's events.
+
 `newest_matching` walks from the newest sequence down to 1 with a point read and a
 JSON decode per event, and when the page fills, `any_match_at_or_below` keeps
 walking to answer `older` (`src/store/feed.rs:90-137`). For a filter that matches

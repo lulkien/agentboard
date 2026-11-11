@@ -1,6 +1,7 @@
 //! Global event feed, opaque resume cursors and a bounded long-poll.
 
 use std::collections::HashMap;
+use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 use crate::domain::{Event, EventKind};
@@ -64,6 +65,8 @@ pub struct FeedPage {
     pub more: bool,
     /// Matching events exist before this page (only set for a no-cursor read).
     pub older: bool,
+    #[cfg(test)]
+    pub events_visited: usize,
 }
 
 /// A page of matching events strictly before a caller-supplied cursor.
@@ -83,6 +86,15 @@ fn checked_cursor(raw: &str, instance_id: &str) -> Result<Cursor> {
     Ok(cursor)
 }
 
+fn index_sequence(key: &[u8]) -> Result<u64> {
+    let bytes: [u8; 8] = key
+        .get(8..16)
+        .ok_or(Error::Corrupt("invalid event index key"))?
+        .try_into()
+        .map_err(|_| Error::Corrupt("invalid event index key"))?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
 impl Board {
     /// The newest page of matching events, plus whether older matches remain.
     /// Walks backwards so a filtered read cannot fall into a window of unrelated
@@ -93,8 +105,34 @@ impl Board {
         filter: &FeedFilter<'_>,
         limit: usize,
         high: u64,
-    ) -> Result<(Vec<Event>, bool)> {
+    ) -> Result<(Vec<Event>, bool, usize)> {
         let mut picked: Vec<Event> = Vec::new();
+        let mut visited = 0;
+        if let Some(task_id) = filter.task {
+            let lo = keys::event_by_task(task_id, 0);
+            let hi = keys::event_by_task(task_id, high);
+            for entry in self
+                .events_by_task
+                .rev_range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
+            {
+                let (key, _) = entry?;
+                let seq = index_sequence(key)?;
+                let event = self.indexed_event(txn, task_id, seq)?;
+                visited += 1;
+                if matches(filter, &event) {
+                    picked.push(event);
+                    if picked.len() == limit {
+                        let (older, extra_visited) =
+                            self.any_match_at_or_below(txn, filter, seq.saturating_sub(1))?;
+                        visited += extra_visited;
+                        picked.reverse();
+                        return Ok((picked, older, visited));
+                    }
+                }
+            }
+            picked.reverse();
+            return Ok((picked, false, visited));
+        }
         let mut seq = high;
         while seq >= 1 {
             if let Some(raw) = self.events.get(txn, &keys::task(seq))? {
@@ -105,16 +143,18 @@ impl Board {
                 if matches(filter, &event) {
                     picked.push(event);
                     if picked.len() == limit {
-                        let older = self.any_match_at_or_below(txn, filter, seq - 1)?;
+                        let (older, extra_visited) =
+                            self.any_match_at_or_below(txn, filter, seq - 1)?;
+                        visited += extra_visited;
                         picked.reverse();
-                        return Ok((picked, older));
+                        return Ok((picked, older, visited));
                     }
                 }
             }
             seq -= 1;
         }
         picked.reverse();
-        Ok((picked, false))
+        Ok((picked, false, visited))
     }
 
     fn any_match_at_or_below(
@@ -122,18 +162,50 @@ impl Board {
         txn: &ReadTxn<'_>,
         filter: &FeedFilter<'_>,
         from: u64,
-    ) -> Result<bool> {
+    ) -> Result<(bool, usize)> {
+        if let Some(task_id) = filter.task {
+            let lo = keys::event_by_task(task_id, 0);
+            let hi = keys::event_by_task(task_id, from);
+            let mut visited = 0;
+            for entry in self
+                .events_by_task
+                .rev_range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
+            {
+                let (key, _) = entry?;
+                let seq = index_sequence(key)?;
+                let event = self.indexed_event(txn, task_id, seq)?;
+                visited += 1;
+                if matches(filter, &event) {
+                    return Ok((true, visited));
+                }
+            }
+            return Ok((false, visited));
+        }
         let mut seq = from;
+        let mut visited = 0;
         while seq >= 1 {
             if let Some(raw) = self.events.get(txn, &keys::task(seq))? {
+                visited += 1;
                 let event: Event = serde_json::from_slice(raw)?;
                 if matches(filter, &event) {
-                    return Ok(true);
+                    return Ok((true, visited));
                 }
             }
             seq -= 1;
         }
-        Ok(false)
+        Ok((false, visited))
+    }
+
+    fn indexed_event(&self, txn: &ReadTxn<'_>, task_id: u64, seq: u64) -> Result<Event> {
+        let raw = self
+            .events
+            .get(txn, &keys::task(seq))?
+            .ok_or(Error::Corrupt("event index points to a missing event"))?;
+        let event: Event = serde_json::from_slice(raw)?;
+        if event.seq != seq || event.task_id != task_id {
+            return Err(Error::Corrupt("event index key does not match event"));
+        }
+        Ok(event)
     }
 
     /// One page of events in ascending sequence order. The cursor is taken from the
@@ -159,7 +231,8 @@ impl Board {
                 // No cursor asks for the newest page *of matching events*, so a
                 // filtered read cannot come back empty while a match sits just
                 // outside a window of global sequences.
-                let (events, older) = self.newest_matching(&txn, filter, limit, high)?;
+                let (events, older, _events_visited) =
+                    self.newest_matching(&txn, filter, limit, high)?;
                 return Ok(FeedPage {
                     events,
                     next: Cursor {
@@ -168,9 +241,69 @@ impl Board {
                     },
                     more: false,
                     older,
+                    #[cfg(test)]
+                    events_visited: _events_visited,
                 });
             }
         };
+        if start > high {
+            return Ok(FeedPage {
+                events: Vec::new(),
+                next: Cursor {
+                    instance_id: metadata.instance_id,
+                    seq: high,
+                },
+                more: false,
+                older: false,
+                #[cfg(test)]
+                events_visited: 0,
+            });
+        }
+        if let Some(task_id) = filter.task {
+            let lo = keys::event_by_task(task_id, start);
+            let hi = keys::event_by_task(task_id, high);
+            let mut events = Vec::new();
+            #[cfg(test)]
+            let mut events_visited = 0;
+            let mut more = false;
+            for entry in self
+                .events_by_task
+                .range(&txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
+            {
+                let (key, _) = entry?;
+                let seq = index_sequence(key)?;
+                let event = self.indexed_event(&txn, task_id, seq)?;
+                #[cfg(test)]
+                {
+                    events_visited += 1;
+                }
+                if !matches(filter, &event) {
+                    continue;
+                }
+                events.push(event);
+                if events.len() == limit {
+                    // Preserve the global sequence cursor contract: `more`
+                    // reflects any later event, even if it belongs to another task.
+                    more = seq < high;
+                    break;
+                }
+            }
+            let next_seq = match events.last() {
+                Some(event) if more => event.seq,
+                _ => high,
+            };
+            return Ok(FeedPage {
+                events,
+                next: Cursor {
+                    instance_id: metadata.instance_id,
+                    seq: next_seq,
+                },
+                more,
+                older: false,
+                #[cfg(test)]
+                events_visited,
+            });
+        }
         let mut events = Vec::new();
         let mut more = false;
         let mut scanned = start;
@@ -205,6 +338,8 @@ impl Board {
             },
             more,
             older: false,
+            #[cfg(test)]
+            events_visited: 0,
         })
     }
 
@@ -223,7 +358,7 @@ impl Board {
         }
         .clamp(1, MAX_PAGE);
         let upper = cursor.seq.saturating_sub(1).min(high);
-        let (events, older) = self.newest_matching(&txn, filter, limit, upper)?;
+        let (events, older, _) = self.newest_matching(&txn, filter, limit, upper)?;
         let before = Cursor {
             instance_id: metadata.instance_id,
             seq: events.first().map_or(cursor.seq, |event| event.seq),

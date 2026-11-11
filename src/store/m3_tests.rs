@@ -2026,6 +2026,86 @@ fn filtered_feed_without_a_cursor_returns_the_newest_match() {
 }
 
 #[test]
+fn task_filtered_feed_walks_only_that_tasks_event_index() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let target = board
+        .add("manager", draft("target", Status::Todo, 0, None), false, 0)
+        .unwrap()
+        .task;
+    board.comment("manager", target.id, "first", 1).unwrap();
+    board.comment("manager", target.id, "second", 2).unwrap();
+    for index in 0..30 {
+        board
+            .add(
+                "manager",
+                draft(&format!("unrelated {index}"), Status::Todo, index, None),
+                false,
+                index as i64 + 3,
+            )
+            .unwrap();
+    }
+
+    let page = board
+        .feed(&FeedFilter {
+            task: Some(target.id),
+            kind: Some(EventKind::Commented),
+            recipient: None,
+            after: None,
+            limit: 1,
+        })
+        .unwrap();
+    assert_eq!(
+        page.events
+            .iter()
+            .map(|event| event.seq)
+            .collect::<Vec<_>>(),
+        [3]
+    );
+    assert!(page.older);
+    // The newest walk reads one matching event and the older probe finds the
+    // preceding comment; unrelated global events are never visited.
+    assert_eq!(page.events_visited, 2);
+
+    let first_page = board
+        .feed(&FeedFilter {
+            task: Some(target.id),
+            kind: Some(EventKind::Commented),
+            recipient: None,
+            after: Some("0"),
+            limit: 1,
+        })
+        .unwrap();
+    assert_eq!(first_page.events[0].seq, 2);
+    assert!(first_page.more);
+    assert_eq!(first_page.next.seq, 2);
+    let second_page = board
+        .feed(&FeedFilter {
+            task: Some(target.id),
+            kind: Some(EventKind::Commented),
+            recipient: None,
+            after: Some(&first_page.next.encode()),
+            limit: 1,
+        })
+        .unwrap();
+    assert_eq!(second_page.events[0].seq, 3);
+    assert!(second_page.more);
+    assert_eq!(second_page.next.seq, 3);
+    let final_page = board
+        .feed(&FeedFilter {
+            task: Some(target.id),
+            kind: Some(EventKind::Commented),
+            recipient: None,
+            after: Some(&second_page.next.encode()),
+            limit: 1,
+        })
+        .unwrap();
+    assert!(final_page.events.is_empty());
+    assert!(!final_page.more);
+    assert_eq!(final_page.next.seq, 33);
+}
+
+#[test]
 fn feed_before_pages_filtered_matches_without_gaps_or_boundary_duplicates() {
     let scratch = Scratch::new();
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
