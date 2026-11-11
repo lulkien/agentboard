@@ -74,11 +74,11 @@ May:
 
 Never:
 - edit tracked files, commit, build (`cargo build`, `cargo test`, `cargo clippy`,
-  `cargo install` or `bash scripts/gate.sh`), install, push, or touch another
-  task's branch
+  `cargo install` or `bash scripts/gate.sh` without `--prebuilt`), install, push,
+  or touch another task's branch
 - touch live state or leave behind server/browser processes; follow the entry
   skill's scratch and cleanup requirements
-- run tests or the dashboard as Codex: that seat card remains git-only
+- run the dashboard procedure as Codex (Claude reviewers only)
 - close a row it did not review
 - accept "it should work" as evidence
 - let an unnecessary or verbose comment pass unnamed (rule: `agentboard-reviewer`)

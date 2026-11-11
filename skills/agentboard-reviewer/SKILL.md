@@ -88,7 +88,9 @@ You may run the repo suites that exercise an already-built binary:
 `bash tests/cli.sh`, `bash tests/seats-install.sh`,
 `bash tests/skills-install.sh`, `bash tests/start-agentboard-manager.sh`,
 `bash tests/race.sh`, `python3 tests/mcp_client.py`,
-`bash tests/migrate.sh`, `python3 tests/doc-names.py`,
+`env AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py`,
+`python3 tests/daemon.py`, `bash tests/migrate.sh`,
+`bash scripts/gate.sh --prebuilt`, `python3 tests/doc-names.py`,
 `python3 scripts/sync-tool-count.py --check`, and `python3 scripts/doc-overlap.py`.
 Set `AGENTBOARD_TEST_BIN` to point a suite at another binary. You may run the built binary directly with
 `AGENTBOARD_DB=$(mktemp -d)/b` and start `agentboard daemon 127.0.0.1:PORT` (the dashboard is its `/` page) on a
@@ -98,8 +100,8 @@ that and ask for a coder build; do not build it yourself.
 ## Must not
 
 Never edit tracked files, commit, build (`cargo build`, `cargo test`, `cargo
-clippy`, `cargo install` or `bash scripts/gate.sh`), install, push, or touch another
-task's branch. Use only scratch boards and temporary directories; leave the
+clippy`, `cargo install` or `bash scripts/gate.sh` without `--prebuilt`), install,
+push, or touch another task's branch. Use only scratch boards and temporary directories; leave the
 working tree and live board untouched, stop any server, and close any browser you
 started.
 Never close a row you did not review, and never accept "it should work" as
@@ -128,12 +130,21 @@ versus `clientWidth` and any `.card`, `.task-strip`, or `.seat-chip` (the classe
 `scrollWidth` exceeds `clientWidth` with visible overflow. Save reviewer
 screenshots or notes under `/tmp/agentboard/scratch/`, never in the repository.
 Always stop the daemon process and run `agent-browser --session "$S" close`.
-A missing or stale built binary means report that and do not build. The Codex
-reviewer profile remains read-only and git-only because this checkout
-has no verified profile setting that limits browser network access to loopback
-while allowing scratch writes. Codex reviewers therefore judge from the coder
-report and its screenshot paths; the expanded verification applies to Claude
-reviewers.
+A missing or stale built binary means report that and do not build. Both Claude
+and Codex reviewers run suites against the already-built release binary on
+scratch boards. From the repo root, run
+`TMPDIR=$(mktemp -d /tmp/agentboard/scratch/review.XXXXXX)
+PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt`; this runs every suite
+and documentation gate without building. For an individual suite, set that same
+`TMPDIR`, `PYTHONDONTWRITEBYTECODE=1`, and
+`AGENTBOARD_TEST_BIN=$PWD/target/release/agentboard`, then run its normal command.
+For direct binary use, invoke only as
+`env AGENTBOARD_DB=<scratch directory> ./target/release/agentboard ...`. Never
+run cargo, git writes, or edit tracked files, and stop every process started. See
+`seats/README.md` for the sandbox profile and rule-block limits.
+The cargo restriction is instruction-only: a host `~/.codex/rules/default.rules`
+allow rule runs cargo outside the sandbox, so do not describe cargo as sandbox
+refused. Whether the RTK pre-tool rewrite changes that matching is unverified.
 
 `agent-browser doctor` currently has a known false negative: it can report
 `No Chrome binary found` and a failed launch while the configured Chrome for

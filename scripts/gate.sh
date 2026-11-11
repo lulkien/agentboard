@@ -4,6 +4,7 @@
 #
 #   bash scripts/gate.sh                         # every gate but latency
 #   bash scripts/gate.sh --full                  # also measure claim_latency
+#   bash scripts/gate.sh --prebuilt              # suites/docs against release binary
 #
 # Pinned result lines are read from the AGENTS.md proof table: every backticked
 # span in a pinned row's Expected cell is accepted as a prefix of the output
@@ -11,13 +12,15 @@
 set -u
 
 usage() {
-  echo "usage: ${0##*/} [--full]"
+  echo "usage: ${0##*/} [--full | --prebuilt]"
 }
 
 full=0
+prebuilt=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --full) full=1 ;;
+    --prebuilt) prebuilt=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "gate: unknown argument ${1}" >&2
@@ -28,9 +31,29 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+if [ "$full" -eq 1 ] && [ "$prebuilt" -eq 1 ]; then
+  echo 'gate: --prebuilt cannot be combined with --full' >&2
+  usage >&2
+  exit 2
+fi
+
 # Runs from the repo root whatever directory the caller is in.
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd) || exit 1
 cd "$root" || exit 1
+
+if [ "$prebuilt" -eq 1 ]; then
+  bin=${AGENTBOARD_TEST_BIN:-$root/target/release/agentboard}
+  if [ ! -x "$bin" ]; then
+    printf 'GATE FAILED: prebuilt binary is missing or not executable: %s\n' "$bin" >&2
+    exit 1
+  fi
+  if find src dashboard Cargo.toml Cargo.lock -newer "$bin" -print -quit | grep -q .; then
+    printf 'GATE FAILED: stale prebuilt binary: %s\n' "$bin" >&2
+    exit 1
+  fi
+  export AGENTBOARD_TEST_BIN="$bin"
+  export PYTHONDONTWRITEBYTECODE=1
+fi
 
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
@@ -115,17 +138,19 @@ silent() { # the command must print nothing at all
   fi
 }
 
-gate cargo fmt --check
-silent
+if [ "$prebuilt" -eq 0 ]; then
+  gate cargo fmt --check
+  silent
 
-gate cargo test --offline --lib
-pin '^test result: '
+  gate cargo test --offline --lib
+  pin '^test result: '
 
-gate cargo clippy --offline --all-targets -- -D warnings
-refuse '^(warning|error)(\[|:)'
+  gate cargo clippy --offline --all-targets -- -D warnings
+  refuse '^(warning|error)(\[|:)'
 
-gate cargo build --release
-want 'Finished'
+  gate cargo build --release
+  want 'Finished'
+fi
 
 gate bash tests/cli.sh
 pin '^[0-9]+/[0-9]+ passed \(cli, lmdb\)$'

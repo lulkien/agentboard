@@ -47,13 +47,12 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     for old in ['manager','agentboard-manager']:
         assert not (home/f'.codex/prompts/{old}.md').exists()
     assert not RETIRED&{p.name.removesuffix('.md') for p in expected},RETIRED
-    # One edit, two readers, no reinstall. Remove the probe even on a failure.
-    with tempfile.NamedTemporaryFile(dir=home/'.agents/skills/agentboard-team',prefix='.install-probe-',mode='w+') as probe:
-        probe.write('one physical copy\n');probe.flush()
-        for agent in ['.claude','.codex']:
-            alias=home/agent/'skills/agentboard-team'/pathlib.Path(probe.name).name
-            assert alias.read_text()=='one physical copy\n'
-    check(f'canonical repo links, two indirect aliases per skill, live edit visibility, {len(expected)} destinations')
+    # Prove all aliases resolve to one physical copy without writing through links.
+    canonical=repo/'skills/agentboard-team/SKILL.md'
+    assert os.path.samefile(home/'.agents/skills/agentboard-team/SKILL.md',canonical)
+    for agent in ['.claude','.codex']:
+        assert os.path.samefile(home/agent/'skills/agentboard-team/SKILL.md',canonical)
+    check(f'canonical repo links, two indirect aliases per skill, one physical copy, {len(expected)} destinations')
 
     p=run(home);assert p.returncode==1 and not p.stdout,p
     for path in expected: assert f'exists: {path} (use --force)' in p.stderr

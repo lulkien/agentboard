@@ -52,6 +52,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/doc-names.py` | `doc-names: 14 pages, 161 CLI names, 153 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 16 gates passed`; with `--full` `GATES OK: 17 gates passed` |
+| `bash scripts/gate.sh --prebuilt` | `GATES OK: 12 gates passed` (reviewer; venv on PATH) |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 | `cargo test --offline --lib -- --ignored --nocapture large_board_reads_scale_with_relevant_work` | `large-board work: tasks=2510 api_reads=2520 wait_polls=1 wait_rows=250 feed_visits=3` |
 
@@ -169,15 +170,20 @@ have both adapters call it, so a rule exists once.
 
 Reviewers read and judge the commit or row the brief names, its `description` and
 `goal`. They report findings classified blocker, follow-up or nit.
-Reviewers may re-run suites against the already-built binary on scratch boards,
-and directly run that binary on a scratch board; they never build. For a dashboard
-UI change, the Claude reviewer may start the already-built `agentboard daemon` on a scratch
-board and use `agent-browser` only against its local loopback URL, following
+Both reviewer kinds may re-run suites against the already-built
+`target/release/agentboard` on scratch boards using `bash scripts/gate.sh
+--prebuilt` (with the venv on PATH), or run individual suites as documented in
+`skills/agentboard-reviewer/SKILL.md`; they never build. Codex uses its
+scratch-write, proxy-only loopback profile, and Claude follows its reviewer rules.
+Codex reviewers are instructed not to run cargo. Do not claim cargo is refused by
+the sandbox: the host `~/.codex/rules/default.rules` cargo allow rule runs outside
+every sandbox. The behavior of the RTK pre-tool rewrite relative to that host rule
+is unverified. Ignored cargo tests remain coder-reported.
+For a dashboard UI change, the Claude reviewer may start the already-built
+`agentboard daemon` on a scratch board and use `agent-browser` only against its local loopback URL, following
 `skills/agentboard-reviewer/SKILL.md`; screenshots and notes stay outside the
-repository, and the server and browser must be stopped. The Codex reviewer profile
-remains read-only/git-only because no verified setting safely bounds browser
-network access to loopback while permitting scratch writes; Codex reviewers judge
-from the coder report and screenshot paths.
+repository, and the server and browser must be stopped. Codex reviewers judge UI
+screenshots from the coder report because browser use is not verified in the sandbox.
 `git status --short` stays clean apart from the one report file the brief allows.
 
 ## Decide with the human, not alone

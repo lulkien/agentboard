@@ -119,17 +119,17 @@ board tool.
   creates its task branch and makes the one commit that branch carries; it never
   pushes or merges into the working branch.
 - manager: `workspace-write`.
-- reviewer: `read-only` with the shell on for git reads only. The rule block allows
-  `git diff`, `git log`, `git show` and `git status`; the sandbox refuses every
-  write. Rules live per `CODEX_HOME`, not per profile, so the coder and manager's
-  git write subcommands are in the same file; the reviewer cannot use them because
-  its sandbox is read-only. The profile also cannot create scratch boards or run
-  tests. It remains unchanged because Codex's documented
-  `sandbox_workspace_write.network_access` option is a boolean for outbound
-  network access; it has no loopback-only host allowlist, so it cannot permit the
-  local dashboard while denying other network access. The expanded verification
-  and local dashboard procedure apply to Claude reviewers; Codex reviewers rely
-  on the coder's report and screenshots.
+- reviewer: `reviewer-scratch` extends `:read-only`, grants writes only under
+  `/tmp/agentboard/scratch`, and enables networking behind `network_proxy` for
+  loopback test listeners while blocking outbound access. Its rule block allows
+  only `rtk git diff/log/show/status`. Host command rules with `decision="allow"`
+  run outside every sandbox, so keep the repo rule block narrow. The reviewer can
+  run `bash scripts/gate.sh --prebuilt` against the coder's release binary; see
+  `skills/agentboard-reviewer/SKILL.md` for the scratch environment and suite
+  commands. Cargo is prohibited by reviewer instructions, not refused by the
+  sandbox: the host `~/.codex/rules/default.rules` cargo allow rule runs outside
+  every sandbox. The RTK pre-tool rewrite's effect on that match is unverified.
+  Dashboard browser verification remains Claude-only.
 
 ## Claude
 

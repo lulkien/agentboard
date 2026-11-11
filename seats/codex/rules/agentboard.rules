@@ -2,6 +2,9 @@
 # managed by agentboard seats/install.py; --force rewrites this block
 prefix_rule(pattern=["hc"], decision="allow")
 prefix_rule(pattern=["agentboard"], decision="allow")
-# RTK git for the reviewer: allows rtk git read commands only.
-prefix_rule(pattern=["rtk", "git"], decision="allow")
+# RTK git reads for the reviewer only. Host allow rules run outside the sandbox.
+prefix_rule(pattern=["rtk", "git", "diff"], decision="allow")
+prefix_rule(pattern=["rtk", "git", "log"], decision="allow")
+prefix_rule(pattern=["rtk", "git", "show"], decision="allow")
+prefix_rule(pattern=["rtk", "git", "status"], decision="allow")
 # END AGENTBOARD RULES

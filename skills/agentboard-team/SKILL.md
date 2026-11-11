@@ -245,7 +245,7 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
 | Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
-| Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml`, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only | `$agentboard-<seat>` |
+| Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml`, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only checkout plus scratch-write and loopback-only network | `$agentboard-<seat>` |
 | Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `~/.grok/config.toml`, URL `/mcp/${AGENTBOARD_SEAT:-manager}` | `--trust --always-approve` | `/agentboard-manager` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
