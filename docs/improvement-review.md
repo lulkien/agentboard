@@ -21,6 +21,8 @@ Do these first:
 | [5](#5-wait---epic-scans-every-task-40-times-a-second) | `wait --epic` scans and decodes every task 40 times a second | performance, measured | **Done** |
 | [9](#9-a-full-map-has-no-way-out-except-reset) | A full map has no remedy except `reset`, and events grow faster than tasks | data lifecycle | **Done**; decisions D1 to D3 |
 | [16](#16-protocolmd-has-drifted-from-the-code) | `PROTOCOL.md` has five stale statements the doc gates do not catch | docs | **Done** `567aed4`, see the note under it |
+| [19](#19-nothing-runs-the-gate-automatically) | Nothing runs the gate automatically | process | **Declined (T322)** |
+| [daemon shutdown](#small-operational-items) | Daemon shutdown on SIGTERM | operations | **Declined (human, T318)** |
 
 ## How this was checked
 
@@ -516,6 +518,8 @@ down is a failure someone has to acknowledge by editing the table.
 
 ### 19. Nothing runs the gate automatically
 
+**Status: declined (T322).** The coder gate and the reviewer --prebuilt run cover every task commit; the fast set needs the release binary for its doc gates; hosted CI stays with the owner.
+
 There is no CI configuration and no git hook; the gate runs when someone remembers
 to. With 229 commits in three weeks, mostly from agents, a `pre-commit` hook that
 runs the fast gates (`fmt`, `clippy`, `test --lib`, the two doc gates) would catch
@@ -549,7 +553,9 @@ time, in line with the existing trap about latency assertions.
   `XDG_STATE_HOME` supplies the board path, `board_path` requires `HOME` and
   refuses by name instead of creating `./.local/state/agentboard/lmdb`
   (`src/main.rs:46`).
-- **Daemon shutdown.** `axum::serve` runs without graceful shutdown
+- **Daemon shutdown.**
+  **Status: declined (human, T318).** LMDB is crash-safe; a hard stop loses no data, graceful shutdown would only let in-flight requests finish and release the lock cleanly.
+  `axum::serve` runs without graceful shutdown
   (`src/daemon.rs:72`). LMDB is crash-safe, so no data is at risk, but an
   in-flight `board_feed(wait=…)` is cut mid-response on `systemctl stop`. A
   SIGTERM handler would need tokio's `signal` feature; low priority.
