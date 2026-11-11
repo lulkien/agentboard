@@ -151,6 +151,18 @@ pub fn brief_text(brief: &Brief) -> String {
     for task in &brief.active {
         lines.push(task_line(task));
     }
+    let permille = if brief.map.size_bytes == 0 {
+        0
+    } else {
+        (brief.map.used_bytes as u128 * 1000 / brief.map.size_bytes as u128) as u64
+    };
+    lines.push(format!(
+        "map used {}.{}% ({} of {} bytes)",
+        permille / 10,
+        permille % 10,
+        brief.map.used_bytes,
+        brief.map.size_bytes
+    ));
     lines.push(counts_text(&brief.counts));
     lines.join("\n")
 }

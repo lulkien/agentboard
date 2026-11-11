@@ -413,6 +413,7 @@ def main():
         check("health refuses HEAD", 405, daemon.request("HEAD", "/api/health")[0])
         check("unknown path is 404", 404, daemon.request("GET", "/nope")[0])
         ok("health carries the board cursor", health["cursor"].startswith(health["instance"]))
+        ok("health carries map usage", isinstance(health["map"]["used_bytes"], int) and isinstance(health["map"]["size_bytes"], int) and 0 < health["map"]["used_bytes"] <= health["map"]["size_bytes"])
         static_checks(daemon)
 
         # Identity is the URL segment: two seats interleaved on one daemon.
@@ -465,6 +466,23 @@ def main():
         check("the board survived the reset", 3, int(daemon.call("/mcp/alice", "task_list").split("total ")[1].split()[0]))
     finally:
         daemon.close()
+
+    usage_db = os.path.join(scratch, "usage-board")
+    usage_daemon = Daemon(usage_db)
+    try:
+        before = json.loads(usage_daemon.request("GET", "/api/health")[1])["map"]["used_bytes"]
+        cli_env = os.environ.copy()
+        cli_env["AGENTBOARD_ACTOR"] = "manager"
+        large_description = "x" * 30000
+        for index in range(20):
+            subprocess.check_call([BIN, "--db", usage_db, "add", f"large {index}", "--description", large_description], stdout=subprocess.DEVNULL, env=cli_env)
+        health_after = json.loads(usage_daemon.request("GET", "/api/health")[1])["map"]["used_bytes"]
+        ok("health map usage observes cross-process writes", health_after > before)
+        brief = subprocess.check_output([BIN, "--db", usage_db, "brief"], text=True, env=cli_env)
+        brief_used = int(re.search(r"^map used [0-9]+\.[0-9]% \(([0-9]+) of [0-9]+ bytes\)$", brief, re.M).group(1))
+        check("brief and health map bytes match", health_after, brief_used)
+    finally:
+        usage_daemon.close()
 
     # Non-loopback bind needs the flag.
     refused = subprocess.run([BIN, "--db", db, "daemon", "192.0.2.1:0"], capture_output=True, text=True, timeout=30)

@@ -292,6 +292,12 @@ has "protected status refusal" "held by" "$out"
 fresh h
 "$B" add "brief task" >/dev/null
 out=$("$B" brief)
+has "brief reports map usage" "map used " "$out"
+check "brief map usage is second-to-last" "map used" "$(printf '%s\n' "$out" | tail -2 | head -1 | cut -d' ' -f1-2)"
+brief_used=$(printf '%s\n' "$out" | sed -n 's/^map used [0-9]*\.[0-9]% (\([0-9]*\) of [0-9]* bytes)$/\1/p')
+brief_size=$(printf '%s\n' "$out" | sed -n 's/^map used [0-9]*\.[0-9]% ([0-9]* of \([0-9]*\) bytes)$/\1/p')
+check "brief used bytes positive" true "$(test "${brief_used:-0}" -gt 0 && echo true || echo false)"
+check "brief size is default map" 1073741824 "$brief_size"
 has "brief counts todo" "todo 1" "$out"
 out=$("$B" agents)
 has "agents lists the manager" "manager" "$out"
@@ -334,6 +340,12 @@ has "brief epic progress" "done 1/3" "$(printf '%s\n' "$out" | head -1)"
 check "brief ordinary active second" T5 "$(printf '%s\n' "$out" | sed -n '2p' | cut -d' ' -f1)"
 lacks "brief hides child rows" "T2 " "$out"
 check "brief counts last" "todo 1  planning 0  implementing 1  blocked 0  reviewing 1  done 1  canceled 1" "$(printf '%s\n' "$out" | tail -1)"
+brief_before=$(printf '%s\n' "$out" | sed -n 's/^map used [0-9]*\.[0-9]% (\([0-9]*\) of [0-9]* bytes)$/\1/p')
+large_description=$(python3 -c 'print("x" * 30000)')
+for i in $(seq 1 20); do "$B" add "large $i" --description "$large_description" >/dev/null; done
+out=$("$B" brief)
+brief_after=$(printf '%s\n' "$out" | sed -n 's/^map used [0-9]*\.[0-9]% (\([0-9]*\) of [0-9]* bytes)$/\1/p')
+check "brief map usage grows after large writes" true "$(test "${brief_after:-0}" -gt "${brief_before:-0}" && echo true || echo false)"
 "$B" update 2 --if-revision 1 --status canceled >/dev/null
 out=$("$B" update 1 --if-revision 1 --status done); code=$?
 check "all terminal epic closes" 0 "$code"

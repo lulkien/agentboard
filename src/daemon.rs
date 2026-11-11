@@ -192,12 +192,13 @@ async fn health(State(app): State<App>) -> Response {
     let read = app
         .board
         .metadata()
-        .and_then(|metadata| Ok((metadata, app.board.cursor_now()?)));
+        .and_then(|metadata| Ok((metadata, app.board.cursor_now()?, app.board.map_usage()?)));
     match read {
-        Ok((metadata, cursor)) => axum::Json(serde_json::json!({
+        Ok((metadata, cursor, map)) => axum::Json(serde_json::json!({
             "board": app.board.path().display().to_string(),
             "instance": metadata.instance_id,
             "cursor": cursor.encode(),
+            "map": {"used_bytes": map.used_bytes, "size_bytes": map.size_bytes},
         }))
         .into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),

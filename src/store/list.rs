@@ -9,7 +9,7 @@ use crate::domain::{Status, Task};
 
 use super::feed::Cursor;
 use super::keys;
-use super::open::{Board, Error, ReadTxn, Result, read_txn};
+use super::open::{Board, Error, MapUsage, ReadTxn, Result, read_txn};
 
 pub const DEFAULT_LIST_LIMIT: usize = 20;
 pub const MAX_LIST_LIMIT: usize = 200;
@@ -60,6 +60,7 @@ pub struct Brief {
     pub counts: Vec<(Status, u64)>,
     pub epics: Vec<Epic>,
     pub active: Vec<Task>,
+    pub map: MapUsage,
 }
 
 pub struct Epic {
@@ -234,6 +235,7 @@ impl Board {
 
     /// Derived epic progress and active work for one project, or the whole board.
     pub fn brief_for_project(&self, active_limit: usize, project: Option<u64>) -> Result<Brief> {
+        let map = self.map_usage()?;
         let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
         let children = self.child_counts_for_project(&txn, project)?;
@@ -273,6 +275,7 @@ impl Board {
             counts: status_counts(&counts),
             epics,
             active,
+            map,
         })
     }
 

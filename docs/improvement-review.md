@@ -316,6 +316,8 @@ no recovery path, and it arrives without warning.
 
 Options, smallest first:
 
+**Status:** Option 1 is implemented in T308; D1, D2 and D3 are tracked in T305, T306 and T307.
+
 1. **Warn early.** `brief` and `/api/health` report map usage (LMDB exposes the
    last used page), so a manager sees 80% long before a write fails.
 2. **Cap text sizes** in `domain.rs`, with a refusal that names the field and the

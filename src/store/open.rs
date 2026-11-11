@@ -337,6 +337,12 @@ pub struct Board {
     _lifetime_lock: File,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MapUsage {
+    pub used_bytes: u64,
+    pub size_bytes: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResetOutcome {
     pub path: PathBuf,
@@ -552,6 +558,19 @@ impl Board {
     pub fn metadata(&self) -> Result<Metadata> {
         let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)
+    }
+
+    pub fn map_usage(&self) -> Result<MapUsage> {
+        let txn = read_txn(&self.env)?;
+        let page_size = self.meta.stat(&txn)?.page_size as u64;
+        let used_bytes = (self.env.info().last_page_number as u64)
+            .checked_add(1)
+            .and_then(|pages| pages.checked_mul(page_size))
+            .ok_or(Error::Corrupt("map usage overflow"))?;
+        Ok(MapUsage {
+            used_bytes,
+            size_bytes: self.env.info().map_size as u64,
+        })
     }
 
     pub(super) fn checked_metadata(&self, txn: &ReadTxn<'_>) -> Result<Metadata> {

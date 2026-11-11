@@ -37,7 +37,7 @@ flag, and a wildcard address (`0.0.0.0`, `[::]`) is refused: name one address.
 One guard runs before every route: `Host` must be the bound address, `localhost` or
 `127.0.0.1` (else 421); a present `Origin` must be `http://` plus such a host (else
 403); `/mcp` answers loopback peers only, whatever the bind address (else 403).
-`GET /api/health` answers `{"board": PATH, "instance": ID, "cursor": CURSOR}`. Stdio `serve` is
+`GET /api/health` answers `{"board": PATH, "instance": ID, "cursor": CURSOR, "map": {"used_bytes": N, "size_bytes": M}}`. Map usage uses LMDB's last used page and page size. Stdio `serve` is
 unchanged.
 
 ### Read-only JSON API

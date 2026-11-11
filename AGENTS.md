@@ -39,10 +39,10 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `cargo test --offline --lib` | `test result: ok. 122 passed; 0 failed; 2 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `415/415 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `223/223 passed (mcp, lmdb)` |
-| `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `223/223 passed (mcp-http, lmdb)` |
-| `python3 tests/daemon.py` | `daemon: 329/329 passed (http, lmdb)` (scratch boards, loopback port 0) |
+| `bash tests/cli.sh` | `420/420 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `225/225 passed (mcp, lmdb)` |
+| `AGENTBOARD_MCP_TRANSPORT=http python3 tests/mcp_client.py` (the same suite against `agentboard daemon`) | `225/225 passed (mcp-http, lmdb)` |
+| `python3 tests/daemon.py` | `daemon: 332/332 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 32/32 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
 | `bash tests/seats-install.sh` | `242/242 passed (seats installer)` (isolated homes; no board writes) |

@@ -150,7 +150,9 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   waits for its closed parent before it can reopen, and a closed task takes a new
   owner only in the update that reopens it.
 - `brief` shows all epic rows with progress first, then up to ten unparented active
-  tasks, then scoped status counts. Each section uses `(priority, id)` order.
+  tasks, then board map usage, then scoped status counts. Each section uses
+  `(priority, id)` order. Map usage reports LMDB's high-water page mark and map
+  size; reclaimed pages below that mark remain counted.
 - `project` manages the registry. Deletion refuses while any task still carries
   its ID; move or detach those rows first. `ls` and `brief` choose the explicit
   project ID, then `AGENTBOARD_PROJECT`, then a registered path matching the cwd.

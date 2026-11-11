@@ -256,6 +256,7 @@ def main():
 
         is_error, body = server.call("board_brief", {})
         has("board_brief counts implementing", "implementing 1", body)
+        check("board_brief reports map usage", True, re.search(r"^map used [0-9]+\.[0-9]% \([0-9]+ of [0-9]+ bytes\)$", body, re.M) is not None)
 
         is_error, body = server.call("board_agents", {})
         has("board_agents lists the actor", "worker", body)
@@ -446,7 +447,8 @@ def main():
             check("brief epic first", "T1", brief.splitlines()[0].split()[0])
             has("brief progress", "done 1/3", brief.splitlines()[0])
             check("brief ordinary second", "T5", brief.splitlines()[1].split()[0])
-            check("brief excludes children", 3, len(brief.splitlines()))
+            check("brief excludes children", 4, len(brief.splitlines()))
+            check("brief map usage before counts", True, brief.splitlines()[-2].startswith("map used "))
             check("brief global counts last", "todo 2  planning 0  implementing 0  blocked 0  reviewing 1  done 1  canceled 1", brief.splitlines()[-1])
             epics.call("task_update", {"id": 2, "if_revision": 1, "status": "canceled"})
             error, body = epics.call("task_update", {"id": 1, "if_revision": 1, "status": "done"})
