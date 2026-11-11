@@ -101,7 +101,9 @@ pub fn parse(path: &str, query: &str) -> Result<Route, BadQuery> {
                     filters.before = Some(value);
                 }
                 "before" => {}
-                "project" if !value.is_empty() => filters.project = Some(positive(&value)?),
+                "project" if !value.is_empty() => {
+                    filters.project = Some(value.parse().map_err(|_| BadQuery)?)
+                }
                 "project" => {}
                 _ => unreachable!(),
             }
@@ -195,7 +197,10 @@ mod tests {
         assert!(parse("/tasks/3", "offset=0").is_err());
         assert!(parse("/epics", "status=").is_err());
         assert!(parse("/feed", "offset=0").is_err());
-        assert!(parse("/tasks", "project=0").is_err());
+        assert_eq!(
+            parse("/tasks", "project=0").unwrap().filters.project,
+            Some(0)
+        );
         assert!(parse("/tasks", "project=1&project=2").is_err());
         assert!(parse("/", "foo=1").is_err());
     }

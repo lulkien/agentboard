@@ -250,14 +250,16 @@ def api_checks(scratch):
         status, isolated = get_json(daemon, "/api/feed?project=2")
         check("project feed holds only that project's rows", {53}, {e["task_id"] for e in isolated["events"]})
         status, listing = get_json(daemon, "/api/projects")
-        check("projects are listed", ["dashboard", '<b>p&"</b>'], [p["project_name"] for p in listing["projects"]])
+        check("projects are listed", ["standalone", "dashboard", '<b>p&"</b>'], [p["project_name"] for p in listing["projects"]])
+        status, standalone_tasks = get_json(daemon, "/api/tasks?project=0")
+        check("standalone project tasks query succeeds", 200, status)
 
         # Refusals.
         for target in ["/api/tasks?status=bogus", "/api/tasks?foo=1", "/api/tasks?status=todo&status=done",
                        "/api/tasks?offset=x", "/api/tasks?parent=0", "/api/board?offset=1", "/api/board?status=todo",
                        "/api/epics?task=1", "/api/feed?before=zzz", "/api/feed?before=foreign:5", "/api/feed?kind=bogus",
                        "/api/feed?status=todo", "/api/projects?kind=x", "/api/tasks/abc", "/api/tasks/0",
-                       "/api/board?project=0", "/api/board?project=x", "/api/board?project=1&project=1",
+                       "/api/board?project=x", "/api/board?project=1&project=1",
                        "/api/tasks?x", "/api/tasks?&", "/api/tasks?status=%zz"]:
             check(f"400 for {target}", 400, daemon.request("GET", target)[0])
         for target in ["/api/tasks/999", "/api/tasks?parent=999", "/api/board?project=9", "/api/feed?project=9",

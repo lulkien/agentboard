@@ -136,6 +136,7 @@ pub enum Error {
     },
     MissingTask(u64),
     MissingProject(u64),
+    ReservedProject(u64),
     ProjectInUse {
         id: u64,
         count: u64,
@@ -210,6 +211,7 @@ impl std::fmt::Display for Error {
             Self::AgentHoldsOpenTasks { name, count } => write!(f, "agent {name:?} still holds open tasks (count {count}); release or reassign them first"),
             Self::MissingTask(id) => write!(f, "task T{id} does not exist"),
             Self::MissingProject(id) => write!(f, "project {id} does not exist"),
+            Self::ReservedProject(id) => write!(f, "project {id} is built in and cannot be changed"),
             Self::ProjectInUse { id, count } => write!(f, "project {id} still has tasks (count {count}); move or detach them first"),
             Self::NotReleasable { id, status } => {
                 write!(f, "task T{id} is {}; nothing to release", status.as_str())
@@ -269,6 +271,7 @@ impl Error {
             | Self::AgentHoldsOpenTasks { .. }
             | Self::MissingTask(_)
             | Self::MissingProject(_)
+            | Self::ReservedProject(_)
             | Self::ProjectInUse { .. }
             | Self::NotReleasable { .. }
             | Self::NoHolder(_)

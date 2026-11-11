@@ -8,6 +8,9 @@ fn key(id: u64) -> [u8; 8] {
 
 impl Board {
     pub fn delete_project(&self, id: u64) -> Result<Project> {
+        if id == domain::STANDALONE_PROJECT_ID {
+            return Err(Error::ReservedProject(id));
+        }
         let mut txn = self.env.write_txn()?;
         self.checked_metadata(&txn)?;
         let project_key = key(id);
@@ -53,6 +56,9 @@ impl Board {
     }
 
     pub fn get_project(&self, id: u64) -> Result<Option<Project>> {
+        if id == domain::STANDALONE_PROJECT_ID {
+            return Ok(Some(standalone_project()));
+        }
         let txn = read_txn(&self.env)?;
         self.projects
             .get(&txn, &key(id))?
@@ -63,13 +69,16 @@ impl Board {
 
     pub fn list_projects(&self) -> Result<Vec<Project>> {
         let txn = read_txn(&self.env)?;
-        self.projects
+        let mut projects: Vec<Project> = self
+            .projects
             .iter(&txn)?
             .map(|entry| {
                 let (_, value) = entry?;
                 serde_json::from_slice(value).map_err(Error::from)
             })
-            .collect()
+            .collect::<Result<_>>()?;
+        projects.insert(0, standalone_project());
+        Ok(projects)
     }
 
     pub fn update_project(
@@ -78,6 +87,9 @@ impl Board {
         project_name: Option<String>,
         project_path: Option<String>,
     ) -> Result<Project> {
+        if id == domain::STANDALONE_PROJECT_ID {
+            return Err(Error::ReservedProject(id));
+        }
         if project_name.is_none() && project_path.is_none() {
             return Err(domain::Error::EmptyProjectPatch.into());
         }
@@ -100,5 +112,13 @@ impl Board {
             .put(&mut txn, &project_key, &serde_json::to_vec(&project)?)?;
         txn.commit()?;
         Ok(project)
+    }
+}
+
+fn standalone_project() -> Project {
+    Project {
+        project_id: domain::STANDALONE_PROJECT_ID,
+        project_name: domain::STANDALONE_PROJECT_NAME.into(),
+        project_path: String::new(),
     }
 }

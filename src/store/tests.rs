@@ -1643,7 +1643,26 @@ fn projects_receive_stable_board_ids_and_update_atomically() {
         .unwrap();
     assert_eq!(first.project_id, 1);
     assert_eq!(second.project_id, 2);
-    assert_eq!(board.list_projects().unwrap(), vec![first.clone(), second]);
+    assert_eq!(
+        board.list_projects().unwrap(),
+        vec![
+            crate::domain::Project {
+                project_id: 0,
+                project_name: "standalone".into(),
+                project_path: String::new()
+            },
+            first.clone(),
+            second
+        ]
+    );
+    assert!(matches!(
+        board.delete_project(0),
+        Err(Error::ReservedProject(0))
+    ));
+    assert!(matches!(
+        board.update_project(0, Some("renamed".into()), None),
+        Err(Error::ReservedProject(0))
+    ));
     let updated = board
         .update_project(first.project_id, None, Some("/updated".into()))
         .unwrap();

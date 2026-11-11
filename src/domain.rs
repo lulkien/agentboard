@@ -16,6 +16,8 @@ pub const MAX_ACTOR_CHARS: usize = 64;
 pub const MAX_TITLE_CHARS: usize = 200;
 pub const MAX_TEXT_CHARS: usize = 32_768;
 pub const MAX_REPORT_CHARS: usize = 262_144;
+pub const STANDALONE_PROJECT_ID: u64 = 0;
+pub const STANDALONE_PROJECT_NAME: &str = "standalone";
 
 pub fn check_len(field: &'static str, text: &str, limit: usize) -> Result<(), Error> {
     let size = text.chars().count();

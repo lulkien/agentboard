@@ -393,6 +393,8 @@ def main():
             reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 1}})
             check("project delete in use is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
             has("project delete in use count", "project 1 still has tasks (count 1); move or detach them first", json.dumps(reply))
+            reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 0}})
+            check("built-in project delete is JSON-RPC error", -32602, reply.get("error", {}).get("code"))
             error, body = deleting.call("board_project_delete", {"id": 2})
             check("project delete success", (False, "deleted project 2"), (error, body))
             reply = deleting.send("tools/call", {"name": "board_project_delete", "arguments": {"id": 2}})

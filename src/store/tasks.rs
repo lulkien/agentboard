@@ -48,6 +48,15 @@ struct EventFields<'a> {
 }
 
 impl Board {
+    fn require_project(&self, txn: &heed::RwTxn<'_>, project_id: Option<u64>) -> Result<()> {
+        if let Some(id) = project_id
+            && id != domain::STANDALONE_PROJECT_ID
+            && self.projects.get(txn, &id.to_be_bytes())?.is_none()
+        {
+            return Err(domain::Error::UnknownProject(id).into());
+        }
+        Ok(())
+    }
     /// Create the task, roster changes, indexes, and event in one write txn.
     /// `new_actor` registers an unknown target assignee, never the caller.
     pub fn add(&self, actor: &str, input: NewTask, new_actor: bool, now_ms: i64) -> Result<Added> {
@@ -56,14 +65,7 @@ impl Board {
         let mut metadata = metadata;
         let task_id = metadata.next_task_id;
         let task = Task::new(task_id, actor, input, now_ms)?;
-        if let Some(project_id) = task.project_id
-            && self
-                .projects
-                .get(&txn, &project_id.to_be_bytes())?
-                .is_none()
-        {
-            return Err(domain::Error::UnknownProject(project_id).into());
-        }
+        self.require_project(&txn, task.project_id)?;
         if let Some(parent_id) = task.parent_id {
             self.check_attachment_parent(&txn, parent_id)?;
         }
@@ -142,14 +144,7 @@ impl Board {
             input.force_reason,
             input.now_ms,
         )?;
-        if let Some(project_id) = applied.task.project_id
-            && self
-                .projects
-                .get(&txn, &project_id.to_be_bytes())?
-                .is_none()
-        {
-            return Err(domain::Error::UnknownProject(project_id).into());
-        }
+        self.require_project(&txn, applied.task.project_id)?;
         if input.patch.status.is_some_and(Status::is_terminal) {
             let counts = self.child_counts(&txn)?;
             let count = counts.get(&input.id).map_or(0, |counts| {

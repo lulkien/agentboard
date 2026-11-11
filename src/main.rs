@@ -94,15 +94,11 @@ fn run(
                 }
                 ProjectCmd::Ls => {
                     let projects = board.list_projects()?;
-                    let output = if projects.is_empty() {
-                        "no projects".to_owned()
-                    } else {
-                        projects
-                            .iter()
-                            .map(render::project_line)
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    };
+                    let output = projects
+                        .iter()
+                        .map(render::project_line)
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     Ok((output, ExitCode::SUCCESS))
                 }
                 ProjectCmd::Delete { id } => {

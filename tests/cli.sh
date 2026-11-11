@@ -644,6 +644,7 @@ check "project add exit" 0 "$code"
 check "project add id" 1 "$out"
 out=$("$B" project ls); code=$?
 check "project ls exit" 0 "$code"
+check "built-in standalone project is first" $'0\tstandalone\t' "$(printf '%s\n' "$out" | head -n1)"
 has "project ls shows project name" "agentboard" "$out"
 has "project ls shows project path" "$PWD" "$out"
 out=$("$B" project update 1 --path "$PWD/updated"); code=$?
@@ -654,6 +655,9 @@ has "project ls sees updated path" "$PWD/updated" "$("$B" project ls)"
 out=$($B add "project one" --project 1); code=$?
 check "task add project id" 0 "$code"
 has "task record names project id" "project 1" "$out"
+out=$($B add "standalone task" --project 0); code=$?
+check "task add standalone project exit" 0 "$code"
+has "task record names standalone project id" "project 0" "$out"
 out=$($B add "unknown project" --project 999 2>&1); code=$?
 check "unknown project add exit" 1 "$code"
 has "unknown project refusal names id" "unknown project 999" "$out"
@@ -662,6 +666,8 @@ check "project list filter exit" 0 "$code"
 has "project list returns linked task" "project one" "$out"
 
 fresh delete-project
+out=$("$B" project delete 0 2>&1); code=$?
+check "built-in project delete exit" 1 "$code"
 check "delete project creates first id" 1 "$("$B" project add --name A --path /a)"
 "$B" add open --project 1 >/dev/null
 "$B" add closed --project 1 --status done >/dev/null
@@ -674,7 +680,7 @@ has "refused project remains" $'1\tA\t/a' "$("$B" project ls)"
 out=$("$B" project delete 1); code=$?
 check "delete unused project exit" 0 "$code"
 check "delete project success text" "deleted project 1" "$out"
-check "deleted project absent" "no projects" "$("$B" project ls)"
+check "deleted project absent from registry" "0" "$("$B" project ls | cut -f1)"
 out=$("$B" project delete 1 2>&1); code=$?
 check "repeat project delete exit" 1 "$code"
 has "repeat project delete missing" "project 1 does not exist" "$out"
