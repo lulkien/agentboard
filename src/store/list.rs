@@ -1,6 +1,9 @@
 //! Task listing and the compact board summary.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
+
+use serde::Deserialize;
 
 use crate::domain::{Status, Task};
 
@@ -10,6 +13,28 @@ use super::open::{Board, Error, ReadTxn, Result, read_txn};
 
 pub const DEFAULT_LIST_LIMIT: usize = 20;
 pub const MAX_LIST_LIMIT: usize = 200;
+
+#[derive(Deserialize)]
+pub(super) struct TaskHead<'a> {
+    pub id: u64,
+    pub status: Status,
+    #[serde(borrow)]
+    pub assignee: Option<Cow<'a, str>>,
+    pub parent_id: Option<u64>,
+    pub project_id: Option<u64>,
+}
+
+impl<'a> From<&'a Task> for TaskHead<'a> {
+    fn from(task: &'a Task) -> Self {
+        Self {
+            id: task.id,
+            status: task.status,
+            assignee: task.assignee.as_deref().map(Cow::Borrowed),
+            parent_id: task.parent_id,
+            project_id: task.project_id,
+        }
+    }
+}
 
 pub struct ListFilter<'a> {
     pub status: Option<Status>,
@@ -79,7 +104,7 @@ impl Board {
         let mut counts = [0_u64; Status::ALL.len()];
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
-            let task: Task = serde_json::from_slice(raw)?;
+            let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if keep(&without_status, &task) {
                 counts[keys::status_code(task.status) as usize] += 1;
             }
@@ -103,7 +128,7 @@ impl Board {
         let mut counts = HashMap::new();
         for entry in self.tasks.iter(txn)? {
             let (_, raw) = entry?;
-            let task: Task = serde_json::from_slice(raw)?;
+            let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if let Some(parent) = task.parent_id {
                 let child_counts = counts.entry(parent).or_insert([0; Status::ALL.len()]);
                 if project.is_none() || task.project_id == project {
@@ -141,7 +166,7 @@ impl Board {
             let task = self
                 .read_task_in_txn(&txn, id)?
                 .ok_or(Error::Corrupt("index points to missing task"))?;
-            if !keep(filter, &task) {
+            if !keep(filter, &TaskHead::from(&task)) {
                 continue;
             }
             tasks.push(task);
@@ -174,12 +199,12 @@ impl Board {
         let mut tasks = Vec::with_capacity(limit);
         for entry in self.tasks.rev_iter(&txn)? {
             let (_, raw) = entry?;
-            let task: Task = serde_json::from_slice(raw)?;
+            let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if !keep(filter, &task) {
                 continue;
             }
             if total >= filter.offset && tasks.len() < limit {
-                tasks.push(task);
+                tasks.push(serde_json::from_slice(raw)?);
             }
             total += 1;
         }
@@ -211,22 +236,26 @@ impl Board {
             seq: metadata.next_event_seq.saturating_sub(1),
         };
         let mut counts = [0_u64; Status::ALL.len()];
-        let mut active = Vec::new();
+        let mut active: Vec<Task> = Vec::new();
         let mut epics = Vec::new();
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
-            let task: Task = serde_json::from_slice(raw)?;
+            let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if project.is_some() && task.project_id != project {
                 continue;
             }
             counts[keys::status_code(task.status) as usize] += 1;
             if let Some(child_counts) = children.get(&task.id) {
-                epics.push(rollup(task, child_counts, cursor.clone()));
+                epics.push(rollup(
+                    serde_json::from_slice(raw)?,
+                    child_counts,
+                    cursor.clone(),
+                ));
             } else if task.parent_id.is_none()
                 && !task.status.is_terminal()
                 && task.status != Status::Todo
             {
-                active.push(task);
+                active.push(serde_json::from_slice(raw)?);
             }
         }
         active.sort_by_key(|task| (task.priority, task.id));
@@ -270,7 +299,7 @@ impl Board {
     }
 }
 
-fn keep(filter: &ListFilter<'_>, task: &Task) -> bool {
+fn keep(filter: &ListFilter<'_>, task: &TaskHead<'_>) -> bool {
     // An explicit status filter is honoured as asked; the terminal exclusion only
     // applies to an unfiltered list.
     if filter.status.is_none()

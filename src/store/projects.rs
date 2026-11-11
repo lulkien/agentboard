@@ -1,3 +1,4 @@
+use super::list::TaskHead;
 use super::open::{Board, Error, Result, read_txn, write_metadata};
 use crate::domain::{self, NewProject, Project};
 
@@ -18,7 +19,7 @@ impl Board {
         let mut count = 0_u64;
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
-            let task: crate::domain::Task = serde_json::from_slice(raw)?;
+            let task: TaskHead<'_> = serde_json::from_slice(raw)?;
             if task.project_id == Some(id) {
                 count += 1;
             }

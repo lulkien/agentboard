@@ -9,6 +9,7 @@ use crate::domain::{Event, EventKind, Status, Task, validate_actor};
 
 use super::feed::Cursor;
 use super::keys;
+use super::list::TaskHead;
 use super::open::{Board, Error, ReadTxn, Result, read_txn};
 
 /// How often a parked waiter re-queries the rows it watches.
@@ -243,7 +244,7 @@ impl Board {
             let mut children = 0;
             for entry in self.tasks.iter(txn)? {
                 let (_, raw) = entry?;
-                let task: Task = serde_json::from_slice(raw)?;
+                let task: TaskHead<'_> = serde_json::from_slice(raw)?;
                 if task.parent_id == Some(id) {
                     ids.push(task.id);
                     children += 1;

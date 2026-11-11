@@ -36,7 +36,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | Command | Expected |
 | --- | --- |
 | `cargo fmt --check` | no output |
-| `cargo test --offline --lib` | `test result: ok. 111 passed; 0 failed; 1 ignored` |
+| `cargo test --offline --lib` | `test result: ok. 112 passed; 0 failed; 1 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` | `376/376 passed (cli, lmdb)` |

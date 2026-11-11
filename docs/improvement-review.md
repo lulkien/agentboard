@@ -274,6 +274,10 @@ Two fixes, in order of cost:
 
 I would do the first now and the second only when a board actually gets large.
 
+**Status: done**: the seven scans use a borrowed `TaskHead` decode, retaining full
+decodes only for rows returned by read models. The store proof covers long text,
+escaped assignees, counts, epic rollups, overview and newest-page rows.
+
 ---
 
 ## Data lifecycle

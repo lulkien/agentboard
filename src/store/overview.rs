@@ -6,6 +6,7 @@ use crate::domain::{Status, Task};
 
 use super::feed::Cursor;
 use super::keys;
+use super::list::TaskHead;
 use super::open::{Board, Result, read_txn};
 
 pub struct Overview {
@@ -40,11 +41,15 @@ impl Board {
         let mut attention = Vec::new();
         for entry in self.tasks.iter(&txn)? {
             let (_, raw) = entry?;
-            let task: Task = serde_json::from_slice(raw)?;
-            if project.is_some() && task.project_id != project {
+            let head: TaskHead<'_> = serde_json::from_slice(raw)?;
+            if project.is_some() && head.project_id != project {
                 continue;
             }
-            counts[keys::status_code(task.status) as usize] += 1;
+            counts[keys::status_code(head.status) as usize] += 1;
+            if head.status.is_terminal() {
+                continue;
+            }
+            let task: Task = serde_json::from_slice(raw)?;
             if !task.status.is_terminal() {
                 lanes[keys::status_code(task.status) as usize].push(task.clone());
                 if let Some(assignee) = &task.assignee {

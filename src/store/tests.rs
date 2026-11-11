@@ -85,6 +85,389 @@ fn draft(assignee: Option<&str>) -> NewTask {
 }
 
 #[test]
+fn task_head_decodes_scan_fields_without_allocating_long_text() {
+    let scratch = Scratch::new();
+    let board = Board::open_with_options(scratch.path(), options()).unwrap();
+    let escaped = "seat\\\"name";
+    let project_a = board
+        .add_project(NewProject {
+            project_name: "a".into(),
+            project_path: "/a".into(),
+        })
+        .unwrap()
+        .project_id;
+    let project_b = board
+        .add_project(NewProject {
+            project_name: "b".into(),
+            project_path: "/b".into(),
+        })
+        .unwrap()
+        .project_id;
+    let mut all_ids = Vec::new();
+    let (epic_a, epic_b, wait_child_a, wait_child_b) = {
+        let mut add = |title: &str,
+                       status: Status,
+                       assignee: Option<&str>,
+                       parent: Option<u64>,
+                       project: Option<u64>,
+                       now: i64| {
+            let mut input = draft(assignee);
+            input.title = title.into();
+            input.description = "description with \"quotes\", \\\\ and 🧪\n".repeat(180);
+            input.goal = "goal text with \"quotes\", \\\\ and non-ASCII é\n".repeat(100);
+            input.status = status;
+            input.parent_id = parent;
+            input.project_id = project;
+            let task = board.add("manager", input, true, now).unwrap().task;
+            all_ids.push(task.id);
+            task
+        };
+        let epic_a = add("epic a", Status::Todo, None, None, Some(project_a), 1);
+        let epic_b = add("epic b", Status::Todo, None, None, Some(project_b), 2);
+        for (i, status) in Status::ALL.into_iter().enumerate() {
+            let assigned = matches!(
+                status,
+                Status::Todo
+                    | Status::Planning
+                    | Status::Implementing
+                    | Status::Blocked
+                    | Status::Reviewing
+            );
+            let parent = (i % 2 == 0).then_some(epic_a.id);
+            let project = match i % 3 {
+                0 => Some(project_a),
+                1 => Some(project_b),
+                _ => None,
+            };
+            add(
+                &format!("status row {i}"),
+                status,
+                assigned.then_some(escaped),
+                parent,
+                project,
+                i as i64 + 3,
+            );
+        }
+        // These terminal children make the epic wait's watched row set immediately decidable.
+        let wait_child_a = add(
+            "wait child a",
+            Status::Done,
+            None,
+            Some(epic_b.id),
+            Some(project_b),
+            20,
+        );
+        let wait_child_b = add(
+            "wait child b",
+            Status::Canceled,
+            None,
+            Some(epic_b.id),
+            Some(project_b),
+            21,
+        );
+        add(
+            "active project row",
+            Status::Implementing,
+            Some(escaped),
+            None,
+            Some(project_a),
+            22,
+        );
+        add(
+            "active unprojected row",
+            Status::Blocked,
+            Some(escaped),
+            None,
+            None,
+            23,
+        );
+        (epic_a, epic_b, wait_child_a, wait_child_b)
+    };
+    let first = board.get(all_ids[2]).unwrap().unwrap();
+    board
+        .update(super::UpdateInput {
+            id: first.id,
+            actor: "manager",
+            expected_revision: first.revision,
+            patch: &TaskPatch {
+                analyst_report: Some("analyst report with \"quotes\", \\\\ and 🧪\n".repeat(100)),
+                coder_report: Some("coder report with \"quotes\", \\\\ and 🧪\n".repeat(100)),
+                reviewer_report: Some("reviewer report with \"quotes\", \\\\ and 🧪\n".repeat(100)),
+                ..TaskPatch::default()
+            },
+            force: false,
+            force_reason: None,
+            new_actor: false,
+            comment: None,
+            now_ms: 20,
+        })
+        .unwrap();
+    let full_tasks: Vec<_> = all_ids
+        .iter()
+        .map(|id| board.get(*id).unwrap().unwrap())
+        .collect();
+    for full in &full_tasks {
+        let bytes = serde_json::to_vec(&full).unwrap();
+        let decoded: super::list::TaskHead<'_> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.id, full.id);
+        assert_eq!(decoded.status, full.status);
+        assert_eq!(decoded.assignee.as_deref(), full.assignee.as_deref());
+        assert_eq!(decoded.parent_id, full.parent_id);
+        assert_eq!(decoded.project_id, full.project_id);
+    }
+
+    let reference_counts = |rows: &[crate::domain::Task]| {
+        Status::ALL
+            .into_iter()
+            .map(|status| {
+                (
+                    status,
+                    rows.iter().filter(|task| task.status == status).count() as u64,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let filter_matches = |task: &&crate::domain::Task, filter: &super::ListFilter<'_>| {
+        (filter.status.is_none_or(|status| task.status == status))
+            && (filter.include_terminal || filter.status.is_some() || !task.status.is_terminal())
+            && filter
+                .assignee
+                .is_none_or(|assignee| task.assignee.as_deref() == Some(assignee))
+            && filter
+                .parent
+                .is_none_or(|parent| task.parent_id == Some(parent))
+            && filter
+                .project
+                .is_none_or(|project| task.project_id == Some(project))
+    };
+    for (assignee, parent, project) in [
+        (None, None, None),
+        (Some(escaped), None, None),
+        (None, Some(epic_a.id), None),
+        (None, None, Some(project_a)),
+        (Some(escaped), None, Some(project_b)),
+    ] {
+        let filter = super::ListFilter {
+            status: None,
+            assignee,
+            parent,
+            project,
+            include_terminal: true,
+            limit: 200,
+            offset: 0,
+        };
+        let expected: Vec<_> = full_tasks
+            .iter()
+            .filter(|task| filter_matches(task, &filter))
+            .cloned()
+            .collect();
+        assert_eq!(
+            board.status_counts(&filter).unwrap(),
+            reference_counts(&expected)
+        );
+        assert_eq!(board.list_newest(&filter).unwrap().tasks, {
+            let mut newest = expected.clone();
+            newest.sort_by_key(|task| std::cmp::Reverse(task.id));
+            newest
+        });
+    }
+
+    for project in [None, Some(project_a), Some(project_b)] {
+        let scoped: Vec<_> = full_tasks
+            .iter()
+            .filter(|task| project.is_none_or(|id| task.project_id == Some(id)))
+            .cloned()
+            .collect();
+        let brief = board.brief_for_project(200, project).unwrap();
+        assert_eq!(brief.counts, reference_counts(&scoped));
+        let expected_epics: Vec<_> = scoped
+            .iter()
+            .filter(|task| scoped.iter().any(|child| child.parent_id == Some(task.id)))
+            .collect();
+        let mut expected_epics = expected_epics;
+        expected_epics.sort_by_key(|task| (task.priority, task.id));
+        assert_eq!(
+            brief
+                .epics
+                .iter()
+                .map(|epic| &epic.task)
+                .collect::<Vec<_>>(),
+            expected_epics
+        );
+        for epic in &brief.epics {
+            let children: Vec<_> = scoped
+                .iter()
+                .filter(|task| task.parent_id == Some(epic.task.id))
+                .cloned()
+                .collect();
+            assert_eq!(epic.counts, reference_counts(&children));
+            assert_eq!(epic.total, children.len() as u64);
+        }
+        let expected_active: Vec<_> = scoped
+            .iter()
+            .filter(|task| {
+                task.parent_id.is_none()
+                    && !task.status.is_terminal()
+                    && task.status != Status::Todo
+                    && !scoped.iter().any(|child| child.parent_id == Some(task.id))
+            })
+            .cloned()
+            .collect();
+        let mut expected_active = expected_active;
+        expected_active.sort_by_key(|task| (task.priority, task.id));
+        assert_eq!(brief.active, expected_active);
+
+        let overview = board.overview(project, 200).unwrap();
+        assert_eq!(overview.counts, reference_counts(&scoped));
+        let expected_lane_statuses: Vec<_> = Status::ALL
+            .into_iter()
+            .filter(|status| !status.is_terminal())
+            .collect();
+        assert_eq!(
+            overview
+                .lanes
+                .iter()
+                .map(|lane| lane.status)
+                .collect::<Vec<_>>(),
+            expected_lane_statuses
+        );
+        for lane in &overview.lanes {
+            let mut expected: Vec<_> = scoped
+                .iter()
+                .filter(|task| task.status == lane.status && !task.status.is_terminal())
+                .cloned()
+                .collect();
+            expected.sort_by_key(|task| (task.priority, task.id));
+            assert_eq!(lane.total, expected.len());
+            assert_eq!(lane.tasks, expected);
+        }
+        let mut expected_attention: Vec<_> = scoped
+            .iter()
+            .filter(|task| {
+                matches!(task.status, Status::Blocked | Status::Reviewing)
+                    || (task.status == Status::Todo && task.assignee.is_some())
+            })
+            .cloned()
+            .collect();
+        expected_attention.sort_by_key(|task| {
+            (
+                match task.status {
+                    Status::Blocked => 0,
+                    Status::Todo => 1,
+                    _ => 2,
+                },
+                task.updated_at_ms,
+                task.id,
+            )
+        });
+        assert_eq!(overview.attention_total, expected_attention.len());
+        assert_eq!(overview.attention, expected_attention);
+        let mut expected_held_names: Vec<_> = scoped
+            .iter()
+            .filter(|task| !task.status.is_terminal())
+            .filter_map(|task| task.assignee.clone())
+            .collect();
+        expected_held_names.sort();
+        expected_held_names.dedup();
+        assert_eq!(
+            overview
+                .held
+                .iter()
+                .map(|held| held.assignee.clone())
+                .collect::<Vec<_>>(),
+            expected_held_names
+        );
+        for held in &overview.held {
+            let mut expected: Vec<_> = scoped
+                .iter()
+                .filter(|task| {
+                    !task.status.is_terminal()
+                        && task.assignee.as_deref() == Some(held.assignee.as_str())
+                })
+                .cloned()
+                .collect();
+            expected.sort_by_key(|task| (task.priority, task.id));
+            assert_eq!(held.total, expected.len());
+            assert_eq!(held.tasks, expected);
+        }
+    }
+
+    for epic_id in [epic_a.id, epic_b.id] {
+        let epic = board.epic(epic_id).unwrap();
+        let children: Vec<_> = full_tasks
+            .iter()
+            .filter(|task| task.parent_id == Some(epic_id))
+            .cloned()
+            .collect();
+        assert_eq!(
+            epic.task,
+            full_tasks
+                .iter()
+                .find(|task| task.id == epic_id)
+                .unwrap()
+                .clone()
+        );
+        assert_eq!(epic.counts, reference_counts(&children));
+        assert_eq!(epic.total, children.len() as u64);
+    }
+
+    let page_filter = super::ListFilter {
+        status: None,
+        assignee: None,
+        parent: None,
+        project: None,
+        include_terminal: true,
+        limit: 5,
+        offset: 0,
+    };
+    let matches: Vec<_> = full_tasks
+        .iter()
+        .filter(|task| filter_matches(task, &page_filter))
+        .cloned()
+        .collect();
+    let mut newest = matches.clone();
+    newest.sort_by_key(|task| std::cmp::Reverse(task.id));
+    for offset in [0, 5] {
+        let filter = super::ListFilter {
+            offset,
+            ..page_filter
+        };
+        let page = board.list_newest(&filter).unwrap();
+        let expected: Vec<_> = newest.iter().skip(offset).take(5).cloned().collect();
+        assert_eq!(page.total, newest.len());
+        assert_eq!(page.tasks, expected);
+        assert_eq!(page.more, offset + expected.len() < newest.len());
+    }
+
+    let p1_count = full_tasks
+        .iter()
+        .filter(|task| task.project_id == Some(project_a))
+        .count() as u64;
+    assert!(
+        matches!(board.delete_project(project_a), Err(Error::ProjectInUse { id, count }) if id == project_a && count == p1_count)
+    );
+    let wait = board
+        .wait_tasks(&super::WaitSpec {
+            ids: &[epic_b.id],
+            epic: true,
+            statuses: &[Status::Done, Status::Canceled],
+            after: None,
+            timeout_ms: 0,
+            assignee: None,
+        })
+        .unwrap();
+    let mut expected_wait = vec![wait_child_a, wait_child_b];
+    expected_wait.sort_by_key(|task| task.id);
+    assert_eq!(
+        wait.rows
+            .into_iter()
+            .map(|row| row.task)
+            .collect::<Vec<_>>(),
+        expected_wait
+    );
+}
+
+#[test]
 fn project_delete_refuses_referenced_projects_and_never_reuses_ids() {
     let scratch = Scratch::new();
     let board = Board::open_with_options(scratch.path(), options()).unwrap();
