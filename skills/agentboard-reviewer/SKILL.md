@@ -11,18 +11,9 @@ Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` i
 that directory before acting. You read and judge; the row is your work product.
 
 1. Find the row: `board_feed` unfiltered, or `task_list(status="reviewing")`.
-2. Read it with `task_get(id, full=true)` for the goal and `board_feed(task=<id>,
-   full=true)` for the comments and updates. The coder's handoff carries `Branch`
-   and `Commit`. You may run the repo's test suites against an already-built
-   binary, run that binary on a scratch board, and read any file or git history.
-   You must not build. Judge the last
-   commit on that branch and nothing else: `rtk git diff <SHA>^ <SHA>` and
-   `rtk git show <SHA>:<path>`, with `rtk git log --oneline <base>..<branch>` listing
-   exactly one commit. A second commit, a missing `Branch`, a missing `Commit`, or
-   uncommitted work is a blocker. Judge the commit, never the working tree.
-3. Comment the findings on the same row, each classified blocker, follow-up or
-   nit, with `file:line` or the command that shows it. A finding without evidence
-   is a doubt, not a finding.
+2. Read `task_get(id, full=true)` and `board_feed(task=<id>, full=true)`, then
+   follow **Verify** below. Judge only the last commit on the named branch.
+3. Comment findings on the row using **Severity** and its evidence shape.
 4. Close when the goal is proved: `task_update(id, if_revision, status="done",
    reviewer_report=...)` with one short comment naming the verdict. Reopen when it
    is not, while the implement turn is below 3: `task_update(id, if_revision,
@@ -38,10 +29,10 @@ that directory before acting. You read and judge; the row is your work product.
    evidence), in the reviewer report, with `Branch:` and `Commit:` naming the one
    commit you judged. A reopen plus new edits voids that verdict; the next review
    judges the next branch and commit and names them. `Status` is `done` (close),
-   `partial` (reopen) or `blocked` (needs the human or manager); `Verified` is
-   `not-verified (accepted coder <level>)` when you did not re-run a check. For
-   each check you re-run, record `Verified: re-ran <command> -> <line>`; a mismatch
-   with the coder's reported output is a blocker.
+   `partial` (reopen) or `blocked` (needs the human or manager). Accept
+   `not-verified (accepted coder <level>: needs a build)` only for a cargo-only
+   check. For other checks, use the applicable `read`, `re-ran`, or `probed`
+   form from **Verdict**; a rerun mismatch with coder output is a blocker.
    A task with children is an epic, and the board refuses to close one while a
    child is open; that refusal is the gate working, so report it and never work
    around it.
@@ -76,11 +67,62 @@ write is a field write and refuses too), then get the hold moved - `force` + `re
 is the manager's tool, so use it only when the owner says to. Do not leave a passed
 row open and silent.
 
-A comment does not move the revision; only a field change does. So the revision you
-read with `task_get` before commenting is still the one to pass as `if_revision` to
-the status update that follows. The manual's tools table is right: `task_comment`
-never bumps the revision.
+A comment does not move the revision; reuse the `task_get` revision for the status
+update (`task_comment` never bumps it).
 
+
+## Verify
+
+1. Before coder report, derive goal checks and allowed/forbidden paths. Stop on a
+   blocker here or in item 2.
+2. Check identity: log shows one commit, `git status --short` is clean, and
+   binary timestamp from
+   `stat -c %Y target/release/agentboard` is newer than
+   `git log -1 --format=%ct <SHA>`. Any failure blocks review.
+3. Check `rtk git show --stat <SHA>`; paths must be allowed. Unexplained paths
+   or scratch artifacts block review.
+4. Read the diff; match `Changed`/`Evidence` claims to hunks or reruns. Flag
+   unexplained claims and hunks.
+5. Run `gate.sh --prebuilt` and runnable goal checks; compare coder output.
+   Retry mismatches; block repeats. Pass then fail is inconclusive: block if
+   changed code is reached, else follow up.
+6. Probe load-bearing behaviour on a scratch board; record the required refusal,
+   exit code, output or event. For docs, run goal rg and search for replaced text.
+7. Every new guard, refusal or branch needs mutation evidence (a test went red)
+   and a test asserting the required observable value. Missing either blocks.
+   Accept an unrun cargo-only check only as `needs a build`.
+8. rg old/new forms of changed names, flags, text and counts (skip `target`,
+   `rework-plan`, historical `docs/`). Stale docs, skills, cards or tests block.
+
+## Severity
+
+- **blocker**: a goal clause lacks proof, a check fails or mismatches, the commit
+  makes behaviour or shipped documentation wrong, a new guard lacks a test that
+  can fail, or Verify 2–3 fails.
+- **follow-up**: a real base issue the commit neither copies nor newly reaches,
+  or an issue outside this row's paths. Report it for the manager to file.
+- **nit**: wording or style that changes no behaviour or decision.
+
+A finding without evidence is a doubt. Shape:
+`<class>: <claim> | <file:line or command -> printed line> | expected: <requirement>`.
+
+## Verdict
+
+Write one per clause: `Verified: read <file:line>`, `Verified: re-ran <command> -> <line>`,
+`Verified: probed <command> -> <line>`, or `not-verified (accepted coder <level>: needs a build)` for cargo-only checks.
+Others unrun are inconclusive. `done` needs evidence for every clause; reopen as
+`partial` if blockers fit allowed paths (comment names blockers and next branch).
+Use `blocked` for an unfalsifiable/contradictory goal, forbidden-path fix, or
+inconclusive check the coder cannot fix.
+
+## Before done
+
+- [ ] Goal clauses and checks written before reading the coder report.
+- [ ] One commit, clean tree, and release binary newer than the commit.
+- [ ] Every changed path is allowed; every claim matches a hunk or rerun.
+- [ ] Every goal clause has `Verified:` read, rerun, or probed evidence as applicable.
+- [ ] Each new guard has mutation evidence and a behaviour asserting test.
+- [ ] rg found no stale form; `Changed:` names what you read yourself.
 
 ## May
 
@@ -91,10 +133,12 @@ You may run the repo suites that exercise an already-built binary:
 `python3 tests/daemon.py`, `bash tests/migrate.sh`,
 `bash scripts/gate.sh --prebuilt`, `python3 tests/doc-names.py`,
 `python3 scripts/sync-tool-count.py --check`, and `python3 scripts/doc-overlap.py`.
-Set `AGENTBOARD_TEST_BIN` to point a suite at another binary. You may run the built binary directly with
-`AGENTBOARD_DB=$(mktemp -d)/b` and start `agentboard daemon 127.0.0.1:PORT` (the dashboard is its `/` page) on a
-free port. If the binary is missing or older than the branch's last commit, report
-that and ask for a coder build; do not build it yourself.
+Set `AGENTBOARD_TEST_BIN` to use another binary. Run it with a scratch `AGENTBOARD_DB`
+or start its daemon on a free port. If the binary is missing or stale, request a
+coder build; do not build it yourself.
+For an individual suite, set a scratch `TMPDIR`, `PYTHONDONTWRITEBYTECODE=1`
+and `AGENTBOARD_TEST_BIN=$PWD/target/release/agentboard`.
+For direct binary use, invoke only as `env AGENTBOARD_DB=<scratch directory> ./target/release/agentboard ...`.
 
 ## Must not
 
@@ -129,18 +173,13 @@ versus `clientWidth` and any `.card`, `.task-strip`, or `.seat-chip` (the classe
 `scrollWidth` exceeds `clientWidth` with visible overflow. Save reviewer
 screenshots or notes under `/tmp/agentboard/scratch/`, never in the repository.
 Always stop the daemon process and run `agent-browser --session "$S" close`.
-A missing or stale built binary means report that and do not build. Both Claude
-and Codex reviewers run suites against the already-built release binary on
-scratch boards. From the repo root, run
+A missing or stale binary means report that and do not build. From the repo root, run
 `TMPDIR=$(mktemp -d /tmp/agentboard/scratch/review.XXXXXX)
 PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt`; this runs every suite
 and documentation gate without building. For an individual suite, set that same
-`TMPDIR`, `PYTHONDONTWRITEBYTECODE=1`, and
-`AGENTBOARD_TEST_BIN=$PWD/target/release/agentboard`, then run its normal command.
-For direct binary use, invoke only as
-`env AGENTBOARD_DB=<scratch directory> ./target/release/agentboard ...`. Never
-run cargo, git writes, or edit tracked files, and stop every process started. See
-`seats/README.md` for the sandbox profile and rule-block limits.
+`TMPDIR`, then run its normal command. Never run cargo, git writes, or edit tracked
+files, and stop every process started. See `seats/README.md` for the sandbox
+profile and rule-block limits.
 The cargo restriction is instruction-only: a host `~/.codex/rules/default.rules`
 allow rule runs cargo outside the sandbox, so do not describe cargo as sandbox
 refused. Whether the RTK pre-tool rewrite changes that matching is unverified.

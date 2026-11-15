@@ -199,11 +199,11 @@ Follow-ups: <optional>
 - Reviewer `Status` maps to the move: `done` closes the row, `partial` reopens it
   to `implementing`/`coder`, `blocked` is a blocker that needs the human or the
   manager.
-- If a reviewer did not re-run a check, its `Verified` is
-  `not-verified (accepted coder <level>)`, for example
-  `not-verified (accepted coder ran-goal)`. For each check it re-ran, record
-  `Verified: re-ran <command> -> <line>`. A mismatch with the coder's reported
-  output is a blocker.
+- The reviewer records one line per goal clause: `Verified: read <file:line>`,
+  `Verified: re-ran <command> -> <line>`, `Verified: probed <command> -> <line>`
+  on a scratch board, or `not-verified (accepted coder <level>: <reason>)`. On a code
+  row, only `needs a build` is an accepted reason. A mismatch with coder output
+  blocks the row.
 - The analyst's report is not a handoff of finished work. It lists `Files`,
   `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
   line that proves it). It also names its analyst turn (`Turn: analyst <n>`) so
