@@ -40,25 +40,81 @@ refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-
   if [ -f "$rules" ] && [ ! -L "$rules" ]; then same "$name unchanged" "$before" "$rules"; fi
 }
 
-# --- old Claude card links are removed only when they point into this repo ---
+# --- generated Claude seat files: merge, idempotence and safe replacement ---
 newhome
 mkdir -p "$home/.codex/rules"
-ln -s "$repo/seats/claude/analyst-mcp.json" "$home/.claude/analyst-mcp.json"
-ln -s /old/checkout/seats/claude/coder-mcp.json "$home/.claude/coder-mcp.json"
-printf 'mine\n' >"$home/.claude/manager-mcp.json"
+printf '%s' '{"mcpServers":{"agentboard":{"type":"http","url":"http://wrong"},"extra":{"type":"stdio","command":"x","env":{"TOKEN":"s3cret-value"}}}}' >"$home/.claude.json"
+cp -r "$repo/seats/claude" "$tmp/cards-before"
 inst; code=$?
-is "old Claude cards do not block install" test "$code" -eq 0
-is "repo Claude card link removed" test ! -e "$home/.claude/analyst-mcp.json" -a ! -L "$home/.claude/analyst-mcp.json"
-has "repo Claude card removal reported" "removed: $home/.claude/analyst-mcp.json" "$tmp/out"
-is "foreign Claude card link kept" test "$(readlink "$home/.claude/coder-mcp.json")" = /old/checkout/seats/claude/coder-mcp.json
-has "foreign Claude card link noted" "note: $home/.claude/coder-mcp.json" "$tmp/err"
-is "regular Claude card file kept" test "$(cat "$home/.claude/manager-mcp.json")" = mine
-has "regular Claude card file noted" "note: $home/.claude/manager-mcp.json" "$tmp/err"
-is "absent Claude card stays absent" test ! -e "$home/.claude/reviewer-mcp.json"
+is "generated install exit" test "$code" -eq 0
+for seat in analyst coder manager reviewer; do
+  is "$seat generated regular 0600 merged file" python3 -c 'import json,os,stat,sys; p,s=sys.argv[1:]; d=json.load(open(p)); card=json.load(open("seats/claude/"+s+"-mcp.json")); assert stat.S_IMODE(os.stat(p).st_mode)==0o600 and not os.path.islink(p); assert d["mcpServers"]["agentboard"]==card["mcpServers"]["agentboard"] and "extra" in d["mcpServers"]' "$home/.claude/$seat-mcp.json" "$seat"
+done
+has "names only output" "servers: agentboard, codebase-memory-mcp, extra" "$tmp/out"
+is "generated lines list names in sorted order" bash -c 'grep -q "servers: agentboard, codebase-memory-mcp, extra" "$1"' _ "$tmp/out"
+is "secret not printed" bash -c '! grep -q s3cret-value "$1" "$2"' _ "$tmp/out" "$tmp/err"
+same "user config unchanged" "$home/.claude.json" "$home/.claude.json"
+diff -r "$tmp/cards-before" "$repo/seats/claude" >/dev/null || bad "repo cards unchanged"
+inst
+has "rerun unchanged" "unchanged: $home/.claude/coder-mcp.json" "$tmp/out"
+cp "$home/.claude/coder-mcp.json" "$tmp/coder-before-refresh"
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["mcpServers"]["extra"]["command"]="y"; open(p,"w").write(json.dumps(d))' "$home/.claude.json"
+inst
+has "stale generated file reported" "note: $home/.claude/coder-mcp.json differs" "$tmp/err"
+same "stale generated file preserved without force" "$tmp/coder-before-refresh" "$home/.claude/coder-mcp.json"
 inst --force
-is "force keeps foreign Claude card link" test "$(readlink "$home/.claude/coder-mcp.json")" = /old/checkout/seats/claude/coder-mcp.json
-is "force keeps regular Claude card file" test "$(cat "$home/.claude/manager-mcp.json")" = mine
+has "stale generated file refreshed with force" "replaced: $home/.claude/coder-mcp.json" "$tmp/out"
+is "force copied updated server value" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["extra"]["command"]=="y"' "$home/.claude/coder-mcp.json"
+rm "$home/.claude/reviewer-mcp.json"
+inst
+is "deleted generated file recreated" test -f "$home/.claude/reviewer-mcp.json"
+is "all generated files regular" bash -c 'for f in "$1"/.claude/*-mcp.json; do test -f "$f" && test ! -L "$f" || exit 1; done' _ "$home"
+is "all generated files private" bash -c 'for f in "$1"/.claude/*-mcp.json; do test "$(stat -c %a "$f")" = 600 || exit 1; done' _ "$home"
+is "all generated markers present" bash -c 'for f in "$1"/.claude/*-mcp.json; do grep -q agentboardGenerated "$f" || exit 1; done' _ "$home"
+is "card wins agentboard clash" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["agentboard"]["url"].endswith("/mcp/analyst")' "$home/.claude/analyst-mcp.json"
+is "user extra server copied" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["extra"]["env"]["TOKEN"]=="s3cret-value"' "$home/.claude/analyst-mcp.json"
+is "secret absent from output and errors" bash -c '! grep -q s3cret-value "$1" "$2"' _ "$tmp/out" "$tmp/err"
+is "user config remains unchanged" grep -q 'wrong' "$home/.claude.json"
+is "user config was not decorated with installer marker" bash -c '! grep -q agentboardGenerated "$1"' _ "$home/.claude.json"
+inst
+is "second run all unchanged" bash -c 'grep -c "^unchanged: .*mcp.json$" "$1" | grep -qx 4' _ "$tmp/out"
+is "unchanged file bytes stable" cmp -s "$home/.claude/coder-mcp.json" "$home/.claude/coder-mcp.json"
+is "repo cards remain regular" bash -c 'for f in seats/claude/*-mcp.json; do test -f "$f" && test ! -L "$f" || exit 1; done'
+is "repo cards retain expected count" test "$(find seats/claude -maxdepth 1 -name '*-mcp.json' | wc -l)" -eq 4
+is "Claude home file count four" test "$(find "$home/.claude" -maxdepth 1 -name '*-mcp.json' | wc -l)" -eq 4
+is "user config lacks rewritten marker" bash -c '! grep -q agentboardGenerated "$1"' _ "$home/.claude.json"
+is "file contains only server names in log" bash -c '! grep -q s3cret-value "$1"' _ "$tmp/out"
+is "missing user config tolerated" test -f "$home/.claude/coder-mcp.json"
+is "all seat endpoints distinct" python3 -c 'import glob,json,sys; u=[json.load(open(p))["mcpServers"]["agentboard"]["url"] for p in glob.glob(sys.argv[1]+"/.claude/*-mcp.json")]; assert len(u)==len(set(u))==4' "$home"
 
+# Old repository symlinks are replaced at the directory entry, never followed.
+newhome
+mkdir -p "$home/.codex/rules"
+ln -s "$repo/seats/claude/coder-mcp.json" "$home/.claude/coder-mcp.json"
+inst; code=$?
+is "repo card symlink install succeeds" test "$code" -eq 0
+is "repo card symlink replaced by regular file" test -f "$home/.claude/coder-mcp.json" -a ! -L "$home/.claude/coder-mcp.json"
+diff -r "$tmp/cards-before" "$repo/seats/claude" >/dev/null || bad "repo card symlink target untouched"
+rm "$home/.claude/coder-mcp.json"
+ln -s /old/checkout/coder-mcp.json "$home/.claude/coder-mcp.json"
+inst; code=$?
+is "foreign card symlink refused" test "$code" -eq 1
+is "foreign link preserved on refusal" test "$(readlink "$home/.claude/coder-mcp.json")" = /old/checkout/coder-mcp.json
+inst --force; code=$?
+is "force replaces foreign card link" test "$code" -eq 0 -a -f "$home/.claude/coder-mcp.json" -a ! -L "$home/.claude/coder-mcp.json"
+printf 'mine\n' >"$home/.claude/manager-mcp.json"
+inst --force; code=$?
+is "force refuses unmarked regular file" test "$code" -eq 1
+is "unmarked regular file preserved" test "$(cat "$home/.claude/manager-mcp.json")" = mine
+rm "$home/.claude/manager-mcp.json"
+printf '{' >"$home/.claude.json"
+inst --force; code=$?
+is "invalid user JSON refused" test "$code" -eq 1
+has "invalid JSON diagnostic names file" "invalid JSON in $home/.claude.json" "$tmp/err"
+printf '{"mcpServers":[]}' >"$home/.claude.json"
+inst --force; code=$?
+is "non-object mcpServers refused" test "$code" -eq 1
+has "mcpServers diagnostic names field" 'mcpServers in' "$tmp/err"
 # --- missing rules dir: the block alone, no second rules file ---------------
 newhome
 inst; code=$?
@@ -67,7 +123,7 @@ is "manager launcher linked" test "$(readlink "$home/.local/bin/start-agentboard
 is "user unit linked" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 for seat in analyst coder manager reviewer; do
   is "$seat Claude URL card" python3 -c 'import json,sys; s=sys.argv[1]; p=sys.argv[2]; a=json.load(open(p))["mcpServers"]["agentboard"]; assert a == {"type":"http","url":f"http://127.0.0.1:8765/mcp/{s}"}' "$seat" "$repo/seats/claude/$seat-mcp.json"
-  is "$seat Claude card not linked" test ! -e "$home/.claude/$seat-mcp.json" -a ! -L "$home/.claude/$seat-mcp.json"
+  is "$seat generated Claude file" test -f "$home/.claude/$seat-mcp.json"
   is "$seat Codex URL card" python3 -c 'import sys,tomllib; s=sys.argv[1]; p=sys.argv[2]; a=tomllib.load(open(p,"rb"))["mcp_servers"]["agentboard"]; assert a["url"] == f"http://127.0.0.1:8765/mcp/{s}" and "command" not in a and "env" not in a and len(a["tools"]) == 12' "$seat" "$home/.codex/$seat.config.toml"
 done
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
@@ -457,7 +513,7 @@ sum=$(cksum <"$grok")
 inst --force --skip-grok; code=$?
 is "skip-grok full install exits successfully" test "$code" -eq 0
 is "skip-grok installs Codex rules block" grep -qF '# BEGIN AGENTBOARD RULES' "$rules"
-is "skip-grok writes no Claude card" test ! -e "$home/.claude/coder-mcp.json"
+is "skip-grok generates Claude seat file" test -f "$home/.claude/coder-mcp.json" -a ! -L "$home/.claude/coder-mcp.json"
 is "skip-grok installs Codex card" test -L "$home/.codex/coder.config.toml"
 same "skip-grok preserves foreign Grok bytes" "$tmp/grok-skip-before" "$grok"
 is "skip-grok preserves Grok checksum" test "$(cksum <"$grok")" = "$sum"

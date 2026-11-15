@@ -45,8 +45,10 @@ export PATH="$tmp/bin:$PATH" HC_TERMINAL_ID=t4 STUB_HC_LOG="$tmp/hc.log" HERDR_L
 unset HERDR_PANE_ID HERDR_TAB_ID HERDR_ENV
 no_hc() { local v; for v in $(compgen -e HC_); do unset "$v"; done; }
 export HOME="$tmp/home"
+mkdir -p "$HOME/.claude"
+printf '{}\n' >"$HOME/.claude/manager-mcp.json"
 repo=$(pwd)
-card=$(readlink -f "$repo/seats/claude/manager-mcp.json")
+card="$HOME/.claude/manager-mcp.json"
 
 run_kind() {
   local kind=$1 expected=$2 wait_at send_at
@@ -65,11 +67,13 @@ run_kind() {
     is "$kind waits for nothing" bash -c '! grep -Fq "CALL <wait>" "$1"' _ "$STUB_HC_LOG"
   fi
 }
-run_kind claude 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <claude> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--dangerously-skip-permissions> </agentboard-manager>'
-mkdir "$tmp/link"; ln -s "$repo/seats/start-agentboard-manager" "$tmp/link/start-agentboard-manager"
+run_kind claude 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <claude> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--strict-mcp-config> <--dangerously-skip-permissions> </agentboard-manager>'
+mv "$card" "$card.saved"
 : >"$STUB_HC_LOG"
-if "$tmp/link/start-agentboard-manager" claude >"$tmp/out" 2>&1; then ok; else bad 'linked launcher succeeds'; fi
-exact "$STUB_HC_LOG" 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <claude> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--dangerously-skip-permissions> </agentboard-manager>' 'linked launcher resolves the repo card'
+if "$repo/seats/start-agentboard-manager" claude >"$tmp/out" 2>"$tmp/err"; then bad 'missing card unexpectedly launched'; else ok; fi
+has "$tmp/err" 'run seats/install.py' 'missing card names installer'
+is 'missing card starts nothing' test ! -s "$STUB_HC_LOG"
+mv "$card.saved" "$card"
 run_kind codex 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <codex> <--no-daemon> <--profile> <manager> <$agentboard-manager>'
 run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <grok> <--trust> <--always-approve>'
 
@@ -125,7 +129,7 @@ run_herdr_kind() {
   fi
   is "herdr $kind never calls hc" test ! -s "$STUB_HC_LOG"
 }
-run_herdr_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--dangerously-skip-permissions> <--> </agentboard-manager>'
+run_herdr_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--strict-mcp-config> <--dangerously-skip-permissions> <--> </agentboard-manager>'
 run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--profile> <manager> <--> <$agentboard-manager>'
 run_herdr_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
 

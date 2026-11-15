@@ -9,7 +9,7 @@ its client gets a board identity.
 |---|---|---|
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
 | `codex/rules/agentboard.rules` | every codex seat | a marked block inside `$CODEX_HOME/rules/default.rules` |
-| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | `claude --mcp-config <file>` |
+| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | merged by installer into `~/.claude/<seat>-mcp.json` |
 | `grok/agentboard-mcp.toml` | grok (manager) | managed block in `~/.grok/config.toml` by `install.py` |
 | `systemd/agentboard.service` | shared HTTP daemon | linked to `~/.config/systemd/user/agentboard.service` |
 
@@ -18,9 +18,9 @@ its client gets a board identity.
     ./seats/install.py --force
 
 It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml`. Claude
-seats read `seats/claude/<seat>-mcp.json` directly from the checkout. An old card
-link into this repo is removed; another file or link is reported and left alone,
-including with `--force`. Each Codex seat profile carries its
+seat files are generated from the repo card and `~/.claude.json`. Repo card links
+from older installs are safely replaced; foreign links and unmarked files are
+refused, including with `--force`. Each Codex seat profile carries its
 own tool list and permissions. `install.py` refuses an existing
 file that is not a symlink into this repo, and `--force` replaces only the named
 destinations. A full install also links `seats/start-agentboard-manager` to
@@ -129,15 +129,14 @@ board tool list.
 
 ## Claude
 
-One `--mcp-config` card per seat, read from the checkout. `analyst-mcp.json`,
-`coder-mcp.json`, `manager-mcp.json` and `reviewer-mcp.json` use distinct
-`/mcp/<seat>` URLs, which name the actor for each request. Claude Code combines
-the supplied card with user-scope servers in `~/.claude.json` by default; do not
-pass `--strict-mcp-config`, which drops those other configurations. Keep
-`agentboard` out of `~/.claude.json`. Claude Code 2.1.325 selected the card's
-`agentboard` entry in a name clash, though its docs do not specify precedence for
-`--mcp-config` against user scope. Start a manager with
-`claude --mcp-config "$REPO/seats/claude/manager-mcp.json"`.
+`install.py` generates `~/.claude/<seat>-mcp.json` by merging every user-scope
+server from `~/.claude.json` with the repo card, with the card winning name clashes.
+Launch with `--strict-mcp-config` so that generated file is the seat's single source
+of truth. Rerun after editing user servers; unchanged inputs produce unchanged files.
+Generated files are mode 0600, output lists names only, and `~/.claude.json` is read
+only. A differing generated file is preserved unless `--force` is supplied; an
+unmarked file is always refused. Example:
+`claude --mcp-config ~/.claude/manager-mcp.json --strict-mcp-config`.
 
 ## Grok
 
@@ -170,6 +169,7 @@ go after herdr's `--` or the `--` that ends `hc run`'s own options.
 
 ## Verified or not
 
-The installer suite checks repo URL cards, the absence of home card links, and the user unit in isolated homes.
+The installer suite checks generated merged cards, private file modes, idempotence,
+safe link replacement and input refusal in isolated homes.
 The coder report for the HTTP cutover records live Claude and Codex writes against
 a scratch daemon; card shape alone is not transport proof.
