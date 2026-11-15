@@ -44,9 +44,9 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/daemon.py` | `daemon: 332/332 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
-| `bash tests/seats-install.sh` | `255/255 passed (seats installer)` (isolated homes; no board writes) |
-| `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `51/51 passed (manager launcher)` |
-| `bash tests/skills-install.sh` | `8/8 passed (skills installer)` (isolated homes; no board writes) |
+| `bash tests/seats-install.sh` | `257/257 passed (seats installer)` (isolated homes; no board writes) |
+| `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `53/53 passed (manager launcher)` |
+| `bash tests/skills-install.sh` | `9/9 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
 | `python3 tests/doc-names.py` | `doc-names: 14 pages, 152 CLI names, 156 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
@@ -198,8 +198,9 @@ screenshots from the coder report because browser use is not verified in the san
 
 - `skills/agentboard-team` — running a team: launcher, wake commands, roles,
   workflow. `skills/install.py --force` creates canonical repo links under
-  `~/.agents/skills`, then links Claude and Codex skills to those
-  canonical names. There is one physical copy: never copy over the installed links.
+  `~/.agents/skills`, then links Claude skills to those canonical names; Codex and
+  Grok read `~/.agents/skills` directly. There is one physical copy: never copy over
+  the installed links.
 - `PROTOCOL.md` — the wire surface: twelve tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses

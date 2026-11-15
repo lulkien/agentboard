@@ -16,25 +16,25 @@ this repo, and every agent alias points at that canonical name:
 
     ~/.agents/skills/<name> -> <repo>/skills/<name>
     ~/.claude/skills/<name> -> ~/.agents/skills/<name>
-    ~/.codex/skills/<name> -> ~/.agents/skills/<name>
 
 Five names are installed — `agentboard-team` and the four `agentboard-<seat>` entry
-points — so each run creates `5 x 3 = 15` directory links, each printing `linked:`.
-Only the canonical links contain the repo location; all three paths for a name resolve
+points — so each run creates `5 x 2 = 10` directory links, each printing `linked:`.
+Only the canonical links contain the repo location; both paths for a name resolve
 to one physical repo directory, so an edit is visible without reinstalling. Unrelated
-skills are left alone. Codex honours `CODEX_HOME`.
+skills are left alone.
 
 | CLI | Entry point in repo | Installed entry point | Invocation |
 |---|---|---|---|
 | Claude Code | `agentboard-<seat>/SKILL.md` | `~/.claude/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `/agentboard-<seat> [focus]` |
-| Codex | `agentboard-<seat>/SKILL.md` | `$CODEX_HOME/skills/agentboard-<seat>` → canonical `agentboard-<seat>` | `$agentboard-<seat> [focus]` via `/skills` |
+| Codex | `agentboard-<seat>/SKILL.md` | `~/.agents/skills/agentboard-<seat>` (canonical; no alias) | `$agentboard-<seat> [focus]` via `/skills` |
 | Grok Build | `agentboard-manager/SKILL.md` | `~/.agents/skills/agentboard-manager` → canonical (no alias needed) | `/agentboard-manager [focus]` |
 
-Grok scans `~/.agents/skills` itself, at every tier, so it needs no alias directory
-of its own; the seat entry points and the manual it shares all resolve through the
-canonical links.
+Codex and Grok scan `~/.agents/skills` directly, so neither needs an alias
+directory. The installer prunes an old `$CODEX_HOME/skills/<name>` alias only when
+it points exactly to the canonical entry; foreign links and real files/directories
+are left alone.
 
-The installer preflights all fifteen destinations before changing any parent.
+The installer preflights all ten destinations before changing any parent.
 Without `--force`, an existing file, directory or dangling symlink prints
 `exists: <path> (use --force)` and exits 1 with no changes. `--force` replaces only
 the named destinations. Missing parents are created. Retired names (manager, analyst, coder, reviewer,
@@ -49,8 +49,8 @@ feed addresses.
 `seats/` holds the canonical client cards for those entries.
 
 `tests/skills-install.sh` proves the layout in isolated homes: five canonical
-links, two aliases per skill, retired links pruned, one edit visible through both
-aliases, a second run that refuses without `--force` while naming every
+links, one Claude alias per skill, retired links pruned, one edit visible through
+the Claude alias, a second run that refuses without `--force` while naming every
 conflict, and the four seat entry points present as skills.
 
 ## Discovery notes (2026-10-22)
@@ -62,6 +62,8 @@ conflict, and the four seat entry points present as skills.
   ([custom prompts are deprecated](https://learn.chatgpt.com/docs/custom-prompts);
   Codex uses the [skill picker](https://learn.chatgpt.com/docs/build-skills)), so
   no `~/.codex/prompts/` file is installed.
+- Codex 0.167.2's `codex debug prompt-input` lists skills from `~/.agents/skills`;
+  the old `$CODEX_HOME/skills` alias was redundant and duplicate paths list once.
 - Grok Build 1.0.70 was exercised here: `grok inspect --json` lists the canonical
   `agentboard-team` and the four `agentboard-<seat>` skills from `~/.agents/skills`
   without any alias, reports `projectTrusted`, and lists the MCP servers it will

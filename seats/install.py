@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Link the seat cards into their client homes: one physical copy, in this repo.
+"""Link seat profiles into client homes and install repo-owned configuration.
 The Codex rules are not a link: they are a marked block inside the user's own
 rules/default.rules, which Codex also appends to. Grok uses a marked block in its
 user config as well.
@@ -278,8 +278,6 @@ def main():
             print(f"invalid TOML in rendered Grok config {grok_file}: {exc}", file=sys.stderr)
             refuse = True
     if not grok_only:
-        for seat in SEATS:
-            check(f"{claude_home}/{seat}-mcp.json")
         check(f"{home}/.local/bin/start-agentboard-manager")
         check(f"{home}/.config/systemd/user/agentboard.service")
     if refuse:
@@ -338,8 +336,15 @@ def main():
             link(f"{src}/codex/{seat}.config.toml", f"{codex_home}/{seat}.config.toml")
         install_rules_block()
         remove_legacy_rules_link()
+        # Seats read their MCP card from the checkout. Remove only old links that
+        # this installer created; preserve regular files and foreign links.
         for seat in SEATS:
-            link(f"{src}/claude/{seat}-mcp.json", f"{claude_home}/{seat}-mcp.json")
+            old = f"{claude_home}/{seat}-mcp.json"
+            if os.path.islink(old) and os.readlink(old).startswith(repo + "/"):
+                os.unlink(old)
+                print(f"removed: {old} (launch with --mcp-config {src}/claude/{seat}-mcp.json)")
+            elif os.path.lexists(old):
+                print(f"note: {old} is not a link into this repo; left alone", file=sys.stderr)
         link(f"{src}/start-agentboard-manager", f"{home}/.local/bin/start-agentboard-manager")
         link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")
         if not skip_grok:

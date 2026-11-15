@@ -40,21 +40,24 @@ refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-
   if [ -f "$rules" ] && [ ! -L "$rules" ]; then same "$name unchanged" "$before" "$rules"; fi
 }
 
-# --- foreign claude links are refused, then --force replaces them ---
+# --- old Claude card links are removed only when they point into this repo ---
 newhome
 mkdir -p "$home/.codex/rules"
-for seat in analyst coder manager reviewer; do
-  ln -s "/old/checkout/seats/claude/$seat-mcp.json" "$home/.claude/$seat-mcp.json"
-done
+ln -s "$repo/seats/claude/analyst-mcp.json" "$home/.claude/analyst-mcp.json"
+ln -s /old/checkout/seats/claude/coder-mcp.json "$home/.claude/coder-mcp.json"
+printf 'mine\n' >"$home/.claude/manager-mcp.json"
 inst; code=$?
-is "foreign links refused" test "$code" -eq 1
-has "foreign link text" 'use --force to replace it' "$tmp/err"
-is "foreign refusal prints nothing on stdout" test ! -s "$tmp/out"
-is "foreign refusal writes no rules" test ! -e "$rules"
+is "old Claude cards do not block install" test "$code" -eq 0
+is "repo Claude card link removed" test ! -e "$home/.claude/analyst-mcp.json" -a ! -L "$home/.claude/analyst-mcp.json"
+has "repo Claude card removal reported" "removed: $home/.claude/analyst-mcp.json" "$tmp/out"
+is "foreign Claude card link kept" test "$(readlink "$home/.claude/coder-mcp.json")" = /old/checkout/seats/claude/coder-mcp.json
+has "foreign Claude card link noted" "note: $home/.claude/coder-mcp.json" "$tmp/err"
+is "regular Claude card file kept" test "$(cat "$home/.claude/manager-mcp.json")" = mine
+has "regular Claude card file noted" "note: $home/.claude/manager-mcp.json" "$tmp/err"
+is "absent Claude card stays absent" test ! -e "$home/.claude/reviewer-mcp.json"
 inst --force
-for seat in analyst coder manager; do
-  is "force relinks $seat" test "$(readlink "$home/.claude/$seat-mcp.json")" = "$repo/seats/claude/$seat-mcp.json"
-done
+is "force keeps foreign Claude card link" test "$(readlink "$home/.claude/coder-mcp.json")" = /old/checkout/seats/claude/coder-mcp.json
+is "force keeps regular Claude card file" test "$(cat "$home/.claude/manager-mcp.json")" = mine
 
 # --- missing rules dir: the block alone, no second rules file ---------------
 newhome
@@ -63,7 +66,8 @@ is "fresh install exit" test "$code" -eq 0
 is "manager launcher linked" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = "$launcher"
 is "user unit linked" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 for seat in analyst coder manager reviewer; do
-  is "$seat Claude URL card" python3 -c 'import json,sys; s=sys.argv[1]; p=sys.argv[2]; a=json.load(open(p))["mcpServers"]["agentboard"]; assert a == {"type":"http","url":f"http://127.0.0.1:8765/mcp/{s}"}' "$seat" "$home/.claude/$seat-mcp.json"
+  is "$seat Claude URL card" python3 -c 'import json,sys; s=sys.argv[1]; p=sys.argv[2]; a=json.load(open(p))["mcpServers"]["agentboard"]; assert a == {"type":"http","url":f"http://127.0.0.1:8765/mcp/{s}"}' "$seat" "$repo/seats/claude/$seat-mcp.json"
+  is "$seat Claude card not linked" test ! -e "$home/.claude/$seat-mcp.json" -a ! -L "$home/.claude/$seat-mcp.json"
   is "$seat Codex URL card" python3 -c 'import sys,tomllib; s=sys.argv[1]; p=sys.argv[2]; a=tomllib.load(open(p,"rb"))["mcp_servers"]["agentboard"]; assert a["url"] == f"http://127.0.0.1:8765/mcp/{s}" and "command" not in a and "env" not in a and len(a["tools"]) == 12' "$seat" "$home/.codex/$seat.config.toml"
 done
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
@@ -400,7 +404,6 @@ for args in "" "--force"; do
   has "Grok malformed TOML inside block ${args:-plain} diagnosed" 'invalid TOML' "$tmp/err"
   is "Grok inside-block refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
   is "Grok inside-block refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
-  is "Grok inside-block refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
 done
 newhome
 grok=$home/.grok/config.toml
@@ -430,7 +433,6 @@ for args in "" "--force"; do
   has "Grok inline mcp_servers ${args:-plain} candidate diagnosed" 'invalid TOML in rendered Grok config' "$tmp/err"
   is "Grok inline refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
   is "Grok inline refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
-  is "Grok inline refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
 done
 
 # --- Grok preflight runs before other installer destinations are written ----
@@ -444,7 +446,6 @@ is "full install refuses unmarked Grok table" test "$code" -eq 1
 same "full install refusal preserves Grok config" "$tmp/grok-before" "$grok"
 is "Grok preflight refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
 is "Grok preflight refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
-is "Grok preflight refusal links no Claude card" test ! -e "$home/.claude/coder-mcp.json"
 
 # --- --skip-grok installs everything else without reading or changing Grok --
 newhome
@@ -456,7 +457,7 @@ sum=$(cksum <"$grok")
 inst --force --skip-grok; code=$?
 is "skip-grok full install exits successfully" test "$code" -eq 0
 is "skip-grok installs Codex rules block" grep -qF '# BEGIN AGENTBOARD RULES' "$rules"
-is "skip-grok installs Claude card" test -L "$home/.claude/coder-mcp.json"
+is "skip-grok writes no Claude card" test ! -e "$home/.claude/coder-mcp.json"
 is "skip-grok installs Codex card" test -L "$home/.codex/coder.config.toml"
 same "skip-grok preserves foreign Grok bytes" "$tmp/grok-skip-before" "$grok"
 is "skip-grok preserves Grok checksum" test "$(cksum <"$grok")" = "$sum"

@@ -24,7 +24,7 @@ def destinations(home,canonical=None,codehome=None,claude=None):
     paths={}
     for name in skills():
         paths[canonical/name]=repo/'skills'/name
-        for parent in [home/'.claude/skills',(codehome or home/'.codex')/'skills']:
+        for parent in [home/'.claude/skills']:
             paths[parent/name]=canonical/name
         for card,root in (('claude',claude or home/'.claude/commands'),):
             if (repo/'skills'/name/f'{card}.md').exists():
@@ -50,9 +50,9 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     # Prove all aliases resolve to one physical copy without writing through links.
     canonical=repo/'skills/agentboard-team/SKILL.md'
     assert os.path.samefile(home/'.agents/skills/agentboard-team/SKILL.md',canonical)
-    for agent in ['.claude','.codex']:
-        assert os.path.samefile(home/agent/'skills/agentboard-team/SKILL.md',canonical)
-    check(f'canonical repo links, two indirect aliases per skill, one physical copy, {len(expected)} destinations')
+    assert os.path.samefile(home/'.claude/skills/agentboard-team/SKILL.md',canonical)
+    assert not (home/'.codex').exists()
+    check(f'canonical repo links and Claude alias per skill, one physical copy, {len(expected)} destinations')
 
     p=run(home);assert p.returncode==1 and not p.stdout,p
     for path in expected: assert f'exists: {path} (use --force)' in p.stderr
@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     assert existing.is_file() and existing.read_text()=='untouched'
     check('an agent alias conflict leaves other parents absent and contents untouched')
 
-    broken=root/'broken';path=broken/'.codex/skills/agentboard-manager'
+    broken=root/'broken';path=broken/'.claude/skills/agentboard-manager'
     path.parent.mkdir(parents=True);path.symlink_to('missing')
     p=run(broken)
     assert p.returncode==1 and str(path) in p.stderr
@@ -91,6 +91,7 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
         assert path.is_symlink() and os.readlink(path)==str(dest),(path,dest)
     assert (target/'commands/keep').read_text()=='untouched'
     assert not (custom/'.agents').exists() and not (custom/'.codex').exists()
+    assert not codehome.exists()
     check('custom canonical home, CODEX_HOME, and command paths with spaces are honored')
 
     # Every seat entry point must be one of the installed skills, so a seat can
@@ -118,6 +119,17 @@ with tempfile.TemporaryDirectory(prefix='agentboard-install-') as root:
     for path,dest in destinations(old).items():
         assert path.is_symlink() and os.readlink(path)==str(dest),path
     check('retired links are pruned only on an exact match; foreign link and real directory stay')
+
+    legacy=root/'legacy';codex=legacy/'.codex/skills';agents=legacy/'.agents/skills'
+    owned=codex/'agentboard-team';owned.parent.mkdir(parents=True);owned.symlink_to(agents/'agentboard-team')
+    foreign=codex/'agentboard-coder';foreign.symlink_to('/elsewhere')
+    realdir=codex/'agentboard-reviewer';realdir.mkdir();(realdir/'keep').write_text('mine')
+    p=run(legacy);assert p.returncode==0,p.stderr
+    assert not owned.is_symlink() and not owned.exists() and f'pruned: {owned}' in p.stdout
+    assert os.readlink(foreign)=='/elsewhere' and (realdir/'keep').read_text()=='mine'
+    assert sorted(os.listdir(codex))==['agentboard-coder','agentboard-reviewer']
+    for path,dest in destinations(legacy).items(): assert path.is_symlink() and os.readlink(path)==str(dest),path
+    check('old Codex aliases are pruned only on an exact match; Codex gets no new alias')
 print(f'{passed}/{passed} passed (skills installer)')
 PY
 

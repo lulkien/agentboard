@@ -32,10 +32,12 @@ for command in "${needs[@]}"; do
   command -v "$command" >/dev/null 2>&1 || { echo "start-agentboard-manager: required command not found: $command" >&2; exit 1; }
 done
 
+card="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/claude/manager-mcp.json"
+
 case "$KIND" in
   claude)
-    argv=(claude --model claude-sonnet-5-5 --mcp-config "$HOME/.claude/manager-mcp.json" --dangerously-skip-permissions /agentboard-manager)
-    hargs=(--model claude-sonnet-5-5 --mcp-config "$HOME/.claude/manager-mcp.json" --dangerously-skip-permissions -- /agentboard-manager)
+    argv=(claude --model claude-sonnet-5-5 --mcp-config "$card" --dangerously-skip-permissions /agentboard-manager)
+    hargs=(--model claude-sonnet-5-5 --mcp-config "$card" --dangerously-skip-permissions -- /agentboard-manager)
     ;;
   codex)
     argv=(codex --no-daemon --profile manager '$agentboard-manager')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical repo links in ~/.agents/skills, then agent aliases through that home.
+"""Canonical repo links in ~/.agents/skills, then Claude aliases through that home.
 Links under a retired name are pruned when they are exactly the link this installer wrote.
 usage: install.py [--force] [canonical-dir]
 """
@@ -24,10 +24,9 @@ def main():
         target = f"{os.getcwd()}/{target}"
     src = os.path.dirname(os.path.abspath(__file__))
     codex_home = os.environ.get("CODEX_HOME") or f"{home}/.codex"
-    agent_dirs = [
-        f"{home}/.claude/skills",
-        f"{codex_home}/skills",
-    ]
+    agent_dirs = [f"{home}/.claude/skills"]
+    codex_skills = f"{codex_home}/skills"
+    legacy = [codex_skills] if codex_skills != target else []
     claude_commands = os.environ.get("AGENTBOARD_CLAUDE_COMMANDS") or f"{home}/.claude/commands"
     names = sorted(
         n
@@ -68,12 +67,20 @@ def main():
         prune(f"{target}/{name}", f"{src}/{name}")
         for d in others:
             prune(f"{d}/{name}", f"{target}/{name}")
+        for d in legacy:
+            prune(f"{d}/{name}", f"{target}/{name}")
         prune(f"{claude_commands}/{name}.md", f"{target}/{name}/claude.md")
     # Claude resolves /<skill> from the skill itself; a command link from before the
     # claude.md files were removed is dead weight.
     for name in names:
         if not os.path.isfile(f"{src}/{name}/claude.md"):
             prune(f"{claude_commands}/{name}.md", f"{target}/{name}/claude.md")
+
+    # Codex reads the canonical ~/.agents/skills directory directly. Remove only
+    # the exact aliases this installer used to create under CODEX_HOME.
+    for name in names:
+        for d in legacy:
+            prune(f"{d}/{name}", f"{target}/{name}")
 
     def link(s, d):
         os.makedirs(os.path.dirname(d), exist_ok=True)
