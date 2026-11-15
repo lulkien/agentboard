@@ -125,6 +125,7 @@ for seat in analyst coder manager reviewer; do
   is "$seat Claude URL card" python3 -c 'import json,sys; s=sys.argv[1]; p=sys.argv[2]; a=json.load(open(p))["mcpServers"]["agentboard"]; assert a == {"type":"http","url":f"http://127.0.0.1:8765/mcp/{s}"}' "$seat" "$repo/seats/claude/$seat-mcp.json"
   is "$seat generated Claude file" test -f "$home/.claude/$seat-mcp.json"
   is "$seat Codex URL card" python3 -c 'import sys,tomllib; s=sys.argv[1]; p=sys.argv[2]; a=tomllib.load(open(p,"rb"))["mcp_servers"]["agentboard"]; assert a["url"] == f"http://127.0.0.1:8765/mcp/{s}" and "command" not in a and "env" not in a and len(a["tools"]) == 12' "$seat" "$home/.codex/$seat.config.toml"
+  is "$seat Codex cbm approval only" python3 -c 'import sys,tomllib; a=tomllib.load(open(sys.argv[1],"rb"))["mcp_servers"]["codebase-memory-mcp"]; assert a == {"default_tools_approval_mode":"approve"}' "$home/.codex/$seat.config.toml"
 done
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
 has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config/systemd/user/agentboard.service"

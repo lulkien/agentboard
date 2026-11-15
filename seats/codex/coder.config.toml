@@ -13,6 +13,8 @@ may reach for; they do not replace AGENTS.md.
 
 SEARCH AND READ. Prefer MCP over shell:
 - agentboard tools for the board.
+- Code: codebase-memory-mcp for symbols, callers, call paths and outlines; rg for
+  text. Index refresh and fallback: "Rules for every agent" in agentboard-team/SKILL.md.
 - git in the shell: status, log, show, diff, switch, branch and commit for the
   task branch the row names.
 - The file tools for reading and writing files; use the shell for search when
@@ -50,18 +52,18 @@ url = "http://127.0.0.1:8765/mcp/coder"
 default_tools_approval_mode = "auto"
 
 [mcp_servers.agentboard.tools]
-task_add = { approval_mode = "auto" }        # create a task
-task_list = { approval_mode = "approve" }    # list tasks by status, owner, parent, or path
-task_get = { approval_mode = "approve" }     # read a task, optionally with full details
-task_epic = { approval_mode = "approve" }    # show an epic’s child-task progress
-task_update = { approval_mode = "approve" }  # change task fields, status, or owner
-task_claim = { approval_mode = "approve" }   # claim a ready task
-task_comment = { approval_mode = "approve" } # add a comment
-board_feed = { approval_mode = "approve" }   # read board events
-board_brief = { approval_mode = "approve" }  # show active work and status counts
-board_agents = { approval_mode = "approve" } # list registered actors
-board_project_delete = { approval_mode = "auto" } # manager-only project deletion
-board_agent_delete = { approval_mode = "auto" } # manager-only roster deletion
+task_add = { approval_mode = "auto" }               # create a task
+task_list = { approval_mode = "approve" }           # list tasks by status, owner, parent, or path
+task_get = { approval_mode = "approve" }            # read a task, optionally with full details
+task_epic = { approval_mode = "approve" }           # show an epic’s child-task progress
+task_update = { approval_mode = "approve" }         # change task fields, status, or owner
+task_claim = { approval_mode = "approve" }          # claim a ready task
+task_comment = { approval_mode = "approve" }        # add a comment
+board_feed = { approval_mode = "approve" }          # read board events
+board_brief = { approval_mode = "approve" }         # show active work and status counts
+board_agents = { approval_mode = "approve" }        # list registered actors
+board_project_delete = { approval_mode = "auto" }   # manager-only project deletion
+board_agent_delete = { approval_mode = "auto" }     # manager-only roster deletion
 
 [notice]
 hide_rate_limit_model_nudge = true

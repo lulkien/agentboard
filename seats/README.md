@@ -35,6 +35,12 @@ uses the default board path. If the manager uses `AGENTBOARD_DB`, give the unit 
 same absolute path with a systemd user drop-in. Stop the daemon before resetting
 or migrating the board, then start it again.
 
+Every profile sets only `default_tools_approval_mode = "approve"` for
+`codebase-memory-mcp`; the server itself is the base `~/.codex/config.toml` entry
+that `codebase-memory-mcp install` writes. Without that entry Codex refuses to load
+any seat profile (`invalid transport` in `mcp_servers.codebase-memory-mcp`); without
+the approval, `approval_policy = "never"` refuses every call.
+
 ## Start the manager in the current pane or terminal
 
 From a herdr pane or an hc terminal at its shell prompt, run:

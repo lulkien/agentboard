@@ -421,12 +421,18 @@ attachment. This never happens automatically.
 - The task row is the prompt: `task_get` returns `description` and `goal` verbatim.
   Do not stage prompt text in files.
 - Write through the MCP tools, not by shelling out to `agentboard`.
-- Prefer MCP over shell for reading and searching: code through
-  `codebase-memory-mcp`, git through the `git` command, the web through
-  `ferris-search`, the board through the agentboard tools. Shell is not banned:
-  builds, tests, installs and the commands a goal names run there, and a command
-  with no MCP equivalent is fine. Keep `grep`, `cat`, `sed`, `find` and `ls` for
-  the cases MCP cannot answer, not as the default reading path.
+- Prefer MCP over shell for reading and searching: git through the `git` command,
+  the web through `ferris-search`, the board through the agentboard tools. Shell is
+  not banned: builds, tests, installs and the commands a goal names run there, and
+  a command with no MCP equivalent is fine. Keep `grep`, `cat`, `sed`, `find` and
+  `ls` for the cases MCP cannot answer, not as the default reading path.
+- Code: `codebase-memory-mcp` for symbols, callers, call paths, impact and outlines
+  (`search_graph`, `trace_path`, `get_code_snippet`, `get_file_outline`,
+  `detect_changes`); `rg` for literals, regexes, stale-text and rename sweeps, docs
+  and non-code files. The index does not follow edits: before the first graph call
+  and after your own edits, call `index_repository` with `repo_path` set to the
+  repository root and no `mode`, then use the project name it returns. If a
+  `codebase-memory-mcp` call fails, name it and fall back to `rg`.
 - Never guess a missing requirement: comment one narrow question, set status
   `blocked`, then stop and report; the manager brings the answer back.
 - `done` means verified. Put the real command output in the coder report, not in a

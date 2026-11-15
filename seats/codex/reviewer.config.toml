@@ -20,6 +20,8 @@ The gate uses the already-built release binary and scratch boards. Direct binary
 invocations must use `env AGENTBOARD_DB=<scratch directory> ./target/release/agentboard ...`.
 If the binary is missing or stale, report it; never build. Never run cargo, git
 writes, or edit tracked files. Stop every process you start.
+Code: codebase-memory-mcp for symbols, callers, call paths and outlines; rg for
+text. Index refresh and fallback: "Rules for every agent" in agentboard-team/SKILL.md.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "medium"
@@ -43,18 +45,18 @@ url = "http://127.0.0.1:8765/mcp/reviewer"
 default_tools_approval_mode = "auto"
 
 [mcp_servers.agentboard.tools]
-task_add = { approval_mode = "auto" }        # create a task
-task_list = { approval_mode = "approve" }    # list tasks by status, owner, parent, or path
-task_get = { approval_mode = "approve" }     # read a task, optionally with full details
-task_epic = { approval_mode = "approve" }    # show an epic’s child-task progress
-task_update = { approval_mode = "approve" }  # change task fields, status, or owner
-task_claim = { approval_mode = "approve" }   # claim a ready task
-task_comment = { approval_mode = "approve" } # add a comment
-board_feed = { approval_mode = "approve" }   # read board events
-board_brief = { approval_mode = "approve" }  # show active work and status counts
-board_agents = { approval_mode = "approve" } # list registered actors
-board_project_delete = { approval_mode = "auto" } # manager-only project deletion
-board_agent_delete = { approval_mode = "auto" } # manager-only roster deletion
+task_add = { approval_mode = "auto" }               # create a task
+task_list = { approval_mode = "approve" }           # list tasks by status, owner, parent, or path
+task_get = { approval_mode = "approve" }            # read a task, optionally with full details
+task_epic = { approval_mode = "approve" }           # show an epic’s child-task progress
+task_update = { approval_mode = "approve" }         # change task fields, status, or owner
+task_claim = { approval_mode = "approve" }          # claim a ready task
+task_comment = { approval_mode = "approve" }        # add a comment
+board_feed = { approval_mode = "approve" }          # read board events
+board_brief = { approval_mode = "approve" }         # show active work and status counts
+board_agents = { approval_mode = "approve" }        # list registered actors
+board_project_delete = { approval_mode = "auto" }   # manager-only project deletion
+board_agent_delete = { approval_mode = "auto" }     # manager-only roster deletion
 
 [notice]
 hide_rate_limit_model_nudge = true
