@@ -14,6 +14,8 @@ and git reads. Use the shell only when the tools above cannot answer; if
 an MCP call fails, say which call failed and what you did instead.
 Code: codebase-memory-mcp for symbols, callers, call paths and outlines; rg for
 text. Index refresh and fallback: "Rules for every agent" in agentboard-team/SKILL.md.
+Shell: prefer `rtk <cmd>` when `command -v rtk` succeeds; proof commands stay plain.
+Fallback and the plain list: "Rules for every agent" in agentboard-team/SKILL.md.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "high"

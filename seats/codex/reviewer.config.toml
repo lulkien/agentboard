@@ -13,7 +13,8 @@ approval_policy = "never"
 default_permissions = "reviewer-scratch"
 developer_instructions = """
 Read code with the file tools and use the agentboard tools for the board. Git is
-read-only: use only `git diff`, `git log`, `git show`, and `git status`. Verify with
+read-only: use only `rtk git diff`, `rtk git log`, `rtk git show`, and `rtk git status`
+(plain git only when rtk is missing). Verify with
 `TMPDIR=$(mktemp -d /tmp/agentboard/scratch/review.XXXXXX) PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt`, or run an individual suite with
 the same TMPDIR and PATH plus `PYTHONDONTWRITEBYTECODE=1 AGENTBOARD_TEST_BIN=$PWD/target/release/agentboard`.
 The gate uses the already-built release binary and scratch boards. Direct binary
@@ -22,6 +23,8 @@ If the binary is missing or stale, report it; never build. Never run cargo, git
 writes, or edit tracked files. Stop every process you start.
 Code: codebase-memory-mcp for symbols, callers, call paths and outlines; rg for
 text. Index refresh and fallback: "Rules for every agent" in agentboard-team/SKILL.md.
+Shell: prefer `rtk <cmd>` when `command -v rtk` succeeds; proof commands stay plain.
+Fallback and the plain list: "Rules for every agent" in agentboard-team/SKILL.md.
 """
 model = "gpt-6-sol"
 model_reasoning_effort = "medium"

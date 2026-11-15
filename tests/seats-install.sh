@@ -126,10 +126,12 @@ for seat in analyst coder manager reviewer; do
   is "$seat generated Claude file" test -f "$home/.claude/$seat-mcp.json"
   is "$seat Codex URL card" python3 -c 'import sys,tomllib; s=sys.argv[1]; p=sys.argv[2]; a=tomllib.load(open(p,"rb"))["mcp_servers"]["agentboard"]; assert a["url"] == f"http://127.0.0.1:8765/mcp/{s}" and "command" not in a and "env" not in a and len(a["tools"]) == 12' "$seat" "$home/.codex/$seat.config.toml"
   is "$seat Codex cbm approval only" python3 -c 'import sys,tomllib; a=tomllib.load(open(sys.argv[1],"rb"))["mcp_servers"]["codebase-memory-mcp"]; assert a == {"default_tools_approval_mode":"approve"}' "$home/.codex/$seat.config.toml"
+  is "$seat Codex rtk pointer" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb"))["developer_instructions"]; assert "rtk <cmd>" in d and "command -v rtk" in d and "Rules for every agent" in d' "$home/.codex/$seat.config.toml"
 done
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
 has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config/systemd/user/agentboard.service"
 same "fresh default.rules is the source block" "$src" "$rules"
+is "rules block rtk allows only git reads" python3 -c 'import re,sys; s=open(sys.argv[1]).read(); found={tuple(re.findall(r"\"([^\"]+)\"", m)) for m in re.findall(r"prefix_rule\(pattern=\[([^]]+)\]", s) if m.startswith("\"rtk\"")}; assert found == {("rtk","git","diff"),("rtk","git","log"),("rtk","git","show"),("rtk","git","status")}, found' "$src"
 is "no separate agentboard.rules" test ! -e "$home/.codex/rules/agentboard.rules"
 has "fresh install says added" "added: $rules" "$tmp/out"
 has "done line kept" "done: seat profiles installed" "$tmp/out"

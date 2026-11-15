@@ -15,6 +15,8 @@ SEARCH AND READ. Prefer MCP over shell:
 - agentboard tools for the board.
 - Code: codebase-memory-mcp for symbols, callers, call paths and outlines; rg for
   text. Index refresh and fallback: "Rules for every agent" in agentboard-team/SKILL.md.
+- Shell: prefer `rtk <cmd>` when `command -v rtk` succeeds; proof commands stay plain.
+- Fallback and the plain list: "Rules for every agent" in agentboard-team/SKILL.md.
 - git in the shell: status, log, show, diff, switch, branch and commit for the
   task branch the row names.
 - The file tools for reading and writing files; use the shell for search when

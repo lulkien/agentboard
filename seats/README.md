@@ -131,6 +131,9 @@ board tool list.
   commands. Cargo is prohibited by reviewer instructions, not refused by the
   sandbox: the host `~/.codex/rules/default.rules` cargo allow rule runs outside
   every sandbox. The RTK pre-tool rewrite's effect on that match is unverified.
+  Other rtk reads (`rtk ls`, `rtk read`, `rtk find`, `rtk rg`) run inside the
+  read-only sandbox without an allow rule; an allow rule would run them outside it,
+  where `rtk find -exec` and `rtk rg --pre` can write.
   Dashboard browser verification remains Claude-only.
 
 ## Claude

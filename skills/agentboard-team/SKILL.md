@@ -433,6 +433,13 @@ attachment. This never happens automatically.
   and after your own edits, call `index_repository` with `repo_path` set to the
   repository root and no `mode`, then use the project name it returns. If a
   `codebase-memory-mcp` call fails, name it and fall back to `rg`.
+- In the shell, prefer `rtk <cmd>` when `command -v rtk` succeeds; use the plain
+  command when rtk is missing. If rtk output is unusable (empty when output was
+  expected, contradicts its exit code, or garbled), rerun with `rtk bypass <cmd>`.
+  Keep proof commands and their output plain, including test/build gates and any
+  goal's evidence command; also keep `agentboard`, `hc`, `herdr`, `codex`, and git
+  writes (`switch`, `branch`, `commit`) plain. rtk changes output, not permissions:
+  Codex sandbox and rules still decide what runs (see `seats/README.md`, Codex).
 - Never guess a missing requirement: comment one narrow question, set status
   `blocked`, then stop and report; the manager brings the answer back.
 - `done` means verified. Put the real command output in the coder report, not in a
