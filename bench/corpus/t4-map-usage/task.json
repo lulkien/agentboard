@@ -1,0 +1,12 @@
+{
+  "id": "t4-map-usage",
+  "kind": "store, adapters, docs",
+  "base": "59994cf64b90",
+  "ref": "4ceb1f979fea",
+  "source_row": "T308",
+  "prompt_edits": [],
+  "build": ["cargo", "build", "--release", "--offline"],
+  "accept": "accept.sh",
+  "regress": [["cargo", "test", "--offline", "--lib"]],
+  "allowed_paths": ["src/**", "README.md", "PROTOCOL.md", "AGENTS.md", "docs/**", "tests/**"]
+}

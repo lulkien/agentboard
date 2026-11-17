@@ -1,0 +1,1 @@
+An update that contains only a comment must still reject an invalid actor name. Reproduce with `agentboard --actor ' bad name' update 1 --if-revision 99 --comment hi`: it must fail with exit status 1, and `agentboard agents` must not list `bad name` afterward. Add a regression check for this behavior.

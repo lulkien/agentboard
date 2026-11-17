@@ -1,0 +1,12 @@
+{
+  "id": "t2-claim-doc",
+  "kind": "docs/protocol",
+  "base": "aca8d68dd68e",
+  "ref": "a93399507406",
+  "source_row": "T321/T318 item 6",
+  "prompt_edits": [],
+  "build": ["cargo", "build", "--release", "--offline"],
+  "accept": "accept.sh",
+  "regress": [["cargo", "test", "--offline", "--lib"]],
+  "allowed_paths": ["PROTOCOL.md"]
+}

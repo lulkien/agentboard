@@ -1,0 +1,12 @@
+{
+  "id": "t3-wait-after",
+  "kind": "CLI flag and docs, multi-file",
+  "base": "8744808b6e11",
+  "ref": "f61ab674893b",
+  "source_row": null,
+  "prompt_edits": [],
+  "build": ["cargo", "build", "--release", "--offline"],
+  "accept": "accept.sh",
+  "regress": [["cargo", "test", "--offline", "--lib"]],
+  "allowed_paths": ["src/**", "README.md", "skills/**", "tests/**", "AGENTS.md"]
+}

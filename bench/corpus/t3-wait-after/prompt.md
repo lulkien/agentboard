@@ -1,0 +1,1 @@
+Add `wait --after CURSOR` so a re-armed wait can observe a handoff that landed between two waits. Demonstrate that after a first wait returns its cursor, a handoff to coder is reported by a second wait using that cursor; the equivalent second wait without `--after` must return exit status 3.

@@ -1,0 +1,12 @@
+{
+  "id": "t1-actor-guard",
+  "kind": "surgical store fix",
+  "base": "a89cb4df26b6",
+  "ref": "8744808b6e11",
+  "source_row": null,
+  "prompt_edits": [],
+  "build": ["cargo", "build", "--release", "--offline"],
+  "accept": "accept.sh",
+  "regress": [["cargo", "test", "--offline", "--lib"]],
+  "allowed_paths": ["src/store/**", "tests/**"]
+}
