@@ -133,6 +133,18 @@ Markdown byte for byte. Raw JSONL and trees stay in scratch.
 - Fixed historical commits may have idiosyncratic tests, dependencies or code
   paths. Preflight validates graders; it does not prove external generality.
 
+## How to run
+
+`python3 bench/run.py --plan` prints the three arms and caps without invoking
+Claude. To run the harness, set `BENCH_CLAUDE` to the desired Claude CLI path and
+use `python3 bench/run.py --output <results.json>`; `--task <id>`, `--arm <arm>`
+and `--reps <n>` narrow or repeat the matrix. The runner creates disposable
+directories under `/tmp/agentboard/scratch/`, writes results to the selected
+output path, and checks every stream's init event before accepting usage data.
+Render the report with `python3 bench/report.py --from <results.json>`.
+The harness tests run offline with `python3 bench/tests/test_bench.py` and use
+`bench/tests/fake_claude.py`; they never call a live model.
+
 ## Prior work (reported, not independently verified)
 
 The T384/T385 research notes report that MCP product benchmarks measure MCP tool

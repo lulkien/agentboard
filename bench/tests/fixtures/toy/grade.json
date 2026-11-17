@@ -1,0 +1,6 @@
+{
+  "id": "toy-grade",
+  "accept": "accept.sh",
+  "build": ["python3", "-c", "import os,pathlib; p=pathlib.Path(os.environ['CARGO_TARGET_DIR'])/'release'/'agentboard'; p.parent.mkdir(parents=True,exist_ok=True); p.write_text('#!/bin/sh\\nexit 0\\n'); p.chmod(493)"],
+  "regress": [["python3", "-c", "import os; assert os.path.isfile(os.environ['AGENTBOARD_TEST_BIN'])"]]
+}
