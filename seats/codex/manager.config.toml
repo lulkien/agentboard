@@ -43,3 +43,6 @@ board_agent_delete = { approval_mode = "approve" }      # delete a name with no 
 status_line = ["model-with-reasoning", "current-dir", "thread-name", "five-hour-limit", "weekly-limit", "context-used"]
 status_line_use_colors = true
 
+[mcp_servers.codebase-memory-mcp]
+default_tools_approval_mode = "approve"
+
