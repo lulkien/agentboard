@@ -237,10 +237,12 @@ carries status hooks that report idle, working and done, so `hc wait <seat>` and
 `still starting`: retry it. Completion is authoritative on the board (`agentboard
 wait`), not the terminal. Each home needs its credential once: see `seats/README.md`.
 
-Seats start hidden: a terminal joins the person's window only when it carries
-`--label herdr.space=<space-id>` at launch, or gets
-`hc label <address> herdr.space=<space-id>` afterwards. The launch adds no label;
-`herdr-app do agent.focus --terminal <address>` then shows a seat that has one.
+Seats start hidden: a terminal joins the person's window only when it carries both
+labels at launch, `--label herdr.space=<space-id> --label herdr.tab=<tab-id>`, or
+gets `hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` afterwards. Copy
+both ids from the manager's own terminal with `hc get <its address> --json` (the
+`labels` field). The launch adds no label;
+`herdr-app do agent.focus --terminal <address>` then shows a seat that has both.
 
 ## Harness map
 

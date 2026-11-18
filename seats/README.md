@@ -70,10 +70,13 @@ started is written to `${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log` an
 never resent, because the screen has to be read first.
 
 Seats start hidden and the launcher adds no label itself. A terminal joins the
-person's window only when it carries `--label herdr.space=<space-id>` at launch, or
-gets `hc label <address> herdr.space=<space-id>` afterwards; either way the person
-asks for it, and `herdr-app do agent.focus --terminal <address>` then shows it. The
-launcher never touches the window, so it also runs on a headless machine.
+person's window only when it carries both labels at launch,
+`--label herdr.space=<space-id> --label herdr.tab=<tab-id>`, or gets
+`hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` afterwards; either
+way the person asks for it, and `herdr-app do agent.focus --terminal <address>` then
+shows it. The manager copies both ids from its own terminal with
+`hc get <its address> --json` (the `labels` field). The launcher never touches the
+window, so it also runs on a headless machine.
 
 The Codex rules are a block, not a link, because Codex appends its own allowed
 commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
