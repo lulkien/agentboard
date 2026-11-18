@@ -18,7 +18,13 @@ printf ' <%s>' "$@" >>"$STUB_HC_LOG"
 printf '\n' >>"$STUB_HC_LOG"
 case $1 in
   run) echo '{"address":"t9"}' ;;
-  send) echo '{"started":true}' ;;
+  send)
+    if [[ -n ${STUB_HC_STARTING:-} && $(cat "$STUB_HC_STARTING") -gt 0 ]]; then
+      echo $(($(cat "$STUB_HC_STARTING") - 1)) >"$STUB_HC_STARTING"
+      echo 'unavailable: t9 is still starting: its output has not settled' >&2
+      exit 1
+    fi
+    echo '{"started":true}' ;;
   wait) echo '{"wait":"exit"}' ;;
 esac
 SH
@@ -76,6 +82,45 @@ is 'missing card starts nothing' test ! -s "$STUB_HC_LOG"
 mv "$card.saved" "$card"
 run_kind codex 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <codex> <--no-daemon> <--profile> <manager> <$agentboard-manager>'
 run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <grok> <--trust> <--always-approve>'
+
+# codewhale: hc only, per-seat home, output wait, retried send
+cwhome="$HOME/.local/share/agentboard/codewhale/manager"
+cwexp='CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <env> <CODEWHALE_HOME='$cwhome'> <codewhale> <--skip-onboarding> <--fresh> <--disable> <subagents>'
+cwrun() { : >"$STUB_HC_LOG"; "$repo/seats/start-agentboard-manager" codewhale >"$tmp/out" 2>"$tmp/err"; }
+mkdir -p "$cwhome"
+printf 'yolo = true\n' >"$cwhome/config.toml"
+if cwrun; then ok; else bad 'codewhale launcher succeeds'; fi
+exact "$STUB_HC_LOG" "$cwexp" 'codewhale command starts manager'
+exact "$tmp/out" 'manager t9' 'codewhale prints the address'
+exact "$STUB_HC_LOG" 'CALL <wait> <manager> <--output> <Type a message> <--timeout> <30>' 'codewhale waits for the input prompt'
+exact "$STUB_HC_LOG" 'CALL <send> <manager> </agentboard-manager>' 'codewhale sends the entry prompt plainly'
+is 'codewhale never uses --wait' bash -c '! grep -Fq "<--wait>" "$1"' _ "$STUB_HC_LOG"
+wait_at=$(grep -nF 'CALL <wait>' "$STUB_HC_LOG" | cut -d: -f1 | head -1 || true)
+send_at=$(grep -nF 'CALL <send>' "$STUB_HC_LOG" | cut -d: -f1 | head -1 || true)
+is 'codewhale waits before sending' bash -c '[[ -n $1 && -n $2 && $1 -lt $2 ]]' _ "$wait_at" "$send_at"
+# still starting twice, then accepted
+echo 2 >"$tmp/starting"
+if (export STUB_HC_STARTING="$tmp/starting"; cwrun); then ok; else bad 'codewhale retries a still-starting send'; fi
+is 'codewhale sent three times' test "$(grep -Fc 'CALL <send>' "$STUB_HC_LOG")" -eq 3
+exact "$tmp/out" 'manager t9' 'codewhale prints the address after retries'
+# never settles: bounded, then fails
+echo 99 >"$tmp/starting"
+if (export STUB_HC_STARTING="$tmp/starting"; cwrun); then bad 'codewhale endless starting unexpectedly succeeded'; else ok; fi
+is 'codewhale gives up after ten sends' test "$(grep -Fc 'CALL <send>' "$STUB_HC_LOG")" -eq 10
+has "$tmp/err" 'entry prompt did not land' 'codewhale reports an unlanded prompt'
+# missing home
+mv "$cwhome" "$cwhome.saved"
+if cwrun; then bad 'missing codewhale home unexpectedly launched'; else ok; fi
+has "$tmp/err" 'run seats/install.py' 'missing codewhale home names installer'
+is 'missing codewhale home starts nothing' test ! -s "$STUB_HC_LOG"
+mv "$cwhome.saved" "$cwhome"
+# herdr refuses
+: >"$HERDR_LOG"; : >"$STUB_HC_LOG"
+if (export HERDR_ENV=1 HERDR_PANE_ID=pane-7 HERDR_TAB_ID=tab-3; "$repo/seats/start-agentboard-manager" codewhale) >"$tmp/out" 2>"$tmp/err"; then bad 'codewhale under herdr unexpectedly succeeded'; else ok; fi
+has "$tmp/err" 'herdr' 'herdr refusal names herdr'
+has "$tmp/err" 'codewhale' 'herdr refusal names codewhale'
+is 'herdr refusal never calls herdr' test ! -s "$HERDR_LOG"
+is 'herdr refusal never calls hc' test ! -s "$STUB_HC_LOG"
 
 run_neither() {
   : >"$STUB_HC_LOG"
@@ -180,10 +225,10 @@ run_missing_herdr
 if "$repo/seats/start-agentboard-manager" >"$tmp/out" 2>"$tmp/no-kind"; then bad 'no kind unexpectedly succeeded'; else
   is 'no kind exits 1' test "$?" -eq 1
 fi
-has "$tmp/no-kind" 'usage: start-agentboard-manager {claude|codex|grok}' 'no kind reports usage'
+has "$tmp/no-kind" 'usage: start-agentboard-manager {claude|codex|grok|codewhale}' 'no kind reports usage'
 is 'unknown kind exits 1' bash -c '"$1" invalid >/dev/null 2>&1; [[ $? -eq 1 ]]' _ "$repo/seats/start-agentboard-manager"
 if "$repo/seats/start-agentboard-manager" invalid >"$tmp/out" 2>"$tmp/usage"; then bad 'unknown kind unexpectedly succeeded'; else ok; fi
-has "$tmp/usage" 'usage: start-agentboard-manager {claude|codex|grok}' 'unknown kind reports usage'
+has "$tmp/usage" 'usage: start-agentboard-manager {claude|codex|grok|codewhale}' 'unknown kind reports usage'
 
 echo "$((n - fail))/$n passed (manager launcher)"
 [[ $fail -eq 0 ]]
