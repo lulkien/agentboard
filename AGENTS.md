@@ -44,8 +44,8 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/daemon.py` | `daemon: 332/332 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
-| `bash tests/seats-install.sh` | `299/299 passed (seats installer)` (isolated homes; no board writes) |
-| `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `54/54 passed (manager launcher)` |
+| `bash tests/seats-install.sh` | `364/364 passed (seats installer)` (isolated homes; no board writes) |
+| `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `75/75 passed (manager launcher)` |
 | `bash tests/skills-install.sh` | `9/9 passed (skills installer)` (isolated homes; no board writes) |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
 | `python3 tests/doc-names.py` | `doc-names: 14 pages, 152 CLI names, 156 MCP names passed` |
