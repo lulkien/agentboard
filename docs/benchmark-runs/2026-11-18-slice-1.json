@@ -1,0 +1,442 @@
+{
+  "rows": [
+    {
+      "task": "t1-actor-guard",
+      "arm": "A-sonnet",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 80341,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "ae5ce0c6e0814670b3a88129ad5ec8f2"
+    },
+    {
+      "task": "t1-actor-guard",
+      "arm": "A-opus",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 191339,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "1065c842cde748188dc3f42633cda4a7"
+    },
+    {
+      "task": "t1-actor-guard",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 58,
+        "output_tokens": 9628,
+        "cache_creation_input_tokens": 59830,
+        "cache_read_input_tokens": 1129256,
+        "total_cost_usd": 0.6951798,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 29,
+        "wall_clock_ms": 223186,
+        "sessions": 3,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 34,
+          "output_tokens": 5917,
+          "cache_creation_input_tokens": 29056,
+          "cache_read_input_tokens": 710762,
+          "total_cost_usd": 0.49307639999999997,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 17
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 14,
+          "output_tokens": 2092,
+          "cache_creation_input_tokens": 18565,
+          "cache_read_input_tokens": 250693,
+          "total_cost_usd": 0.1202773,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 7
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 10,
+          "output_tokens": 1619,
+          "cache_creation_input_tokens": 12209,
+          "cache_read_input_tokens": 167801,
+          "total_cost_usd": 0.08182609999999998,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 5
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "f619fdb2ad034840985232537e2c2410"
+    },
+    {
+      "task": "t2-claim-doc",
+      "arm": "A-sonnet",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 44090,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "71094fe9edd641f797024193b275fe1d"
+    },
+    {
+      "task": "t2-claim-doc",
+      "arm": "A-opus",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 80500,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "c4f5657870d445edab19ba505ab9b934"
+    },
+    {
+      "task": "t2-claim-doc",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 48,
+        "output_tokens": 6995,
+        "cache_creation_input_tokens": 36124,
+        "cache_read_input_tokens": 845787,
+        "total_cost_usd": 0.4285951,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 23,
+        "wall_clock_ms": 81515,
+        "sessions": 3,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 18,
+          "output_tokens": 3258,
+          "cache_creation_input_tokens": 16096,
+          "cache_read_input_tokens": 324744,
+          "total_cost_usd": 0.25894880000000003,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 8
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 20,
+          "output_tokens": 2389,
+          "cache_creation_input_tokens": 13463,
+          "cache_read_input_tokens": 352753,
+          "total_cost_usd": 0.1130573,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 10
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 10,
+          "output_tokens": 1348,
+          "cache_creation_input_tokens": 6565,
+          "cache_read_input_tokens": 168290,
+          "total_cost_usd": 0.056589,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 5
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "71a123ad0be74644b6ff27fcee9c812a"
+    },
+    {
+      "task": "t3-wait-after",
+      "arm": "A-sonnet",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 158593,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "ba98c0c210c0488db3aea3fc7305ff03"
+    },
+    {
+      "task": "t3-wait-after",
+      "arm": "A-opus",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 222310,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "fdb916a762894444a924ac6bdede9b14"
+    },
+    {
+      "task": "t3-wait-after",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 98,
+        "output_tokens": 25429,
+        "cache_creation_input_tokens": 164476,
+        "cache_read_input_tokens": 2110453,
+        "total_cost_usd": 1.8684031,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 48,
+        "wall_clock_ms": 368116,
+        "sessions": 4,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 24,
+          "output_tokens": 5885,
+          "cache_creation_input_tokens": 63794,
+          "cache_read_input_tokens": 536762,
+          "total_cost_usd": 0.7355004,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 11
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 30,
+          "output_tokens": 7866,
+          "cache_creation_input_tokens": 57824,
+          "cache_read_input_tokens": 684515,
+          "total_cost_usd": 0.37846749999999996,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 15
+        },
+        {
+          "seat": "reviewer",
+          "input_tokens": 30,
+          "output_tokens": 7211,
+          "cache_creation_input_tokens": 23558,
+          "cache_read_input_tokens": 630808,
+          "total_cost_usd": 0.45896560000000003,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 15
+        },
+        {
+          "seat": "reviewer",
+          "input_tokens": 14,
+          "output_tokens": 4467,
+          "cache_creation_input_tokens": 19300,
+          "cache_read_input_tokens": 258368,
+          "total_cost_usd": 0.2954696,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 7
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "1f265b2041444746a05d86440dba59d2"
+    },
+    {
+      "task": "t4-map-usage",
+      "arm": "A-sonnet",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 248025,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "9d03e1579dd04641ad84758ee1163940"
+    },
+    {
+      "task": "t4-map-usage",
+      "arm": "A-opus",
+      "outcome": "INVALID",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 0,
+        "wall_clock_ms": 279642,
+        "sessions": 0,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [],
+      "manager_tokens_excluded": true,
+      "run_id": "8a51950295504e94aade606d0d783b85"
+    },
+    {
+      "task": "t4-map-usage",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 98,
+        "output_tokens": 27432,
+        "cache_creation_input_tokens": 108039,
+        "cache_read_input_tokens": 2539240,
+        "total_cost_usd": 1.3972621,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 49,
+        "wall_clock_ms": 415819,
+        "sessions": 3,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 40,
+          "output_tokens": 14231,
+          "cache_creation_input_tokens": 48105,
+          "cache_read_input_tokens": 1018561,
+          "total_cost_usd": 0.8733322,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 20
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 48,
+          "output_tokens": 11781,
+          "cache_creation_input_tokens": 45648,
+          "cache_read_input_tokens": 1347589,
+          "total_cost_usd": 0.4352569,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 24
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 10,
+          "output_tokens": 1420,
+          "cache_creation_input_tokens": 14286,
+          "cache_read_input_tokens": 173090,
+          "total_cost_usd": 0.08867299999999999,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 5
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "89519e109d2941eca764ccd2f204faee"
+    }
+  ],
+  "manager_tokens_excluded": true,
+  "run_status": "not scoreable",
+  "run_note": "Contaminated run: solo cells are INVALID because the prior runner exposed agentboard MCP against an empty allowlist; B-team cells stalled because the runner never started the scratch daemon. Do not use these results for a benchmark verdict. A corrected rerun is published separately."
+}

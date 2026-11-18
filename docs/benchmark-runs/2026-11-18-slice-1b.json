@@ -1,0 +1,567 @@
+{
+  "harness_commit": "6d2c6904d21a99aa358ec3008a358bfd7e518b23",
+  "claude_version": "2.1.327 (Claude Code)",
+  "models": {
+    "A-sonnet": [
+      [
+        "solo",
+        "claude-sonnet-5-5",
+        "medium"
+      ]
+    ],
+    "A-opus": [
+      [
+        "solo",
+        "claude-opus-5-5",
+        "high"
+      ]
+    ],
+    "B-team": [
+      [
+        "analyst",
+        "claude-opus-5-5",
+        "high"
+      ],
+      [
+        "coder",
+        "claude-sonnet-5-5",
+        "medium"
+      ],
+      [
+        "reviewer",
+        "claude-opus-5-5",
+        "high"
+      ]
+    ]
+  },
+  "repetitions": 1,
+  "caps": {
+    "usd_per_session": 6,
+    "usd_per_task_arm": 20
+  },
+  "isolation": "scratch LMDB board; base task archive; strict MCP config",
+  "manager_tokens_excluded": true,
+  "run_status": "complete",
+  "rows": [
+    {
+      "task": "t1-actor-guard",
+      "arm": "A-sonnet",
+      "outcome": "done",
+      "pass": true,
+      "grade": "accept=pass, regress=pass",
+      "usage": {
+        "input_tokens": 14,
+        "output_tokens": 1860,
+        "cache_creation_input_tokens": 13410,
+        "cache_read_input_tokens": 233696,
+        "total_cost_usd": 0.0956376,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 6,
+        "wall_clock_ms": 42056,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 14,
+          "output_tokens": 1860,
+          "cache_creation_input_tokens": 13410,
+          "cache_read_input_tokens": 233696,
+          "total_cost_usd": 0.0956376,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 6
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "1c4fd645637d4c91b0903a4c64a68e15"
+    },
+    {
+      "task": "t1-actor-guard",
+      "arm": "A-opus",
+      "outcome": "done",
+      "pass": true,
+      "grade": "accept=pass, regress=pass",
+      "usage": {
+        "input_tokens": 30,
+        "output_tokens": 5060,
+        "cache_creation_input_tokens": 53652,
+        "cache_read_input_tokens": 639459,
+        "total_cost_usd": 0.6584277999999999,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 16,
+        "wall_clock_ms": 144311,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 30,
+          "output_tokens": 5060,
+          "cache_creation_input_tokens": 53652,
+          "cache_read_input_tokens": 639459,
+          "total_cost_usd": 0.6584277999999999,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 16
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "2a18342a8dd14e69a6798fc5e6239bdf"
+    },
+    {
+      "task": "t1-actor-guard",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 56,
+        "output_tokens": 9740,
+        "cache_creation_input_tokens": 83389,
+        "cache_read_input_tokens": 1033982,
+        "total_cost_usd": 0.7510754000000002,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 28,
+        "wall_clock_ms": 189153,
+        "sessions": 3,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 28,
+          "output_tokens": 5760,
+          "cache_creation_input_tokens": 25987,
+          "cache_read_input_tokens": 550052,
+          "total_cost_usd": 0.43321840000000006,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 14
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 18,
+          "output_tokens": 2446,
+          "cache_creation_input_tokens": 45390,
+          "cache_read_input_tokens": 315177,
+          "total_cost_usd": 0.2375737,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 9
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 10,
+          "output_tokens": 1534,
+          "cache_creation_input_tokens": 12012,
+          "cache_read_input_tokens": 168753,
+          "total_cost_usd": 0.0802833,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 5
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "f7a3311859194bc7b91af648b09a39b4"
+    },
+    {
+      "task": "t2-claim-doc",
+      "arm": "A-sonnet",
+      "outcome": "grade-failed",
+      "pass": false,
+      "grade": "'git <command> [<revision>...] -- [<file>...]'",
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 1301,
+        "cache_creation_input_tokens": 12663,
+        "cache_read_input_tokens": 204133,
+        "total_cost_usd": 0.0840993,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 5,
+        "wall_clock_ms": 13875,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 12,
+          "output_tokens": 1301,
+          "cache_creation_input_tokens": 12663,
+          "cache_read_input_tokens": 204133,
+          "total_cost_usd": 0.0840993,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 5
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "a45b36b0dbed4d17a8083f729d67acc7"
+    },
+    {
+      "task": "t2-claim-doc",
+      "arm": "A-opus",
+      "outcome": "grade-failed",
+      "pass": false,
+      "grade": "'git <command> [<revision>...] -- [<file>...]'",
+      "usage": {
+        "input_tokens": 18,
+        "output_tokens": 2908,
+        "cache_creation_input_tokens": 22223,
+        "cache_read_input_tokens": 372003,
+        "total_cost_usd": 0.3104166,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 10,
+        "wall_clock_ms": 33684,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 18,
+          "output_tokens": 2908,
+          "cache_creation_input_tokens": 22223,
+          "cache_read_input_tokens": 372003,
+          "total_cost_usd": 0.3104166,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 10
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "74dd83cc2a19476b817389eec098b103"
+    },
+    {
+      "task": "t2-claim-doc",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 38,
+        "output_tokens": 5665,
+        "cache_creation_input_tokens": 33153,
+        "cache_read_input_tokens": 650178,
+        "total_cost_usd": 0.36791900000000005,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 18,
+        "wall_clock_ms": 65682,
+        "sessions": 3,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 16,
+          "output_tokens": 2792,
+          "cache_creation_input_tokens": 14456,
+          "cache_read_input_tokens": 277872,
+          "total_cost_usd": 0.2271264,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 7
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 10,
+          "output_tokens": 1289,
+          "cache_creation_input_tokens": 10673,
+          "cache_read_input_tokens": 164467,
+          "total_cost_usd": 0.0720487,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 5
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 12,
+          "output_tokens": 1584,
+          "cache_creation_input_tokens": 8024,
+          "cache_read_input_tokens": 207839,
+          "total_cost_usd": 0.06874390000000001,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 6
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "5780ef6998cb42bfaf937b3480f63dcb"
+    },
+    {
+      "task": "t3-wait-after",
+      "arm": "A-sonnet",
+      "outcome": "done",
+      "pass": true,
+      "grade": "accept=pass, regress=pass",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 3196,
+        "cache_creation_input_tokens": 21727,
+        "cache_read_input_tokens": 395555,
+        "total_cost_usd": 0.15846350000000003,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 9,
+        "wall_clock_ms": 70240,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 20,
+          "output_tokens": 3196,
+          "cache_creation_input_tokens": 21727,
+          "cache_read_input_tokens": 395555,
+          "total_cost_usd": 0.15846350000000003,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 9
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "4c90ba5fcf7b4401b9fadcdf651d7dff"
+    },
+    {
+      "task": "t3-wait-after",
+      "arm": "A-opus",
+      "outcome": "done",
+      "pass": true,
+      "grade": "accept=pass, regress=pass",
+      "usage": {
+        "input_tokens": 36,
+        "output_tokens": 8242,
+        "cache_creation_input_tokens": 44388,
+        "cache_read_input_tokens": 1028549,
+        "total_cost_usd": 0.7257977999999997,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 19,
+        "wall_clock_ms": 312720,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 36,
+          "output_tokens": 8242,
+          "cache_creation_input_tokens": 44388,
+          "cache_read_input_tokens": 1028549,
+          "total_cost_usd": 0.7257977999999997,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 19
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "ef8a8812e16142e0a3a0ddb266cf042c"
+    },
+    {
+      "task": "t3-wait-after",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 68,
+        "output_tokens": 12348,
+        "cache_creation_input_tokens": 71212,
+        "cache_read_input_tokens": 1425861,
+        "total_cost_usd": 0.8196941999999999,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 33,
+        "wall_clock_ms": 224467,
+        "sessions": 3,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 28,
+          "output_tokens": 6053,
+          "cache_creation_input_tokens": 36126,
+          "cache_read_input_tokens": 635541,
+          "total_cost_usd": 0.5372881999999999,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 13
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 28,
+          "output_tokens": 4351,
+          "cache_creation_input_tokens": 22548,
+          "cache_read_input_tokens": 582959,
+          "total_cost_usd": 0.19205390000000003,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 14
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 12,
+          "output_tokens": 1944,
+          "cache_creation_input_tokens": 12538,
+          "cache_read_input_tokens": 207361,
+          "total_cost_usd": 0.0903521,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 6
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "42cc6a3fc4e5429786d1760d3468ef35"
+    },
+    {
+      "task": "t4-map-usage",
+      "arm": "A-sonnet",
+      "outcome": "grade-failed",
+      "pass": false,
+      "grade": "AssertionError: map usage line has no used-byte count: 'map 0% (1 of 8 MiB)\\n'",
+      "usage": {
+        "input_tokens": 36,
+        "output_tokens": 7607,
+        "cache_creation_input_tokens": 31214,
+        "cache_read_input_tokens": 834210,
+        "total_cost_usd": 0.28441900000000003,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 17,
+        "wall_clock_ms": 156194,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 36,
+          "output_tokens": 7607,
+          "cache_creation_input_tokens": 31214,
+          "cache_read_input_tokens": 834210,
+          "total_cost_usd": 0.28441900000000003,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 17
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "b11b68b8d5134125a39329485157d983"
+    },
+    {
+      "task": "t4-map-usage",
+      "arm": "A-opus",
+      "outcome": "grade-failed",
+      "pass": false,
+      "grade": "AssertionError: map usage line has no used-byte count: 'map 0.2% used  16 KiB of 8 MiB\\n'",
+      "usage": {
+        "input_tokens": 60,
+        "output_tokens": 19007,
+        "cache_creation_input_tokens": 57213,
+        "cache_read_input_tokens": 1838548,
+        "total_cost_usd": 1.2057935999999996,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 32,
+        "wall_clock_ms": 291804,
+        "sessions": 1,
+        "retries": 0,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "solo",
+          "input_tokens": 60,
+          "output_tokens": 19007,
+          "cache_creation_input_tokens": 57213,
+          "cache_read_input_tokens": 1838548,
+          "total_cost_usd": 1.2057935999999996,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 32
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "fce630d7f8e74c7c9aa351bbc079c6cf"
+    },
+    {
+      "task": "t4-map-usage",
+      "arm": "B-team",
+      "outcome": "stalled",
+      "pass": null,
+      "grade": null,
+      "usage": {
+        "input_tokens": 108,
+        "output_tokens": 27851,
+        "cache_creation_input_tokens": 115169,
+        "cache_read_input_tokens": 2828242,
+        "total_cost_usd": 1.4871670000000001,
+        "duration_ms": 0,
+        "num_turns": 0,
+        "tool_calls": 55,
+        "wall_clock_ms": 386971,
+        "sessions": 3,
+        "retries": 1,
+        "reopen_count": 0
+      },
+      "seat_usage": [
+        {
+          "seat": "analyst",
+          "input_tokens": 40,
+          "output_tokens": 14771,
+          "cache_creation_input_tokens": 53477,
+          "cache_read_input_tokens": 1032428,
+          "total_cost_usd": 0.9298816000000001,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 20
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 58,
+          "output_tokens": 11536,
+          "cache_creation_input_tokens": 44719,
+          "cache_read_input_tokens": 1623813,
+          "total_cost_usd": 0.4567332999999999,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 30
+        },
+        {
+          "seat": "coder",
+          "input_tokens": 10,
+          "output_tokens": 1544,
+          "cache_creation_input_tokens": 16973,
+          "cache_read_input_tokens": 172001,
+          "total_cost_usd": 0.10055209999999999,
+          "duration_ms": 0,
+          "num_turns": 0,
+          "tool_calls": 5
+        }
+      ],
+      "manager_tokens_excluded": true,
+      "run_id": "0c72bc00772f4bcebe1fb5bfb02a260c"
+    }
+  ]
+}

@@ -29,6 +29,8 @@ def test_usage_and_validation():
     u = run.usage(events)
     check(u == {"input_tokens":3,"output_tokens":4,"cache_creation_input_tokens":5,"cache_read_input_tokens":6,"total_cost_usd":0.25,"duration_ms":7,"num_turns":2,"tool_calls":1}, "usage sum")
     run.validate_init([{"type":"system","subtype":"init","mcp_servers":["agentboard"],"tools":[{"server":"agentboard"}]}], "B-team")
+    run.validate_init([{"type":"system","subtype":"init","mcp_servers":[{"name":"agentboard"}],"tools":[]}], "B-team")
+    run.validate_init([{"type":"system","subtype":"init","mcp_servers":[{"server":"agentboard"}],"tools":[]}], "B-team")
     for arm in run.MODELS:
         bad = [{"type":"system","subtype":"init","mcp_servers":["unexpected"],"tools":[]}]
         try: run.validate_init(bad, arm)
@@ -54,8 +56,13 @@ def test_e2e():
             check(row["grade"] == "accept=pass, regress=pass" and row["pass"] is True,
                   f"{arm} runs isolated grade.py acceptance and regression")
             d = json.loads((scratch / row["run_id"] / "card.json").read_text())
-            port = int(d["mcpServers"]["agentboard"]["url"].split(":")[2].split("/")[0])
-            check(port > 0 and (scratch / row["run_id"] / "board").is_dir(), "scratch card and board")
+            if arm == "B-team":
+                port = int(d["mcpServers"]["agentboard"]["url"].split(":")[2].split("/")[0])
+                check(port > 0, "B-team scratch MCP card")
+            else:
+                check(d == {"mcpServers": {}}, "solo strict empty MCP config")
+                port = int(env_rows_port := json.loads((scratch / row["run_id"] / "session-env.jsonl").read_text().splitlines()[0])["BENCH_SCRATCH_PORT"])
+            check((scratch / row["run_id"] / "board").is_dir(), "scratch board")
             env_rows = [json.loads(line) for line in (scratch / row["run_id"] / "session-env.jsonl").read_text().splitlines()]
             check(len(env_rows) == row["usage"]["sessions"], f"{arm} session env captured")
             check(all(Path(e["AGENTBOARD_DB"]).is_dir() and Path(e["BENCH_MCP_CONFIG"]).is_file()
@@ -69,6 +76,7 @@ def test_e2e():
         check(cli.returncode == 0, "report.py --from succeeds")
         check(out.encode() == rendered.read_bytes(), "report.py --from regenerates byte-identical Markdown")
         check("Manager tokens excluded" in out, "report calls out excluded manager")
+        check("## Aggregate" in out and "## toy" in out, "report has per-task and aggregate tables")
         os.environ.pop("BENCH_TEST_ARM", None)
         os.environ.pop("BENCH_TEST_SCENARIO", None)
         os.environ.pop("BENCH_AGENTBOARD", None)
@@ -106,6 +114,49 @@ def test_outcomes_and_verdicts():
     for delta, multiple, expected in cases:
         got = report.verdict(delta, multiple)
         check(got.startswith(expected), f"verdict {delta},{multiple}: {got}")
+    partial = report.render({"run_status": "partial", "run_note": "Stopped after 1/12 cells.",
+                             "rows": [{"task": "t1", "arm": "A-sonnet", "pass": True,
+                                       "grade": "accept=pass, regress=pass", "outcome": "done",
+                                       "usage": {"sessions":1,"tool_calls":0,"input_tokens":1,
+                                                 "output_tokens":2,"cache_creation_input_tokens":3,
+                                                 "cache_read_input_tokens":4,"total_cost_usd":0.1,
+                                                 "wall_clock_ms":5}}]})
+    check("Status: partial." in partial and "Stopped after 1/12 cells." in partial,
+          "partial report explains stopped matrix")
+    check("B-team vs A-sonnet: incomplete" in partial and "B-team vs A-opus: incomplete" in partial,
+          "partial report retains both directional verdict lines")
+    check("ΔQ=" not in partial and "posture FAIL" not in partial,
+          "partial report cannot publish comparative verdicts")
+    empty_usage = {key: 0 for key in ("sessions", "tool_calls", "input_tokens", "output_tokens",
+                                      "cache_creation_input_tokens", "cache_read_input_tokens",
+                                      "total_cost_usd", "wall_clock_ms")}
+    contaminated = report.render({"rows": [{"task": "t1", "arm": "A-sonnet", "pass": None,
+                                               "outcome": "INVALID", "usage": empty_usage}] * 12})
+    check("incomplete (0/12 scoreable cells" in contaminated,
+          "complete but invalid matrix cannot publish comparative verdicts")
+    partial_scores = report.render({"rows": [
+        {"task": f"t{i}", "arm": arm, "pass": result, "outcome": "done" if result is not None else "stalled",
+         "usage": empty_usage}
+        for i, arm, result in [(1, "A-sonnet", True), (1, "A-opus", False), (1, "B-team", None)]
+    ]})
+    check("incomplete (2/12 scoreable cells" in partial_scores,
+          "incomplete report counts only rows with a pass result")
+    usage = {"sessions":1,"tool_calls":0,"input_tokens":0,"output_tokens":0,
+             "cache_creation_input_tokens":0,"cache_read_input_tokens":0,
+             "total_cost_usd":0,"wall_clock_ms":0}
+    values = report.render({"rows": [
+        {"task":"values","arm":"A-sonnet","pass":True,"grade":"accept=pass, regress=pass","outcome":"done","usage":usage},
+        {"task":"values","arm":"A-opus","pass":False,"grade":"boom | x","outcome":"grade-failed","usage":usage},
+        {"task":"values","arm":"B-team","pass":None,"grade":None,"outcome":"stalled","usage":usage},
+    ]})
+    check("| A-sonnet | true | accept=pass, regress=pass |" in values,
+          "PASS true stays a JSON boolean and grade has its own column")
+    check("| A-opus | false | boom \\| x |" in values,
+          "PASS false stays unchanged and Markdown pipes in grade are escaped")
+    check("| B-team | null | — |" in values,
+          "PASS null stays unchanged and missing grade renders as a dash")
+    check("| A-opus | false | boom \\| x |" in values and "| A-opus | boom" not in values,
+          "false PASS cell never contains grader text")
 
 
 def main():

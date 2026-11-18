@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -50,7 +51,19 @@ def validate_init(events, arm):
     init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), None)
     if init is None:
         raise ValueError("missing system/init event")
-    servers = set(init.get("mcp_servers", []))
+    raw_servers = init.get("mcp_servers", [])
+    servers = set()
+    for server in raw_servers:
+        if isinstance(server, str):
+            servers.add(server)
+        elif isinstance(server, dict):
+            name = server.get("name") or server.get("server")
+            if isinstance(name, str) and name:
+                servers.add(name)
+            else:
+                raise ValueError("INVALID: malformed MCP server in system/init event")
+        else:
+            raise ValueError("INVALID: malformed MCP server in system/init event")
     tools = init.get("tools", [])
     names = {t.get("server") for t in tools if isinstance(t, dict) and t.get("server")}
     names |= {s.get("name", "").split("__", 2)[1] for s in tools
@@ -64,8 +77,7 @@ def session(command, model, effort, prompt, env, arm):
     argv = [command, "-p", prompt, "--model", model, "--effort", effort,
             "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
             "--max-budget-usd", "6"]
-    if arm == "B-team":
-        argv += ["--safe-mode", "--mcp-config", env["BENCH_MCP_CONFIG"], "--strict-mcp-config"]
+    argv += ["--safe-mode", "--mcp-config", env["BENCH_MCP_CONFIG"], "--strict-mcp-config"]
     p = subprocess.run(argv, env=env, cwd=env.get("BENCH_TREE"), text=True,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if p.returncode:
@@ -96,9 +108,12 @@ def run_one(task, arm, command, scratch, reps):
     run_dir.mkdir(parents=True)
     db = run_dir / "board"
     db.mkdir()
-    port = 41000 + (os.getpid() % 20000)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
     card = run_dir / "card.json"
-    card.write_text(json.dumps({"mcpServers": {"agentboard": {"url": f"http://127.0.0.1:{port}/mcp/bench"}}}))
+    config = {"mcpServers": {"agentboard": {"url": f"http://127.0.0.1:{port}/mcp/bench"}}} if arm == "B-team" else {"mcpServers": {}}
+    card.write_text(json.dumps(config))
     env = os.environ.copy()
     env.update(AGENTBOARD_DB=str(db), BENCH_MCP_CONFIG=str(card), BENCH_SCRATCH_PORT=str(port))
     env["AGENTBOARD_ACTOR"] = "bench"
@@ -111,17 +126,36 @@ def run_one(task, arm, command, scratch, reps):
         raise RuntimeError(f"scratch board task creation failed: {created.stdout[-1000:]}")
     row_id = int(next(line.split()[0][1:] for line in created.stdout.splitlines() if line.startswith("T")))
     env["BENCH_ROW_ID"] = str(row_id)
+    daemon = None
+    if arm == "B-team":
+        daemon_log = (run_dir / "daemon.log").open("w")
+        daemon = subprocess.Popen([env.get("BENCH_AGENTBOARD", "agentboard"), "daemon",
+                                  f"127.0.0.1:{port}", "--db", str(db)],
+                                 env=env, stdout=daemon_log, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if daemon.poll() is not None:
+                raise RuntimeError(f"scratch daemon exited: {(run_dir / 'daemon.log').read_text()[-2000:]}")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            daemon.terminate()
+            raise RuntimeError(f"scratch daemon did not listen: {(run_dir / 'daemon.log').read_text()[-2000:]}")
     corpus_task = Path(task.get("grade_task", ROOT / "bench/corpus" / task["id"] / "task.json"))
     tree = run_dir / "tree"
     if corpus_task.is_file() and "grade_task" not in task:
         # Export only the declared historical base; the session cannot see the
         # working checkout or reference commit through its working directory.
+        grade_cache = scratch / "grade-cache"
         prep = subprocess.run([sys.executable, str(ROOT / "bench/grade.py"),
-                               str(corpus_task), "base", "--scratch", str(run_dir / "grade")],
+                               str(corpus_task), "base", "--scratch", str(grade_cache)],
                               text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if prep.returncode:
             raise RuntimeError(f"isolated base preparation failed: {prep.stdout[-2000:]}")
-        tree = run_dir / "grade" / f"{task['id']}-base"
+        tree = grade_cache / f"{task['id']}-base"
         env["BENCH_TREE"] = str(tree)
     else:
         tree.mkdir()
@@ -131,7 +165,8 @@ def run_one(task, arm, command, scratch, reps):
     stage = 0
     last_status, last_assignee = "todo", None
     stage_limit = 10 if arm == "B-team" else 1
-    while stage < stage_limit:
+    try:
+      while stage < stage_limit:
         seat, model, effort = roles[min(stage, len(roles)-1)]
         seat_prompt = prompt if arm != "B-team" else f"Read {ROOT / 'skills' / f'agentboard-{seat}' / 'SKILL.md'}; task T1.\n" + prompt
         try:
@@ -164,6 +199,12 @@ def run_one(task, arm, command, scratch, reps):
         last_status, last_assignee = status, assignee
         if len(sessions) >= stage_limit and status != "done":
             outcome = "cap"; break
+    finally:
+      if daemon is not None:
+        daemon.terminate()
+        try: daemon.wait(timeout=5)
+        except subprocess.TimeoutExpired: daemon.kill(); daemon.wait()
+        daemon_log.close()
     totals["wall_clock_ms"] = int((time.monotonic() - started) * 1000)
     totals["sessions"] = len(sessions)
     totals["retries"] = retries
@@ -171,7 +212,7 @@ def run_one(task, arm, command, scratch, reps):
     grade_result = None
     if corpus_task.is_file() and outcome == "done":
         graded = subprocess.run([sys.executable, str(ROOT / "bench/grade.py"),
-                                 str(corpus_task), str(tree), "--scratch", str(run_dir / "grade-final")],
+                                 str(corpus_task), str(tree), "--scratch", str(scratch / "grade-cache")],
                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         grade_result = graded.stdout.strip().splitlines()[-1] if graded.stdout.strip() else ""
         outcome = "done" if graded.returncode == 0 else "grade-failed"
@@ -192,6 +233,10 @@ def main():
     if args.plan:
         plan(); return
     command = os.environ.get("BENCH_CLAUDE", "claude")
+    version = subprocess.run([command, "--version"], text=True, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT).stdout.strip()
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
+                            stdout=subprocess.PIPE, check=True).stdout.strip()
     selected = set(args.task or [])
     tasks = [t for t in corpus_tasks() if not selected or t["id"] in selected]
     arms = args.arm or list(MODELS)
@@ -199,12 +244,39 @@ def main():
     scratch_root.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix="run-", dir=scratch_root))
     rows = []
+    if args.output.is_file():
+        previous = json.loads(args.output.read_text())
+        if previous.get("run_status") == "partial":
+            rows = previous.get("rows", [])
+    metadata = {"harness_commit": commit, "claude_version": version,
+                "models": {arm: MODELS[arm] for arm in arms}, "repetitions": args.reps,
+                "caps": {"usd_per_session": 6, "usd_per_task_arm": 20},
+                "isolation": "scratch LMDB board; base task archive; strict MCP config",
+        "manager_tokens_excluded": True, "run_status": "running"}
     try:
-        for _ in range(args.reps):
+        for rep in range(args.reps):
             for task in tasks:
                 for arm in arms:
-                    rows.append(run_one(task, arm, command, scratch, args.reps))
-        args.output.write_text(json.dumps({"rows": rows, "manager_tokens_excluded": True}, indent=2) + "\n")
+                    already = sum(r["task"] == task["id"] and r["arm"] == arm for r in rows)
+                    if already > rep:
+                        continue
+                    try:
+                        row = run_one(task, arm, command, scratch, args.reps)
+                    except RuntimeError as exc:
+                        if "usage_limit_reached" not in str(exc):
+                            raise
+                        metadata["run_status"] = "partial"
+                        metadata["run_note"] = f"Stopped after {len(rows)}/12 cells: Claude Pro 5-hour usage limit reached."
+                        args.output.parent.mkdir(parents=True, exist_ok=True)
+                        args.output.write_text(json.dumps({**metadata, "rows": rows}, indent=2) + "\n")
+                        print(f"benchmark: partial {len(rows)}/12 cells -> {args.output}")
+                        return
+                    rows.append(row)
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(json.dumps({**metadata, "rows": rows}, indent=2) + "\n")
+                    shutil.rmtree(scratch / row["run_id"], ignore_errors=True)
+        metadata["run_status"] = "complete"
+        metadata.pop("run_note", None)
         print(f"benchmark: {len(rows)} cells -> {args.output}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
