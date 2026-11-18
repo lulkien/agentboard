@@ -231,9 +231,9 @@ start working. The manager's later wake prompts go without `--wait` (it never
 blocks) and are checked with `hc read --lines 40 <seat>`. If a prompt does not turn
 the agent busy, read the terminal before sending again.
 
-Codewhale seats run under hc only; herdr has no agent kind for them. hc reports no
-turn state for them, so a seat is ready at `hc wait <seat> --output 'Type a message'`
-and a turn ends at `hc wait <seat> --output ttft`. The first `hc send` may answer
+Codewhale seats run under hc only; herdr has no agent kind for them. Each seat home
+carries status hooks that report idle, working and done, so `hc wait <seat>` and
+`hc send --wait` work as for claude and codex. The first `hc send` may answer
 `still starting`: retry it. Completion is authoritative on the board (`agentboard
 wait`), not the terminal. Each home needs its credential once: see `seats/README.md`.
 

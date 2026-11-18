@@ -1,0 +1,15 @@
+
+# hc reads a seat's status only from OSC 7501 and codewhale does not emit it, so
+# these hooks report it: idle at session start, working on submit, done at turn end.
+# `|| true` keeps a hook from failing where there is no tty (codewhale exec).
+[[hooks.hooks]]
+event = "session_start"
+command = "printf '\\033]7501;state=idle:app=codewhale\\033\\\\' > /dev/tty 2>/dev/null || true"
+
+[[hooks.hooks]]
+event = "message_submit"
+command = "printf '\\033]7501;state=working:app=codewhale\\033\\\\' > /dev/tty 2>/dev/null || true"
+
+[[hooks.hooks]]
+event = "turn_end"
+command = "printf '\\033]7501;state=done:app=codewhale\\033\\\\' > /dev/tty 2>/dev/null || true"

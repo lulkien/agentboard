@@ -24,7 +24,7 @@ case $1 in
       echo 'unavailable: t9 is still starting: its output has not settled' >&2
       exit 1
     fi
-    echo '{"started":true}' ;;
+    if [[ -n ${STUB_HC_NOSTART:-} ]]; then echo '{"started":false}'; else echo '{"started":true}'; fi ;;
   wait) echo '{"wait":"exit"}' ;;
 esac
 SH
@@ -83,7 +83,7 @@ mv "$card.saved" "$card"
 run_kind codex 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <codex> <--no-daemon> <--profile> <manager> <$agentboard-manager>'
 run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <grok> <--trust> <--always-approve>'
 
-# codewhale: hc only, per-seat home, output wait, retried send
+# codewhale: hc only, per-seat home, status wait, retried send --wait
 cwhome="$HOME/.local/share/agentboard/codewhale/manager"
 cwexp='CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <env> <CODEWHALE_HOME='$cwhome'> <codewhale> <--skip-onboarding> <--fresh> <--disable> <subagents>'
 cwrun() { : >"$STUB_HC_LOG"; "$repo/seats/start-agentboard-manager" codewhale >"$tmp/out" 2>"$tmp/err"; }
@@ -92,9 +92,9 @@ printf 'yolo = true\n' >"$cwhome/config.toml"
 if cwrun; then ok; else bad 'codewhale launcher succeeds'; fi
 exact "$STUB_HC_LOG" "$cwexp" 'codewhale command starts manager'
 exact "$tmp/out" 'manager t9' 'codewhale prints the address'
-exact "$STUB_HC_LOG" 'CALL <wait> <manager> <--output> <Type a message> <--timeout> <30>' 'codewhale waits for the input prompt'
-exact "$STUB_HC_LOG" 'CALL <send> <manager> </agentboard-manager>' 'codewhale sends the entry prompt plainly'
-is 'codewhale never uses --wait' bash -c '! grep -Fq "<--wait>" "$1"' _ "$STUB_HC_LOG"
+exact "$STUB_HC_LOG" 'CALL <wait> <manager> <--timeout> <30>' 'codewhale waits for reported status'
+exact "$STUB_HC_LOG" 'CALL <send> <--wait> <manager> </agentboard-manager>' 'codewhale sends the entry prompt with --wait'
+is 'codewhale never waits on output text' bash -c '! grep -Fq "<--output>" "$1"' _ "$STUB_HC_LOG"
 wait_at=$(grep -nF 'CALL <wait>' "$STUB_HC_LOG" | cut -d: -f1 | head -1 || true)
 send_at=$(grep -nF 'CALL <send>' "$STUB_HC_LOG" | cut -d: -f1 | head -1 || true)
 is 'codewhale waits before sending' bash -c '[[ -n $1 && -n $2 && $1 -lt $2 ]]' _ "$wait_at" "$send_at"
@@ -108,6 +108,10 @@ echo 99 >"$tmp/starting"
 if (export STUB_HC_STARTING="$tmp/starting"; cwrun); then bad 'codewhale endless starting unexpectedly succeeded'; else ok; fi
 is 'codewhale gives up after ten sends' test "$(grep -Fc 'CALL <send>' "$STUB_HC_LOG")" -eq 10
 has "$tmp/err" 'entry prompt did not land' 'codewhale reports an unlanded prompt'
+# send accepted but the program did not start working
+echo 0 >"$tmp/starting"
+if (export STUB_HC_STARTING="$tmp/starting" STUB_HC_NOSTART=1; cwrun); then bad 'codewhale unstarted prompt unexpectedly succeeded'; else ok; fi
+has "$tmp/err" 'entry prompt did not land' 'codewhale reports started:false'
 # missing home
 mv "$cwhome" "$cwhome.saved"
 if cwrun; then bad 'missing codewhale home unexpectedly launched'; else ok; fi

@@ -106,14 +106,15 @@ else
   fi
 
   if [[ $KIND == codewhale ]]; then
-    # hc reports no turn state for this seat: wait for the input prompt text, then
-    # send until hc stops answering "still starting"
-    hc wait manager --output 'Type a message' --timeout 30 >/dev/null
+    # the seat's hooks report status (seats/codewhale/status-hooks.toml): wait for it,
+    # then send until hc stops answering "still starting"
+    hc wait manager --timeout 30 >/dev/null
     landed=0
     for _ in {1..10}; do
       status=0
-      sent=$(hc send manager /agentboard-manager 2>&1) || status=$?
-      if [[ $status -eq 0 ]]; then landed=1; break; fi
+      sent=$(hc send --wait manager /agentboard-manager 2>&1) || status=$?
+      if [[ $status -eq 0 ]] && jq -e '.started == true' >/dev/null 2>&1 <<<"$sent"; then landed=1; break; fi
+      [[ $status -eq 0 ]] && break
       [[ $sent == *'still starting'* ]] || break
       sleep 1
     done

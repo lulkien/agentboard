@@ -170,9 +170,12 @@ Launch shape (`hc run` forwards no environment, so set it with `env`):
 
     hc run --bg --name coder --cwd <repo> -- env CODEWHALE_HOME=<home> codewhale --skip-onboarding --fresh --disable subagents
 
-Probed in T392: a seat is ready when `hc wait <seat> --output 'Type a message'`
-returns (retry the first `hc send` until output settles); a turn ends at `ttft` in
-the status line; the board stays the authority.
+Codewhale does not report status itself, so every generated home appends the hooks
+from `seats/codewhale/status-hooks.toml`: session start reports `idle`,
+message submit `working`, turn end `done`, as OSC 7501 on the tty. A seat is
+ready when `hc wait <seat>` returns; use `hc send --wait` and retry the first send
+while hc answers `still starting`. The board stays the authority. Homes written
+before the hooks existed need `./seats/install.py --force` to pick them up.
 
 ## Grok
 

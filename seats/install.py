@@ -241,6 +241,8 @@ def codewhale_home_files(src, home, seat, provider):
         lines = f.read().replace("@HOME@", home).splitlines(keepends=True)
     if provider:
         lines.insert(1, f'provider = "{provider}"\n')
+    with open(f"{src}/codewhale/status-hooks.toml", encoding="utf-8") as f:
+        lines.append(f.read())
     mcp = json.dumps({"servers": {"agentboard": {"url": url}}}, indent=2) + "\n"
     return "".join(lines).encode(), mcp.encode()
 

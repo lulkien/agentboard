@@ -565,6 +565,13 @@ has "reviewer network" 'sandbox_network_access = true' "$cw/reviewer/config.toml
 is "nothing under ~/.codewhale" test ! -e "$home/.codewhale"
 is "no approval_policy in repo templates" bash -c '! grep -rq approval_policy "$1"/seats/codewhale' _ "$repo"
 find "$cw" -type f | sort >"$tmp/cw-files"
+for seat in analyst coder manager reviewer; do
+  cfg=$cw/$seat/config.toml
+  is "$seat status hooks parse" python3 -c 'import sys,tomllib; h=tomllib.load(open(sys.argv[1],"rb"))["hooks"]["hooks"]; assert [x["event"] for x in h]==["session_start","message_submit","turn_end"]' "$cfg"
+  for st in idle working done; do
+    has "$seat reports $st" "]7501;state=$st:app=codewhale" "$cfg"
+  done
+done
 is "eight generated files" test "$(wc -l <"$tmp/cw-files")" -eq 8
 xargs cat <"$tmp/cw-files" >"$tmp/cw-before"
 inst
@@ -604,7 +611,7 @@ inst --codewhale-provider deepseek; code=$?
 is "provider install exit" test "$code" -eq 0
 for seat in analyst coder manager reviewer; do
   has "$seat provider line" 'provider = "deepseek"' "$home/.local/share/agentboard/codewhale/$seat/config.toml"
-  is "$seat provider config valid TOML" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="deepseek"' "$home/.local/share/agentboard/codewhale/$seat/config.toml"
+  is "$seat provider config valid TOML" python3 -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1],"rb")); assert c["provider"]=="deepseek" and len(c["hooks"]["hooks"])==3' "$home/.local/share/agentboard/codewhale/$seat/config.toml"
 done
 is "no credential files written" bash -c '! find "$1" -type f \( -name "*auth*" -o -name "*key*" -o -name "*.env" \) | grep -q .' _ "$home/.local/share/agentboard"
 newhome
