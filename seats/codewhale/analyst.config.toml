@@ -1,0 +1,5 @@
+# agentboardGenerated: written by agentboard seats/install.py from seats/codewhale/analyst.config.toml; rerun it to refresh, --force overwrites edits
+reasoning_effort = "medium"
+mcp_config_path = "@HOME@/mcp.json"
+yolo = true
+sandbox_mode = "workspace-write"

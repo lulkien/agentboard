@@ -147,6 +147,33 @@ only. A differing generated file is preserved unless `--force` is supplied; an
 unmarked file is always refused. Example:
 `claude --mcp-config ~/.claude/manager-mcp.json --strict-mcp-config`.
 
+## Codewhale
+
+`install.py` generates one home per seat, `~/.local/share/agentboard/codewhale/<seat>/`,
+holding `config.toml` (from `seats/codewhale/<seat>.config.toml`) and `mcp.json`
+(the same `/mcp/<seat>` URL as the Claude card). Effort, yolo and sandbox live in the
+config, so they are per seat; `~/.codewhale` is never read or written. Every seat
+sets `reasoning_effort = "medium"` and `yolo = true` and none sets `approval_policy`
+(`never` and `auto` deny board calls unattended). Analyst and reviewer add
+`sandbox_mode = "workspace-write"`, the reviewer also `sandbox_network_access = true`
+(all-or-nothing network, weaker than Codex's loopback-only proxy). Launch those two
+with `-C <scratch dir>` so the repository stays read-only.
+
+A differing generated file is kept unless `--force`; a file without the
+`# agentboardGenerated` first line is always refused. The installer writes no
+credentials. `--codewhale-provider NAME` adds `provider = "NAME"`; rerunning without it
+needs `--force` to drop the line. Give each home its key once:
+
+    codewhale auth print-api-key --provider P | CODEWHALE_HOME=<home> codewhale auth set --provider P --api-key-stdin
+
+Launch shape (`hc run` forwards no environment, so set it with `env`):
+
+    hc run --bg --name coder --cwd <repo> -- env CODEWHALE_HOME=<home> codewhale --skip-onboarding --fresh --disable subagents
+
+Probed in T392: a seat is ready when `hc wait <seat> --output 'Type a message'`
+returns (retry the first `hc send` until output settles); a turn ends at `ttft` in
+the status line; the board stays the authority.
+
 ## Grok
 
 `./seats/install.py` installs the marked block from `seats/grok/agentboard-mcp.toml`
