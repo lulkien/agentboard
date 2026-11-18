@@ -80,15 +80,15 @@ To start the manager in the current herdr pane, run the installed
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
-For Claude, analyst and reviewer use Opus at high effort, and coder uses Sonnet at
-medium effort. Codex loads each seat's model and effort
-from its profile. Swap a model only when the human names a different one.
+For Claude, analyst and reviewer use Opus at medium effort, and coder uses Sonnet
+at medium effort. Codex loads each seat's model and effort from its profile. Swap
+a model only when the human names a different one.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
-| analyst | `--model claude-opus-5-5 --effort high` | `-p analyst` (profile: gpt-6-sol, high) |
+| analyst | `--model claude-opus-5-5 --effort medium` | `-p analyst` (profile: gpt-6-sol, medium) |
 | coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-luna, medium) |
-| reviewer | `--model claude-opus-5-5 --effort high` | `-p reviewer` (profile: gpt-6-sol, medium) |
+| reviewer | `--model claude-opus-5-5 --effort medium` | `-p reviewer` (profile: gpt-6-sol, medium) |
 
 ```bash
 export REPO=/path/to/repo
@@ -101,7 +101,7 @@ herdr pane list                                    # note the new tab's pane id
 # it edits and runs the gate.
 herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --model claude-opus-5-5 \
-  --effort high \
+  --effort medium \
   --mcp-config "$HOME/.claude/analyst-mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit
@@ -112,7 +112,7 @@ herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --dangerously-skip-permissions
 herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   --model claude-opus-5-5 \
-  --effort high \
+  --effort medium \
   --mcp-config "$HOME/.claude/reviewer-mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit
@@ -159,15 +159,15 @@ To start the manager in the current hc terminal, run the installed
 the selected manager as a new terminal named `manager` and prints its address;
 `seats/README.md` documents its prerequisites.
 
-For Claude, analyst and reviewer use Opus at high effort and coder uses Sonnet at
-medium effort. Codex loads each seat's model and effort from its profile. Swap a
-model only when the human names a different one.
+For Claude, analyst and reviewer use Opus at medium effort, and coder uses Sonnet
+at medium effort. Codex loads each seat's model and effort from its profile. Swap
+a model only when the human names a different one.
 
 | Seat | Claude | Codex |
 | --- | --- | --- |
-| analyst | `--model claude-opus-5-5 --effort high` | `-p analyst` (profile: gpt-6-sol, high) |
+| analyst | `--model claude-opus-5-5 --effort medium` | `-p analyst` (profile: gpt-6-sol, medium) |
 | coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-luna, medium) |
-| reviewer | `--model claude-opus-5-5 --effort high` | `-p reviewer` (profile: gpt-6-sol, medium) |
+| reviewer | `--model claude-opus-5-5 --effort medium` | `-p reviewer` (profile: gpt-6-sol, medium) |
 
 ```bash
 export REPO=/path/to/repo
@@ -178,7 +178,7 @@ export REPO=/path/to/repo
 # it edits and runs the gate.
 hc run --bg --name analyst --cwd "$REPO" -- \
   claude --model claude-opus-5-5 \
-  --effort high \
+  --effort medium \
   --mcp-config "$HOME/.claude/analyst-mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit
@@ -189,7 +189,7 @@ hc run --bg --name coder --cwd "$REPO" -- \
   --dangerously-skip-permissions
 hc run --bg --name reviewer --cwd "$REPO" -- \
   claude --model claude-opus-5-5 \
-  --effort high \
+  --effort medium \
   --mcp-config "$HOME/.claude/reviewer-mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit

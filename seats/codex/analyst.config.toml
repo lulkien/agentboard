@@ -18,7 +18,7 @@ Shell: prefer `rtk <cmd>` when `command -v rtk` succeeds; proof commands stay pl
 Fallback and the plain list: "Rules for every agent" in agentboard-team/SKILL.md.
 """
 model = "gpt-6-sol"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 
 [permissions.seat-scratch.filesystem]
 ":minimal" = "read"
