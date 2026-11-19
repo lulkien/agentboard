@@ -6,6 +6,7 @@ user config as well.
 usage: install.py [--force] [--grok-only | --skip-grok] [--codewhale-provider NAME]
 """
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -234,28 +235,119 @@ def grok_preflight(path, source):
 
 
 def codewhale_home_files(src, home, seat, provider):
-    """(config.toml bytes, mcp.json bytes) for one seat; the URL comes from the Claude card."""
+    """(config.toml bytes, mcp.json bytes) for one seat, based on user config when present."""
     with open(f"{src}/claude/{seat}-mcp.json", encoding="utf-8") as f:
         url = json.load(f)["mcpServers"]["agentboard"]["url"]
+    mcp_path = f"{os.environ['HOME']}/.codewhale/mcp.json"
+    try:
+        with open(mcp_path, encoding="utf-8") as f:
+            mcp = json.load(f)
+    except FileNotFoundError:
+        mcp = {}
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"invalid JSON in {mcp_path}: {exc}") from exc
+    if not isinstance(mcp, dict):
+        raise ValueError(f"invalid JSON in {mcp_path}: top level must be an object")
+    servers = mcp.setdefault("servers", {})
+    if not isinstance(servers, dict):
+        raise ValueError(f"servers in {mcp_path} is not an object")
+    servers["agentboard"] = {"url": url}
+
+    config_path = f"{os.environ['HOME']}/.codewhale/config.toml"
+    config = {}
+    try:
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
+    except FileNotFoundError:
+        pass
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"invalid TOML in {config_path}: {exc}") from exc
+    # Auth belongs in Codewhale's credential store, not a generated seat config.
+    def without_credentials(value):
+        if isinstance(value, dict):
+            return {k: without_credentials(v) for k, v in value.items()
+                    if not re.search(r"(api.?key|token|secret|credential|password)", k, re.I)}
+        if isinstance(value, list):
+            return [without_credentials(item) for item in value]
+        return value
+
+    config = without_credentials(config)
+    # Execution and permission posture belongs to each seat template. Do not let
+    # a user-wide policy quietly widen a manager/coder or constrain a reviewer.
+    for key in ("approval_policy", "sandbox_mode", "sandbox_network_access"):
+        config.pop(key, None)
     with open(f"{src}/codewhale/{seat}.config.toml", encoding="utf-8") as f:
-        lines = f.read().replace("@HOME@", home).splitlines(keepends=True)
+        seat_config = tomllib.loads(f.read().replace("@HOME@", home))
+    with open(f"{src}/codewhale/status-hooks.toml", "rb") as f:
+        hooks = tomllib.load(f)
+
+    def merge(dst, overlay):
+        for key, value in overlay.items():
+            if isinstance(value, dict) and isinstance(dst.get(key), dict):
+                merge(dst[key], value)
+            else:
+                dst[key] = value
+
+    merge(config, seat_config)
+    merge(config, hooks)
     if provider:
-        lines.insert(1, f'provider = "{provider}"\n')
-    with open(f"{src}/codewhale/status-hooks.toml", encoding="utf-8") as f:
-        lines.append(f.read())
-    mcp = json.dumps({"servers": {"agentboard": {"url": url}}}, indent=2) + "\n"
-    return "".join(lines).encode(), mcp.encode()
+        config["provider"] = provider
+    config_bytes = toml_bytes(config)
+    mcp_bytes = (json.dumps(mcp, indent=2) + "\n").encode()
+    marker = (b"# agentboardGenerated sha256=" + hashlib.sha256(config_bytes).hexdigest().encode()
+              + b" mcp-sha256=" + hashlib.sha256(mcp_bytes).hexdigest().encode() + b"\n")
+    return marker + config_bytes, mcp_bytes
 
 
-def codewhale_file_state(path, want, owned, force):
+def toml_bytes(data):
+    """Serialize the TOML value subset used by client configs; reject unknown values."""
+    def key(name):
+        return name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else json.dumps(name)
+
+    def value(item):
+        if isinstance(item, str): return json.dumps(item, ensure_ascii=False)
+        if isinstance(item, bool): return "true" if item else "false"
+        if isinstance(item, (int, float)): return repr(item)
+        if isinstance(item, list): return "[" + ", ".join(value(x) for x in item) + "]"
+        raise ValueError(f"unsupported value in ~/.codewhale/config.toml: {type(item).__name__}")
+
+    lines = []
+    def table(obj, prefix=()):
+        scalars = [(k, v) for k, v in obj.items() if not isinstance(v, dict) and not (isinstance(v, list) and v and isinstance(v[0], dict))]
+        if prefix:
+            lines.append("[" + ".".join(key(k) for k in prefix) + "]")
+        for k, v in scalars: lines.append(f"{key(k)} = {value(v)}")
+        for k, v in obj.items():
+            if isinstance(v, dict):
+                if lines and lines[-1] != "": lines.append("")
+                table(v, prefix + (k,))
+            elif isinstance(v, list) and v and isinstance(v[0], dict):
+                for entry in v:
+                    if lines and lines[-1] != "": lines.append("")
+                    lines.append("[[" + ".".join(key(x) for x in prefix + (k,)) + "]]")
+                    for ek, ev in entry.items():
+                        if isinstance(ev, dict) or (isinstance(ev, list) and ev and isinstance(ev[0], dict)):
+                            raise ValueError("unsupported nested table in ~/.codewhale/config.toml")
+                        lines.append(f"{key(ek)} = {value(ev)}")
+    table(data)
+    return ("\n".join(lines) + "\n").encode()
+
+
+def codewhale_file_state(path, want, owned, force, trusted_refresh=False):
     """new / unchanged / rewrite / differs, or None when the file is not ours."""
     if not os.path.lexists(path):
         return "new"
     if os.path.islink(path) or not os.path.isfile(path) or not owned:
         print(f"not generated by agentboard: {path}; move it aside", file=sys.stderr)
         return None
-    if read(path) == want:
-        return "unchanged"
+    current = read(path)
+    if current == want:
+        return "unchanged" if os.stat(path).st_mode & 0o777 == 0o600 else "rewrite"
+    marker = re.match(rb"# agentboardGenerated sha256=([0-9a-f]{64})(?: mcp-sha256=[0-9a-f]{64})?\n", current)
+    if marker and hashlib.sha256(current[marker.end():]).hexdigest().encode() == marker.group(1):
+        return "rewrite"
+    if trusted_refresh:
+        return "rewrite"
     if force:
         return "rewrite"
     print(f"unchanged: {path} (differs; --force rewrites it)")
@@ -338,11 +430,22 @@ def main():
     if not grok_only:
         for seat in SEATS:
             cw_home = f"{home}/.local/share/agentboard/codewhale/{seat}"
-            config_want, mcp_want = codewhale_home_files(src, cw_home, seat, provider)
+            try:
+                config_want, mcp_want = codewhale_home_files(src, cw_home, seat, provider)
+            except (ValueError, OSError) as exc:
+                print(str(exc), file=sys.stderr)
+                refuse = True
+                continue
             config_path, mcp_path = f"{cw_home}/config.toml", f"{cw_home}/mcp.json"
             config_owned = os.path.isfile(config_path) and read(config_path).startswith(CODEWHALE_MARK)
+            trusted_mcp_refresh = False
+            if config_owned and os.path.isfile(mcp_path):
+                current_config = read(config_path)
+                header = re.match(rb"# agentboardGenerated sha256=[0-9a-f]{64} mcp-sha256=([0-9a-f]{64})\n", current_config)
+                trusted_mcp_refresh = bool(header and hashlib.sha256(current_config[header.end():]).hexdigest().encode() == re.search(rb"sha256=([0-9a-f]{64})", current_config).group(1)
+                                            and hashlib.sha256(read(mcp_path)).hexdigest().encode() == header.group(1))
             for path, want, owned in ((config_path, config_want, config_owned), (mcp_path, mcp_want, config_owned)):
-                state = codewhale_file_state(path, want, owned, force)
+                state = codewhale_file_state(path, want, owned, force, trusted_mcp_refresh if path == mcp_path else False)
                 if state is None:
                     refuse = True
                 codewhale_files.append((path, want, state))
@@ -479,7 +582,9 @@ def main():
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 tmp = f"{path}.agentboard.{os.getpid()}"
                 try:
-                    with open(tmp, "wb") as f:
+                    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    os.fchmod(fd, 0o600)
+                    with os.fdopen(fd, "wb") as f:
                         f.write(want)
                     os.replace(tmp, path)
                 finally:

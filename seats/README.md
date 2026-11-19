@@ -155,17 +155,27 @@ unmarked file is always refused. Example:
 `install.py` generates one home per seat, `~/.local/share/agentboard/codewhale/<seat>/`,
 holding `config.toml` (from `seats/codewhale/<seat>.config.toml`) and `mcp.json`
 (the same `/mcp/<seat>` URL as the Claude card). Effort, yolo and sandbox live in the
-config, so they are per seat; `~/.codewhale` is never read or written. Every seat
+config, so they are per seat. The installer reads `~/.codewhale/mcp.json` and
+`~/.codewhale/config.toml` as optional, read-only bases; it preserves other MCP
+servers and top-level fields, while the generated agentboard entry wins. User
+provider/model settings carry into each seat, with seat policy, hooks and MCP path
+overriding them. `--codewhale-provider NAME` overrides a base provider. Neither
+base is rewritten, and credentials are omitted from generated TOML. If a base is
+absent, that file uses the existing defaults. Clean managed outputs refresh when
+their bases change; hand-edited outputs remain protected by the normal `--force`
+rule. Malformed bases fail preflight before installed files change. Every seat
 sets `reasoning_effort = "medium"` and `yolo = true` and none sets `approval_policy`
 (`never` and `auto` deny board calls unattended). Analyst and reviewer add
 `sandbox_mode = "workspace-write"`, the reviewer also `sandbox_network_access = true`
 (all-or-nothing network, weaker than Codex's loopback-only proxy). Launch those two
 with `-C <scratch dir>` so the repository stays read-only.
 
-A differing generated file is kept unless `--force`; a file without the
-`# agentboardGenerated` first line is always refused. The installer writes no
-credentials. `--codewhale-provider NAME` adds `provider = "NAME"`; rerunning without it
-needs `--force` to drop the line. Give each home its key once:
+A hand-edited generated file is kept unless `--force`; clean managed files refresh
+when their bases or templates change. A file without the `# agentboardGenerated`
+first line is always refused. The installer writes no credentials. Generated files
+are mode `0600`. `--codewhale-provider NAME` overrides the base provider; rerunning
+without it restores the base provider (or the default when no base is set). Give
+each home its key once:
 
     codewhale auth print-api-key --provider P | CODEWHALE_HOME=<home> codewhale auth set --provider P --api-key-stdin
 

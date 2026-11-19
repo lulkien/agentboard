@@ -544,6 +544,48 @@ has "conflicting Grok flags show usage error" 'mutually exclusive' "$tmp/err"
 newhome
 mkdir -p "$home/.codex/rules"
 inst; code=$?
+is "Codewhale install without bases" test "$code" -eq 0
+is "absent bases retain generated defaults" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["reasoning_effort"]=="medium" and d["yolo"] is True' "$home/.local/share/agentboard/codewhale/coder/config.toml"
+is "absent MCP base retains generated defaults" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert list(d["servers"])==["agentboard"] and d["servers"]["agentboard"]["url"].endswith("/mcp/coder")' "$home/.local/share/agentboard/codewhale/coder/mcp.json"
+if command -v codewhale >/dev/null 2>&1 && [ "${AGENTBOARD_TEST_NO_CODEWHALE:-0}" != 1 ]; then
+  for seat in analyst coder manager reviewer; do
+    HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/codewhale/$seat" codewhale mcp list >"$tmp/mcp-list" 2>&1
+    is "$seat codewhale mcp list ends /mcp/$seat" bash -c 'grep -q "/mcp/$1\$" "$2"' _ "$seat" "$tmp/mcp-list"
+    HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/codewhale/$seat" codewhale config doctor >"$tmp/doctor" 2>&1
+    is "$seat codewhale config doctor reports no error" bash -c '! grep -qiE "(^|[^a-z])(error|fail)" "$1"' _ "$tmp/doctor"
+  done
+  is "Codewhale probes left base config absent" test ! -e "$home/.codewhale/config.toml"
+else
+  for seat in analyst coder manager reviewer; do
+    is "$seat generated MCP URL ends /mcp/$seat" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["servers"]["agentboard"]["url"].endswith("/mcp/"+sys.argv[2])' "$home/.local/share/agentboard/codewhale/$seat/mcp.json" "$seat"
+    is "$seat config doctor TOML fallback parses" python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$home/.local/share/agentboard/codewhale/$seat/config.toml"
+  done
+  is "Codewhale probes left base config absent" test ! -e "$home/.codewhale/config.toml"
+fi
+newhome
+mkdir -p "$home/.codex/rules"
+mkdir -p "$home/.codewhale"
+cat >"$home/.codewhale/mcp.json" <<'EOF'
+{"label":"user-config","servers":{"extra":{"command":"helper","args":["--user"]},"agentboard":{"url":"http://wrong"}},"custom":true}
+EOF
+cat >"$home/.codewhale/config.toml" <<'EOF'
+provider = "base-provider"
+model = "base-model"
+temperature = 0.4
+api_key = "secret-config-value"
+approval_policy = "auto"
+sandbox_mode = "read-only"
+sandbox_network_access = false
+reasoning_effort = "high"
+yolo = false
+mcp_config_path = "/wrong/path"
+
+[auth]
+token = "nested-secret-value"
+EOF
+cp "$home/.codewhale/mcp.json" "$tmp/cw-base-mcp"
+cp "$home/.codewhale/config.toml" "$tmp/cw-base-config"
+inst; code=$?
 is "codewhale install exit" test "$code" -eq 0
 cw=$home/.local/share/agentboard/codewhale
 for seat in analyst coder manager reviewer; do
@@ -551,10 +593,14 @@ for seat in analyst coder manager reviewer; do
   has "$seat effort" 'reasoning_effort = "medium"' "$c"
   has "$seat mcp path" "mcp_config_path = \"$cw/$seat/mcp.json\"" "$c"
   has "$seat yolo" 'yolo = true' "$c"
-  is "$seat mcp card" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))=={"servers":{"agentboard":{"url":"http://127.0.0.1:8765/mcp/"+sys.argv[2]}}}' "$cw/$seat/mcp.json" "$seat"
-  is "$seat has no approval_policy or provider" bash -c '! grep -Eq "approval_policy|^provider" "$1"' _ "$c"
+  is "$seat MCP preserves base fields and owns agentboard" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["label"]=="user-config" and d["custom"] and d["servers"]["extra"]=={"command":"helper","args":["--user"]} and d["servers"]["agentboard"]["url"]=="http://127.0.0.1:8765/mcp/"+sys.argv[2]' "$cw/$seat/mcp.json" "$seat"
+  is "$seat inherits base model settings and seat overrides" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["provider"]=="base-provider" and d["model"]=="base-model" and d["temperature"]==0.4 and d["reasoning_effort"]=="medium" and d["yolo"] is True and d["mcp_config_path"]==sys.argv[2] and "approval_policy" not in d' "$c" "$cw/$seat/mcp.json"
   is "$seat valid TOML" python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$c"
 done
+inst --codewhale-provider explicit-provider
+is "explicit provider overrides base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="explicit-provider"' "$cw/coder/config.toml"
+inst
+is "omitting provider override restores base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="base-provider"' "$cw/coder/config.toml"
 for seat in manager coder; do
   is "$seat has no sandbox keys" bash -c '! grep -q sandbox "$1"' _ "$cw/$seat/config.toml"
 done
@@ -562,8 +608,11 @@ has "analyst sandbox" 'sandbox_mode = "workspace-write"' "$cw/analyst/config.tom
 is "analyst no network key" bash -c '! grep -q sandbox_network_access "$1"' _ "$cw/analyst/config.toml"
 has "reviewer sandbox" 'sandbox_mode = "workspace-write"' "$cw/reviewer/config.toml"
 has "reviewer network" 'sandbox_network_access = true' "$cw/reviewer/config.toml"
-is "nothing under ~/.codewhale" test ! -e "$home/.codewhale"
+same "base MCP config unchanged" "$tmp/cw-base-mcp" "$home/.codewhale/mcp.json"
+same "base config unchanged" "$tmp/cw-base-config" "$home/.codewhale/config.toml"
 is "no approval_policy in repo templates" bash -c '! grep -rq approval_policy "$1"/seats/codewhale' _ "$repo"
+is "credentials stay out of generated config and installer output" bash -c '! grep -q secret-config-value "$1" "$2"' _ "$cw/coder/config.toml" "$tmp/out"
+is "nested credentials stay out of generated config" bash -c '! grep -q nested-secret-value "$1"' _ "$cw/coder/config.toml"
 find "$cw" -type f | sort >"$tmp/cw-files"
 for seat in analyst coder manager reviewer; do
   cfg=$cw/$seat/config.toml
@@ -573,20 +622,15 @@ for seat in analyst coder manager reviewer; do
   done
 done
 is "eight generated files" test "$(wc -l <"$tmp/cw-files")" -eq 8
-xargs cat <"$tmp/cw-files" >"$tmp/cw-before"
+is "generated Codewhale files have private permissions" bash -c 'while IFS= read -r f; do test "$(stat -c %a "$f")" = 600 || exit 1; done <"$1"' _ "$tmp/cw-files"
+chmod 644 "$cw/coder/mcp.json"
 inst
-is "codewhale rerun unchanged" bash -c 'grep -c "^unchanged: .*codewhale/.*" "$1" | grep -qx 8' _ "$tmp/out"
-xargs cat <"$tmp/cw-files" >"$tmp/cw-after"
-same "codewhale rerun byte-identical" "$tmp/cw-before" "$tmp/cw-after"
-if command -v codewhale >/dev/null 2>&1; then
-  for seat in analyst coder manager reviewer; do
-    HOME="$home" CODEWHALE_HOME="$cw/$seat" codewhale mcp list >"$tmp/mcp-list" 2>&1
-    is "$seat codewhale mcp list ends /mcp/$seat" bash -c 'grep -q "/mcp/$1\$" "$2"' _ "$seat" "$tmp/mcp-list"
-    HOME="$home" CODEWHALE_HOME="$cw/$seat" codewhale config doctor >"$tmp/doctor" 2>&1
-    is "$seat codewhale config doctor reports no error" bash -c '! grep -qiE "(^|[^a-z])(error|fail)" "$1"' _ "$tmp/doctor"
-  done
-  is "probes left ~/.codewhale content-free of config" test ! -e "$home/.codewhale/config.toml"
-fi
+is "managed MCP mode repaired on rerun" test "$(stat -c %a "$cw/coder/mcp.json")" = 600
+sed -i 's/model = "base-model"/model = "updated-model"/' "$home/.codewhale/config.toml"
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["servers"]["extra"]["command"]="updated-helper"; open(p,"w").write(json.dumps(d))' "$home/.codewhale/mcp.json"
+inst
+is "base changes refresh managed outputs" python3 -c 'import json,sys,tomllib; p=sys.argv[1]; m=json.load(open(p+"/coder/mcp.json")); c=tomllib.load(open(p+"/coder/config.toml","rb")); assert m["servers"]["extra"]["command"]=="updated-helper" and c["model"]=="updated-model"' "$cw"
+is "generated files carry updated base values" bash -c 'grep -q updated-helper "$1" && grep -q updated-model "$2"' _ "$cw/coder/mcp.json" "$cw/coder/config.toml"
 # a hand-edited config is refused (kept) without --force and replaced with it
 cp "$cw/coder/config.toml" "$tmp/cw-coder-orig"
 printf 'reasoning_effort = "high"\n' >>"$cw/coder/config.toml"
@@ -596,13 +640,38 @@ has "edited config reported" "unchanged: $cw/coder/config.toml (differs" "$tmp/o
 same "edited config kept without force" "$tmp/cw-coder-edited" "$cw/coder/config.toml"
 inst --force
 has "edited config replaced with force" "replaced: $cw/coder/config.toml" "$tmp/out"
-same "force restores template output" "$tmp/cw-coder-orig" "$cw/coder/config.toml"
+is "force restores generated config" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["reasoning_effort"]=="medium"' "$cw/coder/config.toml"
+# MCP hand edits are protected too, while an explicit force refreshes them.
+cp "$cw/coder/mcp.json" "$tmp/cw-mcp-orig"
+printf '\n ' >>"$cw/coder/mcp.json"
+cp "$cw/coder/mcp.json" "$tmp/cw-mcp-edited"
+inst
+same "edited MCP file kept without force" "$tmp/cw-mcp-edited" "$cw/coder/mcp.json"
+inst --force
+same "force restores generated MCP file" "$tmp/cw-mcp-orig" "$cw/coder/mcp.json"
 # a file we did not generate is never replaced, even with --force
 printf 'mine = 1\n' >"$cw/manager/config.toml"
 inst --force; code=$?
 is "unmarked codewhale config refused with force" test "$code" -eq 1
 has "unmarked config message" "not generated by agentboard: $cw/manager/config.toml" "$tmp/err"
 has "unmarked config kept" 'mine = 1' "$cw/manager/config.toml"
+
+# Malformed bases refuse during preflight, before any installed files change.
+newhome
+mkdir -p "$home/.codex/rules" "$home/.codewhale"
+printf '{bad json' >"$home/.codewhale/mcp.json"
+inst; code=$?
+is "malformed Codewhale base refused" test "$code" -eq 1
+has "malformed Codewhale base diagnosed" 'invalid JSON in' "$tmp/err"
+is "malformed base wrote no seat output" test ! -e "$home/.local/share/agentboard/codewhale"
+is "malformed base wrote no Claude outputs" bash -c 'test -z "$(find "$1/.claude" -type f -print -quit)"' _ "$home"
+newhome
+mkdir -p "$home/.codex/rules" "$home/.codewhale"
+printf 'provider = [' >"$home/.codewhale/config.toml"
+inst; code=$?
+is "malformed Codewhale TOML refused" test "$code" -eq 1
+has "malformed Codewhale TOML diagnosed" 'invalid TOML in' "$tmp/err"
+is "malformed TOML wrote no seat output" test ! -e "$home/.local/share/agentboard/codewhale"
 
 # --codewhale-provider writes only the provider name; a bad name is a usage error
 newhome
