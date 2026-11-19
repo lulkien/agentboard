@@ -171,11 +171,15 @@ sets `reasoning_effort = "medium"` and `yolo = true` and none sets `approval_pol
 with `-C <scratch dir>` so the repository stays read-only.
 
 A hand-edited generated file is kept unless `--force`; clean managed files refresh
-when their bases or templates change. A file without the `# agentboardGenerated`
-first line is always refused. The installer writes no credentials. Generated files
-are mode `0600`. `--codewhale-provider NAME` overrides the base provider; rerunning
-without it restores the base provider (or the default when no base is set). Give
-each home its key once:
+when their bases or templates change. Without `--force`, unmarked regular Codewhale
+seat config and MCP files are refused; `--force` replaces them. Symlinks and
+nonregular destinations are always refused. Generated files and auth artifacts use
+mode `0600`. When a provider is selected by the base config or
+`--codewhale-provider NAME`, the installer transfers its runtime-effective API key
+through Codewhale's auth CLI into each seat's credential store. Credentials stay
+out of generated config; OAuth/session grants are not transferred. With no provider
+selected, the installer keeps the current no-auth default. `--codewhale-provider`
+overrides the base provider. Manual key setup remains available:
 
     codewhale auth print-api-key --provider P | CODEWHALE_HOME=<home> codewhale auth set --provider P --api-key-stdin
 
