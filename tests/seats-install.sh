@@ -28,6 +28,8 @@ inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/er
   HOME="$home" CODEX_HOME="$home/.codex" PATH="$tmp/bin:$PATH" \
     AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" \
+    AGENTBOARD_FAKE_AUTH_INVENTORY="$home/.codewhale/auth-inventory" \
+    AGENTBOARD_FAKE_FAIL_LIST="${AGENTBOARD_FAKE_FAIL_LIST:-}" \
     AGENTBOARD_FAKE_FAIL_SEAT="${AGENTBOARD_FAKE_FAIL_SEAT:-}" \
     python3 ./seats/install.py "$@" >"$tmp/out" 2>"$tmp/err"
   local code=$?
@@ -47,6 +49,27 @@ import sys
 args = sys.argv[1:]
 with open(os.environ["AGENTBOARD_FAKE_AUTH_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(args) + "\n")
+if args[:2] == ["auth", "list"]:
+    if os.environ.get("AGENTBOARD_FAKE_FAIL_LIST"):
+        sys.exit(7)
+    inventory = pathlib.Path(os.environ["AGENTBOARD_FAKE_AUTH_INVENTORY"])
+    if inventory.exists():
+        sys.stdout.buffer.write(inventory.read_bytes())
+    else:
+        sys.stdout.write("provider config store env route\n")
+    sys.exit(0)
+if args[:2] == ["mcp", "list"]:
+    config = pathlib.Path(os.environ["CODEWHALE_HOME"], "mcp.json")
+    try:
+        print(config.read_text(encoding="utf-8"))
+    except OSError:
+        sys.exit(3)
+    sys.exit(0)
+if args[:2] == ["config", "doctor"]:
+    print("ok")
+    sys.exit(0)
+if args[:2] not in (["auth", "print-api-key"], ["auth", "set"]):
+    sys.exit(2)
 provider = args[args.index("--provider") + 1]
 if args[:2] == ["auth", "print-api-key"]:
     destination = os.environ.get("CODEWHALE_HOME")
@@ -71,6 +94,7 @@ else:
 PY
   chmod 700 "$tmp/bin/codewhale"
 }
+make_fake_codewhale
 grok_inst() { # grok_inst [args]: Grok-only install into the isolated home
   HOME="$home" python3 ./seats/install.py --grok-only "$@" >"$tmp/out" 2>"$tmp/err"
 }
@@ -637,7 +661,16 @@ printf '%s\n' 'base-provider-fixture-key' >"$tmp/expected-base-key"
 printf '%s' 'explicit-provider-fixture-key' >"$home/.codewhale/fake-auth/explicit-provider"
 printf '%s\n' 'explicit-provider-fixture-key' >"$tmp/expected-explicit-key"
 printf '%s\n' base-provider-fixture-key explicit-provider-fixture-key rotated-base-provider-fixture-key deepseek-fixture-key >"$tmp/fixture-secrets"
+cat >"$home/.codewhale/auth-inventory" <<'EOF'
+provider config store env route
+base-provider yes no no config
+explicit-provider no yes no store
+unset-provider no no no missing
+oauth-provider no yes no oauth (run auth login to register grant)
+external-provider no yes no external-consent (awaiting external approval)
+EOF
 cp "$home/.codewhale/fake-auth/base-provider" "$tmp/base-key-before"
+cp "$home/.codewhale/fake-auth/explicit-provider" "$tmp/explicit-key-before"
 inst; code=$?
 is "codewhale install exit" test "$code" -eq 0
 cw=$home/.local/share/agentboard/codewhale
@@ -654,8 +687,15 @@ for seat in analyst coder manager reviewer; do
   HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider base-provider >"$tmp/seat-key"
   is "$seat has usable inherited provider key" cmp -s "$tmp/expected-base-key" "$tmp/seat-key"
+  HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+    AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider explicit-provider >"$tmp/seat-key"
+  is "$seat has usable inactive provider key" cmp -s "$tmp/expected-explicit-key" "$tmp/seat-key"
+  is "$seat does not claim unset provider credentials" test ! -e "$cw/$seat/auth/unset-provider.key"
+  is "$seat does not claim OAuth grant copied" test ! -e "$cw/$seat/auth/oauth-provider.key"
+  is "$seat does not claim external-consent route copied" test ! -e "$cw/$seat/auth/external-provider.key"
 done
 same "source auth remains byte-identical after install" "$tmp/base-key-before" "$home/.codewhale/fake-auth/base-provider"
+same "other source API key remains byte-identical" "$tmp/explicit-key-before" "$home/.codewhale/fake-auth/explicit-provider"
 inst --codewhale-provider explicit-provider
 is "explicit provider overrides base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="explicit-provider"' "$cw/coder/config.toml"
 for seat in analyst coder manager reviewer; do
@@ -671,13 +711,39 @@ is "auth and generated homes are byte-idempotent" diff -r "$tmp/cw-idempotent-be
 printf '%s' 'rotated-base-provider-fixture-key' >"$home/.codewhale/fake-auth/base-provider"
 printf '%s\n' 'rotated-base-provider-fixture-key' >"$tmp/expected-rotated-key"
 cp "$home/.codewhale/fake-auth/base-provider" "$tmp/rotated-source-key-before"
+cp "$home/.codewhale/fake-auth/explicit-provider" "$tmp/explicit-key-before-rotation"
 inst
 for seat in analyst coder manager reviewer; do
   HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider base-provider >"$tmp/seat-key"
   is "$seat receives rotated key" cmp -s "$tmp/expected-rotated-key" "$tmp/seat-key"
+  HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+    AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider explicit-provider >"$tmp/seat-key"
+  is "$seat retains inactive key on rotation" cmp -s "$tmp/expected-explicit-key" "$tmp/seat-key"
 done
 same "rotated source auth remains byte-identical" "$tmp/rotated-source-key-before" "$home/.codewhale/fake-auth/base-provider"
+same "other source auth remains byte-identical after rotation" "$tmp/explicit-key-before-rotation" "$home/.codewhale/fake-auth/explicit-provider"
+cp -r "$cw" "$tmp/cw-before-inventory-failure"
+AGENTBOARD_FAKE_FAIL_LIST=1 inst; code=$?
+is "auth inventory failure refuses" test "$code" -eq 1
+has "auth inventory failure diagnostic is generic" 'cannot enumerate Codewhale provider auth' "$tmp/err"
+is "auth inventory failure leaves all seat files unchanged" diff -r "$tmp/cw-before-inventory-failure" "$cw"
+cat >"$home/.codewhale/auth-inventory" <<'EOF'
+provider config store env route
+base-provider yes maybe no config
+EOF
+inst; code=$?
+is "malformed auth inventory refuses" test "$code" -eq 1
+has "malformed auth inventory diagnostic is generic" 'cannot parse Codewhale provider auth inventory' "$tmp/err"
+is "malformed auth inventory leaves all seat files unchanged" diff -r "$tmp/cw-before-inventory-failure" "$cw"
+cat >"$home/.codewhale/auth-inventory" <<'EOF'
+provider config store env route
+base-provider yes no no config
+explicit-provider no yes no store
+unset-provider no no no missing
+oauth-provider no yes no oauth (run auth login to register grant)
+external-provider no yes no external-consent (awaiting external approval)
+EOF
 cp -r "$cw" "$tmp/cw-before-missing-source-key"
 mv "$home/.codewhale/fake-auth/base-provider" "$tmp/source-key-unavailable"
 inst; code=$?
@@ -727,7 +793,7 @@ for seat in analyst coder manager reviewer; do
   done
 done
 is "eight generated files" test "$(wc -l <"$tmp/cw-files")" -eq 8
-is "selected and explicit auth artifacts preserved" test "$(find "$cw" -type f -path '*/auth/*.key' | wc -l)" -eq 8
+is "all exportable auth artifacts preserved" test "$(find "$cw" -type f -path '*/auth/*.key' | wc -l)" -eq 8
 is "generated files and auth artifacts have private permissions" bash -c 'while IFS= read -r f; do test "$(stat -c %a "$f")" = 600 || exit 1; done <"$1"' _ "$tmp/cw-all-files"
 chmod 644 "$cw/coder/auth/base-provider.key"
 inst
@@ -812,6 +878,7 @@ newhome
 mkdir -p "$home/.codex/rules"
 mkdir -p "$home/.codewhale/fake-auth"
 printf '%s' 'deepseek-fixture-key' >"$home/.codewhale/fake-auth/deepseek"
+printf 'provider config store env route\ndeepseek yes no no config\n' >"$home/.codewhale/auth-inventory"
 printf '%s\n' 'deepseek-fixture-key' >"$tmp/expected-deepseek-key"
 printf '%s\n' deepseek-fixture-key >>"$tmp/fixture-secrets"
 inst --codewhale-provider deepseek; code=$?

@@ -174,12 +174,17 @@ A hand-edited generated file is kept unless `--force`; clean managed files refre
 when their bases or templates change. Without `--force`, unmarked regular Codewhale
 seat config and MCP files are refused; `--force` replaces them. Symlinks and
 nonregular destinations are always refused. Generated files and auth artifacts use
-mode `0600`. When a provider is selected by the base config or
-`--codewhale-provider NAME`, the installer transfers its runtime-effective API key
-through Codewhale's auth CLI into each seat's credential store. Credentials stay
-out of generated config; OAuth/session grants are not transferred. With no provider
-selected, the installer keeps the current no-auth default. `--codewhale-provider`
-overrides the base provider. Manual key setup remains available:
+mode `0600`. The installer uses Codewhale's value-free `auth list` inventory and
+`auth print-api-key` to transfer every runtime-effective API key it can export
+through Codewhale's auth CLI into each seat's credential store, including keys for
+providers other than the selected one. Missing providers are skipped; OAuth/session
+grants and other non-exportable routes are not transferred. Inventory or export
+errors refuse before seat files change. Source keys are read-only, and key rotation
+is picked up on rerun. A removed source key does not revoke an existing seat key.
+Credentials stay out of generated config. The selected base provider, or
+`--codewhale-provider NAME`, still controls `config.toml`; the flag overrides the
+base provider. With no exportable keys, the installer keeps the no-auth default.
+Manual key setup remains available:
 
     codewhale auth print-api-key --provider P | CODEWHALE_HOME=<home> codewhale auth set --provider P --api-key-stdin
 

@@ -387,6 +387,58 @@ def codewhale_auth_key(provider, home):
     return key
 
 
+def codewhale_auth_inventory(home):
+    """Return every runtime API-key route from Codewhale's value-free table."""
+    env = os.environ.copy()
+    env["HOME"] = home
+    env.pop("CODEWHALE_HOME", None)
+    try:
+        result = subprocess.run(
+            ["codewhale", "auth", "list"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            check=False,
+        )
+    except OSError as exc:
+        raise ValueError("cannot enumerate Codewhale provider auth with auth list") from exc
+    if result.returncode != 0:
+        raise ValueError("cannot enumerate Codewhale provider auth with auth list")
+    try:
+        lines = result.stdout.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError("cannot parse Codewhale provider auth inventory") from exc
+    header = re.compile(r"^provider\s+config\s+store\s+env\s+route$")
+    if not lines or not header.fullmatch(lines[0].strip()):
+        raise ValueError("cannot parse Codewhale provider auth inventory")
+    routes = []
+    seen = set()
+    row_pattern = re.compile(
+        r"^([A-Za-z0-9_.-]+)\s+(yes|no)\s+(yes|no)\s+(yes|no)\s+"
+        r"(config|store|env|oauth|external|external-consent|missing)(?:\s+\([^()]*\))?$"
+    )
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        match = row_pattern.fullmatch(line.strip())
+        if not match:
+            raise ValueError("cannot parse Codewhale provider auth inventory")
+        provider, config, store, environment, route = match.groups()
+        if provider in seen:
+            raise ValueError("cannot parse Codewhale provider auth inventory")
+        seen.add(provider)
+        sources = {"config": config, "store": store, "env": environment}
+        has_source = "yes" in sources.values()
+        if route in sources:
+            if sources[route] != "yes":
+                raise ValueError("uncertain Codewhale provider auth inventory")
+            routes.append(provider)
+        elif route == "missing" and has_source:
+            raise ValueError("uncertain Codewhale provider auth inventory")
+    return routes
+
+
 def write_private_file(path, data):
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -419,7 +471,7 @@ def copy_codewhale_home(source, destination):
             write_private_file(os.path.join(target_root, name), read(src_file))
 
 
-def stage_codewhale_auth(provider, key, home, codewhale_files):
+def stage_codewhale_auth(provider_keys, home, codewhale_files):
     scratch = "/tmp/agentboard/scratch"
     os.makedirs(scratch, mode=0o700, exist_ok=True)
     by_home = {}
@@ -442,21 +494,22 @@ def stage_codewhale_auth(provider, key, home, codewhale_files):
                 stage_mcp = os.path.join(stage_home, "mcp.json")
                 env["CODEWHALE_HOME"] = stage_home
                 try:
-                    result = subprocess.run(
-                        ["codewhale", "auth", "set", "--provider", provider, "--api-key-stdin"],
-                        input=key,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        env=env,
-                        check=False,
-                    )
+                    for provider, key in provider_keys:
+                        result = subprocess.run(
+                            ["codewhale", "auth", "set", "--provider", provider, "--api-key-stdin"],
+                            input=key,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            env=env,
+                            check=False,
+                        )
+                        if result.returncode != 0:
+                            raise ValueError(f"cannot stage API key for provider {provider} in {seat} home")
                 except OSError as exc:
-                    raise ValueError(f"cannot stage API key for provider {provider} in {seat} home") from exc
-                if result.returncode != 0:
-                    raise ValueError(f"cannot stage API key for provider {provider} in {seat} home")
+                    raise ValueError("cannot stage Codewhale provider API keys in seat home") from exc
                 config_data = read(stage_config)
-                if key in config_data:
-                    raise ValueError(f"Codewhale auth CLI placed provider {provider} key in generated config")
+                if any(key in config_data for _, key in provider_keys):
+                    raise ValueError("Codewhale auth CLI placed an API key in generated config")
                 mcp_data = read(stage_mcp)
                 mcp_want = outputs["mcp.json"][1]
                 if mcp_data != mcp_want:
@@ -482,12 +535,12 @@ def stage_codewhale_auth(provider, key, home, codewhale_files):
                     for dirname in dirs:
                         entry = os.path.join(root, dirname)
                         if os.path.islink(entry):
-                            raise ValueError(f"unsupported auth artifact for provider {provider}")
+                            raise ValueError("unsupported Codewhale auth artifact")
                         os.chmod(entry, 0o700)
                     for filename in files:
                         source_path = os.path.join(root, filename)
                         if os.path.islink(source_path) or not os.path.isfile(source_path):
-                            raise ValueError(f"unsupported auth artifact for provider {provider}")
+                            raise ValueError("unsupported Codewhale auth artifact")
                         os.chmod(source_path, 0o600)
                         relative = os.path.relpath(source_path, stage_home)
                         if relative in ("config.toml", "mcp.json"):
@@ -693,12 +746,14 @@ def main():
     if not grok_only:
         check(f"{home}/.local/bin/start-agentboard-manager")
         check(f"{home}/.config/systemd/user/agentboard.service")
-    if not refuse and codewhale_provider:
+    if not refuse and not grok_only:
         try:
-            key = codewhale_auth_key(codewhale_provider, home)
-            codewhale_files, codewhale_auth_files = stage_codewhale_auth(
-                codewhale_provider, key, home, codewhale_files
-            )
+            exportable = codewhale_auth_inventory(home)
+            provider_keys = [(name, codewhale_auth_key(name, home)) for name in exportable]
+            if provider_keys:
+                codewhale_files, codewhale_auth_files = stage_codewhale_auth(
+                    provider_keys, home, codewhale_files
+                )
         except (OSError, ValueError) as exc:
             print(str(exc), file=sys.stderr)
             refuse = True
