@@ -15,7 +15,7 @@ its client gets a board identity.
 
 ## Install
 
-    ./seats/install.py --force
+    ./install.py --force
 
 It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml`. Claude
 seat files are generated from the repo card and `~/.claude.json`. Repo card links
@@ -28,6 +28,10 @@ named destinations. A full install also links `seats/start-agentboard-manager` t
 block and does not install the launcher. Use `--skip-grok` to install or refresh
 everything else without reading or changing `~/.grok/config.toml`; it is mutually
 exclusive with `--grok-only`.
+Use `--agent codex,codewhale,claude,grok` to install only the named clients; names
+are exact lowercase values and cannot be repeated. Selected runs preflight only
+those clients, and do not manage the shared launcher or systemd unit. A provider
+override is accepted with the default full install or when `codewhale` is selected.
 The user unit is linked, never enabled or started. Start the daemon before launching
 HTTP seats and before merging these cards into a live checkout. Its default address
 is `127.0.0.1:8765`; check `/api/health` for the board path and instance. The unit
@@ -204,11 +208,11 @@ from `seats/codewhale/status-hooks.toml`: session start reports `idle`,
 message submit `working`, turn end `done`, as OSC 7501 on the tty. A seat is
 ready when `hc wait <seat>` returns; use `hc send --wait` and retry the first send
 while hc answers `still starting`. The board stays the authority. Homes written
-before the hooks existed need `./seats/install.py --force` to pick them up.
+before the hooks existed need `./install.py --force` to pick them up.
 
 ## Grok
 
-`./seats/install.py` installs the marked block from `seats/grok/agentboard-mcp.toml`
+`./install.py` installs the marked block from `seats/grok/agentboard-mcp.toml`
 into `~/.grok/config.toml`. It contains only the HTTP URL; its actor comes from
 `${AGENTBOARD_SEAT:-manager}`: unset
 uses `manager`, and a supplied value passes through unchanged. Never set

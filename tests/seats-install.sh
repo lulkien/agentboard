@@ -37,6 +37,13 @@ inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/er
   cat "$tmp/err" >>"$tmp/installer-stderr.log"
   return "$code"
 }
+root_inst() { # root_inst [args]: exercise the supported repository entrypoint
+  HOME="$home" CODEX_HOME="$home/.codex" PATH="$tmp/bin:$PATH" \
+    AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+    AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" \
+    AGENTBOARD_FAKE_AUTH_INVENTORY="$home/.codewhale/auth-inventory" \
+    ./install.py "$@" >"$tmp/out" 2>"$tmp/err"
+}
 make_fake_codewhale() {
   mkdir -p "$tmp/bin"
   cat >"$tmp/bin/codewhale" <<'PY'
@@ -973,6 +980,112 @@ is "bad provider name usage error" test "$code" -eq 2
 is "bad provider writes nothing" test ! -e "$home/.local/share/agentboard"
 inst --grok-only; code=$?
 is "grok-only writes no codewhale home" test ! -e "$home/.local/share/agentboard"
+
+# Root entrypoint and selective client preflight/write boundaries.
+newhome
+mkdir -p "$home/.codex/rules" "$home/.grok" "$home/.codewhale"
+printf '{bad json' >"$home/.claude.json"
+printf '{bad grok' >"$home/.grok/config.toml"
+printf '{bad codewhale' >"$home/.codewhale/mcp.json"
+root_inst --agent codex; code=$?
+is "root codex singleton succeeds despite malformed unselected inputs" test "$code" -eq 0
+is "codex singleton installs codex profile" test -L "$home/.codex/coder.config.toml"
+is "codex singleton skips Claude files" test ! -e "$home/.claude/coder-mcp.json"
+is "codex singleton skips Codewhale files" test ! -e "$home/.local/share/agentboard/codewhale"
+is "codex singleton skips Grok config" test "$(cat "$home/.grok/config.toml")" = '{bad grok'
+is "codex singleton skips shared launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+
+newhome
+mkdir -p "$home/.codex/rules" "$home/.grok" "$home/.codewhale"
+printf '{}' >"$home/.claude.json"
+printf '{bad grok' >"$home/.grok/config.toml"
+printf '{bad codewhale' >"$home/.codewhale/mcp.json"
+root_inst --agent codex,claude; code=$?
+is "root codex and Claude pair ignores malformed unselected clients" test "$code" -eq 0
+is "pair writes Claude output" test -f "$home/.claude/coder-mcp.json"
+is "pair writes Codex output" test -L "$home/.codex/coder.config.toml"
+is "pair skips Codewhale output" test ! -e "$home/.local/share/agentboard/codewhale"
+is "pair leaves Grok bytes alone" test "$(cat "$home/.grok/config.toml")" = '{bad grok'
+is "pair leaves launcher and unit alone" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+
+newhome
+mkdir -p "$home/.codex/rules"
+root_inst --agent codex,codewhale; code=$?
+is "root codex and Codewhale pair succeeds" test "$code" -eq 0
+is "Codewhale pair writes Codex profile" test -L "$home/.codex/coder.config.toml"
+is "Codewhale pair writes selected Codewhale home" test -f "$home/.local/share/agentboard/codewhale/coder/config.toml" -a -f "$home/.local/share/agentboard/codewhale/coder/mcp.json"
+is "Codewhale pair skips Claude files" test ! -e "$home/.claude/coder-mcp.json"
+is "Codewhale pair skips Grok" test ! -e "$home/.grok/config.toml"
+is "Codewhale pair skips shared launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+
+newhome
+mkdir -p "$home/.grok" "$home/.codewhale"
+printf '{bad json' >"$home/.claude.json"
+printf '{bad codewhale' >"$home/.codewhale/mcp.json"
+root_inst --agent grok; code=$?
+is "root Grok singleton succeeds despite malformed unselected inputs" test "$code" -eq 0
+is "Grok singleton installs its managed block" grep -qF '# BEGIN AGENTBOARD MCP' "$home/.grok/config.toml"
+is "Grok singleton skips Codex profiles" test ! -e "$home/.codex/coder.config.toml"
+is "Grok singleton skips Claude outputs" test ! -e "$home/.claude/coder-mcp.json"
+is "Grok singleton skips Codewhale outputs" test ! -e "$home/.local/share/agentboard/codewhale"
+is "Grok singleton skips launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+
+newhome
+mkdir -p "$home/.codex/rules" "$home/.grok"
+printf '[broken\n' >"$home/.grok/config.toml"
+cp "$home/.grok/config.toml" "$tmp/selected-grok-before"
+root_inst --agent codex,grok; code=$?
+is "selected malformed Grok preflight refuses before writes" test "$code" -eq 1
+has "selected malformed Grok preflight diagnoses TOML" 'invalid TOML' "$tmp/err"
+same "selected malformed Grok preflight preserves config" "$tmp/selected-grok-before" "$home/.grok/config.toml"
+is "selected malformed Grok preflight writes no Codex output" test ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.codex/rules/default.rules"
+
+newhome
+mkdir -p "$home/.codex/rules" "$home/.codewhale"
+printf '{bad json' >"$home/.codewhale/mcp.json"
+cp "$home/.codewhale/mcp.json" "$tmp/selected-codewhale-before"
+root_inst --agent codex,codewhale; code=$?
+is "selected malformed Codewhale preflight refuses before writes" test "$code" -eq 1
+has "selected malformed Codewhale preflight diagnoses JSON" 'invalid JSON in' "$tmp/err"
+same "selected malformed Codewhale preflight preserves base" "$tmp/selected-codewhale-before" "$home/.codewhale/mcp.json"
+is "selected malformed Codewhale preflight writes no Codex output" test ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.codex/rules/default.rules"
+is "selected malformed Codewhale preflight writes no seat home" test ! -e "$home/.local/share/agentboard/codewhale"
+
+newhome
+mkdir -p "$home/.codex/rules"
+printf '{bad json' >"$home/.claude.json"
+root_inst --agent claude; code=$?
+is "selected malformed Claude input refuses" test "$code" -eq 1
+is "selected malformed Claude input writes no output" test ! -e "$home/.claude/coder-mcp.json" -a ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.local/bin/start-agentboard-manager"
+
+for selector in '' codex, codex,,claude codex,codex Codex mystery; do
+  newhome
+  root_inst --agent "$selector"; code=$?
+  is "invalid --agent $selector exits usage 2 before writes" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.claude/coder-mcp.json"
+done
+newhome
+root_inst --agent codex --agent claude; code=$?
+is "repeated --agent exits usage 2 before writes" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml"
+newhome
+root_inst --agent codex --skip-grok; code=$?
+is "selector with legacy Grok flag exits usage 2" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml"
+newhome
+root_inst --agent claude --codewhale-provider custom; code=$?
+is "provider without selected Codewhale exits usage 2" test "$code" -eq 2 -a ! -e "$home/.claude/coder-mcp.json"
+newhome
+root_inst --codewhale-provider custom --skip-grok; code=$?
+is "provider outside default full install exits usage 2" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml"
+newhome
+root_inst --agent codewhale --codewhale-provider custom; code=$?
+is "provider override is valid for selected Codewhale" test "$code" -eq 0 -a -f "$home/.local/share/agentboard/codewhale/coder/config.toml"
+is "selected Codewhale provider is applied" grep -qF 'provider = "custom"' "$home/.local/share/agentboard/codewhale/coder/config.toml"
+
+newhome
+mkdir -p "$home/.codex/rules"
+printf 'preserve unselected destination' >"$home/.claude/coder-mcp.json"
+root_inst --agent codex --force; code=$?
+is "force selected Codex install succeeds" test "$code" -eq 0
+is "force selected Codex preserves Claude destination" test "$(cat "$home/.claude/coder-mcp.json")" = 'preserve unselected destination'
 
 echo "$((n - fail))/$n passed (seats installer)"
 [ "$fail" -eq 0 ]

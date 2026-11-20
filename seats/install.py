@@ -3,7 +3,7 @@
 The Codex rules are not a link: they are a marked block inside the user's own
 rules/default.rules, which Codex also appends to. Grok uses a marked block in its
 user config as well.
-usage: install.py [--force] [--grok-only | --skip-grok] [--codewhale-provider NAME]
+usage: install.py [--force] [--agent codex,codewhale,claude,grok] [--grok-only | --skip-grok] [--codewhale-provider NAME]
 """
 import json
 import hashlib
@@ -660,6 +660,8 @@ def main():
     grok_only = False
     skip_grok = False
     provider = None
+    selected_agents = None
+    selector_seen = False
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -669,6 +671,13 @@ def main():
             grok_only = True
         elif arg == "--skip-grok":
             skip_grok = True
+        elif arg == "--agent" and i + 1 < len(sys.argv):
+            if selector_seen:
+                print("usage: --agent may be specified only once", file=sys.stderr)
+                sys.exit(2)
+            selector_seen = True
+            selected_agents = sys.argv[i + 1].split(",")
+            i += 1
         elif arg == "--codewhale-provider" and i + 1 < len(sys.argv):
             i += 1
             provider = sys.argv[i]
@@ -682,11 +691,34 @@ def main():
     if grok_only and skip_grok:
         print("usage: --grok-only and --skip-grok are mutually exclusive", file=sys.stderr)
         sys.exit(2)
+    valid_agents = {"codex", "codewhale", "claude", "grok"}
+    if selected_agents is not None and (
+        not selected_agents
+        or any(not name or name not in valid_agents for name in selected_agents)
+        or len(set(selected_agents)) != len(selected_agents)
+    ):
+        print("usage: --agent expects a comma-list of codex,codewhale,claude,grok without duplicates", file=sys.stderr)
+        sys.exit(2)
+    if selected_agents is not None and (grok_only or skip_grok):
+        print("usage: --agent cannot be combined with --grok-only or --skip-grok", file=sys.stderr)
+        sys.exit(2)
+    if provider is not None and (
+        (selected_agents is not None and "codewhale" not in selected_agents)
+        or (selected_agents is None and (grok_only or skip_grok))
+    ):
+        print("usage: --codewhale-provider requires the default full install or codewhale in --agent", file=sys.stderr)
+        sys.exit(2)
     src = os.path.dirname(os.path.abspath(__file__))
     home = os.environ["HOME"]
     codex_home = os.environ.get("CODEX_HOME") or f"{home}/.codex"
     claude_home = f"{home}/.claude"
     repo = os.path.dirname(src)
+    selective = selected_agents is not None
+    agents = set(selected_agents) if selective else valid_agents
+    install_codex = not selective or "codex" in agents
+    install_claude = not selective or "claude" in agents
+    install_codewhale = not selective or "codewhale" in agents
+    install_grok = not selective or "grok" in agents
 
     rules_src = f"{src}/codex/rules/agentboard.rules"
     rules_dir = f"{codex_home}/rules"
@@ -716,9 +748,10 @@ def main():
                 print(f"exists: {p} (use --force)", file=sys.stderr)
                 refuse = True
 
-    if not grok_only:
+    if not grok_only and install_codex:
         for seat in SEATS:
             check(f"{codex_home}/{seat}.config.toml")
+    if not grok_only and install_claude:
         try:
             user_servers = claude_user_servers(f"{home}/.claude.json")
         except ValueError as exc:
@@ -733,7 +766,7 @@ def main():
                 refuse = True
             claude_files.append((path, want, names, state))
 
-    if not grok_only:
+    if not grok_only and install_codewhale:
         for seat in SEATS:
             cw_home = f"{home}/.local/share/agentboard/codewhale/{seat}"
             if os.path.lexists(cw_home) and (os.path.islink(cw_home) or not os.path.isdir(cw_home)):
@@ -770,23 +803,23 @@ def main():
                 codewhale_files.append((path, want, state))
 
     # default.rules is judged here, with the other checks, so a refusal links nothing.
-    if not grok_only and not source_ok(read(rules_src)):
+    if not grok_only and install_codex and not source_ok(read(rules_src)):
         print(
             f"bad rules source: {rules_src} (must start with BEGIN, end with END, "
             "and hold no other marker)",
             file=sys.stderr,
         )
         refuse = True
-    elif not grok_only and os.path.islink(rules_file):
+    elif not grok_only and install_codex and os.path.islink(rules_file):
         print(f"{rules_file} is a symlink; the installer edits only a regular file", file=sys.stderr)
         refuse = True
-    elif not grok_only and os.path.exists(rules_file) and not os.path.isfile(rules_file):
+    elif not grok_only and install_codex and os.path.exists(rules_file) and not os.path.isfile(rules_file):
         print(
             f"{rules_file} is not a regular file; the installer edits only a regular file",
             file=sys.stderr,
         )
         refuse = True
-    elif not grok_only and os.path.isfile(rules_file):
+    elif not grok_only and install_codex and os.path.isfile(rules_file):
         scan = rules_scan(read(rules_file))
         if scan[0] == "bad":
             print(
@@ -796,7 +829,7 @@ def main():
             )
             refuse = True
     grok_source = read(grok_source_path)
-    if not skip_grok:
+    if not skip_grok and install_grok:
         grok_ok, grok_state = grok_preflight(grok_file, grok_source, force)
         if not grok_ok:
             refuse = True
@@ -823,10 +856,10 @@ def main():
             print(f"invalid TOML in rendered Grok config {grok_file}: {exc}", file=sys.stderr)
             refuse = True
         grok_candidate = candidate
-    if not grok_only:
+    if not grok_only and not selective:
         check(f"{home}/.local/bin/start-agentboard-manager")
         check(f"{home}/.config/systemd/user/agentboard.service")
-    if not refuse and not grok_only:
+    if not refuse and not grok_only and install_codewhale:
         try:
             exportable = codewhale_auth_inventory(home)
             provider_keys = [(name, codewhale_auth_key(name, home)) for name in exportable]
@@ -860,7 +893,7 @@ def main():
             candidate_override=grok_candidate,
         )
 
-    if grok_only:
+    if grok_only or (selective and agents == {"grok"}):
         install_grok_block()
         return
 
@@ -897,26 +930,28 @@ def main():
             )
 
     try:
-        for seat in SEATS:
-            link(f"{src}/codex/{seat}.config.toml", f"{codex_home}/{seat}.config.toml")
-        install_rules_block()
-        remove_legacy_rules_link()
-        os.makedirs(claude_home, exist_ok=True)
-        for path, want, names, state in claude_files:
-            if state in ("new", "link", "rewrite"):
-                tmp = f"{claude_home}/.{os.path.basename(path)}.agentboard.{os.getpid()}"
-                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                try:
-                    os.fchmod(fd, 0o600)
-                    with os.fdopen(fd, "wb") as f:
-                        f.write(want)
-                    os.replace(tmp, path)
-                finally:
-                    if os.path.lexists(tmp): os.unlink(tmp)
-                verb = "replaced" if state == "rewrite" else "generated"
-                print(f"{verb}: {path} (servers: {', '.join(names)})")
-            elif state == "unchanged":
-                print(f"unchanged: {path}")
+        if install_codex:
+            for seat in SEATS:
+                link(f"{src}/codex/{seat}.config.toml", f"{codex_home}/{seat}.config.toml")
+            install_rules_block()
+            remove_legacy_rules_link()
+        if install_claude:
+            os.makedirs(claude_home, exist_ok=True)
+            for path, want, names, state in claude_files:
+                if state in ("new", "link", "rewrite"):
+                    tmp = f"{claude_home}/.{os.path.basename(path)}.agentboard.{os.getpid()}"
+                    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    try:
+                        os.fchmod(fd, 0o600)
+                        with os.fdopen(fd, "wb") as f:
+                            f.write(want)
+                        os.replace(tmp, path)
+                    finally:
+                        if os.path.lexists(tmp): os.unlink(tmp)
+                    verb = "replaced" if state == "rewrite" else "generated"
+                    print(f"{verb}: {path} (servers: {', '.join(names)})")
+                elif state == "unchanged":
+                    print(f"unchanged: {path}")
         for path, want, state in codewhale_files:
             if state in ("new", "rewrite"):
                 os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
@@ -935,9 +970,10 @@ def main():
                 print(f"unchanged: {path}")
         for seat_home, path, payload in codewhale_auth_files:
             install_private_auth_artifact(seat_home, path, payload)
-        link(f"{src}/start-agentboard-manager", f"{home}/.local/bin/start-agentboard-manager")
-        link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")
-        if not skip_grok:
+        if not selective:
+            link(f"{src}/start-agentboard-manager", f"{home}/.local/bin/start-agentboard-manager")
+            link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")
+        if not skip_grok and install_grok:
             install_grok_block()
     finally:
         if os.path.lexists(rules_tmp):
