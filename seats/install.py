@@ -18,7 +18,9 @@ import tomllib
 
 SEATS = ["analyst", "coder", "manager", "reviewer"]
 CODEX_HOME_ROOT = ".local/share/agentboard/seats"
+CLAUDE_HOME_ROOT = ".local/share/agentboard/seats"
 CODEX_SEAT_MARK = b"agentboard Codex seat home v1\n"
+CLAUDE_SEAT_MARK = b"agentboard Claude seat home v1\n"
 CLAUDE_MARK = "agentboardGenerated"
 CLAUDE_MARK_TEXT = "written by agentboard seats/install.py from seats/claude/<seat>-mcp.json and ~/.claude.json mcpServers; rerun it to refresh, --force overwrites edits"
 BEGIN = b"# BEGIN AGENTBOARD RULES"
@@ -285,30 +287,6 @@ def install_codex_seat_homes(plans):
         print(f"generated: {destination} (Codex role home)")
 
 
-def claude_user_servers(path):
-    try:
-        with open(path, "rb") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return {}
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ValueError(f"invalid JSON in {path}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"invalid JSON in {path}: top level must be an object")
-    servers = data.get("mcpServers", {})
-    if not isinstance(servers, dict):
-        raise ValueError(f"mcpServers in {path} is not an object")
-    return servers
-
-
-def claude_seat_bytes(card_path, user):
-    with open(card_path, encoding="utf-8") as f:
-        card = json.load(f)
-    merged = {**user, **card.get("mcpServers", {})}
-    payload = {CLAUDE_MARK: CLAUDE_MARK_TEXT, "mcpServers": merged}
-    return (json.dumps(payload, indent=2) + "\n").encode(), sorted(merged)
-
-
 def claude_seat_state(path, want, repo, force):
     if os.path.islink(path):
         target = os.readlink(path)
@@ -336,6 +314,230 @@ def claude_seat_state(path, want, repo, force):
     print(f"unchanged: {path} (differs; --force rewrites it)")
     print(f"note: {path} differs from the card and ~/.claude.json; --force rewrites it", file=sys.stderr)
     return "differs"
+
+
+def claude_base_json(path, optional=False):
+    """Read one Claude user-scope JSON file without following unsafe inputs."""
+    if not os.path.lexists(path):
+        if optional:
+            return None
+        return {}
+    if os.path.islink(path) or not os.path.isfile(path):
+        raise ValueError(f"invalid Claude base file: {path}")
+    try:
+        with open(path, "rb") as stream:
+            value = json.load(stream)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"invalid JSON in {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"invalid JSON in {path}: top level must be an object")
+    return value
+
+
+def claude_home_plans(home, src, repo, force):
+    """Preflight all role homes and legacy cards before any Claude publication."""
+    base = os.path.join(home, ".claude")
+    if os.path.islink(base) or (os.path.lexists(base) and not os.path.isdir(base)):
+        raise ValueError(f"invalid Claude base directory: {base}")
+    settings = claude_base_json(os.path.join(base, "settings.json"))
+    global_config = claude_base_json(os.path.join(home, ".claude.json"))
+    credential_path = os.path.join(base, ".credentials.json")
+    credentials = None
+    if os.path.lexists(credential_path):
+        if os.path.islink(credential_path) or not os.path.isfile(credential_path):
+            raise ValueError(f"invalid Claude base file: {credential_path}")
+        claude_base_json(credential_path)
+        credentials = read(credential_path)
+
+    user_servers = global_config.get("mcpServers", {})
+    if not isinstance(user_servers, dict):
+        raise ValueError(f"mcpServers in {os.path.join(home, '.claude.json')} is not an object")
+    plans = []
+    canonical_skills = os.path.join(home, ".agents", "skills")
+    for seat in SEATS:
+        destination = os.path.join(home, CLAUDE_HOME_ROOT, seat, "claude")
+        current = home
+        for component in (".local", "share", "agentboard", "seats", seat, "claude"):
+            current = os.path.join(current, component)
+            if os.path.islink(current):
+                raise ValueError(f"unsafe Claude seat home path: {current}")
+            if os.path.lexists(current) and not os.path.isdir(current):
+                raise ValueError(f"invalid Claude seat home path: {current}")
+        marker = os.path.join(destination, ".agentboard-seat")
+        if os.path.lexists(destination) and (
+            os.path.islink(marker) or not os.path.isfile(marker) or read(marker) != CLAUDE_SEAT_MARK
+        ):
+            raise ValueError(f"unmanaged Claude seat home: {destination}; move it aside before installing")
+
+        role_settings = dict(settings)
+        permissions = role_settings.get("permissions", {})
+        if not isinstance(permissions, dict):
+            raise ValueError(f"permissions in {os.path.join(base, 'settings.json')} is not an object")
+        permissions = dict(permissions)
+        if seat in ("analyst", "reviewer"):
+            denied = permissions.get("deny", [])
+            if not isinstance(denied, list) or any(not isinstance(item, str) for item in denied):
+                raise ValueError(f"permissions.deny in {os.path.join(base, 'settings.json')} must be a string array")
+            permissions["deny"] = list(dict.fromkeys([*denied, "Edit", "Write", "NotebookEdit"]))
+        role_settings["permissions"] = permissions
+        role_config = dict(global_config)
+        # Claude stores project trust, approvals and project MCP state under this
+        # map. A relocated user config must not promote it to global role state.
+        role_config.pop("projects", None)
+        role_config["mcpServers"] = {**user_servers}
+        card_path = os.path.join(src, "claude", f"{seat}-mcp.json")
+        with open(card_path, encoding="utf-8") as stream:
+            card = json.load(stream)
+        merged_servers = {**user_servers, **card.get("mcpServers", {})}
+        mcp_config = {CLAUDE_MARK: CLAUDE_MARK_TEXT, "mcpServers": merged_servers}
+        files = {
+            ".agentboard-seat": CLAUDE_SEAT_MARK,
+            "settings.json": (json.dumps(role_settings, indent=2) + "\n").encode(),
+            ".claude.json": (json.dumps(role_config, indent=2) + "\n").encode(),
+            "mcp.json": (json.dumps(mcp_config, indent=2) + "\n").encode(),
+        }
+        if credentials is not None:
+            files[".credentials.json"] = credentials
+            files[".agentboard-credentials.sha256"] = (hashlib.sha256(credentials).hexdigest() + "\n").encode()
+        stale_credentials = []
+        credential_warnings = []
+        role_credentials = os.path.join(destination, ".credentials.json")
+        role_credential_mark = os.path.join(destination, ".agentboard-credentials.sha256")
+        copied_snapshot = False
+        if os.path.lexists(role_credentials):
+            if os.path.islink(role_credentials) or not os.path.isfile(role_credentials):
+                raise ValueError(f"unsafe Claude seat file: {role_credentials}")
+            if os.path.lexists(role_credential_mark):
+                if os.path.islink(role_credential_mark) or not os.path.isfile(role_credential_mark):
+                    raise ValueError(f"unsafe Claude seat file: {role_credential_mark}")
+                recorded_hash = read(role_credential_mark).decode("ascii", errors="ignore").strip()
+                copied_snapshot = (
+                    len(recorded_hash) == 64
+                    and recorded_hash == hashlib.sha256(read(role_credentials)).hexdigest()
+                )
+            if credentials is None:
+                if force and copied_snapshot:
+                    stale_credentials.extend((role_credentials, role_credential_mark))
+                elif not copied_snapshot:
+                    credential_warnings.append(role_credentials)
+            elif not copied_snapshot:
+                # A role login without a matching installer snapshot marker is
+                # role-owned. Never overwrite it with the base account.
+                files.pop(".credentials.json", None)
+                files.pop(".agentboard-credentials.sha256", None)
+                credential_warnings.append(role_credentials)
+        elif os.path.lexists(role_credential_mark):
+            if os.path.islink(role_credential_mark) or not os.path.isfile(role_credential_mark):
+                raise ValueError(f"unsafe Claude seat file: {role_credential_mark}")
+            if force:
+                stale_credentials.append(role_credential_mark)
+        skills_home = os.path.join(destination, "skills")
+        if os.path.islink(skills_home) or (os.path.lexists(skills_home) and not os.path.isdir(skills_home)):
+            raise ValueError(f"unsafe Claude skills directory: {skills_home}")
+        for skill in (f"agentboard-{seat}", "agentboard-team"):
+            source = os.path.join(canonical_skills, skill)
+            if not os.path.lexists(source):
+                raise ValueError(f"canonical Claude skill missing: {source}; run skills/install.py first")
+            if os.path.islink(source) and not os.path.exists(source):
+                raise ValueError(f"canonical Claude skill is broken: {source}")
+            if not os.path.isdir(source):
+                raise ValueError(f"canonical Claude skill is not a directory: {source}")
+            link_path = os.path.join(destination, "skills", skill)
+            if os.path.isdir(link_path) and not os.path.islink(link_path):
+                raise ValueError(f"unsafe Claude skill destination: {link_path}")
+            if os.path.lexists(link_path) and (
+                not os.path.islink(link_path) or os.readlink(link_path) != source
+            ) and not force:
+                raise ValueError(f"unmanaged Claude skill destination: {link_path}; use --force")
+        states = {}
+        for name, payload in files.items():
+            path = os.path.join(destination, name)
+            if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
+                raise ValueError(f"unsafe Claude seat file: {path}")
+            if os.path.lexists(path) and not force:
+                if not os.path.isfile(marker) or read(marker) != CLAUDE_SEAT_MARK:
+                    raise ValueError(f"unmanaged Claude seat file: {path}; use --force")
+                if read(path) == payload and stat.S_IMODE(os.stat(path).st_mode) == 0o600:
+                    states[path] = "unchanged"
+                else:
+                    print(f"note: {path} differs from Claude base settings; --force rewrites it", file=sys.stderr)
+                    states[path] = "differs"
+            else:
+                states[path] = "rewrite" if os.path.lexists(path) else "new"
+
+        legacy_path = os.path.join(base, f"{seat}-mcp.json")
+        want = (json.dumps({CLAUDE_MARK: CLAUDE_MARK_TEXT, "mcpServers": merged_servers}, indent=2) + "\n").encode()
+        legacy_state = claude_seat_state(legacy_path, want, repo, force)
+        if legacy_state is None:
+            raise ValueError(f"unsafe legacy Claude card: {legacy_path}")
+        plans.append((destination, files, states, seat, legacy_path, want, legacy_state, sorted(merged_servers), stale_credentials, credential_warnings))
+    return plans
+
+
+def install_claude_seat_homes(plans, home):
+    canonical_skills = os.path.join(home, ".agents", "skills")
+    warnings_to_print = []
+    for destination, files, states, seat, legacy_path, legacy_want, legacy_state, server_names, stale_credentials, role_warnings in plans:
+        os.makedirs(destination, mode=0o700, exist_ok=True)
+        os.chmod(destination, 0o700)
+        for name, payload in files.items():
+            path = os.path.join(destination, name)
+            if states[path] in ("unchanged", "differs"):
+                continue
+            tmp = f"{path}.agentboard.{os.getpid()}"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(payload)
+                os.replace(tmp, path)
+            finally:
+                if os.path.lexists(tmp):
+                    os.unlink(tmp)
+        os.chmod(os.path.join(destination, ".agentboard-seat"), 0o600)
+        skills_dir = os.path.join(destination, "skills")
+        os.makedirs(skills_dir, mode=0o700, exist_ok=True)
+        os.chmod(skills_dir, 0o700)
+        for skill in (f"agentboard-{seat}", "agentboard-team"):
+            source = os.path.join(canonical_skills, skill)
+            target = os.path.join(skills_dir, skill)
+            if os.path.islink(target) and os.readlink(target) == source:
+                continue
+            if os.path.lexists(target):
+                os.unlink(target)
+            os.symlink(source, target)
+        os.chmod(destination, 0o700)
+        for path in stale_credentials:
+            if not os.path.lexists(path):
+                continue
+            os.unlink(path)
+            if path.endswith("/.credentials.json"):
+                print(f"removed stale Claude credentials: {path}")
+        warnings_to_print.extend(role_warnings)
+        verb = "generated" if any(state in ("new", "rewrite") for state in states.values()) else "unchanged"
+        print(f"{verb}: {destination} (Claude role home)")
+        os.makedirs(os.path.dirname(legacy_path), mode=0o700, exist_ok=True)
+        if legacy_state in ("new", "link", "rewrite"):
+            tmp = f"{legacy_path}.agentboard.{os.getpid()}"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(legacy_want)
+                os.replace(tmp, legacy_path)
+            finally:
+                if os.path.lexists(tmp):
+                    os.unlink(tmp)
+            verb = "replaced" if legacy_state == "rewrite" else "generated"
+            print(f"{verb}: {legacy_path} (servers: {', '.join(server_names)})")
+        else:
+            print(f"unchanged: {legacy_path}")
+    for path in warnings_to_print:
+        print(
+            f"warning: preserving Claude role credentials with unknown ownership; "
+            f"inspect and remove manually if stale: {path}",
+            file=sys.stderr,
+        )
 
 
 def block_bytes(source, begin, end, nl):
@@ -931,7 +1133,6 @@ def main():
     # A symlink alias of a role home is runtime-only; compatibility writes stay
     # in the base home so they cannot widen a restricted role's policy.
     codex_home = base_codex_home if role_home_target else resolved_home
-    claude_home = f"{home}/.claude"
     repo = os.path.dirname(src)
     selective = selected_agents is not None
     agents = set(selected_agents) if selective else valid_agents
@@ -951,7 +1152,7 @@ def main():
     codex_stale_auth = []
 
     refuse = False
-    claude_files = []
+    claude_plans = []
     codewhale_files = []
     codewhale_provider = None
     codewhale_auth_files = []
@@ -981,18 +1182,10 @@ def main():
             check(f"{codex_home}/{seat}.config.toml")
     if not grok_only and install_claude:
         try:
-            user_servers = claude_user_servers(f"{home}/.claude.json")
-        except ValueError as exc:
+            claude_plans = claude_home_plans(home, src, repo, force)
+        except (OSError, ValueError) as exc:
             print(str(exc), file=sys.stderr)
             refuse = True
-            user_servers = {}
-        for seat in SEATS:
-            path = f"{claude_home}/{seat}-mcp.json"
-            want, names = claude_seat_bytes(f"{src}/claude/{seat}-mcp.json", user_servers)
-            state = claude_seat_state(path, want, repo, force)
-            if state is None:
-                refuse = True
-            claude_files.append((path, want, names, state))
 
     if not grok_only and install_codewhale:
         legacy_homes = {}
@@ -1173,22 +1366,7 @@ def main():
             install_rules_block()
             remove_legacy_rules_link()
         if install_claude:
-            os.makedirs(claude_home, exist_ok=True)
-            for path, want, names, state in claude_files:
-                if state in ("new", "link", "rewrite"):
-                    tmp = f"{claude_home}/.{os.path.basename(path)}.agentboard.{os.getpid()}"
-                    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                    try:
-                        os.fchmod(fd, 0o600)
-                        with os.fdopen(fd, "wb") as f:
-                            f.write(want)
-                        os.replace(tmp, path)
-                    finally:
-                        if os.path.lexists(tmp): os.unlink(tmp)
-                    verb = "replaced" if state == "rewrite" else "generated"
-                    print(f"{verb}: {path} (servers: {', '.join(names)})")
-                elif state == "unchanged":
-                    print(f"unchanged: {path}")
+            install_claude_seat_homes(claude_plans, home)
         for path, want, state in codewhale_files:
             if state in ("new", "rewrite"):
                 os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)

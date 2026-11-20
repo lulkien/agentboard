@@ -36,9 +36,10 @@ for command in "${needs[@]}"; do
   command -v "$command" >/dev/null 2>&1 || { echo "start-agentboard-manager: required command not found: $command" >&2; exit 1; }
 done
 
-card="$HOME/.claude/manager-mcp.json"
-if [[ $KIND == claude && ! -f $card ]]; then
-  echo "start-agentboard-manager: $card missing; run seats/install.py" >&2
+claude_home="$HOME/.local/share/agentboard/seats/manager/claude"
+claude_mcp="$claude_home/mcp.json"
+if [[ $KIND == claude && ( ! -f $claude_home/.agentboard-seat || ! -f $claude_mcp ) ]]; then
+  echo "start-agentboard-manager: $claude_home is missing; run seats/install.py and skills/install.py" >&2
   exit 1
 fi
 
@@ -56,8 +57,8 @@ fi
 
 case "$KIND" in
   claude)
-    argv=(claude --model claude-sonnet-5-5 --mcp-config "$card" --strict-mcp-config --dangerously-skip-permissions /agentboard-manager)
-    hargs=(--model claude-sonnet-5-5 --mcp-config "$card" --strict-mcp-config --dangerously-skip-permissions -- /agentboard-manager)
+    argv=(env "CLAUDE_CONFIG_DIR=$claude_home" claude --model claude-sonnet-5-5 --mcp-config "$claude_mcp" --strict-mcp-config --dangerously-skip-permissions /agentboard-manager)
+    hargs=(--model claude-sonnet-5-5 --mcp-config "$claude_mcp" --strict-mcp-config --dangerously-skip-permissions -- /agentboard-manager)
     ;;
   codex)
     argv=(env "CODEX_HOME=$codex_home" codex --no-daemon --profile manager '$agentboard-manager')
@@ -77,6 +78,7 @@ log=${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log
 if [[ $world == herdr ]]; then
   herdr tab rename "$HERDR_TAB_ID" manager
   if [[ $KIND == codex ]]; then export CODEX_HOME="$codex_home"; fi
+  if [[ $KIND == claude ]]; then export CLAUDE_CONFIG_DIR="$claude_home"; fi
   setsid bash -c '
     pane=$1 kind=$2
     shift 2

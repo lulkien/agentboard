@@ -10,12 +10,13 @@ its client gets a board identity.
 | `~/.local/share/agentboard/seats/<seat>/codex/` | analyst, coder, manager, reviewer | `CODEX_HOME=... codex -p <seat>` |
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | generated into each isolated role home; legacy `~/.codex` links remain for compatibility |
 | `codex/rules/agentboard.rules` | legacy shared Codex home | marked block inside `${CODEX_HOME:-~/.codex}/rules/default.rules`; isolated role homes do not copy host rules |
-| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | merged by installer into `~/.claude/<seat>-mcp.json` |
+| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | merged into role `mcp.json`; legacy card remains at `~/.claude/<seat>-mcp.json` |
 | `grok/agentboard-mcp.toml` | grok (manager) | managed block in `~/.grok/config.toml` by `install.py` |
 | `systemd/agentboard.service` | shared HTTP daemon | linked to `~/.config/systemd/user/agentboard.service` |
 
 ## Install
 
+    python3 skills/install.py --force
     ./install.py --force
 
 For Codex, it reads `~/.codex/config.toml` and `~/.codex/auth.json` without
@@ -31,7 +32,10 @@ under `~/.codex`; the installer removes legacy profile links and managed rules i
 finds in that restricted home. Missing base auth refuses generation, and a forced
 refresh removes stale private snapshots when the base auth file has been revoked.
 Generated role homes are not replaced without `--force`; an unmanaged home is
-refused and must be moved aside. Claude seat files are generated from the repo card and `~/.claude.json`. Repo card links
+refused and must be moved aside. Claude role homes are generated at
+`~/.local/share/agentboard/seats/<seat>/claude`; install canonical skills first
+with `python3 skills/install.py`. The legacy `~/.claude/<seat>-mcp.json` files
+remain generated for older launch commands. Repo card links
 from older installs are safely replaced; `--force` replaces foreign links and
 unmarked regular files at the named seat destinations. Directories and other
 non-regular destinations are refused before any install writes. Each Codex seat
@@ -160,16 +164,29 @@ the reviewer and analyst do not inherit command rules from the shared host
 
 ## Claude
 
-`install.py` generates `~/.claude/<seat>-mcp.json` by merging every user-scope
-server from `~/.claude.json` with the repo card, with the card winning name clashes.
-Launch with `--strict-mcp-config` so that generated file is the seat's single source
-of truth. Rerun after editing user servers; unchanged inputs produce unchanged files.
-Generated files are mode 0600, output lists names only, and `~/.claude.json` is read
-only. A differing generated file is preserved unless `--force` is supplied;
+`install.py` generates `~/.local/share/agentboard/seats/<seat>/claude` for each
+role. Set `CLAUDE_CONFIG_DIR` to that directory and use its `mcp.json` with
+`--strict-mcp-config`, so only the generated merged MCP card is loaded. Base
+`~/.claude/settings.json`, `.credentials.json`, and `~/.claude.json` are read-only;
+global settings and credentials are copied with private permissions, and user
+MCP entries are merged with the role card taking precedence. Session history,
+caches, logs, project settings/approvals and plugins are not copied. Canonical
+agentboard seat skills are linked from `~/.agents/skills` after running
+`skills/install.py`. User plugin enablement settings are retained, but plugin
+records and bundle files are not copied; install user plugins separately in
+each role home. The legacy card is retained for old launch commands.
+When base authentication is withdrawn, rerun with `--force` to remove copied
+`.credentials.json` snapshots whose bytes still match the installer's private
+SHA-256 ownership marker. Unmarked credentials, including logins created in a
+role home and credentials changed since copying, are preserved and a warning
+asks you to inspect and remove them manually if stale. The installer never
+quarantines or deletes credentials whose ownership it cannot prove.
+Generated files are mode 0600, output lists server names only. A differing
+generated file is preserved unless `--force` is supplied;
 `--force` replaces an unmarked regular file or foreign symlink at that exact seat
 destination without following its target. Directories and other non-regular
 destinations are refused. Example:
-`claude --mcp-config ~/.claude/manager-mcp.json --strict-mcp-config`.
+`env CLAUDE_CONFIG_DIR=~/.local/share/agentboard/seats/manager/claude claude --mcp-config ~/.local/share/agentboard/seats/manager/claude/mcp.json --strict-mcp-config`.
 
 ## Codewhale
 

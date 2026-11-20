@@ -99,21 +99,21 @@ herdr pane list                                    # note the new tab's pane id
 # Analyst and reviewer skip permission prompts and deny the three file-mutation
 # tools, so they read and run the shell but cannot edit. The coder denies nothing:
 # it edits and runs the gate.
-herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
+env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/analyst/claude" herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --model claude-opus-5-5 \
   --effort medium \
-  --mcp-config "$HOME/.claude/analyst-mcp.json" --strict-mcp-config \
+  --mcp-config "$HOME/.local/share/agentboard/seats/analyst/claude/mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit
-herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
+env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/coder/claude" herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 \
   --effort medium \
-  --mcp-config "$HOME/.claude/coder-mcp.json" --strict-mcp-config \
+  --mcp-config "$HOME/.local/share/agentboard/seats/coder/claude/mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions
-herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
+env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/reviewer/claude" herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   --model claude-opus-5-5 \
   --effort medium \
-  --mcp-config "$HOME/.claude/reviewer-mcp.json" --strict-mcp-config \
+  --mcp-config "$HOME/.local/share/agentboard/seats/reviewer/claude/mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit
 
@@ -177,20 +177,20 @@ export REPO=/path/to/repo
 # tools, so they read and run the shell but cannot edit. The coder denies nothing:
 # it edits and runs the gate.
 hc run --bg --name analyst --cwd "$REPO" -- \
-  claude --model claude-opus-5-5 \
+  env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/analyst/claude" claude --model claude-opus-5-5 \
   --effort medium \
-  --mcp-config "$HOME/.claude/analyst-mcp.json" --strict-mcp-config \
+  --mcp-config "$HOME/.local/share/agentboard/seats/analyst/claude/mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit
 hc run --bg --name coder --cwd "$REPO" -- \
-  claude --model claude-sonnet-5-5 \
+  env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/coder/claude" claude --model claude-sonnet-5-5 \
   --effort medium \
-  --mcp-config "$HOME/.claude/coder-mcp.json" --strict-mcp-config \
+  --mcp-config "$HOME/.local/share/agentboard/seats/coder/claude/mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions
 hc run --bg --name reviewer --cwd "$REPO" -- \
-  claude --model claude-opus-5-5 \
+  env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/reviewer/claude" claude --model claude-opus-5-5 \
   --effort medium \
-  --mcp-config "$HOME/.claude/reviewer-mcp.json" --strict-mcp-config \
+  --mcp-config "$HOME/.local/share/agentboard/seats/reviewer/claude/mcp.json" --strict-mcp-config \
   --dangerously-skip-permissions \
   --disallowedTools Edit Write NotebookEdit
 
@@ -251,15 +251,15 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config --strict-mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
+| Claude | all four | herdr `env CLAUDE_CONFIG_DIR=~/.local/share/agentboard/seats/<seat>/claude herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env CLAUDE_CONFIG_DIR=... claude`; manager via `start-agentboard-manager claude` in either | role home `mcp.json` via `--mcp-config --strict-mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
 | Codex | all four | herdr with `CODEX_HOME=$HOME/.local/share/agentboard/seats/<seat>/codex`; hc with `env CODEX_HOME=... codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` in its isolated role home, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only checkout plus scratch-write and loopback-only network | `$agentboard-<seat>` |
 | Codewhale | all four; hc only, not herdr (no agent kind) | `start-agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env CODEWHALE_HOME=$HOME/.local/share/agentboard/seats/<seat>/codewhale codewhale [-C <scratch dir> for analyst and reviewer] --skip-onboarding --fresh --disable subagents` | per-seat home `mcp.json`, URL `/mcp/<seat>` | yolo for manager and coder; analyst and reviewer workspace-write with `-C` scratch, reviewer adds network (not loopback-only) | `/agentboard-<seat>` |
 | Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `~/.grok/config.toml`, URL `/mcp/${AGENTBOARD_SEAT:-manager}` | `--trust --always-approve` | `/agentboard-manager` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
 Model and effort per seat come from the launch table for every client. Skills are
-one physical copy under `~/.agents/skills`, linked into `~/.claude/skills` for
-Claude; Codex and Grok read the canonical directory directly.
+one physical copy under `~/.agents/skills`, linked into `~/.claude/skills` and
+the role-first Claude homes; Codex and Grok read the canonical directory directly.
 
 ## Register a seat's MCP server
 
@@ -274,13 +274,23 @@ uses a custom `AGENTBOARD_DB`, configure the same absolute path for the unit.
 #   [mcp_servers.agentboard]
 #   url = "http://127.0.0.1:8765/mcp/coder"
 #
-# claude: one card per seat, generated by install.py
+# claude: one role home per seat, generated by install.py
 #   "agentboard": { "type": "http", "url": "http://127.0.0.1:8765/mcp/coder" }
-claude --mcp-config "$HOME/.claude/coder-mcp.json" --strict-mcp-config
+env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/coder/claude" claude --mcp-config "$HOME/.local/share/agentboard/seats/coder/claude/mcp.json" --strict-mcp-config
 ```
 
-The repo's `seats/` directory is the canonical copy of those cards. Claude cards
-are generated by install.py; Codex profiles are linked into the client home.
+The repo's `seats/` directory is the canonical copy of those cards. Claude
+homes live at `~/.local/share/agentboard/seats/<seat>/claude`; set
+`CLAUDE_CONFIG_DIR` to that directory and pass its `mcp.json` with
+`--strict-mcp-config`. The installer also refreshes the legacy
+`~/.claude/<seat>-mcp.json` card for old launch commands. It reads
+`~/.claude/settings.json`, `~/.claude/.credentials.json` and `~/.claude.json`
+without changing them, copying user settings, credentials, and user MCP entries
+into private role files. It does not copy sessions, logs, caches, project
+approvals, or user plugins. Run `skills/install.py` first to link the canonical
+seat skills into each role home. Plugin enablement settings are retained, but
+plugin records and bundle files are not copied; installed user plugins must be
+installed separately in each role home. Codex profiles are linked into the client home.
 
 ## Wake loop
 

@@ -23,6 +23,10 @@ newhome() { # newhome <name>: a clean HOME with the dirs the installer expects
   home=$tmp/h$cases
   rules=$home/.codex/rules/default.rules
   mkdir -p "$home/.claude" "$home/.codex"
+  mkdir -p "$home/.agents/skills"
+  for skill in agentboard-manager agentboard-analyst agentboard-coder agentboard-reviewer agentboard-team; do
+    ln -s "$repo/skills/$skill" "$home/.agents/skills/$skill"
+  done
   printf '{"tokens":{"access_token":"isolated-test-token"}}\n' >"$home/.codex/auth.json"
   chmod 600 "$home/.codex/auth.json"
 }
@@ -293,20 +297,55 @@ is "symlinked Codex auth writes no role home" test ! -e "$home/.local/share/agen
 # --- generated Claude seat files: merge, idempotence and safe replacement ---
 newhome
 mkdir -p "$home/.codex/rules"
-printf '%s' '{"mcpServers":{"agentboard":{"type":"http","url":"http://wrong"},"extra":{"type":"stdio","command":"x","env":{"TOKEN":"s3cret-value"}}}}' >"$home/.claude.json"
+printf '%s' '{"account":{"fixture":"kept"},"projects":{"/private/project":{"hasTrustDialogAccepted":true,"trustLevel":"trusted","allowedTools":["Read"],"mcpServers":{"project-server":{"command":"private-project-mcp"}}}},"mcpServers":{"agentboard":{"type":"http","url":"http://wrong"},"extra":{"type":"stdio","command":"x","env":{"TOKEN":"s3cret-value"}}}}' >"$home/.claude.json"
+cp "$home/.claude.json" "$tmp/claude-global-before"
+cat >"$home/.claude/settings.json" <<'JSON'
+{"env":{"CLAUDE_FIXTURE":"present"},"hooks":{"SessionStart":[]},"permissions":{"allow":["Read"],"deny":["Bash(rm *)"]},"enabledPlugins":{"fixture@market":"true"}}
+JSON
+cp "$home/.claude/settings.json" "$tmp/claude-settings-before"
+mkdir -p "$home/.claude/plugins/cache/fixture/1"
+printf '{"plugins":{"fixture@market":[{"installPath":"%s/.claude/plugins/cache/fixture/1"}]}}\n' "$home" >"$home/.claude/plugins/installed_plugins.json"
+cp "$home/.claude/plugins/installed_plugins.json" "$tmp/claude-plugins-before"
+printf 'fixture plugin implementation\n' >"$home/.claude/plugins/cache/fixture/1/plugin.js"
+printf '{"accessToken":"synthetic-credential-sentinel"}\n' >"$home/.claude/.credentials.json"
+chmod 600 "$home/.claude/.credentials.json"
+cp "$home/.claude/.credentials.json" "$tmp/claude-credentials-before"
 cp -r "$repo/seats/claude" "$tmp/cards-before"
 inst; code=$?
 is "generated install exit" test "$code" -eq 0
 for seat in analyst coder manager reviewer; do
   is "$seat generated regular 0600 merged file" python3 -c 'import json,os,stat,sys; p,s=sys.argv[1:]; d=json.load(open(p)); card=json.load(open("seats/claude/"+s+"-mcp.json")); assert stat.S_IMODE(os.stat(p).st_mode)==0o600 and not os.path.islink(p); assert d["mcpServers"]["agentboard"]==card["mcpServers"]["agentboard"] and "extra" in d["mcpServers"]' "$home/.claude/$seat-mcp.json" "$seat"
+  role="$home/.local/share/agentboard/seats/$seat/claude"
+  is "$seat isolated private Claude home" test "$(stat -c %a "$role")" = 700
+  is "$seat inherits settings and role restrictions" python3 -c 'import json,sys; d=json.load(open(sys.argv[1]+"/settings.json")); restricted=sys.argv[2] in ("analyst","reviewer"); assert d["env"]["CLAUDE_FIXTURE"]=="present" and "SessionStart" in d["hooks"] and d["permissions"]["deny"][0]=="Bash(rm *)" and d["permissions"]["allow"]==["Read"]; assert all((name in d["permissions"]["deny"])==restricted for name in ("Edit","Write","NotebookEdit")); assert d["enabledPlugins"]=={"fixture@market":"true"}' "$role" "$seat"
+  is "$seat inherits global config without project trust" python3 -c 'import hashlib,json,os,stat,sys; p=sys.argv[1]; g=json.load(open(p+"/.claude.json")); c=open(p+"/.credentials.json","rb").read(); mark=open(p+"/.agentboard-credentials.sha256").read().strip(); assert g["account"]["fixture"]=="kept" and g["mcpServers"]["extra"]["env"]["TOKEN"]=="s3cret-value" and "projects" not in g; assert json.loads(c)["accessToken"]=="synthetic-credential-sentinel" and stat.S_IMODE(os.stat(p+"/.credentials.json").st_mode)==0o600 and mark==hashlib.sha256(c).hexdigest() and stat.S_IMODE(os.stat(p+"/.agentboard-credentials.sha256").st_mode)==0o600' "$role"
+  is "$seat strict MCP card has role endpoint and user server" python3 -c 'import json,sys; d=json.load(open(sys.argv[1]+"/mcp.json"))["mcpServers"]; assert d["agentboard"]["url"].endswith("/mcp/"+sys.argv[2]) and d["extra"]["env"]["TOKEN"]=="s3cret-value"' "$role" "$seat"
+  is "$seat canonical skills linked" test -L "$role/skills/agentboard-$seat" -a -L "$role/skills/agentboard-team" -a "$(readlink "$role/skills/agentboard-$seat")" = "$home/.agents/skills/agentboard-$seat"
+  is "$seat does not copy plugin installation data" test ! -e "$role/plugins"
+  is "$seat role files are private" bash -c 'for f in "$1"/settings.json "$1"/.claude.json "$1"/mcp.json "$1"/.credentials.json; do test "$(stat -c %a "$f")" = 600 || exit 1; done' _ "$role"
 done
 has "names only output" "servers: agentboard, codebase-memory-mcp, extra" "$tmp/out"
 is "generated lines list names in sorted order" bash -c 'grep -q "servers: agentboard, codebase-memory-mcp, extra" "$1"' _ "$tmp/out"
 is "secret not printed" bash -c '! grep -q s3cret-value "$1" "$2"' _ "$tmp/out" "$tmp/err"
-same "user config unchanged" "$home/.claude.json" "$home/.claude.json"
+same "user global config unchanged" "$tmp/claude-global-before" "$home/.claude.json"
+same "user settings unchanged" "$tmp/claude-settings-before" "$home/.claude/settings.json"
+same "plugin installation record unchanged" "$tmp/claude-plugins-before" "$home/.claude/plugins/installed_plugins.json"
+same "user credentials unchanged" "$tmp/claude-credentials-before" "$home/.claude/.credentials.json"
 diff -r "$tmp/cards-before" "$repo/seats/claude" >/dev/null || bad "repo cards unchanged"
+# Existing role auth without a matching copied-snapshot hash is preserved even
+# while base auth exists and --force refreshes the rest of the role home.
+printf '{"accessToken":"base-present-role-login-sentinel"}\n' >"$home/.local/share/agentboard/seats/manager/claude/.credentials.json"
+chmod 600 "$home/.local/share/agentboard/seats/manager/claude/.credentials.json"
+cp "$home/.local/share/agentboard/seats/manager/claude/.credentials.json" "$tmp/manager-role-credentials-before"
+inst --force; code=$?
+is "force with base auth preserves unmarked role login" test "$code" -eq 0
+same "base-present role login bytes preserved" "$tmp/manager-role-credentials-before" "$home/.local/share/agentboard/seats/manager/claude/.credentials.json"
+has "base-present role login warning is actionable" "warning: preserving Claude role credentials with unknown ownership; inspect and remove manually if stale: $home/.local/share/agentboard/seats/manager/claude/.credentials.json" "$tmp/err"
+is "base-present warning contains no credential or hash" bash -c '! grep -Eq "base-present-role-login-sentinel|[[:xdigit:]]{64}" "$1" "$2"' _ "$tmp/out" "$tmp/err"
 inst
 has "rerun unchanged" "unchanged: $home/.claude/coder-mcp.json" "$tmp/out"
+has "no-force rerun warns about unmarked role login" "warning: preserving Claude role credentials with unknown ownership; inspect and remove manually if stale: $home/.local/share/agentboard/seats/manager/claude/.credentials.json" "$tmp/err"
+same "no-force rerun preserves unmarked role login" "$tmp/manager-role-credentials-before" "$home/.local/share/agentboard/seats/manager/claude/.credentials.json"
 cp "$home/.claude/coder-mcp.json" "$tmp/coder-before-refresh"
 python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["mcpServers"]["extra"]["command"]="y"; open(p,"w").write(json.dumps(d))' "$home/.claude.json"
 inst
@@ -324,11 +363,29 @@ is "all generated markers present" bash -c 'for f in "$1"/.claude/*-mcp.json; do
 is "card wins agentboard clash" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["agentboard"]["url"].endswith("/mcp/analyst")' "$home/.claude/analyst-mcp.json"
 is "user extra server copied" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["extra"]["env"]["TOKEN"]=="s3cret-value"' "$home/.claude/analyst-mcp.json"
 is "secret absent from output and errors" bash -c '! grep -q s3cret-value "$1" "$2"' _ "$tmp/out" "$tmp/err"
+is "credential sentinel absent from output and errors" bash -c '! grep -q synthetic-credential-sentinel "$1" "$2"' _ "$tmp/out" "$tmp/err"
 is "user config remains unchanged" grep -q 'wrong' "$home/.claude.json"
 is "user config was not decorated with installer marker" bash -c '! grep -q agentboardGenerated "$1"' _ "$home/.claude.json"
 inst
 is "second run all unchanged" bash -c 'grep -c "^unchanged: .*/.claude/.*mcp.json$" "$1" | grep -qx 4' _ "$tmp/out"
 is "unchanged file bytes stable" cmp -s "$home/.claude/coder-mcp.json" "$home/.claude/coder-mcp.json"
+rm "$home/.claude/.credentials.json"
+inst --agent claude; code=$?
+is "stale role auth remains without force" test "$code" -eq 0 -a -f "$home/.local/share/agentboard/seats/analyst/claude/.credentials.json" -a -f "$home/.local/share/agentboard/seats/reviewer/claude/.credentials.json"
+printf '{"accessToken":"independent-role-login-sentinel"}\n' >"$home/.local/share/agentboard/seats/coder/claude/.credentials.json"
+chmod 600 "$home/.local/share/agentboard/seats/coder/claude/.credentials.json"
+printf '{"accessToken":"legacy-unmarked-role-sentinel"}\n' >"$home/.local/share/agentboard/seats/reviewer/claude/.credentials.json"
+chmod 600 "$home/.local/share/agentboard/seats/reviewer/claude/.credentials.json"
+cp "$home/.local/share/agentboard/seats/reviewer/claude/.credentials.json" "$tmp/reviewer-role-credentials-before"
+inst --agent claude --force; code=$?
+is "force removes proven snapshot and preserves role logins" test "$code" -eq 0 -a ! -e "$home/.local/share/agentboard/seats/analyst/claude/.credentials.json" -a ! -e "$home/.local/share/agentboard/seats/analyst/claude/.agentboard-credentials.sha256" -a -f "$home/.local/share/agentboard/seats/coder/claude/.credentials.json" -a -f "$home/.local/share/agentboard/seats/manager/claude/.credentials.json" -a -f "$home/.local/share/agentboard/seats/reviewer/claude/.credentials.json"
+is "independent role login bytes preserved" grep -q independent-role-login-sentinel "$home/.local/share/agentboard/seats/coder/claude/.credentials.json"
+same "legacy unmarked role login bytes preserved" "$tmp/reviewer-role-credentials-before" "$home/.local/share/agentboard/seats/reviewer/claude/.credentials.json"
+has "legacy unmarked role login warns for manual review" "warning: preserving Claude role credentials with unknown ownership; inspect and remove manually if stale: $home/.local/share/agentboard/seats/reviewer/claude/.credentials.json" "$tmp/err"
+has "changed marked role login warns for manual review" "warning: preserving Claude role credentials with unknown ownership; inspect and remove manually if stale: $home/.local/share/agentboard/seats/coder/claude/.credentials.json" "$tmp/err"
+has "changed role login warns after base auth withdrawal" "warning: preserving Claude role credentials with unknown ownership; inspect and remove manually if stale: $home/.local/share/agentboard/seats/manager/claude/.credentials.json" "$tmp/err"
+is "withdrawal warnings contain no credential or hash" bash -c '! grep -Eq "synthetic-credential-sentinel|independent-role-login-sentinel|legacy-unmarked-role-sentinel|base-present-role-login-sentinel|[[:xdigit:]]{64}" "$1" "$2"' _ "$tmp/out" "$tmp/err"
+is "force stale auth removal prints no credentials" bash -c '! grep -q synthetic-credential-sentinel "$1" "$2"' _ "$tmp/out" "$tmp/err"
 is "repo cards remain regular" bash -c 'for f in seats/claude/*-mcp.json; do test -f "$f" && test ! -L "$f" || exit 1; done'
 is "repo cards retain expected count" test "$(find seats/claude -maxdepth 1 -name '*-mcp.json' | wc -l)" -eq 4
 is "Claude home file count four" test "$(find "$home/.claude" -maxdepth 1 -name '*-mcp.json' | wc -l)" -eq 4
@@ -1029,7 +1086,7 @@ for seat in analyst coder manager reviewer; do
     has "$seat reports $st" "]7501;state=$st:app=codewhale" "$cfg"
   done
 done
-is "eight generated files" test "$(wc -l <"$tmp/cw-files")" -eq 8
+is "twelve generated config and MCP files" test "$(wc -l <"$tmp/cw-files")" -eq 12
 is "all exportable auth artifacts preserved" test "$(find "$cw" -type f -path '*/auth/*.key' | wc -l)" -eq 8
 is "generated files and auth artifacts have private permissions" bash -c 'while IFS= read -r f; do test "$(stat -c %a "$f")" = 600 || exit 1; done <"$1"' _ "$tmp/cw-all-files"
 chmod 644 "$cw/coder/codewhale/auth/base-provider.key"
@@ -1232,6 +1289,31 @@ printf '{bad json' >"$home/.claude.json"
 root_inst --agent claude; code=$?
 is "selected malformed Claude input refuses" test "$code" -eq 1
 is "selected malformed Claude input writes no output" test ! -e "$home/.claude/coder-mcp.json" -a ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.local/bin/start-agentboard-manager"
+is "selected malformed Claude input writes no role home" test ! -e "$home/.local/share/agentboard/seats"
+
+newhome
+mkdir -p "$home/.codex/rules" "$home/.grok" "$home/.codewhale"
+printf '[malformed' >"$home/.grok/config.toml"
+printf '{malformed' >"$home/.codewhale/mcp.json"
+root_inst --agent claude; code=$?
+is "selected Claude succeeds with malformed unselected clients" test "$code" -eq 0
+is "selected Claude publishes all four role homes" test -f "$home/.local/share/agentboard/seats/analyst/claude/mcp.json" -a -f "$home/.local/share/agentboard/seats/coder/claude/mcp.json" -a -f "$home/.local/share/agentboard/seats/manager/claude/mcp.json" -a -f "$home/.local/share/agentboard/seats/reviewer/claude/mcp.json"
+is "selected Claude leaves other clients and shared installs untouched" test ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.local/share/agentboard/seats/coder/codex" -a ! -e "$home/.local/share/agentboard/seats/coder/codewhale" -a "$(cat "$home/.grok/config.toml")" = '[malformed' -a ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+
+for input in settings credentials; do
+  newhome
+  mkdir -p "$home/.claude"
+  if [[ $input == settings ]]; then printf '{bad json' >"$home/.claude/settings.json"; else printf '{bad json' >"$home/.claude/.credentials.json"; fi
+  root_inst --agent claude --force; code=$?
+  is "malformed Claude $input refuses before publication" test "$code" -eq 1 -a ! -e "$home/.local/share/agentboard/seats" -a ! -e "$home/.claude/manager-mcp.json"
+done
+
+newhome
+mkdir -p "$home/.local/share/agentboard/seats/manager"
+ln -s "$tmp" "$home/.local/share/agentboard/seats/manager/claude"
+root_inst --agent claude --force; code=$?
+is "symlinked Claude role home refuses under force" test "$code" -eq 1
+is "symlinked Claude role home target untouched" test ! -e "$tmp/settings.json" -a ! -e "$tmp/mcp.json" -a ! -e "$home/.local/share/agentboard/seats/analyst/claude"
 
 for selector in '' codex, codex,,claude codex,codex Codex mystery; do
   newhome

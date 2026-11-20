@@ -33,8 +33,9 @@ cat >"$tmp/bin/herdr" <<'SH'
 printf 'CALL' >>"$HERDR_LOG"
 printf ' <%s>' "$@" >>"$HERDR_LOG"
 printf '\n' >>"$HERDR_LOG"
-if [[ $1 == agent && $2 == start && ${3:-} == manager && ${5:-} == codex && ${HERDR_ENV:-} == 1 ]]; then
-  printf 'ENV CODEX_HOME=%s\n' "${CODEX_HOME:-}" >>"$HERDR_LOG"
+if [[ $1 == agent && $2 == start && ${3:-} == manager && ${HERDR_ENV:-} == 1 ]]; then
+  [[ ${5:-} == codex ]] && printf 'ENV CODEX_HOME=%s\n' "${CODEX_HOME:-}" >>"$HERDR_LOG"
+  [[ ${5:-} == claude ]] && printf 'ENV CLAUDE_CONFIG_DIR=%s\n' "${CLAUDE_CONFIG_DIR:-}" >>"$HERDR_LOG"
 fi
 if [[ $1 == pane && $2 == process-info ]]; then
   case ${HERDR_MODE:-ready} in
@@ -54,10 +55,12 @@ export PATH="$tmp/bin:$PATH" HC_TERMINAL_ID=t4 STUB_HC_LOG="$tmp/hc.log" HERDR_L
 unset HERDR_PANE_ID HERDR_TAB_ID HERDR_ENV
 no_hc() { local v; for v in $(compgen -e HC_); do unset "$v"; done; }
 export HOME="$tmp/home"
-mkdir -p "$HOME/.claude"
-printf '{}\n' >"$HOME/.claude/manager-mcp.json"
+claude_home="$HOME/.local/share/agentboard/seats/manager/claude"
+mkdir -p "$claude_home"
+printf 'agentboard Claude seat home v1\n' >"$claude_home/.agentboard-seat"
+printf '{}\n' >"$claude_home/mcp.json"
 repo=$(pwd)
-card="$HOME/.claude/manager-mcp.json"
+card="$claude_home/mcp.json"
 
 run_kind() {
   local kind=$1 expected=$2 wait_at send_at
@@ -76,11 +79,11 @@ run_kind() {
     is "$kind waits for nothing" bash -c '! grep -Fq "CALL <wait>" "$1"' _ "$STUB_HC_LOG"
   fi
 }
-run_kind claude 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <claude> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--strict-mcp-config> <--dangerously-skip-permissions> </agentboard-manager>'
+run_kind claude 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <env> <CLAUDE_CONFIG_DIR='$claude_home'> <claude> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--strict-mcp-config> <--dangerously-skip-permissions> </agentboard-manager>'
 mv "$card" "$card.saved"
 : >"$STUB_HC_LOG"
 if "$repo/seats/start-agentboard-manager" claude >"$tmp/out" 2>"$tmp/err"; then bad 'missing card unexpectedly launched'; else ok; fi
-has "$tmp/err" 'run seats/install.py' 'missing card names installer'
+has "$tmp/err" 'run seats/install.py and skills/install.py' 'missing home names installer'
 is 'missing card starts nothing' test ! -s "$STUB_HC_LOG"
 mv "$card.saved" "$card"
 codex_home="$HOME/.local/share/agentboard/seats/manager/codex"
@@ -191,6 +194,7 @@ run_herdr_kind() {
   is "herdr $kind never calls hc" test ! -s "$STUB_HC_LOG"
 }
 run_herdr_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--strict-mcp-config> <--dangerously-skip-permissions> <--> </agentboard-manager>'
+has "$HERDR_LOG" "ENV CLAUDE_CONFIG_DIR=$claude_home" 'herdr Claude manager receives its isolated home'
 run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--profile> <manager> <--> <$agentboard-manager>'
 has "$HERDR_LOG" "ENV CODEX_HOME=$codex_home" 'herdr Codex manager receives its isolated home'
 run_herdr_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
