@@ -42,7 +42,7 @@ if [[ $KIND == claude && ! -f $card ]]; then
   exit 1
 fi
 
-cwhome="$HOME/.local/share/agentboard/codewhale/manager"
+cwhome="$HOME/.local/share/agentboard/seats/manager/codewhale"
 if [[ $KIND == codewhale && ! -f $cwhome/config.toml ]]; then
   echo "start-agentboard-manager: $cwhome/config.toml missing; run seats/install.py" >&2
   exit 1

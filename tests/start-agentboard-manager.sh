@@ -96,7 +96,7 @@ mv "$codex_home/manager.config.saved" "$codex_home/manager.config.toml"
 run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <grok> <--trust> <--always-approve>'
 
 # codewhale: hc only, per-seat home, status wait, retried send --wait
-cwhome="$HOME/.local/share/agentboard/codewhale/manager"
+cwhome="$HOME/.local/share/agentboard/seats/manager/codewhale"
 cwexp='CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <env> <CODEWHALE_HOME='$cwhome'> <codewhale> <--skip-onboarding> <--fresh> <--disable> <subagents>'
 cwrun() { : >"$STUB_HC_LOG"; "$repo/seats/start-agentboard-manager" codewhale >"$tmp/out" 2>"$tmp/err"; }
 mkdir -p "$cwhome"

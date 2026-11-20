@@ -743,7 +743,7 @@ def copy_codewhale_home(source, destination, replace_links=()):
             write_private_file(os.path.join(target_root, name), read(src_file))
 
 
-def stage_codewhale_auth(provider_keys, home, codewhale_files, force):
+def stage_codewhale_auth(provider_keys, home, codewhale_files, force, legacy_homes):
     scratch = "/tmp/agentboard/scratch"
     os.makedirs(scratch, mode=0o700, exist_ok=True)
     by_home = {}
@@ -757,10 +757,11 @@ def stage_codewhale_auth(provider_keys, home, codewhale_files, force):
         with tempfile.TemporaryDirectory(prefix="T404-codewhale-auth.", dir=scratch) as stage_root:
             os.chmod(stage_root, 0o700)
             for seat_home, outputs in by_home.items():
-                seat = os.path.basename(seat_home)
+                seat = os.path.basename(os.path.dirname(seat_home))
                 stage_home = os.path.join(stage_root, seat)
                 replace_links = ("config.toml", "mcp.json") if force else ()
-                copy_codewhale_home(seat_home, stage_home, replace_links)
+                source_home = legacy_homes.get(seat) or seat_home
+                copy_codewhale_home(source_home, stage_home, replace_links)
                 for filename, (target, want, state) in outputs.items():
                     write_private_file(os.path.join(stage_home, filename), want)
                 stage_config = os.path.join(stage_home, "config.toml")
@@ -994,8 +995,12 @@ def main():
             claude_files.append((path, want, names, state))
 
     if not grok_only and install_codewhale:
+        legacy_homes = {}
         for seat in SEATS:
-            cw_home = f"{home}/.local/share/agentboard/codewhale/{seat}"
+            cw_home = f"{home}/.local/share/agentboard/seats/{seat}/codewhale"
+            legacy_home = f"{home}/.local/share/agentboard/codewhale/{seat}"
+            if not os.path.lexists(cw_home) and os.path.lexists(legacy_home):
+                legacy_homes[seat] = legacy_home
             if os.path.lexists(cw_home) and (os.path.islink(cw_home) or not os.path.isdir(cw_home)):
                 print(f"invalid Codewhale seat home: {cw_home}", file=sys.stderr)
                 refuse = True
@@ -1090,10 +1095,9 @@ def main():
         try:
             exportable = codewhale_auth_inventory(home)
             provider_keys = [(name, codewhale_auth_key(name, home)) for name in exportable]
-            if provider_keys:
-                codewhale_files, codewhale_auth_files = stage_codewhale_auth(
-                    provider_keys, home, codewhale_files, force
-                )
+            codewhale_files, codewhale_auth_files = stage_codewhale_auth(
+                provider_keys, home, codewhale_files, force, legacy_homes
+            )
         except (OSError, ValueError) as exc:
             print(str(exc), file=sys.stderr)
             refuse = True

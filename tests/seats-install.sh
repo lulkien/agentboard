@@ -243,7 +243,7 @@ inst --agent codex --force; code=$?
 is "Codex force rerun succeeds" test "$code" -eq 0
 after_homes=$(find "$home/.local/share/agentboard/seats" -type f -print0 | sort -z | xargs -0 cksum | cksum)
 is "Codex force rerun is byte-idempotent" test "$before_homes" = "$after_homes"
-is "selected Codex install leaves other clients untouched" test ! -e "$home/.claude/coder-mcp.json" -a ! -e "$home/.local/share/agentboard/codewhale/coder/config.toml" -a ! -e "$home/.grok/config.toml"
+is "selected Codex install leaves other clients untouched" test ! -e "$home/.claude/coder-mcp.json" -a ! -e "$home/.local/share/agentboard/seats/coder/codewhale/config.toml" -a ! -e "$home/.grok/config.toml"
 
 # Missing base auth refuses new homes; force refresh removes revoked snapshots.
 newhome
@@ -850,21 +850,21 @@ newhome
 mkdir -p "$home/.codex/rules"
 inst; code=$?
 is "Codewhale install without bases" test "$code" -eq 0
-is "absent bases retain generated defaults" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["reasoning_effort"]=="medium" and d["yolo"] is True' "$home/.local/share/agentboard/codewhale/coder/config.toml"
-is "absent MCP base retains generated defaults" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert list(d["servers"])==["agentboard"] and d["servers"]["agentboard"]["url"].endswith("/mcp/coder")' "$home/.local/share/agentboard/codewhale/coder/mcp.json"
-is "no provider leaves auth unconfigured" test ! -e "$home/.local/share/agentboard/codewhale/coder/auth"
+is "absent bases retain generated defaults" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["reasoning_effort"]=="medium" and d["yolo"] is True' "$home/.local/share/agentboard/seats/coder/codewhale/config.toml"
+is "absent MCP base retains generated defaults" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert list(d["servers"])==["agentboard"] and d["servers"]["agentboard"]["url"].endswith("/mcp/coder")' "$home/.local/share/agentboard/seats/coder/codewhale/mcp.json"
+is "no provider leaves auth unconfigured" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale/auth"
 if command -v codewhale >/dev/null 2>&1 && [ "${AGENTBOARD_TEST_NO_CODEWHALE:-0}" != 1 ]; then
   for seat in analyst coder manager reviewer; do
-    HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/codewhale/$seat" codewhale mcp list >"$tmp/mcp-list" 2>&1
+    HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/seats/$seat/codewhale" codewhale mcp list >"$tmp/mcp-list" 2>&1
     is "$seat codewhale mcp list ends /mcp/$seat" bash -c 'grep -q "/mcp/$1\$" "$2"' _ "$seat" "$tmp/mcp-list"
-    HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/codewhale/$seat" codewhale config doctor >"$tmp/doctor" 2>&1
+    HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/seats/$seat/codewhale" codewhale config doctor >"$tmp/doctor" 2>&1
     is "$seat codewhale config doctor reports no error" bash -c '! grep -qiE "(^|[^a-z])(error|fail)" "$1"' _ "$tmp/doctor"
   done
   is "Codewhale probes left base config absent" test ! -e "$home/.codewhale/config.toml"
 else
   for seat in analyst coder manager reviewer; do
-    is "$seat generated MCP URL ends /mcp/$seat" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["servers"]["agentboard"]["url"].endswith("/mcp/"+sys.argv[2])' "$home/.local/share/agentboard/codewhale/$seat/mcp.json" "$seat"
-    is "$seat config doctor TOML fallback parses" python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$home/.local/share/agentboard/codewhale/$seat/config.toml"
+    is "$seat generated MCP URL ends /mcp/$seat" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["servers"]["agentboard"]["url"].endswith("/mcp/"+sys.argv[2])' "$home/.local/share/agentboard/seats/$seat/codewhale/mcp.json" "$seat"
+    is "$seat config doctor TOML fallback parses" python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$home/.local/share/agentboard/seats/$seat/codewhale/config.toml"
   done
   is "Codewhale probes left base config absent" test ! -e "$home/.codewhale/config.toml"
 fi
@@ -910,38 +910,38 @@ cp "$home/.codewhale/fake-auth/base-provider" "$tmp/base-key-before"
 cp "$home/.codewhale/fake-auth/explicit-provider" "$tmp/explicit-key-before"
 inst; code=$?
 is "codewhale install exit" test "$code" -eq 0
-cw=$home/.local/share/agentboard/codewhale
+cw=$home/.local/share/agentboard/seats
 for seat in analyst coder manager reviewer; do
-  c=$cw/$seat/config.toml
+  c=$cw/$seat/codewhale/config.toml
   has "$seat effort" 'reasoning_effort = "medium"' "$c"
-  has "$seat mcp path" "mcp_config_path = \"$cw/$seat/mcp.json\"" "$c"
+  has "$seat mcp path" "mcp_config_path = \"$cw/$seat/codewhale/mcp.json\"" "$c"
   has "$seat yolo" 'yolo = true' "$c"
-  is "$seat MCP preserves base fields and owns agentboard" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["label"]=="user-config" and d["custom"] and d["servers"]["extra"]=={"command":"helper","args":["--user"]} and d["servers"]["agentboard"]["url"]=="http://127.0.0.1:8765/mcp/"+sys.argv[2]' "$cw/$seat/mcp.json" "$seat"
-  is "$seat inherits base model settings and seat overrides" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["provider"]=="base-provider" and d["model"]=="base-model" and d["temperature"]==0.4 and d["reasoning_effort"]=="medium" and d["yolo"] is True and d["mcp_config_path"]==sys.argv[2] and "approval_policy" not in d' "$c" "$cw/$seat/mcp.json"
+  is "$seat MCP preserves base fields and owns agentboard" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["label"]=="user-config" and d["custom"] and d["servers"]["extra"]=={"command":"helper","args":["--user"]} and d["servers"]["agentboard"]["url"]=="http://127.0.0.1:8765/mcp/"+sys.argv[2]' "$cw/$seat/codewhale/mcp.json" "$seat"
+  is "$seat inherits base model settings and seat overrides" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["provider"]=="base-provider" and d["model"]=="base-model" and d["temperature"]==0.4 and d["reasoning_effort"]=="medium" and d["yolo"] is True and d["mcp_config_path"]==sys.argv[2] and "approval_policy" not in d' "$c" "$cw/$seat/codewhale/mcp.json"
   is "$seat valid TOML" python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$c"
 done
 for seat in analyst coder manager reviewer; do
-  HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+  HOME="$home" CODEWHALE_HOME="$cw/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider base-provider >"$tmp/seat-key"
   is "$seat has usable inherited provider key" cmp -s "$tmp/expected-base-key" "$tmp/seat-key"
-  HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+  HOME="$home" CODEWHALE_HOME="$cw/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider explicit-provider >"$tmp/seat-key"
   is "$seat has usable inactive provider key" cmp -s "$tmp/expected-explicit-key" "$tmp/seat-key"
-  is "$seat does not claim unset provider credentials" test ! -e "$cw/$seat/auth/unset-provider.key"
-  is "$seat does not claim OAuth grant copied" test ! -e "$cw/$seat/auth/oauth-provider.key"
-  is "$seat does not claim external-consent route copied" test ! -e "$cw/$seat/auth/external-provider.key"
+  is "$seat does not claim unset provider credentials" test ! -e "$cw/$seat/codewhale/auth/unset-provider.key"
+  is "$seat does not claim OAuth grant copied" test ! -e "$cw/$seat/codewhale/auth/oauth-provider.key"
+  is "$seat does not claim external-consent route copied" test ! -e "$cw/$seat/codewhale/auth/external-provider.key"
 done
 same "source auth remains byte-identical after install" "$tmp/base-key-before" "$home/.codewhale/fake-auth/base-provider"
 same "other source API key remains byte-identical" "$tmp/explicit-key-before" "$home/.codewhale/fake-auth/explicit-provider"
 inst --codewhale-provider explicit-provider
-is "explicit provider overrides base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="explicit-provider"' "$cw/coder/config.toml"
+is "explicit provider overrides base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="explicit-provider"' "$cw/coder/codewhale/config.toml"
 for seat in analyst coder manager reviewer; do
-  HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+  HOME="$home" CODEWHALE_HOME="$cw/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider explicit-provider >"$tmp/seat-key"
   is "$seat has explicit provider key" cmp -s "$tmp/expected-explicit-key" "$tmp/seat-key"
 done
 inst
-is "omitting provider override restores base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="base-provider"' "$cw/coder/config.toml"
+is "omitting provider override restores base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="base-provider"' "$cw/coder/codewhale/config.toml"
 cp -r "$cw" "$tmp/cw-idempotent-before"
 inst
 is "auth and generated homes are byte-idempotent" diff -r "$tmp/cw-idempotent-before" "$cw"
@@ -951,10 +951,10 @@ cp "$home/.codewhale/fake-auth/base-provider" "$tmp/rotated-source-key-before"
 cp "$home/.codewhale/fake-auth/explicit-provider" "$tmp/explicit-key-before-rotation"
 inst
 for seat in analyst coder manager reviewer; do
-  HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+  HOME="$home" CODEWHALE_HOME="$cw/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider base-provider >"$tmp/seat-key"
   is "$seat receives rotated key" cmp -s "$tmp/expected-rotated-key" "$tmp/seat-key"
-  HOME="$home" CODEWHALE_HOME="$cw/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+  HOME="$home" CODEWHALE_HOME="$cw/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider explicit-provider >"$tmp/seat-key"
   is "$seat retains inactive key on rotation" cmp -s "$tmp/expected-explicit-key" "$tmp/seat-key"
 done
@@ -1008,22 +1008,22 @@ cp "$tmp/cw-base-config" "$home/.codewhale/config.toml"
 same "base MCP remains byte-identical after failure probes" "$tmp/cw-base-mcp" "$home/.codewhale/mcp.json"
 same "base config remains byte-identical after failure probes" "$tmp/cw-base-config" "$home/.codewhale/config.toml"
 for seat in manager coder; do
-  is "$seat has no sandbox keys" bash -c '! grep -q sandbox "$1"' _ "$cw/$seat/config.toml"
+  is "$seat has no sandbox keys" bash -c '! grep -q sandbox "$1"' _ "$cw/$seat/codewhale/config.toml"
 done
-has "analyst sandbox" 'sandbox_mode = "workspace-write"' "$cw/analyst/config.toml"
-is "analyst no network key" bash -c '! grep -q sandbox_network_access "$1"' _ "$cw/analyst/config.toml"
-has "reviewer sandbox" 'sandbox_mode = "workspace-write"' "$cw/reviewer/config.toml"
-has "reviewer network" 'sandbox_network_access = true' "$cw/reviewer/config.toml"
+has "analyst sandbox" 'sandbox_mode = "workspace-write"' "$cw/analyst/codewhale/config.toml"
+is "analyst no network key" bash -c '! grep -q sandbox_network_access "$1"' _ "$cw/analyst/codewhale/config.toml"
+has "reviewer sandbox" 'sandbox_mode = "workspace-write"' "$cw/reviewer/codewhale/config.toml"
+has "reviewer network" 'sandbox_network_access = true' "$cw/reviewer/codewhale/config.toml"
 same "base MCP config unchanged" "$tmp/cw-base-mcp" "$home/.codewhale/mcp.json"
 same "base config unchanged" "$tmp/cw-base-config" "$home/.codewhale/config.toml"
 is "no approval_policy in repo templates" bash -c '! grep -rq approval_policy "$1"/seats/codewhale' _ "$repo"
-is "credentials stay out of generated config and installer output" bash -c '! grep -q secret-config-value "$1" "$2"' _ "$cw/coder/config.toml" "$tmp/out"
-is "nested credentials stay out of generated config" bash -c '! grep -q nested-secret-value "$1"' _ "$cw/coder/config.toml"
-is "fixture keys absent from installer output, generated configs and argv logs" bash -c '! grep -Ff "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"' _ "$tmp/fixture-secrets" "$tmp/installer-stdout.log" "$tmp/installer-stderr.log" "$tmp/codewhale-auth.log" "$cw/analyst/config.toml" "$cw/coder/config.toml" "$cw/manager/config.toml" "$cw/reviewer/config.toml"
+is "credentials stay out of generated config and installer output" bash -c '! grep -q secret-config-value "$1" "$2"' _ "$cw/coder/codewhale/config.toml" "$tmp/out"
+is "nested credentials stay out of generated config" bash -c '! grep -q nested-secret-value "$1"' _ "$cw/coder/codewhale/config.toml"
+is "fixture keys absent from installer output, generated configs and argv logs" bash -c '! grep -Ff "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"' _ "$tmp/fixture-secrets" "$tmp/installer-stdout.log" "$tmp/installer-stderr.log" "$tmp/codewhale-auth.log" "$cw/analyst/codewhale/config.toml" "$cw/coder/codewhale/config.toml" "$cw/manager/codewhale/config.toml" "$cw/reviewer/codewhale/config.toml"
 find "$cw" -type f \( -name config.toml -o -name mcp.json \) | sort >"$tmp/cw-files"
 find "$cw" -type f | sort >"$tmp/cw-all-files"
 for seat in analyst coder manager reviewer; do
-  cfg=$cw/$seat/config.toml
+  cfg=$cw/$seat/codewhale/config.toml
   is "$seat status hooks parse" python3 -c 'import sys,tomllib; h=tomllib.load(open(sys.argv[1],"rb"))["hooks"]["hooks"]; assert [x["event"] for x in h]==["session_start","message_submit","turn_end"]' "$cfg"
   for st in idle working done; do
     has "$seat reports $st" "]7501;state=$st:app=codewhale" "$cfg"
@@ -1032,84 +1032,84 @@ done
 is "eight generated files" test "$(wc -l <"$tmp/cw-files")" -eq 8
 is "all exportable auth artifacts preserved" test "$(find "$cw" -type f -path '*/auth/*.key' | wc -l)" -eq 8
 is "generated files and auth artifacts have private permissions" bash -c 'while IFS= read -r f; do test "$(stat -c %a "$f")" = 600 || exit 1; done <"$1"' _ "$tmp/cw-all-files"
-chmod 644 "$cw/coder/auth/base-provider.key"
+chmod 644 "$cw/coder/codewhale/auth/base-provider.key"
 inst
-is "managed auth artifact mode repaired on rerun" test "$(stat -c %a "$cw/coder/auth/base-provider.key")" = 600
+is "managed auth artifact mode repaired on rerun" test "$(stat -c %a "$cw/coder/codewhale/auth/base-provider.key")" = 600
 is "fixture keys absent from output, config and CLI argv log" bash -c '! grep -Ff "$1" "$2" "$3" "$4" "$5"' _ "$tmp/fixture-secrets" "$tmp/out" "$tmp/err" "$tmp/codewhale-auth.log" "$tmp/cw-files"
-chmod 644 "$cw/coder/mcp.json"
+chmod 644 "$cw/coder/codewhale/mcp.json"
 inst
-is "managed MCP mode repaired on rerun" test "$(stat -c %a "$cw/coder/mcp.json")" = 600
+is "managed MCP mode repaired on rerun" test "$(stat -c %a "$cw/coder/codewhale/mcp.json")" = 600
 sed -i 's/model = "base-model"/model = "updated-model"/' "$home/.codewhale/config.toml"
 python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["servers"]["extra"]["command"]="updated-helper"; open(p,"w").write(json.dumps(d))' "$home/.codewhale/mcp.json"
 inst
-is "base changes refresh managed outputs" python3 -c 'import json,sys,tomllib; p=sys.argv[1]; m=json.load(open(p+"/coder/mcp.json")); c=tomllib.load(open(p+"/coder/config.toml","rb")); assert m["servers"]["extra"]["command"]=="updated-helper" and c["model"]=="updated-model"' "$cw"
-is "generated files carry updated base values" bash -c 'grep -q updated-helper "$1" && grep -q updated-model "$2"' _ "$cw/coder/mcp.json" "$cw/coder/config.toml"
+is "base changes refresh managed outputs" python3 -c 'import json,sys,tomllib; p=sys.argv[1]+"/coder/codewhale"; m=json.load(open(p+"/mcp.json")); c=tomllib.load(open(p+"/config.toml","rb")); assert m["servers"]["extra"]["command"]=="updated-helper" and c["model"]=="updated-model"' "$cw"
+is "generated files carry updated base values" bash -c 'grep -q updated-helper "$1" && grep -q updated-model "$2"' _ "$cw/coder/codewhale/mcp.json" "$cw/coder/codewhale/config.toml"
 # a hand-edited config is refused (kept) without --force and replaced with it
-cp "$cw/coder/config.toml" "$tmp/cw-coder-orig"
-printf 'reasoning_effort = "high"\n' >>"$cw/coder/config.toml"
-cp "$cw/coder/config.toml" "$tmp/cw-coder-edited"
+cp "$cw/coder/codewhale/config.toml" "$tmp/cw-coder-orig"
+printf 'reasoning_effort = "high"\n' >>"$cw/coder/codewhale/config.toml"
+cp "$cw/coder/codewhale/config.toml" "$tmp/cw-coder-edited"
 inst
-has "edited config reported" "unchanged: $cw/coder/config.toml (differs" "$tmp/out"
-same "edited config kept without force" "$tmp/cw-coder-edited" "$cw/coder/config.toml"
+has "edited config reported" "unchanged: $cw/coder/codewhale/config.toml (differs" "$tmp/out"
+same "edited config kept without force" "$tmp/cw-coder-edited" "$cw/coder/codewhale/config.toml"
 inst --force
-has "edited config replaced with force" "replaced: $cw/coder/config.toml" "$tmp/out"
-is "force restores generated config" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["reasoning_effort"]=="medium"' "$cw/coder/config.toml"
+has "edited config replaced with force" "replaced: $cw/coder/codewhale/config.toml" "$tmp/out"
+is "force restores generated config" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["reasoning_effort"]=="medium"' "$cw/coder/codewhale/config.toml"
 # MCP hand edits are protected too, while an explicit force refreshes them.
-cp "$cw/coder/mcp.json" "$tmp/cw-mcp-orig"
-printf '\n ' >>"$cw/coder/mcp.json"
-cp "$cw/coder/mcp.json" "$tmp/cw-mcp-edited"
+cp "$cw/coder/codewhale/mcp.json" "$tmp/cw-mcp-orig"
+printf '\n ' >>"$cw/coder/codewhale/mcp.json"
+cp "$cw/coder/codewhale/mcp.json" "$tmp/cw-mcp-edited"
 inst
-same "edited MCP file kept without force" "$tmp/cw-mcp-edited" "$cw/coder/mcp.json"
+same "edited MCP file kept without force" "$tmp/cw-mcp-edited" "$cw/coder/codewhale/mcp.json"
 inst --force
-same "force restores generated MCP file" "$tmp/cw-mcp-orig" "$cw/coder/mcp.json"
+same "force restores generated MCP file" "$tmp/cw-mcp-orig" "$cw/coder/codewhale/mcp.json"
 # Unmarked regular Codewhale files refuse without force and are replaced with it.
-printf 'mine = 1\n' >"$cw/manager/config.toml"
-printf '{"custom":true}' >"$cw/reviewer/mcp.json"
-cp "$cw/manager/config.toml" "$tmp/unmarked-config-before"
-cp "$cw/reviewer/mcp.json" "$tmp/unmarked-mcp-before"
+printf 'mine = 1\n' >"$cw/manager/codewhale/config.toml"
+printf '{"custom":true}' >"$cw/reviewer/codewhale/mcp.json"
+cp "$cw/manager/codewhale/config.toml" "$tmp/unmarked-config-before"
+cp "$cw/reviewer/codewhale/mcp.json" "$tmp/unmarked-mcp-before"
 inst; code=$?
 is "unmarked Codewhale files refuse without force" test "$code" -eq 1
-has "unmarked config refusal names file" "not generated by agentboard: $cw/manager/config.toml" "$tmp/err"
-has "unmarked MCP refusal names file" "not generated by agentboard: $cw/reviewer/mcp.json" "$tmp/err"
-same "unmarked config kept without force" "$tmp/unmarked-config-before" "$cw/manager/config.toml"
-same "unmarked MCP kept without force" "$tmp/unmarked-mcp-before" "$cw/reviewer/mcp.json"
+has "unmarked config refusal names file" "not generated by agentboard: $cw/manager/codewhale/config.toml" "$tmp/err"
+has "unmarked MCP refusal names file" "not generated by agentboard: $cw/reviewer/codewhale/mcp.json" "$tmp/err"
+same "unmarked config kept without force" "$tmp/unmarked-config-before" "$cw/manager/codewhale/config.toml"
+same "unmarked MCP kept without force" "$tmp/unmarked-mcp-before" "$cw/reviewer/codewhale/mcp.json"
 inst --force; code=$?
 is "force replaces unmarked regular Codewhale files" test "$code" -eq 0
-has "force replaced config with generated marker" '# agentboardGenerated' "$cw/manager/config.toml"
-is "force replaced MCP with seat card" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["servers"]["agentboard"]["url"].endswith("/mcp/reviewer")' "$cw/reviewer/mcp.json"
+has "force replaced config with generated marker" '# agentboardGenerated' "$cw/manager/codewhale/config.toml"
+is "force replaced MCP with seat card" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["servers"]["agentboard"]["url"].endswith("/mcp/reviewer")' "$cw/reviewer/codewhale/mcp.json"
 
 # Exact Codewhale seat-file symlinks require force and are replaced, never followed.
 newhome
 mkdir -p "$home/.codex/rules"
 inst
-cw=$home/.local/share/agentboard/codewhale
+cw=$home/.local/share/agentboard/seats
 printf 'outside config' >"$tmp/foreign-codewhale-config"
 printf 'outside MCP' >"$tmp/foreign-codewhale-mcp"
-rm "$cw/manager/config.toml"
-ln -s "$tmp/foreign-codewhale-config" "$cw/manager/config.toml"
-rm "$cw/coder/mcp.json"
-ln -s "$tmp/foreign-codewhale-mcp" "$cw/coder/mcp.json"
+rm "$cw/manager/codewhale/config.toml"
+ln -s "$tmp/foreign-codewhale-config" "$cw/manager/codewhale/config.toml"
+rm "$cw/coder/codewhale/mcp.json"
+ln -s "$tmp/foreign-codewhale-mcp" "$cw/coder/codewhale/mcp.json"
 inst; code=$?
 is "Codewhale foreign seat links refuse without force" test "$code" -eq 1
-is "Codewhale config link preserved without force" test -L "$cw/manager/config.toml"
-is "Codewhale MCP link preserved without force" test -L "$cw/coder/mcp.json"
+is "Codewhale config link preserved without force" test -L "$cw/manager/codewhale/config.toml"
+is "Codewhale MCP link preserved without force" test -L "$cw/coder/codewhale/mcp.json"
 mkdir -p "$home/.codewhale/fake-auth"
 printf 'stage-link-fixture-key' >"$home/.codewhale/fake-auth/deepseek"
 printf 'provider config store env route\ndeepseek yes no no config\n' >"$home/.codewhale/auth-inventory"
 inst --force; code=$?
-is "force replaces Codewhale links with regular private files" test "$code" -eq 0 -a ! -L "$cw/manager/config.toml" -a ! -L "$cw/coder/mcp.json" -a "$(stat -c %a "$cw/manager/config.toml")" = 600 -a "$(stat -c %a "$cw/coder/mcp.json")" = 600
+is "force replaces Codewhale links with regular private files" test "$code" -eq 0 -a ! -L "$cw/manager/codewhale/config.toml" -a ! -L "$cw/coder/codewhale/mcp.json" -a "$(stat -c %a "$cw/manager/codewhale/config.toml")" = 600 -a "$(stat -c %a "$cw/coder/codewhale/mcp.json")" = 600
 is "Codewhale link targets untouched" test "$(cat "$tmp/foreign-codewhale-config")" = 'outside config' -a "$(cat "$tmp/foreign-codewhale-mcp")" = 'outside MCP'
 
 # Directories remain unsafe and are rejected during preflight.
 newhome
 mkdir -p "$home/.codex/rules"
 inst
-cw=$home/.local/share/agentboard/codewhale
-rm "$cw/coder/mcp.json"
-mkdir "$cw/coder/mcp.json"
+cw=$home/.local/share/agentboard/seats
+rm "$cw/coder/codewhale/mcp.json"
+mkdir "$cw/coder/codewhale/mcp.json"
 inst --force; code=$?
 is "Codewhale directory refuses under force" test "$code" -eq 1
-is "Codewhale directory survives refusal" test -d "$cw/coder/mcp.json"
+is "Codewhale directory survives refusal" test -d "$cw/coder/codewhale/mcp.json"
 
 # Malformed bases refuse during preflight, before any installed files change.
 newhome
@@ -1118,7 +1118,7 @@ printf '{bad json' >"$home/.codewhale/mcp.json"
 inst; code=$?
 is "malformed Codewhale base refused" test "$code" -eq 1
 has "malformed Codewhale base diagnosed" 'invalid JSON in' "$tmp/err"
-is "malformed base wrote no seat output" test ! -e "$home/.local/share/agentboard/codewhale"
+is "malformed base wrote no seat output" test ! -e "$home/.local/share/agentboard/seats"
 is "malformed base wrote no Claude outputs" bash -c 'test -z "$(find "$1/.claude" -type f -print -quit)"' _ "$home"
 newhome
 mkdir -p "$home/.codex/rules" "$home/.codewhale"
@@ -1126,7 +1126,7 @@ printf 'provider = [' >"$home/.codewhale/config.toml"
 inst; code=$?
 is "malformed Codewhale TOML refused" test "$code" -eq 1
 has "malformed Codewhale TOML diagnosed" 'invalid TOML in' "$tmp/err"
-is "malformed TOML wrote no seat output" test ! -e "$home/.local/share/agentboard/codewhale"
+is "malformed TOML wrote no seat output" test ! -e "$home/.local/share/agentboard/seats"
 
 # --codewhale-provider writes only the provider name; a bad name is a usage error
 newhome
@@ -1139,15 +1139,15 @@ printf '%s\n' deepseek-fixture-key >>"$tmp/fixture-secrets"
 inst --codewhale-provider deepseek; code=$?
 is "provider install exit" test "$code" -eq 0
 for seat in analyst coder manager reviewer; do
-  has "$seat provider line" 'provider = "deepseek"' "$home/.local/share/agentboard/codewhale/$seat/config.toml"
-  is "$seat provider config valid TOML" python3 -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1],"rb")); assert c["provider"]=="deepseek" and len(c["hooks"]["hooks"])==3' "$home/.local/share/agentboard/codewhale/$seat/config.toml"
-  HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/codewhale/$seat" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+  has "$seat provider line" 'provider = "deepseek"' "$home/.local/share/agentboard/seats/$seat/codewhale/config.toml"
+  is "$seat provider config valid TOML" python3 -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1],"rb")); assert c["provider"]=="deepseek" and len(c["hooks"]["hooks"])==3' "$home/.local/share/agentboard/seats/$seat/codewhale/config.toml"
+  HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/seats/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider deepseek >"$tmp/seat-key"
   is "$seat receives explicit provider key" cmp -s "$tmp/expected-deepseek-key" "$tmp/seat-key"
 done
-is "all fixture API keys absent from generated config files" bash -c '! grep -Ff "$1" "$2" "$3" "$4" "$5"' _ "$tmp/fixture-secrets" "$home/.local/share/agentboard/codewhale/analyst/config.toml" "$home/.local/share/agentboard/codewhale/coder/config.toml" "$home/.local/share/agentboard/codewhale/manager/config.toml" "$home/.local/share/agentboard/codewhale/reviewer/config.toml"
-is "explicit provider auth artifact is private" test "$(stat -c %a "$home/.local/share/agentboard/codewhale/coder/auth/deepseek.key")" = 600
-is "explicit provider key absent from config" bash -c '! grep -q deepseek-fixture-key "$1"' _ "$home/.local/share/agentboard/codewhale/coder/config.toml"
+is "all fixture API keys absent from generated config files" bash -c '! grep -Ff "$1" "$2" "$3" "$4" "$5"' _ "$tmp/fixture-secrets" "$home/.local/share/agentboard/seats/analyst/codewhale/config.toml" "$home/.local/share/agentboard/seats/coder/codewhale/config.toml" "$home/.local/share/agentboard/seats/manager/codewhale/config.toml" "$home/.local/share/agentboard/seats/reviewer/codewhale/config.toml"
+is "explicit provider auth artifact is private" test "$(stat -c %a "$home/.local/share/agentboard/seats/coder/codewhale/auth/deepseek.key")" = 600
+is "explicit provider key absent from config" bash -c '! grep -q deepseek-fixture-key "$1"' _ "$home/.local/share/agentboard/seats/coder/codewhale/config.toml"
 is "all fixture keys absent from installer output and argv logs" bash -c '! grep -Ff "$1" "$2" "$3" "$4"' _ "$tmp/fixture-secrets" "$tmp/installer-stdout.log" "$tmp/installer-stderr.log" "$tmp/codewhale-auth.log"
 newhome
 inst --codewhale-provider 'x"; yolo = false'; code=$?
@@ -1166,7 +1166,7 @@ root_inst --agent codex; code=$?
 is "root codex singleton succeeds despite malformed unselected inputs" test "$code" -eq 0
 is "codex singleton installs codex profile" test -L "$home/.codex/coder.config.toml"
 is "codex singleton skips Claude files" test ! -e "$home/.claude/coder-mcp.json"
-is "codex singleton skips Codewhale files" test ! -e "$home/.local/share/agentboard/codewhale"
+is "codex singleton skips Codewhale files" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
 is "codex singleton skips Grok config" test "$(cat "$home/.grok/config.toml")" = '{bad grok'
 is "codex singleton skips shared launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
@@ -1179,7 +1179,7 @@ root_inst --agent codex,claude; code=$?
 is "root codex and Claude pair ignores malformed unselected clients" test "$code" -eq 0
 is "pair writes Claude output" test -f "$home/.claude/coder-mcp.json"
 is "pair writes Codex output" test -L "$home/.codex/coder.config.toml"
-is "pair skips Codewhale output" test ! -e "$home/.local/share/agentboard/codewhale"
+is "pair skips Codewhale output" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
 is "pair leaves Grok bytes alone" test "$(cat "$home/.grok/config.toml")" = '{bad grok'
 is "pair leaves launcher and unit alone" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
@@ -1188,7 +1188,7 @@ mkdir -p "$home/.codex/rules"
 root_inst --agent codex,codewhale; code=$?
 is "root codex and Codewhale pair succeeds" test "$code" -eq 0
 is "Codewhale pair writes Codex profile" test -L "$home/.codex/coder.config.toml"
-is "Codewhale pair writes selected Codewhale home" test -f "$home/.local/share/agentboard/codewhale/coder/config.toml" -a -f "$home/.local/share/agentboard/codewhale/coder/mcp.json"
+is "Codewhale pair writes selected Codewhale home" test -f "$home/.local/share/agentboard/seats/coder/codewhale/config.toml" -a -f "$home/.local/share/agentboard/seats/coder/codewhale/mcp.json"
 is "Codewhale pair skips Claude files" test ! -e "$home/.claude/coder-mcp.json"
 is "Codewhale pair skips Grok" test ! -e "$home/.grok/config.toml"
 is "Codewhale pair skips shared launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
@@ -1202,7 +1202,7 @@ is "root Grok singleton succeeds despite malformed unselected inputs" test "$cod
 is "Grok singleton installs its managed block" grep -qF '# BEGIN AGENTBOARD MCP' "$home/.grok/config.toml"
 is "Grok singleton skips Codex profiles" test ! -e "$home/.codex/coder.config.toml"
 is "Grok singleton skips Claude outputs" test ! -e "$home/.claude/coder-mcp.json"
-is "Grok singleton skips Codewhale outputs" test ! -e "$home/.local/share/agentboard/codewhale"
+is "Grok singleton skips Codewhale outputs" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
 is "Grok singleton skips launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
 newhome
@@ -1224,7 +1224,7 @@ is "selected malformed Codewhale preflight refuses before writes" test "$code" -
 has "selected malformed Codewhale preflight diagnoses JSON" 'invalid JSON in' "$tmp/err"
 same "selected malformed Codewhale preflight preserves base" "$tmp/selected-codewhale-before" "$home/.codewhale/mcp.json"
 is "selected malformed Codewhale preflight writes no Codex output" test ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.codex/rules/default.rules"
-is "selected malformed Codewhale preflight writes no seat home" test ! -e "$home/.local/share/agentboard/codewhale"
+is "selected malformed Codewhale preflight writes no seat home" test ! -e "$home/.local/share/agentboard/seats"
 
 newhome
 mkdir -p "$home/.codex/rules"
@@ -1252,8 +1252,58 @@ root_inst --codewhale-provider custom --skip-grok; code=$?
 is "provider outside default full install exits usage 2" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml"
 newhome
 root_inst --agent codewhale --codewhale-provider custom; code=$?
-is "provider override is valid for selected Codewhale" test "$code" -eq 0 -a -f "$home/.local/share/agentboard/codewhale/coder/config.toml"
-is "selected Codewhale provider is applied" grep -qF 'provider = "custom"' "$home/.local/share/agentboard/codewhale/coder/config.toml"
+is "provider override is valid for selected Codewhale" test "$code" -eq 0 -a -f "$home/.local/share/agentboard/seats/coder/codewhale/config.toml"
+is "selected Codewhale provider is applied" grep -qF 'provider = "custom"' "$home/.local/share/agentboard/seats/coder/codewhale/config.toml"
+
+# Legacy Codewhale homes are copied into role-first destinations without mutation.
+newhome
+mkdir -p "$home/.codex/rules" "$home/.codewhale/fake-auth"
+make_fake_codewhale
+printf '%s' 'migration-provider-fixture-key' >"$home/.codewhale/fake-auth/migration-provider"
+printf 'provider config store env route\nmigration-provider yes no no config\n' >"$home/.codewhale/auth-inventory"
+legacy=$home/.local/share/agentboard/codewhale
+for seat in analyst coder manager reviewer; do
+  mkdir -p "$legacy/$seat/auth"
+  printf 'legacy user setting\n' >"$legacy/$seat/preferences.txt"
+  printf 'legacy auth artifact\n' >"$legacy/$seat/auth/session.data"
+  printf 'provider = "legacy-provider"\n' >"$legacy/$seat/config.toml"
+  printf '{"servers":{"old":{"command":"kept"}}}\n' >"$legacy/$seat/mcp.json"
+done
+cp -R "$legacy" "$tmp/legacy-before"
+inst --agent codewhale; code=$?
+is "legacy Codewhale migration succeeds" test "$code" -eq 0
+for seat in analyst coder manager reviewer; do
+  dest=$home/.local/share/agentboard/seats/$seat/codewhale
+  is "$seat old home retained byte-identically" diff -r "$tmp/legacy-before/$seat" "$legacy/$seat"
+  is "$seat unrelated file migrated" test "$(cat "$dest/preferences.txt")" = 'legacy user setting'
+  is "$seat old auth artifact migrated privately" test "$(cat "$dest/auth/session.data")" = 'legacy auth artifact' -a "$(stat -c %a "$dest/auth/session.data")" = 600
+  is "$seat config regenerated from base and template" grep -qF "mcp_config_path = \"$dest/mcp.json\"" "$dest/config.toml"
+  is "$seat MCP regenerated for its actor" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["servers"]["agentboard"]["url"].endswith("/mcp/"+sys.argv[2])' "$dest/mcp.json" "$seat"
+  is "$seat migrated exportable API key retained" test -f "$dest/auth/migration-provider.key"
+done
+is "legacy migration did not create old-home links" bash -c '! find "$1" -type l | grep -q .' _ "$legacy"
+is "legacy migration outputs are private" test "$(stat -c %a "$home/.local/share/agentboard/seats/coder/codewhale")" = 700
+
+# Unsafe legacy entries refuse before any role-first destination is published.
+newhome
+mkdir -p "$home/.codex/rules" "$home/.local/share/agentboard/codewhale/reviewer"
+ln -s "$tmp" "$home/.local/share/agentboard/codewhale/reviewer/outside"
+inst --agent codewhale; code=$?
+is "unsafe legacy symlink refuses migration" test "$code" -eq 1
+has "unsafe legacy migration diagnostic" 'unsupported entry in Codewhale seat home' "$tmp/err"
+is "unsafe legacy migration publishes no destination" test ! -e "$home/.local/share/agentboard/seats"
+is "unsafe legacy migration preserves old symlink" test -L "$home/.local/share/agentboard/codewhale/reviewer/outside"
+
+# An existing canonical destination refreshes in place and leaves both its
+# unrelated files and any legacy source untouched.
+newhome
+mkdir -p "$home/.codex/rules" "$home/.local/share/agentboard/seats/coder/codewhale" "$home/.local/share/agentboard/codewhale/coder"
+printf 'canonical unrelated content\n' >"$home/.local/share/agentboard/seats/coder/codewhale/keep.txt"
+printf 'legacy stays untouched\n' >"$home/.local/share/agentboard/codewhale/coder/keep.txt"
+inst --agent codewhale; code=$?
+is "existing role-first home refresh succeeds" test "$code" -eq 0
+is "existing role-first unrelated file preserved" test "$(cat "$home/.local/share/agentboard/seats/coder/codewhale/keep.txt")" = 'canonical unrelated content'
+is "existing destination leaves legacy source untouched" test "$(cat "$home/.local/share/agentboard/codewhale/coder/keep.txt")" = 'legacy stays untouched'
 
 newhome
 mkdir -p "$home/.codex/rules"

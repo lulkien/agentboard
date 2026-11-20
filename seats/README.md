@@ -173,7 +173,7 @@ destinations are refused. Example:
 
 ## Codewhale
 
-`install.py` generates one home per seat, `~/.local/share/agentboard/codewhale/<seat>/`,
+`install.py` generates one home per seat, `~/.local/share/agentboard/seats/<seat>/codewhale/`,
 holding `config.toml` (from `seats/codewhale/<seat>.config.toml`) and `mcp.json`
 (the same `/mcp/<seat>` URL as the Claude card). Effort, yolo and sandbox live in the
 config, so they are per seat. The installer reads `~/.codewhale/mcp.json` and
@@ -184,7 +184,12 @@ overriding them. `--codewhale-provider NAME` overrides a base provider. Neither
 base is rewritten, and credentials are omitted from generated TOML. If a base is
 absent, that file uses the existing defaults. Clean managed outputs refresh when
 their bases change; hand-edited outputs remain protected by the normal `--force`
-rule. `--force` replaces unmarked regular files or foreign symlinks at exactly
+rule. If a role-first home is absent, install safely copies regular files from
+the legacy `~/.local/share/agentboard/codewhale/<seat>/` home, then regenerates
+its owned config and MCP files. The legacy home is read-only: it is never
+removed, moved or linked. Unsafe entries refuse before any destination is
+published. If the role-first home exists, it is refreshed there and unrelated
+content is retained; the legacy home is left alone. `--force` replaces unmarked regular files or foreign symlinks at exactly
 `config.toml` or `mcp.json`; it never follows the link, and other symlinks or
 non-regular entries in a seat home remain refused. Malformed bases fail preflight
 before installed files change. Every seat
