@@ -171,9 +171,13 @@ is "foreign link preserved on refusal" test "$(readlink "$home/.claude/coder-mcp
 inst --force; code=$?
 is "force replaces foreign card link" test "$code" -eq 0 -a -f "$home/.claude/coder-mcp.json" -a ! -L "$home/.claude/coder-mcp.json"
 printf 'mine\n' >"$home/.claude/manager-mcp.json"
+cp "$home/.claude/manager-mcp.json" "$tmp/claude-unmarked-before"
+inst; code=$?
+is "unmarked regular Claude file refuses without force" test "$code" -eq 1
+same "unmarked Claude file preserved without force" "$tmp/claude-unmarked-before" "$home/.claude/manager-mcp.json"
 inst --force; code=$?
-is "force refuses unmarked regular file" test "$code" -eq 1
-is "unmarked regular file preserved" test "$(cat "$home/.claude/manager-mcp.json")" = mine
+is "force replaces unmarked regular Claude file" test "$code" -eq 0
+is "forced Claude file is generated card" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert "agentboardGenerated" in d and d["mcpServers"]["agentboard"]["url"].endswith("/mcp/manager")' "$home/.claude/manager-mcp.json"
 rm "$home/.claude/manager-mcp.json"
 printf '{' >"$home/.claude.json"
 inst --force; code=$?
@@ -227,6 +231,38 @@ is "foreign unit link preserved" test "$(readlink "$home/.config/systemd/user/ag
 is "foreign unit refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
 inst --force
 is "force replaces unit link" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
+
+# --force replaces regular Codex entries, but refuses directories before writing.
+newhome
+mkdir -p "$home/.codex/rules"
+printf 'foreign profile\n' >"$home/.codex/coder.config.toml"
+cp "$home/.codex/coder.config.toml" "$tmp/codex-foreign-before"
+inst; code=$?
+is "foreign regular Codex profile refuses without force" test "$code" -eq 1
+same "foreign regular Codex profile preserved without force" "$tmp/codex-foreign-before" "$home/.codex/coder.config.toml"
+inst --force; code=$?
+is "force replaces regular Codex profile" test "$code" -eq 0 -a -L "$home/.codex/coder.config.toml"
+is "Codex replacement points at this seat profile" test "$(readlink "$home/.codex/coder.config.toml")" = "$repo/seats/codex/coder.config.toml"
+
+newhome
+mkdir -p "$home/.codex/rules"
+printf 'foreign target' >"$tmp/codex-target"
+ln -s "$tmp/codex-target" "$home/.codex/coder.config.toml"
+inst; code=$?
+is "foreign Codex profile link refuses without force" test "$code" -eq 1
+is "foreign Codex profile link remains without force" test -L "$home/.codex/coder.config.toml"
+inst --force; code=$?
+is "force replaces foreign Codex profile link" test "$code" -eq 0 -a -L "$home/.codex/coder.config.toml" -a "$(readlink "$home/.codex/coder.config.toml")" = "$repo/seats/codex/coder.config.toml"
+is "foreign Codex profile link target stays unchanged" test "$(cat "$tmp/codex-target")" = 'foreign target'
+
+newhome
+mkdir -p "$home/.codex/rules" "$home/.claude"
+mkdir "$home/.codex/coder.config.toml"
+inst --force; code=$?
+is "Codex directory refuses under force" test "$code" -eq 1
+is "Codex directory survives force refusal" test -d "$home/.codex/coder.config.toml"
+is "Codex directory refusal writes no Claude card" test ! -e "$home/.claude/coder-mcp.json"
+is "Codex directory refusal writes no rules" test ! -e "$rules"
 
 # --- grok-only does not manage the PATH launcher ------------------------------
 newhome
@@ -499,17 +535,36 @@ for kind in duplicate_begin duplicate_end begin_only end_before_begin padded; do
 done
 
 # --- unmarked tables, malformed TOML and unsafe destinations refuse --------
-for args in "" "--force"; do
-  newhome
-  grok=$home/.grok/config.toml
-  mkdir -p "$home/.grok"
-  printf '[mcp_servers.agentboard]\ncommand = "grok mcp add"\n' >"$grok"
-  cp "$grok" "$tmp/grok-before"
-  grok_inst $args; code=$?
-  is "Grok unmarked table ${args:-plain} refused" test "$code" -eq 1
-  same "Grok unmarked table ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
-  has "Grok unmarked table ${args:-plain} manual repair" 'remove or convert it by hand' "$tmp/err"
-done
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+printf '[mcp_servers.agentboard]\ncommand = "grok mcp add"\n' >"$grok"
+cp "$grok" "$tmp/grok-before"
+grok_inst; code=$?
+is "Grok unmarked table refuses without force" test "$code" -eq 1
+same "Grok unmarked table stays without force" "$tmp/grok-before" "$grok"
+has "Grok unmarked table refusal diagnosed" 'remove or convert it by hand' "$tmp/err"
+grok_inst --force; code=$?
+is "force replaces Grok unmarked table" test "$code" -eq 0
+is "Grok replacement has one managed table" python3 -c 'import sys,tomllib; p=sys.argv[1]; d=tomllib.load(open(p,"rb")); assert d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/${AGENTBOARD_SEAT:-manager}")' "$grok"
+is "Grok replacement has one marker pair" test "$(grep -cF '# BEGIN AGENTBOARD MCP' "$grok")" -eq 1 -a "$(grep -cF '# END AGENTBOARD MCP' "$grok")" -eq 1
+
+# Exact Grok table replacement preserves unrelated bytes, CRLF and file mode.
+newhome
+grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+printf '[mcp_servers.agentboard]\r\ncommand = "manual"\r\n\r\n[mcp_servers.agentboard.env]\r\nTOKEN = "discard this owned entry"\r\n\r\n[ui] # keep this comment\r\ntheme = "dark"\r\n\r\n[mcp_servers.other]\r\ncommand = "other"\r\n' >"$grok"
+chmod 640 "$grok"
+printf '\r\n\r\n[ui] # keep this comment\r\ntheme = "dark"\r\n\r\n[mcp_servers.other]\r\ncommand = "other"\r\n' >"$tmp/grok-preserved"
+grok_inst --force; code=$?
+is "force converts Grok table with child tables" test "$code" -eq 0
+is "Grok unrelated bytes stay byte-identical" python3 -c 'import pathlib,sys; actual=pathlib.Path(sys.argv[1]).read_bytes(); expected=pathlib.Path(sys.argv[2]).read_bytes(); assert actual.startswith(expected) and b"TOKEN = \"discard this owned entry\"" not in actual; assert b"\r\n" in actual and b"\n" not in actual.replace(b"\r\n", b"")' "$grok" "$tmp/grok-preserved"
+is "inline-commented Grok table survives force" python3 -c 'import pathlib,sys,tomllib; raw=pathlib.Path(sys.argv[1]).read_bytes(); parsed=tomllib.loads(raw.decode()); assert b"[ui] # keep this comment\r\n" in raw and parsed["ui"]=={"theme":"dark"}' "$grok"
+is "Grok mode preserved" test "$(stat -c %a "$grok")" = 640
+cp "$grok" "$tmp/grok-force-first"
+grok_inst --force; code=$?
+is "second Grok force succeeds" test "$code" -eq 0
+same "second Grok force is idempotent" "$tmp/grok-force-first" "$grok"
 newhome
 grok=$home/.grok/config.toml
 mkdir -p "$home/.grok"
@@ -562,17 +617,19 @@ for args in "" "--force"; do
   is "Grok inline refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
 done
 
-# --- Grok preflight runs before other installer destinations are written ----
+# --- Grok conversion is preflighted before any other destination is written -
 newhome
 grok=$home/.grok/config.toml
 mkdir -p "$home/.grok" "$home/.codex/rules" "$home/.claude"
 printf '[mcp_servers.agentboard]\ncommand = "manual"\n' >"$grok"
 cp "$grok" "$tmp/grok-before"
+printf 'mcp_servers = { agentboard = { command = "manual" } }\n' >"$grok"
+cp "$grok" "$tmp/grok-before"
 inst --force; code=$?
-is "full install refuses unmarked Grok table" test "$code" -eq 1
-same "full install refusal preserves Grok config" "$tmp/grok-before" "$grok"
-is "Grok preflight refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
-is "Grok preflight refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
+is "unsafe inline Grok entry refuses under force" test "$code" -eq 1
+same "unsafe inline Grok entry stays unchanged" "$tmp/grok-before" "$grok"
+is "Grok refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
+is "Grok refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
 
 # --- --skip-grok installs everything else without reading or changing Grok --
 newhome
@@ -590,17 +647,15 @@ same "skip-grok preserves foreign Grok bytes" "$tmp/grok-skip-before" "$grok"
 is "skip-grok preserves Grok checksum" test "$(cksum <"$grok")" = "$sum"
 is "skip-grok emits no Grok access diagnostic" test ! -s "$tmp/err"
 
-# The default full install keeps its existing refusal for that same entry.
+# The full install converts an exactly locatable unmarked Grok table.
 newhome
 grok=$home/.grok/config.toml
 mkdir -p "$home/.grok" "$home/.codex/rules"
 printf '[mcp_servers.agentboard]\ncommand = "foreign"\n' >"$grok"
-cp "$grok" "$tmp/grok-default-before"
 inst --force; code=$?
-is "default full install refuses foreign Grok entry" test "$code" -eq 1
-same "default refusal preserves Grok bytes" "$tmp/grok-default-before" "$grok"
-has "default refusal keeps unmarked-entry message" 'unmarked [mcp_servers.agentboard] entry' "$tmp/err"
-is "default refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
+is "full install converts Grok table" test "$code" -eq 0
+is "full install writes Codex profile after safe Grok conversion" test -L "$home/.codex/coder.config.toml"
+is "full install writes one Grok agentboard table" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/${AGENTBOARD_SEAT:-manager}")' "$grok"
 
 # Combining the mutually exclusive Grok modes is a usage error.
 newhome
@@ -841,20 +896,38 @@ is "force replaces unmarked regular Codewhale files" test "$code" -eq 0
 has "force replaced config with generated marker" '# agentboardGenerated' "$cw/manager/config.toml"
 is "force replaced MCP with seat card" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["servers"]["agentboard"]["url"].endswith("/mcp/reviewer")' "$cw/reviewer/mcp.json"
 
-# Symlinks and nonregular config/MCP destinations are refused even with force.
+# Exact Codewhale seat-file symlinks require force and are replaced, never followed.
 newhome
 mkdir -p "$home/.codex/rules"
 inst
 cw=$home/.local/share/agentboard/codewhale
-printf 'outside' >"$tmp/foreign-codewhale-config"
+printf 'outside config' >"$tmp/foreign-codewhale-config"
+printf 'outside MCP' >"$tmp/foreign-codewhale-mcp"
 rm "$cw/manager/config.toml"
 ln -s "$tmp/foreign-codewhale-config" "$cw/manager/config.toml"
 rm "$cw/coder/mcp.json"
+ln -s "$tmp/foreign-codewhale-mcp" "$cw/coder/mcp.json"
+inst; code=$?
+is "Codewhale foreign seat links refuse without force" test "$code" -eq 1
+is "Codewhale config link preserved without force" test -L "$cw/manager/config.toml"
+is "Codewhale MCP link preserved without force" test -L "$cw/coder/mcp.json"
+mkdir -p "$home/.codewhale/fake-auth"
+printf 'stage-link-fixture-key' >"$home/.codewhale/fake-auth/deepseek"
+printf 'provider config store env route\ndeepseek yes no no config\n' >"$home/.codewhale/auth-inventory"
+inst --force; code=$?
+is "force replaces Codewhale links with regular private files" test "$code" -eq 0 -a ! -L "$cw/manager/config.toml" -a ! -L "$cw/coder/mcp.json" -a "$(stat -c %a "$cw/manager/config.toml")" = 600 -a "$(stat -c %a "$cw/coder/mcp.json")" = 600
+is "Codewhale link targets untouched" test "$(cat "$tmp/foreign-codewhale-config")" = 'outside config' -a "$(cat "$tmp/foreign-codewhale-mcp")" = 'outside MCP'
+
+# Directories remain unsafe and are rejected during preflight.
+newhome
+mkdir -p "$home/.codex/rules"
+inst
+cw=$home/.local/share/agentboard/codewhale
+rm "$cw/coder/mcp.json"
 mkdir "$cw/coder/mcp.json"
 inst --force; code=$?
-is "symlink and directory destinations refuse under force" test "$code" -eq 1
-is "symlink config remains a symlink" test -L "$cw/manager/config.toml"
-is "MCP directory remains a directory" test -d "$cw/coder/mcp.json"
+is "Codewhale directory refuses under force" test "$code" -eq 1
+is "Codewhale directory survives refusal" test -d "$cw/coder/mcp.json"
 
 # Malformed bases refuse during preflight, before any installed files change.
 newhome

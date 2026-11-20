@@ -19,11 +19,11 @@ its client gets a board identity.
 
 It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml`. Claude
 seat files are generated from the repo card and `~/.claude.json`. Repo card links
-from older installs are safely replaced; foreign links and unmarked files are
-refused, including with `--force`. Each Codex seat profile carries its
-own tool list and permissions. `install.py` refuses an existing
-file that is not a symlink into this repo, and `--force` replaces only the named
-destinations. A full install also links `seats/start-agentboard-manager` to
+from older installs are safely replaced; `--force` replaces foreign links and
+unmarked regular files at the named seat destinations. Directories and other
+non-regular destinations are refused before any install writes. Each Codex seat
+profile carries its own tool list and permissions. `--force` replaces only the
+named destinations. A full install also links `seats/start-agentboard-manager` to
 `~/.local/bin/start-agentboard-manager`; `--grok-only` manages only the Grok MCP
 block and does not install the launcher. Use `--skip-grok` to install or refresh
 everything else without reading or changing `~/.grok/config.toml`; it is mutually
@@ -146,8 +146,10 @@ server from `~/.claude.json` with the repo card, with the card winning name clas
 Launch with `--strict-mcp-config` so that generated file is the seat's single source
 of truth. Rerun after editing user servers; unchanged inputs produce unchanged files.
 Generated files are mode 0600, output lists names only, and `~/.claude.json` is read
-only. A differing generated file is preserved unless `--force` is supplied; an
-unmarked file is always refused. Example:
+only. A differing generated file is preserved unless `--force` is supplied;
+`--force` replaces an unmarked regular file or foreign symlink at that exact seat
+destination without following its target. Directories and other non-regular
+destinations are refused. Example:
 `claude --mcp-config ~/.claude/manager-mcp.json --strict-mcp-config`.
 
 ## Codewhale
@@ -163,7 +165,10 @@ overriding them. `--codewhale-provider NAME` overrides a base provider. Neither
 base is rewritten, and credentials are omitted from generated TOML. If a base is
 absent, that file uses the existing defaults. Clean managed outputs refresh when
 their bases change; hand-edited outputs remain protected by the normal `--force`
-rule. Malformed bases fail preflight before installed files change. Every seat
+rule. `--force` replaces unmarked regular files or foreign symlinks at exactly
+`config.toml` or `mcp.json`; it never follows the link, and other symlinks or
+non-regular entries in a seat home remain refused. Malformed bases fail preflight
+before installed files change. Every seat
 sets `reasoning_effort = "medium"` and `yolo = true` and none sets `approval_policy`
 (`never` and `auto` deny board calls unattended). Analyst and reviewer add
 `sandbox_mode = "workspace-write"`, the reviewer also `sandbox_network_access = true`
@@ -172,9 +177,11 @@ with `-C <scratch dir>` so the repository stays read-only.
 
 A hand-edited generated file is kept unless `--force`; clean managed files refresh
 when their bases or templates change. Without `--force`, unmarked regular Codewhale
-seat config and MCP files are refused; `--force` replaces them. Symlinks and
-nonregular destinations are always refused. Generated files and auth artifacts use
-mode `0600`. The installer uses Codewhale's value-free `auth list` inventory and
+seat config and MCP files and foreign seat-file links are refused; `--force`
+replaces those exact entries with regular generated files and never follows link
+targets. Directories and other nonregular destinations remain refused. Generated
+files and auth artifacts use mode `0600`. The installer uses Codewhale's
+value-free `auth list` inventory and
 `auth print-api-key` to transfer every runtime-effective API key it can export
 through Codewhale's auth CLI into each seat's credential store, including keys for
 providers other than the selected one. Missing providers are skipped; OAuth/session
@@ -215,10 +222,12 @@ An empty `AGENTBOARD_SEAT` produces an empty URL actor segment, which the daemon
 rejects as a missing route.
 
 The installer preserves the rest of the Grok config, its line endings and mode. It
-refuses malformed TOML, malformed markers, symlinked/non-regular config, and an
-unmarked `[mcp_servers.agentboard]` table (including one written by `grok mcp add`),
-even with `--force`. Review and remove or convert that table by hand before retrying;
-the installer never removes user text.
+refuses malformed TOML, malformed markers and symlinked/non-regular config. An
+unmarked `[mcp_servers.agentboard]` table (including one written by `grok mcp add`)
+is refused without `--force`; with `--force`, it removes only that table and its
+child tables when their source spans are unambiguous, then writes the managed
+block. Inline or otherwise ambiguous entries are refused. Other tables, comments
+and settings stay byte-identical.
 
 Only `grok mcp doctor agentboard` has been proven: it starts the server, completes
 the handshake and lists the tool catalog. A real session load has not been proven.
