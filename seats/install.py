@@ -10,12 +10,15 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import tomllib
 
 SEATS = ["analyst", "coder", "manager", "reviewer"]
+CODEX_HOME_ROOT = ".local/share/agentboard/seats"
+CODEX_SEAT_MARK = b"agentboard Codex seat home v1\n"
 CLAUDE_MARK = "agentboardGenerated"
 CLAUDE_MARK_TEXT = "written by agentboard seats/install.py from seats/claude/<seat>-mcp.json and ~/.claude.json mcpServers; rerun it to refresh, --force overwrites edits"
 BEGIN = b"# BEGIN AGENTBOARD RULES"
@@ -84,6 +87,202 @@ def source_ok(data, begin=BEGIN, end=END):
 def read(path):
     with open(path, "rb") as f:
         return f.read()
+
+
+def resolve_path_aliases(path):
+    """Resolve path aliases with lstat/readlink only; never open through a symlink."""
+    path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        path = os.path.join(os.getcwd(), path)
+    pending = path.split(os.sep)
+    resolved = []
+    symlink_seen = False
+    symlink_hops = 0
+    while pending:
+        part = pending.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if resolved:
+                resolved.pop()
+            continue
+        candidate = os.path.join(os.sep, *resolved, part)
+        try:
+            mode = os.lstat(candidate).st_mode
+        except FileNotFoundError:
+            resolved.append(part)
+            continue
+        if stat.S_ISLNK(mode):
+            symlink_seen = True
+            symlink_hops += 1
+            if symlink_hops > 40:
+                raise ValueError("too many CODEX_HOME symlink aliases")
+            target = os.readlink(candidate)
+            if os.path.isabs(target):
+                resolved = []
+            pending = target.split(os.sep) + pending
+            continue
+        resolved.append(part)
+    return os.path.join(os.sep, *resolved), symlink_seen
+
+
+def path_is_within(path, directory):
+    return os.path.commonpath((path, directory)) == directory
+
+
+def codex_seat_home_plans(home, src, force):
+    """Preflight role homes, reporting missing base auth and stale snapshots."""
+    base = os.path.join(home, ".codex")
+    if os.path.lexists(base) and (os.path.islink(base) or not os.path.isdir(base)):
+        raise ValueError(f"invalid Codex base home: {base}")
+    inputs = {}
+    for name, parser in (("config.toml", "toml"), ("auth.json", "json")):
+        path = os.path.join(base, name)
+        if not os.path.lexists(path):
+            inputs[name] = None
+            continue
+        if os.path.islink(path) or not os.path.isfile(path):
+            raise ValueError(f"invalid Codex base file: {path}")
+        payload = read(path)
+        try:
+            if parser == "toml":
+                tomllib.loads(payload.decode("utf-8"))
+            else:
+                parsed = json.loads(payload)
+                if not isinstance(parsed, dict):
+                    raise ValueError("top level must be an object")
+        except (UnicodeDecodeError, json.JSONDecodeError, tomllib.TOMLDecodeError, ValueError) as exc:
+            raise ValueError(f"invalid {parser.upper()} in {path}: {exc}") from exc
+        inputs[name] = payload
+
+    missing_auth = inputs["auth.json"] is None
+    plans = []
+    stale_auth = []
+    parent = os.path.join(home, CODEX_HOME_ROOT)
+    for seat in SEATS:
+        destination = os.path.join(parent, seat, "codex")
+        # Reject symlinks in any existing parent component before creating homes.
+        current = home
+        for component in (".local", "share", "agentboard", "seats", seat, "codex"):
+            current = os.path.join(current, component)
+            if os.path.islink(current):
+                raise ValueError(f"unsafe Codex seat home path: {current}")
+            if os.path.lexists(current) and not os.path.isdir(current):
+                raise ValueError(f"invalid Codex seat home path: {current}")
+        marker = os.path.join(destination, ".agentboard-seat")
+        if os.path.lexists(destination):
+            if not os.path.isfile(marker) or os.path.islink(marker) or read(marker) != CODEX_SEAT_MARK:
+                raise ValueError(f"unmanaged Codex seat home: {destination}; move it aside before installing")
+        files = {".agentboard-seat": CODEX_SEAT_MARK}
+        for name, payload in inputs.items():
+            if payload is not None:
+                files[name] = payload
+        profile_path = os.path.join(src, "codex", f"{seat}.config.toml")
+        profile = read(profile_path)
+        try:
+            profile_data = tomllib.loads(profile.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(f"invalid TOML in Codex role profile {profile_path}: {exc}") from exc
+        policy = profile_data.get("approval_policy")
+        if policy not in ("never", "on-request") or not (
+            isinstance(profile_data.get("sandbox_mode"), str)
+            or isinstance(profile_data.get("default_permissions"), str)
+        ):
+            raise ValueError(f"Codex role profile lacks an explicit policy: {profile_path}")
+        files[f"{seat}.config.toml"] = profile
+        cleanup = []
+        for old_seat in SEATS:
+            old_profile = os.path.join(destination, f"{old_seat}.config.toml")
+            if os.path.islink(old_profile):
+                target = os.readlink(old_profile)
+                if not os.path.isabs(target):
+                    target = os.path.join(destination, target)
+                expected = os.path.abspath(os.path.join(src, "codex", f"{old_seat}.config.toml"))
+                if os.path.abspath(target) != expected:
+                    raise ValueError(f"unsafe Codex role profile link: {old_profile}")
+                cleanup.append(old_profile)
+        rules_dir = os.path.join(destination, "rules")
+        if os.path.lexists(rules_dir):
+            if os.path.islink(rules_dir) or not os.path.isdir(rules_dir):
+                raise ValueError(f"unsafe Codex role rules path: {rules_dir}")
+            default_rules = os.path.join(rules_dir, "default.rules")
+            if os.path.lexists(default_rules):
+                if os.path.islink(default_rules) or not os.path.isfile(default_rules):
+                    raise ValueError(f"unsafe Codex role rules file: {default_rules}")
+                current_rules = read(default_rules)
+                scan = rules_scan(current_rules)
+                if scan[0] == "bad" or (scan[0] == "none" and current_rules.strip()):
+                    raise ValueError(f"unmanaged rules in restricted Codex home: {default_rules}")
+                cleanup.append(default_rules)
+            old_rules = os.path.join(rules_dir, "agentboard.rules")
+            if os.path.lexists(old_rules):
+                if not os.path.islink(old_rules):
+                    raise ValueError(f"unmanaged rules in restricted Codex home: {old_rules}")
+                target = os.readlink(old_rules)
+                if not os.path.isabs(target):
+                    target = os.path.join(rules_dir, target)
+                expected = os.path.abspath(os.path.join(src, "codex", "rules", "agentboard.rules"))
+                if os.path.abspath(target) != expected:
+                    raise ValueError(f"unsafe Codex role rules link: {old_rules}")
+                cleanup.append(old_rules)
+            unknown_rules = [
+                name for name in os.listdir(rules_dir)
+                if name not in {"default.rules", "agentboard.rules"} and name.endswith(".rules")
+            ]
+            if unknown_rules:
+                raise ValueError(f"unmanaged rules in restricted Codex home: {rules_dir}")
+        for name, payload in files.items():
+            path = os.path.join(destination, name)
+            if os.path.islink(path) and path in cleanup:
+                continue
+            if os.path.lexists(path) and (os.path.islink(path) or not os.path.isfile(path)):
+                raise ValueError(f"invalid Codex seat file: {path}")
+            if os.path.isfile(path) and not force and (read(path) != payload or os.stat(path).st_mode & 0o777 != 0o600):
+                raise ValueError(f"Codex seat home differs from installer input: {path} (use --force)")
+        auth_path = os.path.join(destination, "auth.json")
+        if missing_auth and os.path.lexists(auth_path):
+            if os.path.islink(auth_path) or not os.path.isfile(auth_path):
+                raise ValueError(f"invalid Codex seat auth file: {auth_path}")
+            stale_auth.append(auth_path)
+        plans.append((destination, files, cleanup))
+    return plans, missing_auth, stale_auth
+
+
+def cleanup_codex_seat_homes(plans, stale_auth=()):
+    """Remove legacy shared rules and profiles, and explicitly revoked auth."""
+    for destination, _files, cleanup in plans:
+        for path in cleanup:
+            if os.path.basename(path) == "default.rules" or os.path.islink(path):
+                os.unlink(path)
+        rules_dir = os.path.join(destination, "rules")
+        if os.path.isdir(rules_dir) and not os.listdir(rules_dir):
+            os.rmdir(rules_dir)
+    for path in stale_auth:
+        os.unlink(path)
+        print(f"removed stale Codex auth snapshot: {path}")
+
+
+def install_codex_seat_homes(plans):
+    """Write the already-preflighted Codex role homes without following links."""
+    for destination, files, cleanup in plans:
+        os.makedirs(destination, mode=0o700, exist_ok=True)
+        os.chmod(destination, 0o700)
+        for name, payload in files.items():
+            path = os.path.join(destination, name)
+            if os.path.isfile(path) and not os.path.islink(path) and read(path) == payload and os.stat(path).st_mode & 0o777 == 0o600:
+                continue
+            tmp = f"{path}.agentboard.{os.getpid()}"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(payload)
+                os.replace(tmp, path)
+            finally:
+                if os.path.lexists(tmp):
+                    os.unlink(tmp)
+        cleanup_codex_seat_homes([(destination, files, cleanup)])
+        print(f"generated: {destination} (Codex role home)")
 
 
 def claude_user_servers(path):
@@ -710,7 +909,27 @@ def main():
         sys.exit(2)
     src = os.path.dirname(os.path.abspath(__file__))
     home = os.environ["HOME"]
-    codex_home = os.environ.get("CODEX_HOME") or f"{home}/.codex"
+    base_codex_home = os.path.join(home, ".codex")
+    requested_codex_home = os.environ.get("CODEX_HOME")
+    role_homes = set()
+    try:
+        for seat in SEATS:
+            role_path, _ = resolve_path_aliases(os.path.join(home, CODEX_HOME_ROOT, seat, "codex"))
+            role_homes.add(role_path)
+        if requested_codex_home:
+            resolved_home, has_symlink = resolve_path_aliases(requested_codex_home)
+        else:
+            resolved_home, has_symlink = base_codex_home, False
+    except (OSError, ValueError) as exc:
+        print(f"invalid CODEX_HOME path: {exc}", file=sys.stderr)
+        sys.exit(1)
+    role_home_target = any(path_is_within(resolved_home, role_home) for role_home in role_homes)
+    if has_symlink and not role_home_target:
+        print("unsafe CODEX_HOME symlink alias; refusing to install through it", file=sys.stderr)
+        sys.exit(1)
+    # A symlink alias of a role home is runtime-only; compatibility writes stay
+    # in the base home so they cannot widen a restricted role's policy.
+    codex_home = base_codex_home if role_home_target else resolved_home
     claude_home = f"{home}/.claude"
     repo = os.path.dirname(src)
     selective = selected_agents is not None
@@ -726,6 +945,9 @@ def main():
     rules_tmp = f"{rules_dir}/.default.rules.agentboard.{os.getpid()}"
     grok_source_path = f"{src}/grok/agentboard-mcp.toml"
     grok_file = f"{home}/.grok/config.toml"
+    codex_seat_plans = []
+    codex_auth_missing = False
+    codex_stale_auth = []
 
     refuse = False
     claude_files = []
@@ -749,6 +971,11 @@ def main():
                 refuse = True
 
     if not grok_only and install_codex:
+        try:
+            codex_seat_plans, codex_auth_missing, codex_stale_auth = codex_seat_home_plans(home, src, force)
+        except (OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            refuse = True
         for seat in SEATS:
             check(f"{codex_home}/{seat}.config.toml")
     if not grok_only and install_claude:
@@ -870,6 +1097,11 @@ def main():
         except (OSError, ValueError) as exc:
             print(str(exc), file=sys.stderr)
             refuse = True
+    if codex_auth_missing:
+        if force and not refuse:
+            cleanup_codex_seat_homes(codex_seat_plans, codex_stale_auth)
+        print(f"missing Codex base auth: {home}/.codex/auth.json; authenticate Codex before installing seats", file=sys.stderr)
+        refuse = True
     if refuse:
         sys.exit(1)
 
@@ -931,6 +1163,7 @@ def main():
 
     try:
         if install_codex:
+            install_codex_seat_homes(codex_seat_plans)
             for seat in SEATS:
                 link(f"{src}/codex/{seat}.config.toml", f"{codex_home}/{seat}.config.toml")
             install_rules_block()

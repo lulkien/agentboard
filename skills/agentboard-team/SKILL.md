@@ -121,11 +121,11 @@ herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
 # Analyst's permission profile allows writes only in this scratch directory;
 # keep the pane rooted in the repository so it can read source files there.
 install -d -m 700 /tmp/agentboard/scratch
-herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
+env CODEX_HOME="$HOME/.local/share/agentboard/seats/analyst/codex" herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
   -p analyst
-herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
+env CODEX_HOME="$HOME/.local/share/agentboard/seats/coder/codex" herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
   -p coder
-herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
+env CODEX_HOME="$HOME/.local/share/agentboard/seats/reviewer/codex" herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
   -p reviewer
 
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
@@ -198,9 +198,9 @@ hc run --bg --name reviewer --cwd "$REPO" -- \
 # seat's own commands run outside hc and nothing it starts is addressable.
 # The analyst's permission profile writes only in this scratch directory.
 install -d -m 700 /tmp/agentboard/scratch
-hc run --bg --name analyst --cwd "$REPO" -- codex --no-daemon -p analyst
-hc run --bg --name coder --cwd "$REPO" -- codex --no-daemon -p coder
-hc run --bg --name reviewer --cwd "$REPO" -- codex --no-daemon -p reviewer
+hc run --bg --name analyst --cwd "$REPO" -- env CODEX_HOME="$HOME/.local/share/agentboard/seats/analyst/codex" codex --no-daemon -p analyst
+hc run --bg --name coder --cwd "$REPO" -- env CODEX_HOME="$HOME/.local/share/agentboard/seats/coder/codex" codex --no-daemon -p coder
+hc run --bg --name reviewer --cwd "$REPO" -- env CODEX_HOME="$HOME/.local/share/agentboard/seats/reviewer/codex" codex --no-daemon -p reviewer
 
 # The first prompt is the seat skill and the row: /agentboard-<seat> T<id> for
 # Claude and Grok; $agentboard-<seat> T<id> for Codex. A terminal that has not
@@ -252,7 +252,7 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
 | Claude | all four | herdr `herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- claude`; manager via `start-agentboard-manager claude` in either | `~/.claude/<seat>-mcp.json` via `--mcp-config --strict-mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
-| Codex | all four | herdr `herdr agent start <seat> --kind codex -- -p <seat>`; hc `hc run --bg --name <seat> -- codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` loads `<seat>.config.toml`, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only checkout plus scratch-write and loopback-only network | `$agentboard-<seat>` |
+| Codex | all four | herdr with `CODEX_HOME=$HOME/.local/share/agentboard/seats/<seat>/codex`; hc with `env CODEX_HOME=... codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` in its isolated role home, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only checkout plus scratch-write and loopback-only network | `$agentboard-<seat>` |
 | Codewhale | all four; hc only, not herdr (no agent kind) | `start-agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env CODEWHALE_HOME=$HOME/.local/share/agentboard/codewhale/<seat> codewhale [-C <scratch dir> for analyst and reviewer] --skip-onboarding --fresh --disable subagents` | per-seat home `mcp.json`, URL `/mcp/<seat>` | yolo for manager and coder; analyst and reviewer workspace-write with `-C` scratch, reviewer adds network (not loopback-only) | `/agentboard-<seat>` |
 | Grok | manager only | `start-agentboard-manager grok` (herdr or hc) | `~/.grok/config.toml`, URL `/mcp/${AGENTBOARD_SEAT:-manager}` | `--trust --always-approve` | `/agentboard-manager` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |

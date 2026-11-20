@@ -22,10 +22,26 @@ newhome() { # newhome <name>: a clean HOME with the dirs the installer expects
   cases=$((cases + 1))
   home=$tmp/h$cases
   rules=$home/.codex/rules/default.rules
-  mkdir -p "$home/.claude"
+  mkdir -p "$home/.claude" "$home/.codex"
+  printf '{"tokens":{"access_token":"isolated-test-token"}}\n' >"$home/.codex/auth.json"
+  chmod 600 "$home/.codex/auth.json"
 }
 inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/err
   HOME="$home" CODEX_HOME="$home/.codex" PATH="$tmp/bin:$PATH" \
+    AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
+    AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" \
+    AGENTBOARD_FAKE_AUTH_INVENTORY="$home/.codewhale/auth-inventory" \
+    AGENTBOARD_FAKE_FAIL_LIST="${AGENTBOARD_FAKE_FAIL_LIST:-}" \
+    AGENTBOARD_FAKE_FAIL_SEAT="${AGENTBOARD_FAKE_FAIL_SEAT:-}" \
+    python3 ./seats/install.py "$@" >"$tmp/out" 2>"$tmp/err"
+  local code=$?
+  cat "$tmp/out" >>"$tmp/installer-stdout.log"
+  cat "$tmp/err" >>"$tmp/installer-stderr.log"
+  return "$code"
+}
+inst_with_codex_home() { # inst_with_codex_home <runtime home> [installer args]
+  local runtime_home=$1; shift
+  HOME="$home" CODEX_HOME="$runtime_home" PATH="$tmp/bin:$PATH" \
     AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
     AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" \
     AGENTBOARD_FAKE_AUTH_INVENTORY="$home/.codewhale/auth-inventory" \
@@ -114,6 +130,165 @@ refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-
   is "$name links nothing" test ! -e "$home/.codex/coder.config.toml"
   if [ -f "$rules" ] && [ ! -L "$rules" ]; then same "$name unchanged" "$before" "$rules"; fi
 }
+
+# --- isolated Codex role homes copy only validated base settings and auth -----
+newhome
+mkdir -p "$home/.codex/rules" "$home/.codex/sessions" "$home/.codex/cache"
+cat >"$home/.codex/config.toml" <<'TOML'
+model = "fixture-model"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[mcp_servers.unrelated]
+command = "fixture-mcp"
+
+[hooks]
+enabled = true
+
+[plugins.fixture]
+enabled = true
+
+[projects."/fixture/project"]
+trust_level = "trusted"
+TOML
+printf '{"tokens":{"access_token":"fixture-secret"}}\n' >"$home/.codex/auth.json"
+printf 'host rule\n' >"$home/.codex/rules/default.rules"
+printf 'runtime session\n' >"$home/.codex/sessions/session.jsonl"
+printf 'runtime cache\n' >"$home/.codex/cache/state.sqlite"
+cat >"$tmp/bin/codex" <<'PY'
+#!/usr/bin/env python3
+import os, sys, tomllib
+args = sys.argv[1:]
+assert len(args) == 2 and args[0] in ("-p", "--profile")
+seat = args[1]
+with open(os.path.join(os.environ["CODEX_HOME"], seat + ".config.toml"), "rb") as f:
+    profile = tomllib.load(f)
+print(profile["mcp_servers"]["agentboard"]["url"])
+PY
+chmod 700 "$tmp/bin/codex"
+cp "$home/.codex/config.toml" "$tmp/base-config"
+cp "$home/.codex/auth.json" "$tmp/base-auth"
+config_sum=$(stat -c '%a:%s:%Y' "$home/.codex/config.toml")
+auth_sum=$(stat -c '%a:%s:%Y' "$home/.codex/auth.json")
+inst --agent codex --force; code=$?
+is "isolated Codex install succeeds" test "$code" -eq 0
+same "Codex base config unchanged" "$tmp/base-config" "$home/.codex/config.toml"
+same "Codex base auth unchanged" "$tmp/base-auth" "$home/.codex/auth.json"
+is "Codex base config mode and timestamp unchanged" test "$(stat -c '%a:%s:%Y' "$home/.codex/config.toml")" = "$config_sum"
+is "Codex base auth mode and timestamp unchanged" test "$(stat -c '%a:%s:%Y' "$home/.codex/auth.json")" = "$auth_sum"
+for seat in analyst coder manager reviewer; do
+  codex_home="$home/.local/share/agentboard/seats/$seat/codex"
+  same "$seat copied config preserves unrelated settings" "$tmp/base-config" "$codex_home/config.toml"
+  same "$seat private auth snapshot content" "$tmp/base-auth" "$codex_home/auth.json"
+  is "$seat home and auth are private" python3 -c 'import os,stat,sys; h,a=sys.argv[1:]; assert stat.S_IMODE(os.stat(h).st_mode)==0o700 and stat.S_IMODE(os.stat(a).st_mode)==0o600' "$codex_home" "$codex_home/auth.json"
+  is "$seat profile selects correct MCP actor and role policy" python3 -c 'import sys,tomllib; s,p=sys.argv[1:]; d=tomllib.load(open(p,"rb")); assert d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/"+s); assert d["approval_policy"] in ("never","on-request"); assert ("sandbox_mode" in d or "default_permissions" in d); assert d["mcp_servers"]["codebase-memory-mcp"]["default_tools_approval_mode"]=="approve"' "$seat" "$codex_home/$seat.config.toml"
+  is "$seat Codex -p runtime smoke selects role home" bash -c 'test "$(HOME="$1" CODEX_HOME="$2" PATH="$3:$PATH" codex -p "$4")" = "http://127.0.0.1:8765/mcp/$4"' _ "$home" "$codex_home" "$tmp/bin" "$seat"
+  is "$seat runtime files and host rules not copied" test ! -e "$codex_home/rules" -a ! -e "$codex_home/sessions" -a ! -e "$codex_home/cache"
+done
+is "reviewer profile remains restricted" python3 -c 'import tomllib,sys; d=tomllib.load(open(sys.argv[1],"rb")); assert d["default_permissions"]=="reviewer-scratch" and d["permissions"]["reviewer-scratch"]["extends"]==":read-only" and d["permissions"]["reviewer-scratch"]["filesystem"]["/tmp/agentboard/scratch"]=="write" and d["permissions"]["reviewer-scratch"]["network"]["enabled"] is True' "$home/.local/share/agentboard/seats/reviewer/codex/reviewer.config.toml"
+is "analyst profile remains scratch-only" python3 -c 'import tomllib,sys; d=tomllib.load(open(sys.argv[1],"rb")); assert d["default_permissions"]=="seat-scratch" and d["permissions"]["seat-scratch"]["filesystem"]["/tmp/agentboard/scratch"]=="write"' "$home/.local/share/agentboard/seats/analyst/codex/analyst.config.toml"
+is "private auth never printed" bash -c '! grep -q fixture-secret "$1" "$2"' _ "$tmp/out" "$tmp/err"
+
+# A role CODEX_HOME is a runtime selector; installation cleans old shared
+# profiles/rules from that restricted home and keeps compatibility files at ~/.codex.
+reviewer_home="$home/.local/share/agentboard/seats/reviewer/codex"
+ln -s "$repo/seats/codex/analyst.config.toml" "$reviewer_home/analyst.config.toml"
+mv "$reviewer_home/reviewer.config.toml" "$tmp/reviewer-profile"
+ln -s "$repo/seats/codex/reviewer.config.toml" "$reviewer_home/reviewer.config.toml"
+mkdir -p "$reviewer_home/rules"
+{
+  printf 'host rule\n'
+  cat "$repo/seats/codex/rules/agentboard.rules"
+} >"$reviewer_home/rules/default.rules"
+ln -s "$repo/seats/codex/rules/agentboard.rules" "$reviewer_home/rules/agentboard.rules"
+inst_with_codex_home "$reviewer_home" --agent codex --force; code=$?
+is "role CODEX_HOME install succeeds" test "$code" -eq 0
+is "role profile is restored as a private regular file" test -f "$reviewer_home/reviewer.config.toml" -a ! -L "$reviewer_home/reviewer.config.toml"
+is "legacy profile links removed from restricted home" test -z "$(find "$reviewer_home" -maxdepth 1 -type l -name '*.config.toml' -print -quit)"
+is "legacy and inherited rules removed from restricted home" test ! -e "$reviewer_home/rules/default.rules" -a ! -e "$reviewer_home/rules/agentboard.rules"
+is "restricted home rules directory removed when empty" test ! -e "$reviewer_home/rules"
+is "compatibility links stay in base Codex home" test -L "$home/.codex/reviewer.config.toml" -a -f "$home/.codex/rules/default.rules"
+same "reviewer role profile template restored" "$repo/seats/codex/reviewer.config.toml" "$reviewer_home/reviewer.config.toml"
+
+# A CODEX_HOME symlink alias must be classified before installer writes. Role
+# policy cleanup still targets the real home; compatibility writes stay at ~/.codex.
+ln -s "$repo/seats/codex/analyst.config.toml" "$reviewer_home/analyst.config.toml"
+rm "$reviewer_home/reviewer.config.toml"
+ln -s "$repo/seats/codex/reviewer.config.toml" "$reviewer_home/reviewer.config.toml"
+mkdir -p "$reviewer_home/rules"
+{
+  printf 'host rule\n'
+  cat "$repo/seats/codex/rules/agentboard.rules"
+} >"$reviewer_home/rules/default.rules"
+ln -s "$repo/seats/codex/rules/agentboard.rules" "$reviewer_home/rules/agentboard.rules"
+ln -s "$reviewer_home" "$tmp/codex-role-alias"
+inst_with_codex_home "$tmp/codex-role-alias" --agent codex --force; code=$?
+is "role-home CODEX_HOME alias install succeeds" test "$code" -eq 0
+is "role-home alias leaves private profile regular" test -f "$reviewer_home/reviewer.config.toml" -a ! -L "$reviewer_home/reviewer.config.toml"
+is "role-home alias removes legacy profile links" test -z "$(find "$reviewer_home" -maxdepth 1 -type l -name '*.config.toml' -print -quit)"
+is "role-home alias removes inherited rules" test ! -e "$reviewer_home/rules/default.rules" -a ! -e "$reviewer_home/rules/agentboard.rules"
+is "role-home alias keeps compatibility files in base home" test -L "$home/.codex/reviewer.config.toml" -a -f "$home/.codex/rules/default.rules"
+
+# An alias into an unmanaged home cannot be safely classified. Refuse before
+# touching files through it.
+mkdir -p "$tmp/untrusted-codex-home"
+ln -s "$tmp/untrusted-codex-home" "$tmp/codex-untrusted-alias"
+inst_with_codex_home "$tmp/codex-untrusted-alias" --agent codex --force; code=$?
+is "untrusted CODEX_HOME alias refuses" test "$code" -eq 1
+has "untrusted CODEX_HOME alias diagnostic" "unsafe CODEX_HOME symlink alias" "$tmp/err"
+is "untrusted CODEX_HOME alias writes no profiles or rules" test ! -e "$tmp/untrusted-codex-home/reviewer.config.toml" -a ! -e "$tmp/untrusted-codex-home/rules"
+
+before_homes=$(find "$home/.local/share/agentboard/seats" -type f -print0 | sort -z | xargs -0 cksum | cksum)
+inst --agent codex --force; code=$?
+is "Codex force rerun succeeds" test "$code" -eq 0
+after_homes=$(find "$home/.local/share/agentboard/seats" -type f -print0 | sort -z | xargs -0 cksum | cksum)
+is "Codex force rerun is byte-idempotent" test "$before_homes" = "$after_homes"
+is "selected Codex install leaves other clients untouched" test ! -e "$home/.claude/coder-mcp.json" -a ! -e "$home/.local/share/agentboard/codewhale/coder/config.toml" -a ! -e "$home/.grok/config.toml"
+
+# Missing base auth refuses new homes; force refresh removes revoked snapshots.
+newhome
+mkdir -p "$home/.codex/rules"
+printf 'model = "fixture-model"\n' >"$home/.codex/config.toml"
+rm "$home/.codex/auth.json"
+inst --agent codex --force; code=$?
+is "missing base auth refuses role-home generation" test "$code" -eq 1
+has "missing base auth diagnostic" "missing Codex base auth: $home/.codex/auth.json" "$tmp/err"
+is "missing base auth writes no role home" test ! -e "$home/.local/share/agentboard/seats"
+is "missing base auth writes no legacy profile or rules" test ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.codex/rules/default.rules"
+
+newhome
+mkdir -p "$home/.codex/rules"
+printf 'model = "fixture-model"\n' >"$home/.codex/config.toml"
+printf '{"tokens":{"access_token":"revoked-fixture"}}\n' >"$home/.codex/auth.json"
+inst --agent codex --force; code=$?
+is "initial authenticated Codex role homes generate" test "$code" -eq 0
+rm "$home/.codex/auth.json"
+inst_with_codex_home "$home/.local/share/agentboard/seats/reviewer/codex" --agent codex --force; code=$?
+is "force refresh without base auth refuses" test "$code" -eq 1
+is "force refresh removes every stale credential snapshot" bash -c 'for s in analyst coder manager reviewer; do test ! -e "$1/.local/share/agentboard/seats/$s/codex/auth.json" || exit 1; done' _ "$home"
+is "role CODEX_HOME still has no legacy profile links or rules" test ! -L "$home/.local/share/agentboard/seats/reviewer/codex/reviewer.config.toml" -a ! -e "$home/.local/share/agentboard/seats/reviewer/codex/rules"
+is "base auth remains absent after revoked refresh" test ! -e "$home/.codex/auth.json"
+
+# Malformed and unsafe base inputs refuse before any client destination changes.
+for input in config auth; do
+  newhome
+  mkdir -p "$home/.codex/rules"
+  if [[ $input == config ]]; then printf '[broken\n' >"$home/.codex/config.toml"; else printf '{broken' >"$home/.codex/auth.json"; fi
+  inst --agent codex --force; code=$?
+  is "malformed Codex $input refuses" test "$code" -eq 1
+  is "malformed Codex $input writes no role home" test ! -e "$home/.local/share/agentboard/seats"
+  is "malformed Codex $input writes no legacy profile" test ! -e "$home/.codex/coder.config.toml"
+  is "malformed Codex $input writes no other client" test ! -e "$home/.claude/coder-mcp.json"
+done
+newhome
+mkdir -p "$home/.codex/rules"
+printf 'private target\n' >"$tmp/auth-target"
+rm "$home/.codex/auth.json"
+ln -s "$tmp/auth-target" "$home/.codex/auth.json"
+inst --agent codex --force; code=$?
+is "symlinked Codex auth refuses" test "$code" -eq 1
+is "symlinked Codex auth target remains unchanged" test "$(cat "$tmp/auth-target")" = 'private target'
+is "symlinked Codex auth writes no role home" test ! -e "$home/.local/share/agentboard/seats"
 
 # --- generated Claude seat files: merge, idempotence and safe replacement ---
 newhome

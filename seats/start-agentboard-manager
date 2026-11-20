@@ -48,13 +48,19 @@ if [[ $KIND == codewhale && ! -f $cwhome/config.toml ]]; then
   exit 1
 fi
 
+codex_home="$HOME/.local/share/agentboard/seats/manager/codex"
+if [[ $KIND == codex && ! -f $codex_home/manager.config.toml ]]; then
+  echo "start-agentboard-manager: $codex_home/manager.config.toml missing; run seats/install.py" >&2
+  exit 1
+fi
+
 case "$KIND" in
   claude)
     argv=(claude --model claude-sonnet-5-5 --mcp-config "$card" --strict-mcp-config --dangerously-skip-permissions /agentboard-manager)
     hargs=(--model claude-sonnet-5-5 --mcp-config "$card" --strict-mcp-config --dangerously-skip-permissions -- /agentboard-manager)
     ;;
   codex)
-    argv=(codex --no-daemon --profile manager '$agentboard-manager')
+    argv=(env "CODEX_HOME=$codex_home" codex --no-daemon --profile manager '$agentboard-manager')
     hargs=(--profile manager -- '$agentboard-manager')
     ;;
   grok)
@@ -70,6 +76,7 @@ esac
 log=${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log
 if [[ $world == herdr ]]; then
   herdr tab rename "$HERDR_TAB_ID" manager
+  if [[ $KIND == codex ]]; then export CODEX_HOME="$codex_home"; fi
   setsid bash -c '
     pane=$1 kind=$2
     shift 2

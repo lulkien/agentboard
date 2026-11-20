@@ -33,6 +33,9 @@ cat >"$tmp/bin/herdr" <<'SH'
 printf 'CALL' >>"$HERDR_LOG"
 printf ' <%s>' "$@" >>"$HERDR_LOG"
 printf '\n' >>"$HERDR_LOG"
+if [[ $1 == agent && $2 == start && ${3:-} == manager && ${5:-} == codex && ${HERDR_ENV:-} == 1 ]]; then
+  printf 'ENV CODEX_HOME=%s\n' "${CODEX_HOME:-}" >>"$HERDR_LOG"
+fi
 if [[ $1 == pane && $2 == process-info ]]; then
   case ${HERDR_MODE:-ready} in
     ready) echo '{"result":{"process_info":{"foreground_process_group_id":4,"shell_pid":4}}}' ;;
@@ -80,7 +83,16 @@ if "$repo/seats/start-agentboard-manager" claude >"$tmp/out" 2>"$tmp/err"; then 
 has "$tmp/err" 'run seats/install.py' 'missing card names installer'
 is 'missing card starts nothing' test ! -s "$STUB_HC_LOG"
 mv "$card.saved" "$card"
-run_kind codex 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <codex> <--no-daemon> <--profile> <manager> <$agentboard-manager>'
+codex_home="$HOME/.local/share/agentboard/seats/manager/codex"
+mkdir -p "$codex_home"
+printf 'approval_policy = "never"\n' >"$codex_home/manager.config.toml"
+run_kind codex 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <env> <CODEX_HOME='$codex_home'> <codex> <--no-daemon> <--profile> <manager> <$agentboard-manager>'
+mv "$codex_home/manager.config.toml" "$codex_home/manager.config.saved"
+: >"$STUB_HC_LOG"
+if "$repo/seats/start-agentboard-manager" codex >"$tmp/out" 2>"$tmp/err"; then bad 'missing isolated Codex profile unexpectedly launched'; else ok; fi
+has "$tmp/err" 'run seats/install.py' 'missing isolated Codex profile names installer'
+is 'missing isolated Codex profile starts nothing' test ! -s "$STUB_HC_LOG"
+mv "$codex_home/manager.config.saved" "$codex_home/manager.config.toml"
 run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <grok> <--trust> <--always-approve>'
 
 # codewhale: hc only, per-seat home, status wait, retried send --wait
@@ -180,6 +192,7 @@ run_herdr_kind() {
 }
 run_herdr_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--mcp-config> <'$card'> <--strict-mcp-config> <--dangerously-skip-permissions> <--> </agentboard-manager>'
 run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--profile> <manager> <--> <$agentboard-manager>'
+has "$HERDR_LOG" "ENV CODEX_HOME=$codex_home" 'herdr Codex manager receives its isolated home'
 run_herdr_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
 
 run_herdr_not_ready() {

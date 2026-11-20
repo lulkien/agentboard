@@ -7,8 +7,9 @@ its client gets a board identity.
 
 | Path | Seat | Loaded by |
 |---|---|---|
-| `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | `codex -p <seat>` |
-| `codex/rules/agentboard.rules` | every codex seat | a marked block inside `$CODEX_HOME/rules/default.rules` |
+| `~/.local/share/agentboard/seats/<seat>/codex/` | analyst, coder, manager, reviewer | `CODEX_HOME=... codex -p <seat>` |
+| `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | generated into each isolated role home; legacy `~/.codex` links remain for compatibility |
+| `codex/rules/agentboard.rules` | legacy shared Codex home | marked block inside `${CODEX_HOME:-~/.codex}/rules/default.rules`; isolated role homes do not copy host rules |
 | `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | merged by installer into `~/.claude/<seat>-mcp.json` |
 | `grok/agentboard-mcp.toml` | grok (manager) | managed block in `~/.grok/config.toml` by `install.py` |
 | `systemd/agentboard.service` | shared HTTP daemon | linked to `~/.config/systemd/user/agentboard.service` |
@@ -17,8 +18,20 @@ its client gets a board identity.
 
     ./install.py --force
 
-It links each codex profile to `${CODEX_HOME:-~/.codex}/<seat>.config.toml`. Claude
-seat files are generated from the repo card and `~/.claude.json`. Repo card links
+For Codex, it reads `~/.codex/config.toml` and `~/.codex/auth.json` without
+changing them, validates both, then creates a private role home at
+`~/.local/share/agentboard/seats/<seat>/codex`. Only those two base files and the
+role profile are copied; rules, sessions, logs, caches and SQLite files are not.
+The home is mode `0700`, copied files are mode `0600`, and each role profile
+overlays its own agentboard URL and permission policy. Launches set `CODEX_HOME`
+to this role home. Existing `${CODEX_HOME:-~/.codex}/<seat>.config.toml` links and
+the shared rules block remain managed for compatibility, but launches do not use
+them. If `CODEX_HOME` points at a generated role home, compatibility writes stay
+under `~/.codex`; the installer removes legacy profile links and managed rules it
+finds in that restricted home. Missing base auth refuses generation, and a forced
+refresh removes stale private snapshots when the base auth file has been revoked.
+Generated role homes are not replaced without `--force`; an unmanaged home is
+refused and must be moved aside. Claude seat files are generated from the repo card and `~/.claude.json`. Repo card links
 from older installs are safely replaced; `--force` replaces foreign links and
 unmarked regular files at the named seat destinations. Directories and other
 non-regular destinations are refused before any install writes. Each Codex seat
@@ -39,8 +52,8 @@ uses the default board path. If the manager uses `AGENTBOARD_DB`, give the unit 
 same absolute path with a systemd user drop-in. Stop the daemon before resetting
 or migrating the board, then start it again.
 
-Every profile sets only `default_tools_approval_mode = "approve"` for
-`codebase-memory-mcp`; the server itself is the base `~/.codex/config.toml` entry
+Every role profile sets only `default_tools_approval_mode = "approve"` for
+`codebase-memory-mcp`; the server itself is the copied base `~/.codex/config.toml` entry
 that `codebase-memory-mcp install` writes. Without that entry Codex refuses to load
 any seat profile (`invalid transport` in `mcp_servers.codebase-memory-mcp`); without
 the approval, `approval_policy = "never"` refuses every call.
@@ -82,7 +95,7 @@ shows it. The manager copies both ids from its own terminal with
 `hc get <its address> --json` (the `labels` field). The launcher never touches the
 window, so it also runs on a headless machine.
 
-The Codex rules are a block, not a link, because Codex appends its own allowed
+The legacy shared Codex rules are a block, not a link, because Codex appends its own allowed
 commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 `codex/rules/agentboard.rules`, from its `# BEGIN AGENTBOARD RULES` line to its
 `# END AGENTBOARD RULES` line:
@@ -116,7 +129,9 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 ## Codex
 
 Each seat profile defines its own approval policy, filesystem permissions, and
-board tool list.
+board tool list. Launchers point `CODEX_HOME` at that seat's generated home, so
+the reviewer and analyst do not inherit command rules from the shared host
+`~/.codex/rules/default.rules`.
 
 - analyst: the `seat-scratch` permission profile keeps the repository readable
   and permits writes only under `/tmp/agentboard/scratch`; create that directory
