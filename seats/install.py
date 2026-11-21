@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Link seat profiles into client homes and install repo-owned configuration.
 The Codex rules are not a link: they are a marked block inside the user's own
-rules/default.rules, which Codex also appends to. Grok uses a marked block in its
-user config as well.
+rules/default.rules, which Codex also appends to. Grok role homes copy a marked
+MCP block into private role config files and leave the shared home unchanged.
 usage: install.py [--force] [--agent codex,codewhale,claude,grok] [--grok-only | --skip-grok] [--codewhale-provider NAME]
 """
 import json
@@ -28,6 +28,7 @@ END = b"# END AGENTBOARD RULES"
 CODEWHALE_MARK = b"# agentboardGenerated"
 GROK_BEGIN = b"# BEGIN AGENTBOARD MCP"
 GROK_END = b"# END AGENTBOARD MCP"
+GROK_HOME_ROOT = ".local/share/agentboard/seats"
 
 
 def split_lines(data):
@@ -703,6 +704,159 @@ def grok_preflight(path, source, force):
     return True, scan
 
 
+def grok_managed_block_matches(data, source):
+    """Compare only the marked Grok block, ignoring CRLF and final newline shape."""
+    state = marked_scan(data, GROK_BEGIN, GROK_END)
+    if state[0] != "ok":
+        return False
+    lines = split_lines(data)
+    existing = b"\n".join(lines[state[1] - 1 : state[2]]).replace(b"\r", b"")
+    expected = source.replace(b"\r", b"").rstrip(b"\n")
+    return existing == expected
+
+
+def grok_seat_home_plans(home, src, force):
+    """Build isolated Grok configs from safe user settings and credentials."""
+    base = os.path.join(home, ".grok")
+    if os.path.lexists(base) and (os.path.islink(base) or not os.path.isdir(base)):
+        raise ValueError(f"invalid Grok base home: {base}")
+    base_config = os.path.join(base, "config.toml")
+    if os.path.lexists(base_config) and (os.path.islink(base_config) or not os.path.isfile(base_config)):
+        raise ValueError(f"invalid Grok base config: {base_config}")
+    settings = b""
+    if os.path.isfile(base_config):
+        settings = read(base_config)
+        try:
+            tomllib.loads(settings.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(f"invalid TOML in {base_config}: {exc}") from exc
+    source = read(os.path.join(src, "grok/agentboard-mcp.toml"))
+    if not source_ok(source, GROK_BEGIN, GROK_END):
+        raise ValueError("bad Grok MCP source")
+    plans = []
+    for seat in SEATS:
+        dest = os.path.join(home, GROK_HOME_ROOT, seat, "grok")
+        current = home
+        for component in (".local", "share", "agentboard", "seats", seat, "grok"):
+            current = os.path.join(current, component)
+            if os.path.islink(current) or (os.path.lexists(current) and not os.path.isdir(current)):
+                raise ValueError(f"unsafe Grok seat home path: {current}")
+        files = {}
+        role_source = source.replace(b"${AGENTBOARD_SEAT:-manager}", seat.encode())
+        base_ok, base_state = grok_preflight(base_config, role_source, force)
+        if not base_ok:
+            raise ValueError(f"unsafe Grok base config: {base_config}")
+        role_config = os.path.join(dest, "config.toml")
+        if os.path.lexists(role_config) and (os.path.islink(role_config) or not os.path.isfile(role_config)):
+            raise ValueError(f"invalid Grok seat config: {role_config}")
+        if os.path.isfile(role_config):
+            role_before = read(role_config)
+            role_ok, role_state = grok_preflight(role_config, role_source, force)
+            if not role_ok:
+                raise ValueError(f"unsafe Grok role config: {role_config}")
+            if role_state[0] == "ok" and not force:
+                candidate = role_before
+                try:
+                    actor = tomllib.loads(candidate.decode("utf-8"))["mcp_servers"]["agentboard"]["url"]
+                except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError):
+                    raise ValueError(f"invalid agentboard URL in {role_config}")
+                if actor != f"http://127.0.0.1:8765/mcp/{seat}":
+                    raise ValueError(f"Grok role actor differs in {role_config} (use --force)")
+                if not grok_managed_block_matches(role_before, role_source):
+                    raise ValueError(f"Grok managed agentboard block differs in {role_config} (use --force)")
+            else:
+                candidate = marked_candidate(role_before, True, role_state, role_source, GROK_BEGIN, GROK_END)
+        else:
+            candidate = marked_candidate(settings, bool(settings), base_state, role_source, GROK_BEGIN, GROK_END)
+        tomllib.loads(candidate.decode("utf-8"))
+        files["config.toml"] = candidate
+        manifest_path = os.path.join(dest, ".agentboard-grok-state.json")
+        manifest = {}
+        if os.path.lexists(manifest_path):
+            if os.path.islink(manifest_path) or not os.path.isfile(manifest_path):
+                raise ValueError(f"invalid Grok ownership state: {manifest_path}")
+            try:
+                manifest = json.loads(read(manifest_path))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"invalid Grok ownership state: {manifest_path}") from exc
+            if not isinstance(manifest, dict) or any(k not in ("auth.json", "mcp_credentials.json") or not re.fullmatch(r"[0-9a-f]{64}", v or "") for k, v in manifest.items()):
+                raise ValueError(f"invalid Grok ownership state: {manifest_path}")
+        next_manifest = {}
+        for name in ("auth.json", "mcp_credentials.json"):
+            path = os.path.join(base, name)
+            payload = None
+            if os.path.lexists(path):
+                if os.path.islink(path) or not os.path.isfile(path):
+                    raise ValueError(f"invalid Grok credential file: {path}")
+                payload = read(path)
+                try:
+                    value = json.loads(payload)
+                    if not isinstance(value, dict):
+                        raise ValueError(f"invalid JSON in {path}: top level must be an object")
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(f"invalid JSON in {path}: {exc}") from exc
+            role_path = os.path.join(dest, name)
+            prior_hash = manifest.get(name)
+            if os.path.lexists(role_path) and (os.path.islink(role_path) or not os.path.isfile(role_path)):
+                raise ValueError(f"invalid Grok role credential: {role_path}")
+            prior_owned = bool(os.path.isfile(role_path) and prior_hash and hashlib.sha256(read(role_path)).hexdigest() == prior_hash)
+            if os.path.isfile(role_path) and not prior_owned:
+                print(f"warning: preserving independent Grok role credential: {role_path}", file=sys.stderr)
+            elif prior_owned and payload is None:
+                if force:
+                    files[name] = None
+                else:
+                    next_manifest[name] = prior_hash
+            elif prior_owned and payload is not None and not force and hashlib.sha256(payload).hexdigest() != prior_hash:
+                next_manifest[name] = prior_hash
+            elif payload is not None:
+                files[name] = payload
+                next_manifest[name] = hashlib.sha256(payload).hexdigest()
+        files[".agentboard-grok-state.json"] = (json.dumps(next_manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        marker = os.path.join(dest, ".agentboard-seat")
+        if os.path.lexists(dest) and (not os.path.isfile(marker) or os.path.islink(marker) or read(marker) != b"agentboard Grok seat home v1\n"):
+            raise ValueError(f"unmanaged Grok seat home: {dest}")
+        files[".agentboard-seat"] = b"agentboard Grok seat home v1\n"
+        for name, payload in files.items():
+            path = os.path.join(dest, name)
+            if payload is None:
+                continue
+            if os.path.lexists(path) and (os.path.islink(path) or not os.path.isfile(path)):
+                raise ValueError(f"invalid Grok seat file: {path}")
+            if os.path.isfile(path) and not force and name not in ("auth.json", "mcp_credentials.json", ".agentboard-grok-state.json") and read(path) != payload:
+                raise ValueError(f"Grok seat home differs from installer input: {path} (use --force)")
+        plans.append((dest, files))
+    return plans
+
+
+def install_grok_seat_homes(plans):
+    for dest, files in plans:
+        os.makedirs(dest, mode=0o700, exist_ok=True)
+        os.chmod(dest, 0o700)
+        for name, payload in files.items():
+            path = os.path.join(dest, name)
+            if payload is None:
+                if os.path.isfile(path) and not os.path.islink(path):
+                    os.unlink(path)
+                continue
+            if os.path.isfile(path) and not os.path.islink(path) and read(path) == payload and os.stat(path).st_mode & 0o777 == 0o600:
+                continue
+            tmp = f"{path}.agentboard.{os.getpid()}"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(payload)
+                os.replace(tmp, path)
+            finally:
+                if os.path.lexists(tmp): os.unlink(tmp)
+        for name in ("auth.json", "mcp_credentials.json"):
+            path = os.path.join(dest, name)
+            if os.path.isfile(path) and not os.path.islink(path):
+                os.chmod(path, 0o600)
+        print(f"generated: {dest} (Grok role home)")
+
+
 def codewhale_home_files(src, home, seat, provider):
     """(config.toml bytes, mcp.json bytes) for one seat, based on user config when present."""
     with open(f"{src}/claude/{seat}-mcp.json", encoding="utf-8") as f:
@@ -1147,6 +1301,7 @@ def main():
     rules_tmp = f"{rules_dir}/.default.rules.agentboard.{os.getpid()}"
     grok_source_path = f"{src}/grok/agentboard-mcp.toml"
     grok_file = f"{home}/.grok/config.toml"
+    grok_seat_plans = []
     codex_seat_plans = []
     codex_auth_missing = False
     codex_stale_auth = []
@@ -1255,9 +1410,12 @@ def main():
             refuse = True
     grok_source = read(grok_source_path)
     if not skip_grok and install_grok:
-        grok_ok, grok_state = grok_preflight(grok_file, grok_source, force)
-        if not grok_ok:
+        try:
+            grok_seat_plans = grok_seat_home_plans(home, src, force)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(str(exc), file=sys.stderr)
             refuse = True
+        grok_ok, grok_state = False, None
     else:
         grok_ok, grok_state = False, None
     grok_rendered = grok_source
@@ -1323,7 +1481,7 @@ def main():
         )
 
     if grok_only or (selective and agents == {"grok"}):
-        install_grok_block()
+        install_grok_seat_homes(grok_seat_plans)
         return
 
     # Put the repo's block into default.rules: append when absent, replace in place
@@ -1389,7 +1547,7 @@ def main():
             link(f"{src}/start-agentboard-manager", f"{home}/.local/bin/start-agentboard-manager")
             link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")
         if not skip_grok and install_grok:
-            install_grok_block()
+            install_grok_seat_homes(grok_seat_plans)
     finally:
         if os.path.lexists(rules_tmp):
             os.unlink(rules_tmp)

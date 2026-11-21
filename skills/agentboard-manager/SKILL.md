@@ -34,7 +34,7 @@ seat is a named terminal and `hc send` waits for the program to pause.
    assigning seats. `board_agents` is board-wide.
 2. Check that the shared daemon is running on the intended board (`GET
    /api/health`) before launching HTTP seats. Each card's `/mcp/<seat>` URL
-   supplies its actor, including Grok's `${AGENTBOARD_SEAT:-manager}` URL. The
+   supplies its actor, including Grok's fixed per-role URL. The
    manual's launch sections have the exact commands and preferred-model table
    (Claude Opus/Sonnet 5.5;
    Codex Sol with model and effort supplied by each seat profile).
@@ -161,31 +161,29 @@ seat is a named terminal and `hc send` waits for the program to pause.
 
 ## Grok Build manager
 
-Install the seat cards and launcher with `./seats/install.py`, or manage only the
-Grok MCP entry with `./seats/install.py --grok-only`. The installer writes the
-marked block from `seats/grok/agentboard-mcp.toml` to `~/.grok/config.toml`; the
-daemon must be running before Grok starts. The actor defaults to `manager` via
-`${AGENTBOARD_SEAT:-manager}`. To use another manager name in herdr, create its
-pane with `herdr tab create --env AGENTBOARD_SEAT=<name>`; in hc carry it in argv,
-since `hc run` has no environment flag: `hc run --bg --name manager-2 -- env
-AGENTBOARD_SEAT=<name> grok --trust --always-approve`. Never set it to an empty
-value. The installer refuses an unmarked `[mcp_servers.agentboard]` table even with
-`--force`; review and remove or convert that entry by hand.
+Install the seat cards and launcher with `./seats/install.py`, or generate only
+Grok role homes with `./seats/install.py --grok-only`. The installer reads the
+legacy `~/.grok` config and credentials without changing them, then generates
+private homes at `~/.local/share/agentboard/seats/<seat>/grok`. Each role config
+uses a fixed `/mcp/<seat>` URL. Set `GROK_HOME` to the matching role home whenever
+Grok starts; never use the old `AGENTBOARD_SEAT` override with these cards.
 
 From a herdr pane or an hc terminal at its shell prompt, `start-agentboard-manager
 grok` starts Grok with `--trust --always-approve` and prompts `/agentboard-manager`.
-For a fresh herdr tab, use:
+The manager helper sets its manager role home in both hc and herdr. For workers,
+set the role home explicitly. Analyst and reviewer use read-only sandbox policy
+and deny Edit; coder uses its normal write access. For a fresh herdr tab, use:
 
-    herdr tab create --cwd "$REPO" --label grok
+    herdr tab create --cwd "$REPO" --label analyst
     herdr pane list
-    herdr agent start grok --kind grok --pane "$PANE_GROK" -- --trust --always-approve
-    herdr agent prompt grok '/agentboard-manager focus: <purpose>' --wait
+    env GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" herdr agent start analyst --kind grok --pane "$PANE_ANALYST" -- --trust --always-approve --sandbox read-only --deny Edit
+    herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
 
 For a fresh hc terminal, use:
 
-    hc run --bg --name grok --cwd "$REPO" -- grok --trust --always-approve
-    hc wait grok
-    hc send --wait grok '/agentboard-manager focus: <purpose>'
+    hc run --bg --name reviewer --cwd "$REPO" -- env GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok" grok --trust --always-approve --sandbox read-only --deny Edit
+    hc wait reviewer
+    hc send --wait reviewer '/agentboard-reviewer T<id>'
 
 Grok flags go after herdr's `--` or the `--` that ends `hc run`'s own options. `--trust` loads
 project instructions and skills only for trusted folders; Grok scans the canonical

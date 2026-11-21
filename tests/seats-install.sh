@@ -125,6 +125,9 @@ make_fake_codewhale
 grok_inst() { # grok_inst [args]: Grok-only install into the isolated home
   HOME="$home" python3 ./seats/install.py --grok-only "$@" >"$tmp/out" 2>"$tmp/err"
 }
+grok_select() { # grok_select [args]: selected Grok install
+  HOME="$home" CODEX_HOME="$home/.codex" python3 ./seats/install.py --agent grok "$@" >"$tmp/out" 2>"$tmp/err"
+}
 refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-identical
   local name=$1; shift
   local before=$tmp/before
@@ -653,254 +656,152 @@ is "empty rules source refused" test "$code" -eq 1
 has "empty rules source named" 'bad rules source' "$tmp/err"
 is "empty rules source links nothing" test ! -e "$home/.codex/coder.config.toml"
 
-# --- managed Grok block: source bytes, idempotence and force behavior --------
+# --- isolated Grok role homes; legacy ~/.grok remains untouched --------------
 newhome
-grok=$home/.grok/config.toml
+mkdir -p "$home/.grok"
+printf '[ui]\ntheme = "dark"\n' >"$home/.grok/config.toml"
+printf '{"access_token":"synthetic"}\n' >"$home/.grok/auth.json"
+printf '{"server":"initial-synthetic"}\n' >"$home/.grok/mcp_credentials.json"
+chmod 600 "$home/.grok/auth.json"
+cp "$home/.grok/config.toml" "$tmp/grok-before"
 grok_inst; code=$?
-is "fresh Grok install exit" test "$code" -eq 0
-same "fresh Grok config is the source block" "$grok_src" "$grok"
-has "fresh Grok config has seat HTTP URL" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
-is "fresh Grok config has no stdio serve" test -z "$(grep -F 'args = ["serve"]' "$grok" || true)"
-has "fresh Grok install says added" "added: $grok" "$tmp/out"
-is "Grok-only install leaves Codex links alone" test ! -e "$home/.codex/coder.config.toml"
-cp "$grok" "$tmp/grok-before"
+is "fresh Grok role install exit" test "$code" -eq 0
+same "legacy Grok config stays unchanged" "$tmp/grok-before" "$home/.grok/config.toml"
+for seat in analyst coder manager reviewer; do
+  role="$home/.local/share/agentboard/seats/$seat/grok"
+  has "$seat Grok actor URL" "url = \"http://127.0.0.1:8765/mcp/$seat\"" "$role/config.toml"
+  is "$seat Grok home private" test "$(stat -c %a "$role")" = 700
+  is "$seat Grok auth private" test "$(stat -c %a "$role/auth.json")" = 600
+  is "$seat Grok MCP credentials private" test "$(stat -c %a "$role/mcp_credentials.json")" = 600
+done
+cp "$home/.local/share/agentboard/seats/manager/grok/config.toml" "$tmp/grok-before"
 grok_inst
-same "Grok rerun is byte-identical" "$tmp/grok-before" "$grok"
-has "Grok rerun says unchanged" 'unchanged:' "$tmp/out"
-is "Grok rerun has no differs note" test ! -s "$tmp/err"
-grok_inst --force
-same "Grok force on current source is byte-identical" "$tmp/grok-before" "$grok"
+same "Grok role config rerun is byte-identical" "$tmp/grok-before" "$home/.local/share/agentboard/seats/manager/grok/config.toml"
 
+# A disabled edit inside the managed card must refuse plain install; force restores it.
 newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok"
-sed 's/AGENTBOARD_SEAT:-manager/manager/' "$grok_src" >"$grok"
-cp "$grok" "$tmp/grok-literal-actor"
-grok_inst
-same "Grok plain run leaves a different literal actor" "$tmp/grok-literal-actor" "$grok"
-has "Grok different literal actor reports difference" 'differs from the repo' "$tmp/err"
-has "Grok different literal actor says unchanged" 'unchanged:' "$tmp/out"
-grok_inst --force
-has "Grok force replaces the literal actor" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
-has "Grok force on literal actor says replaced" 'replaced:' "$tmp/out"
+grok_select; code=$?
+is "fresh selected Grok role homes install" test "$code" -eq 0
+role="$home/.local/share/agentboard/seats/reviewer/grok"
+sed -i 's/enabled = true/enabled = false/' "$role/config.toml"
+cp "$role/config.toml" "$tmp/disabled-grok-card"
+grok_select; code=$?
+is "plain selected Grok refuses disabled managed card" test "$code" -eq 1
+same "plain refusal preserves edited card for inspection" "$tmp/disabled-grok-card" "$role/config.toml"
+grok_select --force; code=$?
+is "force restores managed Grok card" test "$code" -eq 0
+is "force restores enabled agentboard server" python3 -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1],"rb")); assert c["mcp_servers"]["agentboard"]["enabled"] is True and c["mcp_servers"]["agentboard"]["url"].endswith("/mcp/reviewer")' "$role/config.toml"
 
-# --- preserve existing config bytes, other tables, CRLF and file mode -------
+# A legacy shared card's variable actor must become a literal role URL in each copy.
 newhome
-grok=$home/.grok/config.toml
 mkdir -p "$home/.grok"
-printf '[ui]\ntheme = "dark"\n\n[mcp_servers.other]\ncommand = "other"' >"$grok"
-cp "$grok" "$tmp/grok-prefix"
-grok_inst
-is "Grok append preserves no-final-LF prefix" cmp -s -n "$(wc -c <"$tmp/grok-prefix")" "$tmp/grok-prefix" "$grok"
-is "Grok leaves other MCP table" grep -qF '[mcp_servers.other]' "$grok"
-sum=$(cksum <"$grok")
-grok_inst
-is "Grok config rerun remains stable with other tables" test "$(cksum <"$grok")" = "$sum"
-
-newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok"
-printf '[ui]\r\ntheme = "dark"\r\n' >"$grok"
-chmod 640 "$grok"
-grok_inst
-is "Grok CRLF prefix preserved" grep -q $'theme = "dark"\r$' "$grok"
-is "Grok appended block uses CRLF" test "$(grep -c $'\r$' "$grok")" -eq "$(wc -l <"$grok")"
-is "Grok config mode preserved" test "$(stat -c %a "$grok")" = 640
-sum=$(cksum <"$grok")
-grok_inst --force
-is "Grok CRLF force is byte-stable" test "$(cksum <"$grok")" = "$sum"
-is "Grok temp file removed" test -z "$(ls "$home/.grok" | grep -F .agentboard || true)"
-
-# --- marked block force behavior and malformed marker refusals --------------
-newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok"
-{
-  echo '[ui]'
-  echo 'theme = "light"'
-  sed 's/AGENTBOARD_SEAT:-manager/edited/' "$grok_src"
-  echo '[mcp_servers.other]'
-  echo 'command = "other"'
-} >"$grok"
-cp "$grok" "$tmp/grok-edited"
-grok_inst
-same "Grok plain run leaves edited block" "$tmp/grok-edited" "$grok"
-has "Grok plain run notes edited block" 'differs from the repo' "$tmp/err"
-grok_inst --force
-has "Grok force replaces marked block" 'replaced:' "$tmp/out"
-is "Grok force keeps neighboring tables" grep -qF '[mcp_servers.other]' "$grok"
-has "Grok force restores source actor" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
-
-# An existing marked stdio card upgrades in place under --force.
-newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok"
-cat >"$grok" <<'EOF'
-# BEGIN AGENTBOARD MCP
-[mcp_servers.agentboard]
-command = "agentboard"
-args = ["serve"]
-enabled = true
-
-[mcp_servers.agentboard.env]
-AGENTBOARD_ACTOR = "${AGENTBOARD_SEAT:-manager}"
-# END AGENTBOARD MCP
-EOF
-grok_inst --force
-has "Grok force upgrades stdio card to HTTP" 'url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"' "$grok"
-is "Grok upgraded card has no serve" test -z "$(grep -F 'args = ["serve"]' "$grok" || true)"
-
-GB='# BEGIN AGENTBOARD MCP'
-GE='# END AGENTBOARD MCP'
-for kind in duplicate_begin duplicate_end begin_only end_before_begin padded; do
-  case $kind in
-    duplicate_begin) printf '%s\nx\n%s\n%s\n' "$GB" "$GB" "$GE" >"$tmp/body" ;;
-    duplicate_end) printf '%s\n%s\n%s\n' "$GB" "$GE" "$GE" >"$tmp/body" ;;
-    begin_only) printf '[ui]\n%s\nx\n' "$GB" >"$tmp/body" ;;
-    end_before_begin) printf '%s\n%s\n' "$GE" "$GB" >"$tmp/body" ;;
-    padded) printf ' %s\nx\n%s\n' "$GB" "$GE" >"$tmp/body" ;;
-  esac
-  for args in "" "--force"; do
-    newhome
-    grok=$home/.grok/config.toml
-    mkdir -p "$home/.grok"
-    cp "$tmp/body" "$grok"
-    cp "$grok" "$tmp/grok-before"
-    grok_inst $args; code=$?
-    is "Grok malformed $kind ${args:-plain} refused" test "$code" -eq 1
-    same "Grok malformed $kind ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
-    has "Grok malformed $kind ${args:-plain} diagnosed" 'malformed agentboard block' "$tmp/err"
-  done
+cp "$grok_src" "$home/.grok/config.toml"
+printf '\n[ui]\nnote = "keep /mcp/${AGENTBOARD_SEAT:-manager} unchanged"\n' >>"$home/.grok/config.toml"
+grok_inst; code=$?
+is "legacy Grok card role install succeeds" test "$code" -eq 0
+for seat in analyst coder manager reviewer; do
+  has "$seat copied legacy card has its fixed actor" "url = \"http://127.0.0.1:8765/mcp/$seat\"" "$home/.local/share/agentboard/seats/$seat/grok/config.toml"
+  has "$seat copied legacy config preserves unrelated actor-looking text" 'note = "keep /mcp/${AGENTBOARD_SEAT:-manager} unchanged"' "$home/.local/share/agentboard/seats/$seat/grok/config.toml"
 done
 
-# --- unmarked tables, malformed TOML and unsafe destinations refuse --------
-newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok"
-printf '[mcp_servers.agentboard]\ncommand = "grok mcp add"\n' >"$grok"
-cp "$grok" "$tmp/grok-before"
+# Force updates only the managed MCP block and installer-owned credential snapshots.
+role="$home/.local/share/agentboard/seats/reviewer/grok"
+printf '\n[custom]\nurl = "https://user.invalid/${AGENTBOARD_SEAT:-manager}"\n' >>"$role/config.toml"
+printf '{"independent":"reviewer-auth"}\n' >"$role/auth.json"
+printf '{"independent":"reviewer-mcp"}\n' >"$role/mcp_credentials.json"
+cp "$role/auth.json" "$tmp/diverged-auth"
+cp "$role/mcp_credentials.json" "$tmp/diverged-mcp"
+printf '{"access_token":"rotated-synthetic"}\n' >"$home/.grok/auth.json"
+printf '{"server":"synthetic"}\n' >"$home/.grok/mcp_credentials.json"
 grok_inst; code=$?
-is "Grok unmarked table refuses without force" test "$code" -eq 1
-same "Grok unmarked table stays without force" "$tmp/grok-before" "$grok"
-has "Grok unmarked table refusal diagnosed" 'remove or convert it by hand' "$tmp/err"
+is "base credential change without force succeeds" test "$code" -eq 0
+has "auth snapshot waits for force before refresh" 'synthetic' "$home/.local/share/agentboard/seats/analyst/grok/auth.json"
+has "MCP snapshot waits for force before refresh" 'synthetic' "$home/.local/share/agentboard/seats/analyst/grok/mcp_credentials.json"
 grok_inst --force; code=$?
-is "force replaces Grok unmarked table" test "$code" -eq 0
-is "Grok replacement has one managed table" python3 -c 'import sys,tomllib; p=sys.argv[1]; d=tomllib.load(open(p,"rb")); assert d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/${AGENTBOARD_SEAT:-manager}")' "$grok"
-is "Grok replacement has one marker pair" test "$(grep -cF '# BEGIN AGENTBOARD MCP' "$grok")" -eq 1 -a "$(grep -cF '# END AGENTBOARD MCP' "$grok")" -eq 1
-
-# Exact Grok table replacement preserves unrelated bytes, CRLF and file mode.
-newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok"
-printf '[mcp_servers.agentboard]\r\ncommand = "manual"\r\n\r\n[mcp_servers.agentboard.env]\r\nTOKEN = "discard this owned entry"\r\n\r\n[ui] # keep this comment\r\ntheme = "dark"\r\n\r\n[mcp_servers.other]\r\ncommand = "other"\r\n' >"$grok"
-chmod 640 "$grok"
-printf '\r\n\r\n[ui] # keep this comment\r\ntheme = "dark"\r\n\r\n[mcp_servers.other]\r\ncommand = "other"\r\n' >"$tmp/grok-preserved"
-grok_inst --force; code=$?
-is "force converts Grok table with child tables" test "$code" -eq 0
-is "Grok unrelated bytes stay byte-identical" python3 -c 'import pathlib,sys; actual=pathlib.Path(sys.argv[1]).read_bytes(); expected=pathlib.Path(sys.argv[2]).read_bytes(); assert actual.startswith(expected) and b"TOKEN = \"discard this owned entry\"" not in actual; assert b"\r\n" in actual and b"\n" not in actual.replace(b"\r\n", b"")' "$grok" "$tmp/grok-preserved"
-is "inline-commented Grok table survives force" python3 -c 'import pathlib,sys,tomllib; raw=pathlib.Path(sys.argv[1]).read_bytes(); parsed=tomllib.loads(raw.decode()); assert b"[ui] # keep this comment\r\n" in raw and parsed["ui"]=={"theme":"dark"}' "$grok"
-is "Grok mode preserved" test "$(stat -c %a "$grok")" = 640
-cp "$grok" "$tmp/grok-force-first"
-grok_inst --force; code=$?
-is "second Grok force succeeds" test "$code" -eq 0
-same "second Grok force is idempotent" "$tmp/grok-force-first" "$grok"
-newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok"
-printf '[ui\n' >"$grok"
+is "force refreshes managed Grok home" test "$code" -eq 0
+same "force preserves diverged role auth" "$tmp/diverged-auth" "$role/auth.json"
+same "force preserves diverged role MCP credentials" "$tmp/diverged-mcp" "$role/mcp_credentials.json"
+has "force preserves unrelated actor-looking role setting" 'url = "https://user.invalid/${AGENTBOARD_SEAT:-manager}"' "$role/config.toml"
+has "force preserves role's fixed agentboard actor" 'url = "http://127.0.0.1:8765/mcp/reviewer"' "$role/config.toml"
+for seat in analyst coder manager; do
+  has "$seat force refreshes recorded auth snapshot" 'rotated-synthetic' "$home/.local/share/agentboard/seats/$seat/grok/auth.json"
+  has "$seat force copies validated MCP credentials" 'synthetic' "$home/.local/share/agentboard/seats/$seat/grok/mcp_credentials.json"
+done
+cp -r "$role" "$tmp/grok-role-before-force-rerun"
+grok_inst --force
+is "repeated Grok force converges byte-for-byte" diff -r "$tmp/grok-role-before-force-rerun" "$role"
+rm "$home/.grok/auth.json" "$home/.grok/mcp_credentials.json"
 grok_inst; code=$?
-is "Grok malformed TOML refused" test "$code" -eq 1
-has "Grok malformed TOML named" 'invalid TOML' "$tmp/err"
-
-# A valid marker pair does not make invalid TOML inside the block safe to keep.
-for args in "" "--force"; do
-  newhome
-  grok=$home/.grok/config.toml
-  mkdir -p "$home/.grok" "$home/.codex/rules" "$home/.claude"
-  printf '[ui]\ntheme = "dark"\n# BEGIN AGENTBOARD MCP\n[mcp_servers.agentboard]\nargs = [\n# END AGENTBOARD MCP\n' >"$grok"
-  cp "$grok" "$tmp/grok-before"
-  inst $args; code=$?
-  is "Grok malformed TOML inside block ${args:-plain} refused" test "$code" -eq 1
-  same "Grok malformed TOML inside block ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
-  has "Grok malformed TOML inside block ${args:-plain} diagnosed" 'invalid TOML' "$tmp/err"
-  is "Grok inside-block refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
-  is "Grok inside-block refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
+is "credential withdrawal without force succeeds" test "$code" -eq 0
+is "withdrawn auth snapshot remains until force" test -e "$home/.local/share/agentboard/seats/analyst/grok/auth.json"
+is "withdrawn MCP snapshot remains until force" test -e "$home/.local/share/agentboard/seats/analyst/grok/mcp_credentials.json"
+grok_inst --force; code=$?
+is "base credential withdrawal force succeeds" test "$code" -eq 0
+for seat in analyst coder manager; do
+  is "$seat recorded withdrawn auth snapshot removed" test ! -e "$home/.local/share/agentboard/seats/$seat/grok/auth.json"
+  is "$seat recorded withdrawn MCP snapshot removed" test ! -e "$home/.local/share/agentboard/seats/$seat/grok/mcp_credentials.json"
 done
+same "independent auth survives base withdrawal" "$tmp/diverged-auth" "$role/auth.json"
+same "independent MCP credential survives base withdrawal" "$tmp/diverged-mcp" "$role/mcp_credentials.json"
+
+# Malformed marked cards and unsafe role paths fail preflight without writes.
 newhome
-grok=$home/.grok/config.toml
+mkdir -p "$home/.grok" "$home/.local/share/agentboard/seats/reviewer/grok"
+printf '[ui]\ntheme = "dark"\n# BEGIN AGENTBOARD MCP\n' >"$home/.grok/config.toml"
+grok_inst --force; code=$?
+is "malformed Grok base markers refused" test "$code" -eq 1
+is "malformed Grok base marker writes no homes" test ! -e "$home/.local/share/agentboard/seats/analyst/grok"
+newhome
+mkdir -p "$home/.grok" "$home/.local/share/agentboard/seats/analyst"
+ln -s "$tmp" "$home/.local/share/agentboard/seats/analyst/grok"
+grok_inst --force; code=$?
+is "symlink Grok role home refused" test "$code" -eq 1
+is "symlink Grok role preflight creates no sibling homes" test ! -e "$home/.local/share/agentboard/seats/coder/grok"
+
+# Either malformed credential file refuses all writes and remains private input only.
+newhome
 mkdir -p "$home/.grok"
-printf 'target\n' >"$home/target"
-ln -s "$home/target" "$grok"
+printf '{"access_token":"synthetic"}\n' >"$home/.grok/auth.json"
+printf '[]\n' >"$home/.grok/mcp_credentials.json"
+cp "$home/.grok/auth.json" "$tmp/base-auth"
 grok_inst --force; code=$?
-is "Grok symlink refused" test "$code" -eq 1
-is "Grok symlink target untouched" test "$(cat "$home/target")" = target
+is "non-object Grok MCP credential refused" test "$code" -eq 1
+is "malformed credential preflight writes no role homes" test ! -e "$home/.local/share/agentboard/seats"
+same "malformed credential refusal preserves base auth" "$tmp/base-auth" "$home/.grok/auth.json"
 newhome
-grok=$home/.grok/config.toml
-mkdir -p "$grok"
+mkdir -p "$home/.grok"
+printf 'not-json' >"$home/.grok/auth.json"
+printf '{"server":"synthetic"}\n' >"$home/.grok/mcp_credentials.json"
 grok_inst --force; code=$?
-is "Grok directory refused" test "$code" -eq 1
-has "Grok directory refusal named" 'not a regular file' "$tmp/err"
+is "malformed Grok auth refused" test "$code" -eq 1
+is "malformed auth preflight writes no role homes" test ! -e "$home/.local/share/agentboard/seats"
 
-# An inline mcp_servers table is valid alone but cannot accept an appended table.
-for args in "" "--force"; do
-  newhome
-  grok=$home/.grok/config.toml
-  mkdir -p "$home/.grok" "$home/.codex/rules" "$home/.claude"
-  printf 'mcp_servers = { other = { command = "other" } }\n' >"$grok"
-  cp "$grok" "$tmp/grok-before"
-  inst $args; code=$?
-  is "Grok inline mcp_servers ${args:-plain} refused" test "$code" -eq 1
-  same "Grok inline mcp_servers ${args:-plain} unchanged" "$tmp/grok-before" "$grok"
-  has "Grok inline mcp_servers ${args:-plain} candidate diagnosed" 'invalid TOML in rendered Grok config' "$tmp/err"
-  is "Grok inline refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
-  is "Grok inline refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
-done
-
-# --- Grok conversion is preflighted before any other destination is written -
+# The legacy config's agentboard table can be replaced only after explicit force.
 newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok" "$home/.codex/rules" "$home/.claude"
-printf '[mcp_servers.agentboard]\ncommand = "manual"\n' >"$grok"
-cp "$grok" "$tmp/grok-before"
-printf 'mcp_servers = { agentboard = { command = "manual" } }\n' >"$grok"
-cp "$grok" "$tmp/grok-before"
-inst --force; code=$?
-is "unsafe inline Grok entry refuses under force" test "$code" -eq 1
-same "unsafe inline Grok entry stays unchanged" "$tmp/grok-before" "$grok"
-is "Grok refusal links no Codex card" test ! -e "$home/.codex/coder.config.toml"
-is "Grok refusal writes no rules" test ! -e "$home/.codex/rules/default.rules"
+mkdir -p "$home/.grok"
+printf '[ui]\ntheme = "dark"\nnote = "keep"\n\n[mcp_servers.agentboard]\nurl = "http://wrong"\n\n[mcp_servers.agentboard.env]\nTOKEN = "synthetic"\n\n[mcp_servers.other]\nurl = "http://other"\n' >"$home/.grok/config.toml"
+grok_inst; code=$?
+is "unmarked Grok agentboard table refused" test "$code" -eq 1
+is "unmarked refusal writes no role homes" test ! -e "$home/.local/share/agentboard/seats"
+grok_inst --force; code=$?
+is "force safely replaces unmarked Grok table" test "$code" -eq 0
+has "force preserves unrelated UI setting" 'note = "keep"' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
+has "force preserves unrelated MCP table" '[mcp_servers.other]' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
+is "force removes unmarked token from role config" bash -c '! grep -q synthetic "$1"' _ "$home/.local/share/agentboard/seats/manager/grok/config.toml"
 
-# --- --skip-grok installs everything else without reading or changing Grok --
+# --agent grok isolates Grok; --skip-grok never examines a malformed Grok base.
 newhome
-grok=$home/.grok/config.toml
 mkdir -p "$home/.grok" "$home/.codex/rules"
-printf '[mcp_servers.agentboard]\ncommand = "foreign"\n' >"$grok"
-cp "$grok" "$tmp/grok-skip-before"
-sum=$(cksum <"$grok")
-inst --force --skip-grok; code=$?
-is "skip-grok full install exits successfully" test "$code" -eq 0
-is "skip-grok installs Codex rules block" grep -qF '# BEGIN AGENTBOARD RULES' "$rules"
-is "skip-grok generates Claude seat file" test -f "$home/.claude/coder-mcp.json" -a ! -L "$home/.claude/coder-mcp.json"
-is "skip-grok installs Codex card" test -L "$home/.codex/coder.config.toml"
-same "skip-grok preserves foreign Grok bytes" "$tmp/grok-skip-before" "$grok"
-is "skip-grok preserves Grok checksum" test "$(cksum <"$grok")" = "$sum"
-is "skip-grok emits no Grok access diagnostic" test ! -s "$tmp/err"
-
-# The full install converts an exactly locatable unmarked Grok table.
-newhome
-grok=$home/.grok/config.toml
-mkdir -p "$home/.grok" "$home/.codex/rules"
-printf '[mcp_servers.agentboard]\ncommand = "foreign"\n' >"$grok"
-inst --force; code=$?
-is "full install converts Grok table" test "$code" -eq 0
-is "full install writes Codex profile after safe Grok conversion" test -L "$home/.codex/coder.config.toml"
-is "full install writes one Grok agentboard table" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); assert d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/${AGENTBOARD_SEAT:-manager}")' "$grok"
-
-# Combining the mutually exclusive Grok modes is a usage error.
-newhome
-inst --skip-grok --grok-only; code=$?
-is "skip-grok with grok-only exits with usage error" test "$code" -eq 2
-has "conflicting Grok flags show usage error" 'mutually exclusive' "$tmp/err"
+printf '[ui]\ntheme = "dark"\n' >"$home/.grok/config.toml"
+printf 'unselected Codex profile' >"$home/.codex/coder.config.toml"
+grok_select; code=$?
+is "selected Grok skips unrelated malformed Codex input" test "$code" -eq 0
+is "selected Grok leaves Codex destination unchanged" test "$(cat "$home/.codex/coder.config.toml")" = 'unselected Codex profile'
+rm -rf "$home/.local/share/agentboard/seats/analyst/grok" "$home/.local/share/agentboard/seats/coder/grok" "$home/.local/share/agentboard/seats/manager/grok" "$home/.local/share/agentboard/seats/reviewer/grok"
+printf 'not TOML = [' >"$home/.grok/config.toml"
+inst --skip-grok --force; code=$?
+is "skip Grok succeeds with malformed Grok base" test "$code" -eq 0
+is "skip Grok does not publish Grok role homes" test ! -e "$home/.local/share/agentboard/seats/analyst/grok"
 
 # --- Codewhale per-seat homes: own config + MCP card, never ~/.codewhale ---
 newhome
@@ -1086,7 +987,7 @@ for seat in analyst coder manager reviewer; do
     has "$seat reports $st" "]7501;state=$st:app=codewhale" "$cfg"
   done
 done
-is "twelve generated config and MCP files" test "$(wc -l <"$tmp/cw-files")" -eq 12
+is "twelve generated config and MCP files" test "$(wc -l <"$tmp/cw-files")" -eq 16
 is "all exportable auth artifacts preserved" test "$(find "$cw" -type f -path '*/auth/*.key' | wc -l)" -eq 8
 is "generated files and auth artifacts have private permissions" bash -c 'while IFS= read -r f; do test "$(stat -c %a "$f")" = 600 || exit 1; done <"$1"' _ "$tmp/cw-all-files"
 chmod 644 "$cw/coder/codewhale/auth/base-provider.key"
@@ -1211,7 +1112,7 @@ inst --codewhale-provider 'x"; yolo = false'; code=$?
 is "bad provider name usage error" test "$code" -eq 2
 is "bad provider writes nothing" test ! -e "$home/.local/share/agentboard"
 inst --grok-only; code=$?
-is "grok-only writes no codewhale home" test ! -e "$home/.local/share/agentboard"
+is "grok-only writes no Codewhale home" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
 
 # Root entrypoint and selective client preflight/write boundaries.
 newhome
@@ -1256,7 +1157,7 @@ printf '{bad json' >"$home/.claude.json"
 printf '{bad codewhale' >"$home/.codewhale/mcp.json"
 root_inst --agent grok; code=$?
 is "root Grok singleton succeeds despite malformed unselected inputs" test "$code" -eq 0
-is "Grok singleton installs its managed block" grep -qF '# BEGIN AGENTBOARD MCP' "$home/.grok/config.toml"
+is "Grok singleton installs manager role config" grep -qF 'url = "http://127.0.0.1:8765/mcp/manager"' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
 is "Grok singleton skips Codex profiles" test ! -e "$home/.codex/coder.config.toml"
 is "Grok singleton skips Claude outputs" test ! -e "$home/.claude/coder-mcp.json"
 is "Grok singleton skips Codewhale outputs" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
@@ -1393,6 +1294,10 @@ printf 'preserve unselected destination' >"$home/.claude/coder-mcp.json"
 root_inst --agent codex --force; code=$?
 is "force selected Codex install succeeds" test "$code" -eq 0
 is "force selected Codex preserves Claude destination" test "$(cat "$home/.claude/coder-mcp.json")" = 'preserve unselected destination'
+
+has "team manual documents Grok role homes for each seat" 'GROK_HOME="$HOME/.local/share/agentboard/seats/coder/grok"' "$repo/skills/agentboard-team/SKILL.md"
+has "manager skill documents herdr Grok home and read-only policy" 'GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" herdr agent start analyst' "$repo/skills/agentboard-manager/SKILL.md"
+has "seat README documents reviewer Grok home" 'GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok"' "$repo/seats/README.md"
 
 echo "$((n - fail))/$n passed (seats installer)"
 [ "$fail" -eq 0 ]

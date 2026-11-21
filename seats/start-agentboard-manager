@@ -48,6 +48,11 @@ if [[ $KIND == codewhale && ! -f $cwhome/config.toml ]]; then
   echo "start-agentboard-manager: $cwhome/config.toml missing; run seats/install.py" >&2
   exit 1
 fi
+grok_home="$HOME/.local/share/agentboard/seats/manager/grok"
+if [[ $KIND == grok && ! -f $grok_home/config.toml ]]; then
+  echo "start-agentboard-manager: $grok_home/config.toml missing; run seats/install.py" >&2
+  exit 1
+fi
 
 codex_home="$HOME/.local/share/agentboard/seats/manager/codex"
 if [[ $KIND == codex && ! -f $codex_home/manager.config.toml ]]; then
@@ -65,7 +70,7 @@ case "$KIND" in
     hargs=(--profile manager -- '$agentboard-manager')
     ;;
   grok)
-    argv=(grok --trust --always-approve)
+    argv=(env "GROK_HOME=$grok_home" grok --trust --always-approve)
     hargs=(--trust --always-approve)
     ;;
   codewhale)
@@ -79,6 +84,7 @@ if [[ $world == herdr ]]; then
   herdr tab rename "$HERDR_TAB_ID" manager
   if [[ $KIND == codex ]]; then export CODEX_HOME="$codex_home"; fi
   if [[ $KIND == claude ]]; then export CLAUDE_CONFIG_DIR="$claude_home"; fi
+  if [[ $KIND == grok ]]; then export GROK_HOME="$grok_home"; fi
   setsid bash -c '
     pane=$1 kind=$2
     shift 2

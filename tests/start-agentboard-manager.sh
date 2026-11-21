@@ -36,6 +36,7 @@ printf '\n' >>"$HERDR_LOG"
 if [[ $1 == agent && $2 == start && ${3:-} == manager && ${HERDR_ENV:-} == 1 ]]; then
   [[ ${5:-} == codex ]] && printf 'ENV CODEX_HOME=%s\n' "${CODEX_HOME:-}" >>"$HERDR_LOG"
   [[ ${5:-} == claude ]] && printf 'ENV CLAUDE_CONFIG_DIR=%s\n' "${CLAUDE_CONFIG_DIR:-}" >>"$HERDR_LOG"
+  [[ ${5:-} == grok ]] && printf 'ENV GROK_HOME=%s\n' "${GROK_HOME:-}" >>"$HERDR_LOG"
 fi
 if [[ $1 == pane && $2 == process-info ]]; then
   case ${HERDR_MODE:-ready} in
@@ -96,7 +97,10 @@ if "$repo/seats/start-agentboard-manager" codex >"$tmp/out" 2>"$tmp/err"; then b
 has "$tmp/err" 'run seats/install.py' 'missing isolated Codex profile names installer'
 is 'missing isolated Codex profile starts nothing' test ! -s "$STUB_HC_LOG"
 mv "$codex_home/manager.config.saved" "$codex_home/manager.config.toml"
-run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <grok> <--trust> <--always-approve>'
+grok_home="$HOME/.local/share/agentboard/seats/manager/grok"
+mkdir -p "$grok_home"
+printf '[mcp_servers.agentboard]\nurl = "http://127.0.0.1:8765/mcp/manager"\n' >"$grok_home/config.toml"
+run_kind grok 'CALL <run> <--json> <--bg> <--outlive-parent> <--name> <manager> <--cwd> <'$repo'> <--> <env> <GROK_HOME='$grok_home'> <grok> <--trust> <--always-approve>'
 
 # codewhale: hc only, per-seat home, status wait, retried send --wait
 cwhome="$HOME/.local/share/agentboard/seats/manager/codewhale"
@@ -198,6 +202,7 @@ has "$HERDR_LOG" "ENV CLAUDE_CONFIG_DIR=$claude_home" 'herdr Claude manager rece
 run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--profile> <manager> <--> <$agentboard-manager>'
 has "$HERDR_LOG" "ENV CODEX_HOME=$codex_home" 'herdr Codex manager receives its isolated home'
 run_herdr_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
+has "$HERDR_LOG" "ENV GROK_HOME=$grok_home" 'herdr Grok manager receives its isolated home'
 
 run_herdr_not_ready() {
   local mode=$1

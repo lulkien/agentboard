@@ -11,7 +11,7 @@ its client gets a board identity.
 | `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | generated into each isolated role home; legacy `~/.codex` links remain for compatibility |
 | `codex/rules/agentboard.rules` | legacy shared Codex home | marked block inside `${CODEX_HOME:-~/.codex}/rules/default.rules`; isolated role homes do not copy host rules |
 | `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | merged into role `mcp.json`; legacy card remains at `~/.claude/<seat>-mcp.json` |
-| `grok/agentboard-mcp.toml` | grok (manager) | managed block in `~/.grok/config.toml` by `install.py` |
+| `grok/agentboard-mcp.toml` | grok (all seats) | rendered into private role homes by `install.py` |
 | `systemd/agentboard.service` | shared HTTP daemon | linked to `~/.config/systemd/user/agentboard.service` |
 
 ## Install
@@ -41,10 +41,10 @@ unmarked regular files at the named seat destinations. Directories and other
 non-regular destinations are refused before any install writes. Each Codex seat
 profile carries its own tool list and permissions. `--force` replaces only the
 named destinations. A full install also links `seats/start-agentboard-manager` to
-`~/.local/bin/start-agentboard-manager`; `--grok-only` manages only the Grok MCP
-block and does not install the launcher. Use `--skip-grok` to install or refresh
-everything else without reading or changing `~/.grok/config.toml`; it is mutually
-exclusive with `--grok-only`.
+`~/.local/bin/start-agentboard-manager`; `--grok-only` manages only Grok role
+homes and does not install the launcher. Use `--skip-grok` to install or refresh
+everything else without reading or changing `~/.grok`; it is mutually exclusive
+with `--grok-only`.
 Use `--agent codex,codewhale,claude,grok` to install only the named clients; names
 are exact lowercase values and cannot be repeated. Selected runs preflight only
 those clients, and do not manage the shared launcher or systemd unit. A provider
@@ -121,9 +121,8 @@ commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
 
 - Tool names, never home paths: `git` and `ferris-search` resolve on the Claude
   seat's `PATH`.
-- Claude and Codex cards connect to `http://127.0.0.1:8765/mcp/<seat>`; Grok
-  connects to `http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}`. The URL
-  names the actor on every request. Keep `AGENTBOARD_SEAT` nonempty when set.
+- Claude, Codex and generated Grok role cards connect to
+  `http://127.0.0.1:8765/mcp/<seat>`. The URL names the actor on every request.
 - The board tool set is the twelve tools of this build: `task_add`, `task_list`,
   `task_get`, `task_epic`, `task_update`, `task_claim`, `task_comment`,
   `board_feed`, `board_brief`, `board_agents`, `board_project_delete`,
@@ -249,26 +248,26 @@ before the hooks existed need `./install.py --force` to pick them up.
 
 ## Grok
 
-`./install.py` installs the marked block from `seats/grok/agentboard-mcp.toml`
-into `~/.grok/config.toml`. It contains only the HTTP URL; its actor comes from
-`${AGENTBOARD_SEAT:-manager}`: unset
-uses `manager`, and a supplied value passes through unchanged. Never set
-`AGENTBOARD_SEAT` to an empty string. Grok is manager-only. In herdr, name a second manager's pane with
-`herdr tab create --env AGENTBOARD_SEAT=<name>`. In hc the name rides the argv of
-its own terminal, because `hc run` has no environment flag:
+`./install.py` leaves the legacy `~/.grok` home unchanged and generates private
+homes at `~/.local/share/agentboard/seats/<seat>/grok` for manager, analyst,
+coder and reviewer. Each config uses the fixed URL `/mcp/<seat>` and copies only
+safe user settings plus `auth.json` and `mcp_credentials.json` when present.
+The role home is mode 0700 and copied credentials are mode 0600. Unrelated role
+config is preserved on `--force`. Credential files are refreshed
+or withdrawn only while they still match the installer's recorded snapshot;
+diverged or independently created credentials stay in place. The installer
+refreshes only its marked agentboard table in a role config.
+Base `auth.json` and `mcp_credentials.json` must each be valid JSON objects. Only
+those files are copied as credentials. `~/.grok` is read-only and is never
+rewritten.
 
-    hc run --bg --name manager-2 -- env AGENTBOARD_SEAT=<name> grok --trust --always-approve
+Launch a worker with a role-specific home and fixed MCP actor:
 
-An empty `AGENTBOARD_SEAT` produces an empty URL actor segment, which the daemon
-rejects as a missing route.
+    env GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" herdr agent start analyst --kind grok --pane "$PANE_ANALYST" -- --trust --always-approve --sandbox read-only --deny Edit
+    hc run --bg --name reviewer --cwd "$REPO" -- env GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok" grok --trust --always-approve --sandbox read-only --deny Edit
 
-The installer preserves the rest of the Grok config, its line endings and mode. It
-refuses malformed TOML, malformed markers and symlinked/non-regular config. An
-unmarked `[mcp_servers.agentboard]` table (including one written by `grok mcp add`)
-is refused without `--force`; with `--force`, it removes only that table and its
-child tables when their source spans are unambiguous, then writes the managed
-block. Inline or otherwise ambiguous entries are refused. Other tables, comments
-and settings stay byte-identical.
+Use the matching `/agentboard-<seat>` prompt. Coder uses no added read-only
+policy; analyst and reviewer use the documented read-only sandbox and Edit deny.
 
 Only `grok mcp doctor agentboard` has been proven: it starts the server, completes
 the handshake and lists the tool catalog. A real session load has not been proven.
