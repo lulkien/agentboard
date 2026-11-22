@@ -1295,9 +1295,9 @@ root_inst --agent codex --force; code=$?
 is "force selected Codex install succeeds" test "$code" -eq 0
 is "force selected Codex preserves Claude destination" test "$(cat "$home/.claude/coder-mcp.json")" = 'preserve unselected destination'
 
-has "team manual documents Grok role homes for each seat" 'GROK_HOME="$HOME/.local/share/agentboard/seats/coder/grok"' "$repo/skills/agentboard-team/SKILL.md"
-has "manager skill documents herdr Grok home and read-only policy" 'GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" herdr agent start analyst' "$repo/skills/agentboard-manager/SKILL.md"
-has "seat README documents reviewer Grok home" 'GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok"' "$repo/seats/README.md"
+has "team manual launches Grok seats by actor" 'env AGENTBOARD_ACTOR=<seat> grok --trust --always-approve' "$repo/skills/agentboard-team/SKILL.md"
+has "manager skill documents herdr Grok actor launch" 'env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind grok' "$repo/skills/agentboard-manager/SKILL.md"
+has "seat README launches the reviewer Grok seat by actor" 'env AGENTBOARD_ACTOR=reviewer grok --trust --always-approve' "$repo/seats/README.md"
 
 echo "$((n - fail))/$n passed (installer)"
 [ "$fail" -eq 0 ]

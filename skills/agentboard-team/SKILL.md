@@ -25,7 +25,7 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
 - One directory per board: `$AGENTBOARD_DB`, else
   `~/.local/state/agentboard/lmdb`. `agentboard path` prints the resolved one.
 - A seat writes as its name: CLI uses `AGENTBOARD_ACTOR` or `--actor`; MCP uses
-  `/mcp/<seat>` in the card URL.
+  the `Authorization: Bearer <seat>` header, filled from `AGENTBOARD_ACTOR`.
 - Names identify a seat; they are not a credential. A name enters the roster when
   it first writes, and pointing a row at an unseen name needs `new_actor`, so a
   typo cannot invent a person.
@@ -80,53 +80,46 @@ To start the manager in the current herdr pane, run the installed
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
+Every seat is the same client with the global `agentboard` MCP entry that
+`install.py` registers; the seat's name is `AGENTBOARD_ACTOR`, set with `env` on the
+launch. The recipes below add no home variable, no MCP-config flag, no sandbox
+profile and no deny list: what a seat may and may never do is written in its role
+skill and `roles.md`, and a seat that ignores them is a contract breach the
+reviewer reopens, not a launch flag.
+
 For Claude, analyst and reviewer use Opus at medium effort, and coder uses Sonnet
-at medium effort. Codex loads each seat's model and effort from its profile. Swap
-a model only when the human names a different one.
+at medium effort. Codex takes the model and effort as flags. Swap a model only when
+the human names a different one.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
-| analyst | `--model claude-opus-5-5 --effort medium` | `-p analyst` (profile: gpt-6-sol, medium) |
-| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-luna, medium) |
-| reviewer | `--model claude-opus-5-5 --effort medium` | `-p reviewer` (profile: gpt-6-sol, medium) |
+| analyst | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
+| coder | `--model claude-sonnet-5-5 --effort medium` | `--model gpt-6-luna -c model_reasoning_effort=medium` |
+| reviewer | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
 
 ```bash
 export REPO=/path/to/repo
 herdr tab create --cwd "$REPO" --label analyst
 herdr pane list                                    # note the new tab's pane id
 
-# Claude seats (MCP config + preferred model + permission mode)
-# Analyst and reviewer skip permission prompts and deny the three file-mutation
-# tools, so they read and run the shell but cannot edit. The coder denies nothing:
-# it edits and runs the gate.
-env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/analyst/claude" herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
-  --model claude-opus-5-5 \
-  --effort medium \
-  --mcp-config "$HOME/.local/share/agentboard/seats/analyst/claude/mcp.json" --strict-mcp-config \
-  --dangerously-skip-permissions \
-  --disallowedTools Edit Write NotebookEdit
-env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/coder/claude" herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
-  --model claude-sonnet-5-5 \
-  --effort medium \
-  --mcp-config "$HOME/.local/share/agentboard/seats/coder/claude/mcp.json" --strict-mcp-config \
-  --dangerously-skip-permissions
-env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/reviewer/claude" herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
-  --model claude-opus-5-5 \
-  --effort medium \
-  --mcp-config "$HOME/.local/share/agentboard/seats/reviewer/claude/mcp.json" --strict-mcp-config \
-  --dangerously-skip-permissions \
-  --disallowedTools Edit Write NotebookEdit
+# Claude seats: actor, model, effort, unattended permission mode
+env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
+  --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
+env AGENTBOARD_ACTOR=coder herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
+  --model claude-sonnet-5-5 --effort medium --dangerously-skip-permissions
+env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
+  --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 
-# Codex seats (profile + preferred model)
-# Analyst's permission profile allows writes only in this scratch directory;
-# keep the pane rooted in the repository so it can read source files there.
-install -d -m 700 /tmp/agentboard/scratch
-env CODEX_HOME="$HOME/.local/share/agentboard/seats/analyst/codex" herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
-  -p analyst
-env CODEX_HOME="$HOME/.local/share/agentboard/seats/coder/codex" herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
-  -p coder
-env CODEX_HOME="$HOME/.local/share/agentboard/seats/reviewer/codex" herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
-  -p reviewer
+# Codex seats
+env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
+  --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+env AGENTBOARD_ACTOR=coder herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
+  --model gpt-6-luna -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
+  --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+
+# Grok seats: the same, with Grok's trust and approve flags
+env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok --pane "$PANE" -- --trust --always-approve
 
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
 # and Grok; $agentboard-<seat> T<id> for Codex.
@@ -138,10 +131,9 @@ Start only the seats the work needs: a reviewer with nothing to review is a tab
 that idles. Pick one kind per team; do not mix Claude and Codex rows of the table
 in one launch unless the human asks.
 
-The deny list removes the three file-mutation tools only; the shell stays open, and
-the seat's own rules (analyst never commits, builds or installs; reviewer never
-commits, builds or installs; the
-coder commits only on its task branch) are what cover it.
+A seat's restrictions are the ones its role skill states (analyst and reviewer
+never edit product files, the coder commits only on its task branch); nothing in
+the launch enforces them.
 
 A launch prompt uses `--wait` for proof it landed; without it a stalled prompt (an
 open overlay) goes unnoticed. The manager's later wake prompts go without `--wait`
@@ -159,61 +151,39 @@ To start the manager in the current hc terminal, run the installed
 replaces that shell with the selected manager, so the manager's address is
 `$HC_TERMINAL_ID`; `seats/README.md` documents its prerequisites.
 
-For Claude, analyst and reviewer use Opus at medium effort, and coder uses Sonnet
-at medium effort. Codex loads each seat's model and effort from its profile. Swap
-a model only when the human names a different one.
-
-| Seat | Claude | Codex |
-| --- | --- | --- |
-| analyst | `--model claude-opus-5-5 --effort medium` | `-p analyst` (profile: gpt-6-sol, medium) |
-| coder | `--model claude-sonnet-5-5 --effort medium` | `-p coder` (profile: gpt-6-luna, medium) |
-| reviewer | `--model claude-opus-5-5 --effort medium` | `-p reviewer` (profile: gpt-6-sol, medium) |
+The models and efforts are the table above; the same no-home, no-profile, no-deny
+rule applies.
 
 ```bash
 export REPO=/path/to/repo
 
-# Claude seats (MCP config + preferred model + permission mode)
-# Analyst and reviewer skip permission prompts and deny the three file-mutation
-# tools, so they read and run the shell but cannot edit. The coder denies nothing:
-# it edits and runs the gate.
-hc run --bg --name analyst --cwd "$REPO" -- \
-  env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/analyst/claude" claude --model claude-opus-5-5 \
-  --effort medium \
-  --mcp-config "$HOME/.local/share/agentboard/seats/analyst/claude/mcp.json" --strict-mcp-config \
-  --dangerously-skip-permissions \
-  --disallowedTools Edit Write NotebookEdit
-hc run --bg --name coder --cwd "$REPO" -- \
-  env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/coder/claude" claude --model claude-sonnet-5-5 \
-  --effort medium \
-  --mcp-config "$HOME/.local/share/agentboard/seats/coder/claude/mcp.json" --strict-mcp-config \
-  --dangerously-skip-permissions
-hc run --bg --name reviewer --cwd "$REPO" -- \
-  env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/reviewer/claude" claude --model claude-opus-5-5 \
-  --effort medium \
-  --mcp-config "$HOME/.local/share/agentboard/seats/reviewer/claude/mcp.json" --strict-mcp-config \
-  --dangerously-skip-permissions \
-  --disallowedTools Edit Write NotebookEdit
+# Claude seats
+hc run --bg --name analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=analyst claude \
+  --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
+hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder claude \
+  --model claude-sonnet-5-5 --effort medium --dangerously-skip-permissions
+hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer claude \
+  --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 
-# Grok Build workers: each role has a private home and fixed MCP actor.
-# Analyst and reviewer are read-only; coder retains its normal write access.
-hc run --bg --name analyst --cwd "$REPO" -- env GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" grok --trust --always-approve --sandbox read-only --deny Edit
-hc run --bg --name coder --cwd "$REPO" -- env GROK_HOME="$HOME/.local/share/agentboard/seats/coder/grok" grok --trust --always-approve
-hc run --bg --name reviewer --cwd "$REPO" -- env GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok" grok --trust --always-approve --sandbox read-only --deny Edit
+# Grok Build seats
+hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> grok --trust --always-approve
 
-# In herdr, put the same GROK_HOME and role flags after agent start's --:
-# env GROK_HOME="$HOME/.local/share/agentboard/seats/<seat>/grok" herdr agent start <seat> --kind grok --pane "$PANE" -- --trust --always-approve [role flags]
+# Codex seats. --no-daemon is mandatory: without it the seat's own commands run
+# outside hc and nothing it starts is addressable.
+hc run --bg --name analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=analyst codex --no-daemon \
+  --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder codex --no-daemon \
+  --model gpt-6-luna -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex --no-daemon \
+  --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 
-# Codex seats (the profile supplies the model and effort). --no-daemon is mandatory: without it the
-# seat's own commands run outside hc and nothing it starts is addressable.
-# The analyst's permission profile writes only in this scratch directory.
-install -d -m 700 /tmp/agentboard/scratch
-hc run --bg --name analyst --cwd "$REPO" -- env CODEX_HOME="$HOME/.local/share/agentboard/seats/analyst/codex" codex --no-daemon -p analyst
-hc run --bg --name coder --cwd "$REPO" -- env CODEX_HOME="$HOME/.local/share/agentboard/seats/coder/codex" codex --no-daemon -p coder
-hc run --bg --name reviewer --cwd "$REPO" -- env CODEX_HOME="$HOME/.local/share/agentboard/seats/reviewer/codex" codex --no-daemon -p reviewer
+# Codewhale seats (hc only)
+hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> codewhale \
+  --skip-onboarding --fresh --disable subagents --approval-policy never
 
 # The first prompt is the seat skill and the row: /agentboard-<seat> T<id> for
-# Claude and Grok; $agentboard-<seat> T<id> for Codex. A terminal that has not
-# reported yet is working, so wait for each seat before its first prompt.
+# Claude, Grok and Codewhale; $agentboard-<seat> T<id> for Codex. A terminal that
+# has not reported yet is working, so wait for each seat before its first prompt.
 hc wait analyst
 hc wait coder
 hc wait reviewer
@@ -225,11 +195,6 @@ Start only the seats the work needs: a reviewer with nothing to review is a
 terminal that idles. Pick one kind per team; do not mix Claude and Codex rows of the
 table in one launch unless the human asks.
 
-The deny list removes the three file-mutation tools only; the shell stays open, and
-the seat's own rules (analyst never commits, builds or installs; reviewer never
-commits, builds or installs; the
-coder commits only on its task branch) are what cover it.
-
 Wake every seat with a plain `hc send`, never `--if idle`: it accepts only `idle` or
 `working`, and a seat that finished a turn reports `done`, so it is refused with exit
 10 and nothing is typed. Plain `hc send` waits for the program to pause, which is what
@@ -240,11 +205,8 @@ start working. The manager's later wake prompts go without `--wait` (it never
 blocks) and are checked with `hc read --lines 40 <seat>`. If a prompt does not turn
 the agent busy, read the terminal before sending again.
 
-Codewhale seats run under hc only; herdr has no agent kind for them. Each seat home
-carries status hooks that report idle, working and done, so `hc wait <seat>` and
-`hc send --wait` work as for claude and codex. The first `hc send` may answer
-`still starting`: retry it. Completion is authoritative on the board (`agentboard
-wait`), not the terminal. Each home needs its credential once: see `seats/README.md`.
+Codewhale seats run under hc only; herdr has no agent kind for them. Completion is
+authoritative on the board (`agentboard wait`), not the terminal.
 
 Seats start hidden: a terminal joins the person's window only when it carries both
 labels at launch, `--label herdr.space=<space-id> --label herdr.tab=<tab-id>`, or
@@ -256,63 +218,38 @@ both ids from the manager's own terminal with `hc get <its address> --json` (the
 ## Harness map
 
 An index to what is documented elsewhere, not a second copy of it. Flags are in the
-launch table above; install, cards and permissions are in `seats/README.md`.
+launch recipes above; install and the registered entries are in `seats/README.md`.
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all four | herdr `env CLAUDE_CONFIG_DIR=~/.local/share/agentboard/seats/<seat>/claude herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env CLAUDE_CONFIG_DIR=... claude`; manager via `agentboard-manager claude` in either | role home `mcp.json` via `--mcp-config --strict-mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
-| Codex | all four | herdr with `CODEX_HOME=$HOME/.local/share/agentboard/seats/<seat>/codex`; hc with `env CODEX_HOME=... codex --no-daemon -p <seat>`; manager via `agentboard-manager codex` in either | `codex -p <seat>` in its isolated role home, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only checkout plus scratch-write and loopback-only network | `$agentboard-<seat>` |
-| Codewhale | all four; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env CODEWHALE_HOME=$HOME/.local/share/agentboard/seats/<seat>/codewhale codewhale [-C <scratch dir> for analyst and reviewer] --skip-onboarding --fresh --disable subagents` | per-seat home `mcp.json`, URL `/mcp/<seat>` | yolo for manager and coder; analyst and reviewer workspace-write with `-C` scratch, reviewer adds network (not loopback-only) | `/agentboard-<seat>` |
-| Grok | all four | per-seat `GROK_HOME=~/.local/share/agentboard/seats/<seat>/grok`; manager via `agentboard-manager grok` | role config URL `/mcp/<seat>`; legacy `~/.grok` remains unchanged | `--trust --always-approve`; analyst/reviewer add `--sandbox read-only --deny Edit` | `/agentboard-<seat>` |
+| Claude | all four | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> claude`; manager via `agentboard-manager claude` in either | global `agentboard` entry (`claude mcp add-json -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
+| Codex | all four | herdr and hc as for Claude with `--kind codex` / `codex --no-daemon`; manager via `agentboard-manager codex` in either | global `[mcp_servers.agentboard]` (`codex mcp add`), `bearer_token_env_var = "AGENTBOARD_ACTOR"` | `--dangerously-bypass-approvals-and-sandbox` | `$agentboard-<seat>` |
+| Codewhale | all four; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> codewhale --skip-onboarding --fresh --disable subagents --approval-policy never` | global `mcp.json` entry (`codewhale mcp add`), `bearer_token_env_var` | `--approval-policy never` | `/agentboard-<seat>` |
+| Grok | all four | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok`; manager via `agentboard-manager grok` | global entry (`grok mcp add -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--trust --always-approve` | `/agentboard-<seat>` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
 Model and effort per seat come from the launch table for every client. Skills are
-one physical copy under `~/.agents/skills`, linked into `~/.claude/skills` and
-the role-first Claude homes; Codex and Grok read the canonical directory directly.
+one physical copy under `~/.agents/skills`, which the installer links; Codex, Grok
+and Codewhale read that directory directly. Claude reads `~/.claude/skills`, which the
+installer does not link yet; until it does, link the five `agentboard-*` skill
+directories there by hand.
 
 ## Register a seat's MCP server
 
 Start `agentboard daemon` on the board before launching HTTP seats. Its default
 address is `127.0.0.1:8765`; `GET /api/health` shows the board path and instance.
-The URL path carries the actor on each request. The installer links the cards and
-the optional systemd user unit; it never enables or starts the unit. If the CLI
-uses a custom `AGENTBOARD_DB`, configure the same absolute path for the unit.
+`install.py` registers one global `agentboard` entry per client at
+`http://127.0.0.1:8765/mcp` through the client's own `mcp add` command. The daemon
+takes the actor from the request's `Authorization: Bearer <actor>` header, and each
+client fills that header from `AGENTBOARD_ACTOR` in the environment the seat was
+launched with. A seat launched without `AGENTBOARD_ACTOR` therefore has no usable
+agentboard server; its role skill's first step checks that the board tools answer.
+If the CLI uses a custom `AGENTBOARD_DB`, configure the same absolute path for the
+optional systemd user unit, which the installer links but never enables or starts.
 
-```bash
-# codex: active card in the isolated role home, selected by CODEX_HOME and -p
-#   CODEX_HOME="$HOME/.local/share/agentboard/seats/coder/codex"
-#   ~/.local/share/agentboard/seats/coder/codex/coder.config.toml
-#   [mcp_servers.agentboard]
-#   url = "http://127.0.0.1:8765/mcp/coder"
-#
-# claude: active card in the role home selected by CLAUDE_CONFIG_DIR
-#   "agentboard": { "type": "http", "url": "http://127.0.0.1:8765/mcp/coder" }
-env CLAUDE_CONFIG_DIR="$HOME/.local/share/agentboard/seats/coder/claude" claude --mcp-config "$HOME/.local/share/agentboard/seats/coder/claude/mcp.json" --strict-mcp-config
-
-# codewhale: active card in the role home selected by CODEWHALE_HOME
-env CODEWHALE_HOME="$HOME/.local/share/agentboard/seats/coder/codewhale" codewhale --skip-onboarding --fresh --disable subagents
-
-# grok: active card in the role home selected by GROK_HOME
-env GROK_HOME="$HOME/.local/share/agentboard/seats/coder/grok" grok --trust --always-approve
-```
-
-The repo's `seats/` directory is the canonical copy of those cards. Claude
-homes live at `~/.local/share/agentboard/seats/<seat>/claude`; set
-`CLAUDE_CONFIG_DIR` to that directory and pass its `mcp.json` with
-`--strict-mcp-config`. It reads
-`~/.claude/settings.json`, `~/.claude/.credentials.json` and `~/.claude.json`
-without changing them, copying user settings, credentials, and user MCP entries
-into private role files. It does not copy sessions, logs, caches, project
-approvals, or user plugins. The same installer links the canonical skills into
-`~/.agents/skills` and each Claude role home's `skills/`. Plugin enablement settings are retained, but
-plugin records and bundle files are not copied; installed user plugins must be
-installed separately in each role home. Codex launches use the generated
-`~/.local/share/agentboard/seats/<seat>/codex` home through `CODEX_HOME`. The
-installer never writes `~/.codex`, `~/.claude`, `~/.grok` or `~/.codewhale`; it
-names any `~/.codex/<seat>.config.toml` link, `default.rules` block or
-`~/.claude/<seat>-mcp.json` card an older install left there, for you to delete.
-Codewhale, Claude and Grok likewise use their generated
-role homes through `CODEWHALE_HOME`, `CLAUDE_CONFIG_DIR` and `GROK_HOME`.
+The installer also links the canonical skills into `~/.agents/skills` (and, while
+they still exist, each Claude role home's `skills/`). The repo's `seats/` directory holds the installer's
+inputs; `seats/README.md` describes them.
 
 ## Wake loop
 
@@ -436,7 +373,7 @@ Project `0` is called `standalone`; it is part of the board and its name and ID
 are fixed.
 The manager runs `agentboard project ls`, selects the row whose path matches its
 current working directory or project `0` when none matches, and passes that
-project on every `task_add`. The argument is required for HTTP seat cards because
+project on every `task_add`. The argument is required for HTTP seats because
 they carry no `?project=` URL parameter. `task_add` refuses without a resolved
 project, and `clear_project` refuses; move tasks to another project before
 deleting their current project.
@@ -480,7 +417,8 @@ attachment. This never happens automatically.
   Keep proof commands and their output plain, including test/build gates and any
   goal's evidence command; also keep `agentboard`, `hc`, `herdr`, `codex`, and git
   writes (`switch`, `branch`, `commit`) plain. rtk changes output, not permissions:
-  Codex sandbox and rules still decide what runs (see `seats/README.md`, Codex).
+  a seat's limits are the ones its role skill states; no sandbox applies under
+  the actor launches above.
 - Never guess a missing requirement: comment one narrow question, set status
   `blocked`, then stop and report; the manager brings the answer back.
 - `done` means verified. Put the real command output in the coder report, not in a

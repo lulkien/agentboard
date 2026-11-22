@@ -6,6 +6,14 @@ Nothing in the board enforces these rules; they are the team's contract, and the
 board's refusals (stale revision, held task, missing reason) are what make breaking
 them visible. Each seat also has a one-page entry skill of its own.
 
+No launch flag, sandbox profile or deny list enforces a seat's limits: the lists
+below and the seat's entry skill are the whole restriction, and every seat follows
+them as written. Every seat prefers MCP over the shell (agentboard tools for the
+board, `codebase-memory-mcp` for code structure, the file tools for files, `rg` for
+text), uses the shell only when those cannot answer, names an MCP call that failed
+and what it did instead, and prefers `rtk <cmd>` when `command -v rtk` succeeds
+(proof commands stay plain).
+
 ## Manager
 
 Runs no code beyond the board and `hc`. Files work, reads the board, hands rows to
@@ -56,6 +64,8 @@ Never:
 - use the shell to install or deploy binaries (`scp`, `rsync`, `ssh`, and similar
   remote copy/login tools)
 - stage prompt text in files
+- push, tag, reset, clean or stash
+- edit a path the row does not own
 
 ## Reviewer
 
@@ -65,7 +75,11 @@ May:
 - `task_get` with `full=true`, `board_feed`, `task_list`, `board_brief`
 - read the row's branch, its last commit and its diff through git reads
 - run the repo's test suites against an already-built binary on scratch boards,
-  and run that binary directly on a scratch board
+  and run that binary directly on a scratch board, for example
+  `TMPDIR=$(mktemp -d /tmp/agentboard/scratch/review.XXXXXX) PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt`
+  (direct runs use `env AGENTBOARD_DB=<scratch directory> ./target/release/agentboard`)
+- use git for reads only: `git diff`, `git log`, `git show`, `git status`
+- write only under `/tmp/agentboard/scratch/`
 - follow the entry skill's dashboard review procedure when the UI changed
 - `task_comment` findings as a short verdict line
 - `task_update` the row it reviews, with the reviewer report: `done`, back to
@@ -73,7 +87,7 @@ May:
   the cap
 
 Never:
-- edit tracked files, commit, build (`cargo build`, `cargo test`, `cargo clippy`,
+- edit tracked files (the file tools included), commit, build (`cargo build`, `cargo test`, `cargo clippy`,
   `cargo install` or `bash scripts/gate.sh` without `--prebuilt`), install, push,
   or touch another task's branch
 - touch live state or leave behind server/browser processes; follow the entry
@@ -81,6 +95,8 @@ Never:
 - run the dashboard procedure as Codex (Claude reviewers only)
 - close a row it did not review
 - accept "it should work" as evidence
+- build a missing or stale release binary: report it instead
+- leave a process it started running
 - let an unnecessary or verbose comment pass unnamed (rule: `agentboard-reviewer`)
 
 ## Analyst
@@ -89,6 +105,8 @@ The seat that turns a question into a plan. The manager files the row with the
 question; the analyst reads it, plans, and hands the same row on.
 
 May:
+- read code with the file tools and the shell's read-only searches (`rg`, git reads)
+- write only under `/tmp/agentboard/scratch/`
 - read the row the manager set to `planning` with the analyst as assignee; it does
   not `task_claim` it, because a claim starts `implementing`
 - `task_comment` one short line naming the analyst turn; the plan goes in the
@@ -98,7 +116,9 @@ May:
   the manager (`status="todo"`, `assignee="manager"`) with a split plan
 
 Never:
-- implement the plan, edit product files, or run the change
+- implement the plan, edit product files (the file tools included), or run the
+  change
+- build, install, commit or push
 - file a second row for the same work
 - close a row; the reviewer or the coder closes it
 

@@ -82,8 +82,9 @@ From a herdr pane or an hc terminal at its shell prompt, run:
 
     agentboard-manager {codex|grok|codewhale|claude}
 
-`agentboard-manager -h` explains the choice below. If the manager's role home
-is missing, it refuses and prints the exact `install.py --agent <client>` to run.
+`agentboard-manager -h` explains the choice below. The launcher starts the client with
+`AGENTBOARD_ACTOR=manager` and no home variable, so the client reads the global
+`agentboard` entry `install.py` registered (bearer token from `AGENTBOARD_ACTOR`).
 
 The launcher picks by environment: herdr when `HERDR_ENV=1` (it wins when both
 worlds are present), else hc when any `HC_*` variable is set, else it refuses and
@@ -100,7 +101,7 @@ with `herdr agent start`. It requires `HERDR_ENV=1`, `HERDR_PANE_ID`, `HERDR_TAB
 ### hc
 
 The command replaces the shell in the current hc terminal with the selected
-manager (`exec`), in the current directory, from the manager's role home; it opens
+manager (`exec`), in the current directory, as the actor `manager`; it opens
 no new terminal and prints nothing. It requires `HC_TERMINAL_ID` (set inside every
 hc terminal), `hc`, `jq` and `setsid`; it needs no window and never calls
 `herdr-app`. hc names a terminal only at `hc run --name`, so the manager keeps this
@@ -135,10 +136,12 @@ window, so it also runs on a headless machine.
 
 ## Codex
 
-Each seat profile defines its own approval policy, filesystem permissions, and
-board tool list. Launchers point `CODEX_HOME` at that seat's generated home, so
-the reviewer and analyst do not inherit command rules from the shared host
-`~/.codex/rules/default.rules`.
+Launchers no longer set `CODEX_HOME`: seats start as
+`env AGENTBOARD_ACTOR=<seat> codex ... --dangerously-bypass-approvals-and-sandbox`
+against the global `agentboard` entry. No sandbox or approval policy applies; a
+seat's limits are written only in its role skill. The profile notes below describe
+the generated role-home files (`<seat>.config.toml`), which this launch does not use
+and child D retires.
 
 - analyst: the `seat-scratch` permission profile keeps the repository readable
   and permits writes only under `/tmp/agentboard/scratch`; create that directory
@@ -168,8 +171,8 @@ the reviewer and analyst do not inherit command rules from the shared host
 ## Claude
 
 `install.py` generates `~/.local/share/agentboard/seats/<seat>/claude` for each
-role. Set `CLAUDE_CONFIG_DIR` to that directory and use its `mcp.json` with
-`--strict-mcp-config`, so only the generated merged MCP card is loaded. Base
+role. Launches no longer use these homes: seats start as
+`env AGENTBOARD_ACTOR=<seat> claude ...` against the global entry. Base
 `~/.claude/settings.json`, `.credentials.json`, and `~/.claude.json` are read-only;
 global settings and credentials are copied with private permissions, and user
 MCP entries are merged with the role card taking precedence. Session history,
@@ -187,8 +190,8 @@ Generated files are mode 0600, output lists server names only. A differing
 generated file is preserved unless `--force` is supplied;
 `--force` replaces an unmarked regular file or foreign symlink at that exact seat
 destination without following its target. Directories and other non-regular
-destinations are refused. Example:
-`env CLAUDE_CONFIG_DIR=~/.local/share/agentboard/seats/manager/claude claude --mcp-config ~/.local/share/agentboard/seats/manager/claude/mcp.json --strict-mcp-config`.
+destinations are refused. Launch example:
+`env AGENTBOARD_ACTOR=manager claude --model claude-sonnet-5-5 --dangerously-skip-permissions`.
 
 ## Codewhale
 
@@ -212,10 +215,10 @@ content is retained; the legacy home is left alone. `--force` replaces unmarked 
 non-regular entries in a seat home remain refused. Malformed bases fail preflight
 before installed files change. Every seat
 sets `reasoning_effort = "medium"` and `yolo = true` and none sets `approval_policy`
-(`never` and `auto` deny board calls unattended). Analyst and reviewer add
-`sandbox_mode = "workspace-write"`, the reviewer also `sandbox_network_access = true`
-(all-or-nothing network, weaker than Codex's loopback-only proxy). Launch those two
-with `-C <scratch dir>` so the repository stays read-only.
+(`never` and `auto` deny board calls unattended). Analyst and reviewer also add
+`sandbox_mode = "workspace-write"` in these generated homes (the reviewer
+`sandbox_network_access = true`); the actor launch uses neither the homes nor `-C`, so
+no sandbox applies there and the role skills hold the limits.
 
 A hand-edited generated file is kept unless `--force`; clean managed files refresh
 when their bases or templates change. Without `--force`, unmarked regular Codewhale
@@ -238,7 +241,7 @@ Manual key setup remains available:
 
 Launch shape (`hc run` forwards no environment, so set it with `env`):
 
-    hc run --bg --name coder --cwd <repo> -- env CODEWHALE_HOME=<home> codewhale --skip-onboarding --fresh --disable subagents
+    hc run --bg --name coder --cwd <repo> -- env AGENTBOARD_ACTOR=coder codewhale --skip-onboarding --fresh --disable subagents --approval-policy never
 
 Codewhale does not report status itself, so every generated home appends the hooks
 from `seats/codewhale/status-hooks.toml`: session start reports `idle`,
@@ -258,20 +261,20 @@ config is preserved on `--force`. Credential files are refreshed
 or withdrawn only while they still match the installer's recorded snapshot;
 diverged or independently created credentials stay in place. The installer
 refreshes only its marked agentboard table in a role config.
-A hand-written `[mcp_servers.agentboard]` table in `~/.grok/config.toml` (no
-`# BEGIN AGENTBOARD MCP` markers) refuses a plain install; `--force` drops that
-table from each role copy only and still leaves `~/.grok/config.toml` unchanged.
+The `[mcp_servers.agentboard]` table in `~/.grok/config.toml` (the global entry,
+without `# BEGIN AGENTBOARD MCP` markers) is dropped from each role copy and left
+in `~/.grok/config.toml` itself.
 Base `auth.json` and `mcp_credentials.json` must each be valid JSON objects. Only
 those files are copied as credentials. `~/.grok` is read-only and is never
 rewritten.
 
-Launch a worker with a role-specific home and fixed MCP actor:
+Launch a worker as its board actor against the global entry:
 
-    env GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" herdr agent start analyst --kind grok --pane "$PANE_ANALYST" -- --trust --always-approve --sandbox read-only --deny Edit
-    hc run --bg --name reviewer --cwd "$REPO" -- env GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok" grok --trust --always-approve --sandbox read-only --deny Edit
+    env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind grok --pane "$PANE_ANALYST" -- --trust --always-approve
+    hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer grok --trust --always-approve
 
-Use the matching `/agentboard-<seat>` prompt. Coder uses no added read-only
-policy; analyst and reviewer use the documented read-only sandbox and Edit deny.
+Use the matching `/agentboard-<seat>` prompt. No seat gets a sandbox or deny flag;
+analyst and reviewer read-only limits are written in their role skills.
 
 Only `grok mcp doctor agentboard` has been proven: it starts the server, completes
 the handshake and lists the tool catalog. A real session load has not been proven.

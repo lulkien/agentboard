@@ -3,7 +3,9 @@ name: agentboard-manager
 description: "Initialize the agentboard manager seat (Claude, Codex or Grok): brief, launch, file, wait in the background."
 version: 6.0.0
 ---
-You are the manager; use the invocation's arguments as your focus.
+You are the manager; use the invocation's arguments as your focus. First, check the
+board tools: call `board_brief`. If the agentboard tools are missing or the call
+fails, this seat was launched without `AGENTBOARD_ACTOR=manager`; say so and stop.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md`
 in that directory before acting. They are the shared manual; follow the manager
@@ -28,16 +30,17 @@ seat is a named terminal and `hc send` waits for the program to pause.
 1. Resolve the active project before managing seats. Run `agentboard project ls`,
    choose the project whose registered path is the manager's current working
    directory, or choose project `0` (`standalone`) if no path matches. Pass that
-   project ID to `board_brief`, `task_list`, and every `task_add`. HTTP seat cards
+   project ID to `board_brief`, `task_list`, and every `task_add`. HTTP seats
    carry no `?project=` URL parameter, so the `task_add` argument is required.
    Check the selected project against the repository before launching or
    assigning seats. `board_agents` is board-wide.
 2. Check that the shared daemon is running on the intended board (`GET
-   /api/health`) before launching HTTP seats. Each card's `/mcp/<seat>` URL
-   supplies its actor, including Grok's fixed per-role URL. The
+   /api/health`) before launching HTTP seats. Each seat's actor is the
+   `AGENTBOARD_ACTOR` it was launched with (`env AGENTBOARD_ACTOR=<seat> ...`); the
+   global MCP entry sends it as a bearer token. The
    manual's launch sections have the exact commands and preferred-model table
    (Claude Opus/Sonnet 5.5;
-   Codex Sol with model and effort supplied by each seat profile).
+   Codex Sol with model and effort passed as flags).
    - herdr: one tab per seat and never split panes; pass those flags after `--` on
      `herdr agent start`.
    - hc: one named terminal per seat and never two agents in one terminal; pass
@@ -161,27 +164,24 @@ seat is a named terminal and `hc send` waits for the program to pause.
 
 ## Grok Build manager
 
-Install the seat cards and launcher with `./install.py`, or generate only
-Grok role homes with `./install.py --agent grok`. The installer reads the
-legacy `~/.grok` config and credentials without changing them, then generates
-private homes at `~/.local/share/agentboard/seats/<seat>/grok`. Each role config
-uses a fixed `/mcp/<seat>` URL. Set `GROK_HOME` to the matching role home whenever
-Grok starts; never use the old `AGENTBOARD_SEAT` override with these cards.
+Install the launcher and the global `agentboard` MCP entry with `./install.py`
+(or `./install.py --agent grok`). Grok reads that one entry from `~/.grok/config.toml`
+and sends `Authorization: Bearer ${AGENTBOARD_ACTOR}`, so every Grok seat is started
+with `env AGENTBOARD_ACTOR=<seat>` and no home variable.
 
 From a herdr pane or an hc terminal at its shell prompt, `agentboard-manager
 grok` starts Grok with `--trust --always-approve` and prompts `/agentboard-manager`.
-The manager helper sets its manager role home in both hc and herdr. For workers,
-set the role home explicitly. Analyst and reviewer use read-only sandbox policy
-and deny Edit; coder uses its normal write access. For a fresh herdr tab, use:
+For workers, only the actor and Grok's two flags go on the launch; the role skill
+holds the seat's restrictions. For a fresh herdr tab, use:
 
     herdr tab create --cwd "$REPO" --label analyst
     herdr pane list
-    env GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" herdr agent start analyst --kind grok --pane "$PANE_ANALYST" -- --trust --always-approve --sandbox read-only --deny Edit
+    env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind grok --pane "$PANE_ANALYST" -- --trust --always-approve
     herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
 
 For a fresh hc terminal, use:
 
-    hc run --bg --name reviewer --cwd "$REPO" -- env GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok" grok --trust --always-approve --sandbox read-only --deny Edit
+    hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer grok --trust --always-approve
     hc wait reviewer
     hc send --wait reviewer '/agentboard-reviewer T<id>'
 
@@ -195,10 +195,9 @@ for an unattended prompt. For board tools, use `use_tool` with catalog keys such
 Check setup with `grok inspect --json` (confirm `projectTrusted`, the skills
 `agentboard-team`, `agentboard-manager`, `agentboard-analyst`, `agentboard-coder`
 and `agentboard-reviewer`, and the MCP servers), `grok mcp list`, and
-`grok mcp doctor agentboard`. The doctor handshake and tool catalog are proven; a
-live session load is not. An optional headless read-only probe is:
+`grok mcp doctor agentboard`. An optional headless read-only probe is:
 
-    grok -p 'list the board brief with the agentboard board_brief tool' --always-approve --max-turns 3
+    env AGENTBOARD_ACTOR=manager grok -p 'list the board brief with the agentboard board_brief tool' --always-approve --max-turns 3
 
 Keep `agentboard-manager` as the slash entry point; do not add a Grok command with
 the same name as a skill. If a Grok pane or terminal looks idle, inspect its output for an

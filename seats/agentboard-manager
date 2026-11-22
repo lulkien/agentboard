@@ -12,8 +12,8 @@ if [[ $1 == -h || $1 == --help ]]; then
   cat <<EOF
 $USAGE
 
-Start the manager seat from its isolated role home
-(~/.local/share/agentboard/seats/manager/<client>). Inside herdr (HERDR_ENV=1)
+Start the manager seat as the board actor "manager" (AGENTBOARD_ACTOR=manager; the
+client reads the global agentboard MCP entry that install.py registers). Inside herdr (HERDR_ENV=1)
 it renames this tab to "manager" and starts the client in this pane; inside hc
 (any HC_* variable, with HC_TERMINAL_ID) it starts the client in this terminal.
 Codewhale is hc only.
@@ -53,58 +53,30 @@ for command in "${needs[@]}"; do
   command -v "$command" >/dev/null 2>&1 || { echo "agentboard-manager: required command not found: $command" >&2; exit 1; }
 done
 
-repo=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
-missing() { # missing <path>: the manager's role home is not installed
-  echo "agentboard-manager: $1 missing; run $repo/install.py --agent $KIND" >&2
-  exit 1
-}
-
-claude_home="$HOME/.local/share/agentboard/seats/manager/claude"
-claude_mcp="$claude_home/mcp.json"
-if [[ $KIND == claude && ( ! -f $claude_home/.agentboard-seat || ! -f $claude_mcp ) ]]; then
-  echo "agentboard-manager: $claude_home missing; run $repo/install.py --agent claude" >&2
-  exit 1
-fi
-
-cwhome="$HOME/.local/share/agentboard/seats/manager/codewhale"
-if [[ $KIND == codewhale && ! -f $cwhome/config.toml ]]; then
-  missing "$cwhome/config.toml"
-fi
-grok_home="$HOME/.local/share/agentboard/seats/manager/grok"
-if [[ $KIND == grok && ! -f $grok_home/config.toml ]]; then
-  missing "$grok_home/config.toml"
-fi
-
-codex_home="$HOME/.local/share/agentboard/seats/manager/codex"
-if [[ $KIND == codex && ! -f $codex_home/manager.config.toml ]]; then
-  missing "$codex_home/manager.config.toml"
-fi
-
 case "$KIND" in
   claude)
-    argv=(env "CLAUDE_CONFIG_DIR=$claude_home" claude --model claude-sonnet-5-5 --mcp-config "$claude_mcp" --strict-mcp-config --dangerously-skip-permissions /agentboard-manager)
-    hargs=(--model claude-sonnet-5-5 --mcp-config "$claude_mcp" --strict-mcp-config --dangerously-skip-permissions -- /agentboard-manager)
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager claude --model claude-sonnet-5-5 --dangerously-skip-permissions /agentboard-manager)
+    hargs=(--model claude-sonnet-5-5 --dangerously-skip-permissions -- /agentboard-manager)
     ;;
   codex)
-    argv=(env "CODEX_HOME=$codex_home" codex --no-daemon --profile manager '$agentboard-manager')
-    hargs=(--profile manager -- '$agentboard-manager')
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codex --no-daemon --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox '$agentboard-manager')
+    hargs=(--model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox -- '$agentboard-manager')
     ;;
   grok)
-    argv=(env "GROK_HOME=$grok_home" grok --trust --always-approve)
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager grok --trust --always-approve)
     hargs=(--trust --always-approve)
     ;;
   codewhale)
-    # the seat home goes in through env(1), the same as for the worker seats
-    argv=(env "CODEWHALE_HOME=$cwhome" codewhale --skip-onboarding --fresh --disable subagents)
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codewhale --skip-onboarding --fresh --disable subagents --approval-policy never)
     ;;
 esac
 
 log=${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log
 if [[ $world == herdr ]]; then
   herdr tab rename "$HERDR_TAB_ID" manager
-  if [[ $KIND == codex ]]; then export CODEX_HOME="$codex_home"; fi
-  if [[ $KIND == claude ]]; then export CLAUDE_CONFIG_DIR="$claude_home"; fi
-  if [[ $KIND == grok ]]; then export GROK_HOME="$grok_home"; fi
+  # the board actor rides in the environment herdr gives the agent
+  export AGENTBOARD_ACTOR=manager
+  unset CODEX_HOME CLAUDE_CONFIG_DIR GROK_HOME CODEWHALE_HOME
   setsid bash -c '
     pane=$1 kind=$2
     shift 2

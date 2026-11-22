@@ -3,9 +3,24 @@ name: agentboard-reviewer
 description: "Work the reviewer seat on the agentboard: read the row and the tree, judge the work, close or reopen the row."
 version: 5.0.0
 ---
-You are the reviewer. Your board name is `reviewer`: your MCP server is the HTTP URL
-`/mcp/reviewer` in your card, and the manager prompts you with a message naming
-the row.
+You are the reviewer. Your board name is `reviewer`: it is the `AGENTBOARD_ACTOR` your launch set,
+and the manager prompts you with a message naming the row.
+
+Limits (the whole restriction; nothing in the launch enforces it): read code with the
+file tools and use the agentboard tools for the board; git is read-only (`git diff`,
+`log`, `show`, `status`, through `rtk` when present). Never edit tracked files with
+any tool, commit, build (cargo, or `scripts/gate.sh` without `--prebuilt`), install
+or push. Verify with `TMPDIR=$(mktemp -d /tmp/agentboard/scratch/review.XXXXXX)
+PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt` or an individual suite
+with the same TMPDIR and PATH plus `PYTHONDONTWRITEBYTECODE=1
+AGENTBOARD_TEST_BIN=$PWD/target/release/agentboard`; direct binary runs use
+`env AGENTBOARD_DB=<scratch directory> ./target/release/agentboard ...`. If the
+binary is missing or stale, report it. Write only under `/tmp/agentboard/scratch/`
+and stop every process you start.
+
+First, check the board tools: call `board_brief`. If the agentboard tools are
+missing or the call fails, this seat was launched without `AGENTBOARD_ACTOR=reviewer`
+(there is no usable agentboard server); say so and stop for the manager.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` in
 that directory before acting. You read and judge; the row is your work product.
@@ -178,11 +193,9 @@ A missing or stale binary means report that and do not build. From the repo root
 PATH=$PWD/.venv/bin:$PATH bash scripts/gate.sh --prebuilt`; this runs every suite
 and documentation gate without building. For an individual suite, set that same
 `TMPDIR`, then run its normal command. Never run cargo, git writes, or edit tracked
-files, and stop every process started. See `seats/README.md` for the sandbox
-profile and rule-block limits.
-The cargo restriction is instruction-only: a host `~/.codex/rules/default.rules`
-allow rule runs cargo outside the sandbox, so do not describe cargo as sandbox
-refused. Whether the RTK pre-tool rewrite changes that matching is unverified.
+files, and stop every process started.
+The cargo restriction is instruction-only: no sandbox or rule refuses cargo under
+the actor launch, so never describe cargo as sandbox refused.
 
 `agent-browser doctor` currently has a known false negative: it can report
 `No Chrome binary found` and a failed launch while the configured Chrome for
