@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-USAGE='usage: agentboard-manager {codex|grok|codewhale|claude}'
+USAGE='usage: agentboard-manager {codex|grok|codewhale|claude|agy}'
 usage() {
   echo "$USAGE" >&2
   exit 1
@@ -22,7 +22,7 @@ EOF
 fi
 KIND=$1
 case "$KIND" in
-  claude|codex|grok|codewhale) ;;
+  claude|codex|grok|codewhale|agy) ;;
   *) usage ;;
 esac
 
@@ -65,6 +65,11 @@ case "$KIND" in
   grok)
     argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager grok --trust --always-approve)
     hargs=(--trust --always-approve)
+    ;;
+  agy)
+    # the first prompt travels in -i, so no typing helper runs for agy
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager agy --dangerously-skip-permissions --model gemini-4-neon-medium -i /agentboard-manager)
+    hargs=(--dangerously-skip-permissions --model gemini-4-neon-medium -i /agentboard-manager)
     ;;
   codewhale)
     argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codewhale --skip-onboarding --fresh --disable subagents --approval-policy never)

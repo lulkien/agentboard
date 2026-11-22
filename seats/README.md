@@ -52,6 +52,19 @@ so the installer links `~/.gemini/config/skills/<skill>` to the canonical
 `~/.agents/skills/<skill>` links. It never writes `~/.gemini/antigravity-cli/settings.json`
 or onboarding state. `python3 tests/agy_shim.py` proves the shim against a scratch daemon.
 
+Launch an agy seat as its board actor, with the entry prompt in `-i` (so no typing
+helper runs):
+
+    env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
+    hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
+
+`agentboard-manager agy` does the same for the manager with `gemini-4-neon-medium` and
+`-i /agentboard-manager`. No seat gets a `--settings` deny or sandbox flag; its limits are
+written in its role skill. One-time setup a human does first: finish agy's onboarding (the
+terms and data-use screen, which stops a seat at "Finish setup"), and make sure the seat's
+working directory is in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`,
+or agy asks to trust it. The installer writes neither.
+
 ### Leftovers from older installers
 
 Earlier installers built per-role homes at
@@ -69,7 +82,7 @@ the global config.
 
 From a herdr pane or an hc terminal at its shell prompt, run:
 
-    agentboard-manager {codex|grok|codewhale|claude}
+    agentboard-manager {codex|grok|codewhale|claude|agy}
 
 `agentboard-manager -h` explains the choice below. The launcher starts the client with
 `AGENTBOARD_ACTOR=manager` and no home variable, so the client reads the global

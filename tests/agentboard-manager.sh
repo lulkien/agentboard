@@ -50,7 +50,7 @@ cat >"$tmp/bin/sleep" <<'SH'
 exit 0
 SH
 # each client records how it was exec'd: argv, its role-home variable and its pid
-for client in claude codex grok codewhale; do
+for client in claude codex grok codewhale agy; do
   cat >"$tmp/bin/$client" <<'SH'
 #!/usr/bin/env bash
 {
@@ -99,6 +99,7 @@ run_kind() {
 run_kind claude 'EXEC claude <--model> <claude-sonnet-5-5> <--dangerously-skip-permissions> </agentboard-manager>'
 run_kind codex 'EXEC codex <--no-daemon> <--model> <gpt-6-sol> <-c> <model_reasoning_effort=medium> <--dangerously-bypass-approvals-and-sandbox> <$agentboard-manager>'
 run_kind grok 'EXEC grok <--trust> <--always-approve>'
+run_kind agy 'EXEC agy <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager>'
 run_kind codewhale 'EXEC codewhale <--skip-onboarding> <--fresh> <--disable> <subagents> <--approval-policy> <never>'
 # exec replaces the launcher: the client is the process the shell started
 : >"$CLIENT_LOG"
@@ -192,6 +193,7 @@ run_herdr_kind() {
 run_herdr_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--dangerously-skip-permissions> <--> </agentboard-manager>'
 run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--model> <gpt-6-sol> <-c> <model_reasoning_effort=medium> <--dangerously-bypass-approvals-and-sandbox> <--> <$agentboard-manager>'
 run_herdr_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
+run_herdr_kind agy 'CALL <agent> <start> <manager> <--kind> <agy> <--pane> <pane-7> <--> <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager>'
 
 run_herdr_not_ready() {
   local mode=$1
@@ -240,15 +242,15 @@ run_missing_herdr
 if "$repo/seats/agentboard-manager" >"$tmp/out" 2>"$tmp/no-kind"; then bad 'no kind unexpectedly succeeded'; else
   is 'no kind exits 1' test "$?" -eq 1
 fi
-has "$tmp/no-kind" 'usage: agentboard-manager {codex|grok|codewhale|claude}' 'no kind reports usage'
+has "$tmp/no-kind" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy}' 'no kind reports usage'
 is 'unknown kind exits 1' bash -c '"$1" invalid >/dev/null 2>&1; [[ $? -eq 1 ]]' _ "$repo/seats/agentboard-manager"
 if "$repo/seats/agentboard-manager" invalid >"$tmp/out" 2>"$tmp/usage"; then bad 'unknown kind unexpectedly succeeded'; else ok; fi
-has "$tmp/usage" 'usage: agentboard-manager {codex|grok|codewhale|claude}' 'unknown kind reports usage'
+has "$tmp/usage" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy}' 'unknown kind reports usage'
 
 for flag in -h --help; do
   : >"$STUB_HC_LOG"
   if "$repo/seats/agentboard-manager" "$flag" >"$tmp/help" 2>"$tmp/err"; then ok; else bad "$flag exits non-zero"; fi
-  has "$tmp/help" 'usage: agentboard-manager {codex|grok|codewhale|claude}' "$flag prints usage on stdout"
+  has "$tmp/help" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy}' "$flag prints usage on stdout"
   is "$flag starts nothing" test ! -s "$STUB_HC_LOG"
 done
 

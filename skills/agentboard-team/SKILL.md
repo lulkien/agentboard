@@ -76,7 +76,7 @@ workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
 To start the manager in the current herdr pane, run the installed
-`agentboard-manager claude|codex|grok` helper from its shell prompt. It
+`agentboard-manager claude|codex|grok|agy` helper from its shell prompt. It
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
@@ -121,6 +121,10 @@ env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind codex --pane "$P
 # Grok seats: the same, with Grok's trust and approve flags
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok --pane "$PANE" -- --trust --always-approve
 
+# agy seats: the entry prompt travels in -i, so no herdr agent prompt follows
+env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- \
+  --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
+
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
 # and Grok; $agentboard-<seat> T<id> for Codex.
 herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
@@ -147,7 +151,7 @@ workspace, and the manager keeps its own. Every worker gets a terminal of its ow
 named after the seat.
 
 To start the manager in the current hc terminal, run the installed
-`agentboard-manager codex|grok|codewhale|claude` helper from its shell prompt. It
+`agentboard-manager codex|grok|codewhale|claude|agy` helper from its shell prompt. It
 replaces that shell with the selected manager, so the manager's address is
 `$HC_TERMINAL_ID`; `seats/README.md` documents its prerequisites.
 
@@ -176,6 +180,10 @@ hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder codex --no-
   --model gpt-6-luna -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex --no-daemon \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+
+# agy seats: gemini-4-neon-high for analyst, coder and reviewer, -medium for the manager
+hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy \
+  --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
 
 # Codewhale seats (hc only)
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> codewhale \
@@ -226,9 +234,11 @@ launch recipes above; install and the registered entries are in `seats/README.md
 | Codex | all four | herdr and hc as for Claude with `--kind codex` / `codex --no-daemon`; manager via `agentboard-manager codex` in either | global `[mcp_servers.agentboard]` (`codex mcp add`), `bearer_token_env_var = "AGENTBOARD_ACTOR"` | `--dangerously-bypass-approvals-and-sandbox` | `$agentboard-<seat>` |
 | Codewhale | all four; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> codewhale --skip-onboarding --fresh --disable subagents --approval-policy never` | global `mcp.json` entry (`codewhale mcp add`), `bearer_token_env_var` | `--approval-policy never` | `/agentboard-<seat>` |
 | Grok | all four | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok`; manager via `agentboard-manager grok` | global entry (`grok mcp add -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--trust --always-approve` | `/agentboard-<seat>` |
+| agy | all four | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> agy`; manager via `agentboard-manager agy`; first prompt in `-i`, no typing helper | global stdio entry `seats/agy/agentboard-stdio` (`agy mcp add`), which reads `AGENTBOARD_ACTOR` from the launch environment | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
-Model and effort per seat come from the launch table for every client. Skills are
+Model and effort per seat come from the launch table for every client; agy takes the effort in the model id (`gemini-4-neon-high` for analyst, coder and reviewer, `gemini-4-neon-medium` for the manager).
+agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. agy reads skills from `~/.gemini/config/skills`, which the installer links. Skills are
 one physical copy under `~/.agents/skills`, which the installer links; Codex, Grok
 and Codewhale read that directory directly. Claude reads `~/.claude/skills`, which the
 installer does not link yet; until it does, link the five `agentboard-*` skill
