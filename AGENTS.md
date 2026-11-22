@@ -44,10 +44,10 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/daemon.py` | `daemon: 340/340 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
-| `bash tests/install.sh` | `631/631 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
+| `bash tests/install.sh` | `146/146 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
 | `bash tests/agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `87/87 passed (manager launcher)` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 153 CLI names, 160 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 14 pages, 153 CLI names, 161 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 14 gates passed`; with `--full` `GATES OK: 15 gates passed` |
 | `bash scripts/gate.sh --prebuilt` | `GATES OK: 10 gates passed` (reviewer; venv on PATH) |
@@ -196,16 +196,13 @@ screenshots from the coder report because browser use is not verified in the san
 ## Where the rest lives
 
 - `skills/agentboard-team` — running a team: launcher, wake commands, roles,
-  workflow. `./install.py` creates canonical repo links under `~/.agents/skills`
-  and links them into each Claude role home; Codex, Grok and Codewhale read
-  `~/.agents/skills` directly. There is one physical copy: never copy over the
+  workflow. `./install.py` creates canonical repo links under `~/.agents/skills`;
+  Codex, Grok and Codewhale read `~/.agents/skills` directly. There is one physical copy: never copy over the
   installed links.
 - `PROTOCOL.md` — the wire surface: twelve tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
   `agentboard-manager/SKILL.md`.
-- `seats/` — the canonical per-seat client cards (codex profiles, claude MCP
-  configs). The one installer is the repository-root `./install.py` (`-h`,
+- `seats/` — the manager launcher and the systemd unit. The one installer is the repository-root `./install.py` (`-h`,
   `--agent`, `--force`, `--skip-binary`): it runs `cargo install --path . --locked`,
-  links the skills, and generates per-role homes under
-  `~/.local/share/agentboard/seats`; it writes a default client home only through each client's own `mcp add` (one global `agentboard` entry).
+  links the skills and registers the global MCP entry per client; it only names old role homes as leftovers; it writes a default client home only through each client's own `mcp add` (one global `agentboard` entry).

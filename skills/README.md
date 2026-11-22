@@ -21,17 +21,17 @@ Five names are installed: `agentboard-team` and the four `agentboard-<seat>` ent
 points. Both the link and the repo directory are one physical copy, so an edit is
 visible without reinstalling. Unrelated skills are left alone.
 
-Where each client finds them, with its config dir pointed at a seat role home
-(checked 2026-11-22 against an isolated `HOME`):
+Where each client finds them under the global-config launch (checked 2026-11-22
+against an isolated `HOME`; seats start as `env AGENTBOARD_ACTOR=<seat> <client>`):
 
 | CLI | Reads skills from | What the installer adds | Invocation |
 |---|---|---|---|
-| Codex 0.171.0 | `$HOME/.agents/skills` (`codex debug prompt-input` lists it with `CODEX_HOME` set to a role home) | nothing beyond the canonical link | `$agentboard-<seat>` via `/skills` |
-| Grok Build 1.0.89 | `$HOME/.agents/skills` (`grok inspect --json` reports it as a `user` skill with `GROK_HOME` set) | nothing beyond the canonical link | `/agentboard-<seat>` |
-| Codewhale 0.10.2 | `$HOME/.agents/skills` (`codewhale doctor`: "selected skills dir: ~/.agents/skills" with `CODEWHALE_HOME` set) | nothing beyond the canonical link | `/agentboard-<seat>` |
-| Claude Code 2.1.330 | `$CLAUDE_CONFIG_DIR/skills` | `seats/<seat>/claude/skills/{agentboard-<seat>,agentboard-team}` → the canonical names | `/agentboard-<seat>` |
+| Codex 0.171.0 | `$HOME/.agents/skills` (`codex debug prompt-input` lists it) | nothing beyond the canonical link | `$agentboard-<seat>` via `/skills` |
+| Grok Build 1.0.89 | `$HOME/.agents/skills` (`grok inspect --json` reports it as a `user` skill) | nothing beyond the canonical link | `/agentboard-<seat>` |
+| Codewhale 0.10.2 | `$HOME/.agents/skills` (`codewhale doctor`: "selected skills dir: ~/.agents/skills") | nothing beyond the canonical link | `/agentboard-<seat>` |
+| Claude Code 2.1.330 | `~/.claude/skills` | nothing: the installer does not link it, so link the five names there by hand | `/agentboard-<seat>` |
 
-The installer never writes `~/.claude/skills` or `$CODEX_HOME/skills`; aliases an
+The installer never writes `~/.claude/skills`, `$CODEX_HOME/skills` or any role home; aliases an
 older skill installer left there still resolve and are left alone.
 
 An existing canonical entry that is exactly this repo's link is left unchanged.
@@ -40,14 +40,12 @@ each conflict as `exists: <path> (use --force)`; `--force` replaces those links 
 files. A real directory at one of the names is refused even under `--force`, and a
 non-directory `~/.agents` or `~/.agents/skills` refuses in preflight.
 
-Each seat's MCP card carries its board name in the HTTP URL `/mcp/<seat>`, pointed
-at the shared board. That name is what the board attributes writes to and what the
-feed addresses.
-`seats/` holds the canonical client cards for those entries.
+Each seat's board name is the `AGENTBOARD_ACTOR` it is launched with; the global
+`agentboard` MCP entry sends it as a bearer token to the shared board. That name is
+what the board attributes writes to and what the feed addresses.
 
 `tests/install.sh` proves the layout in isolated homes: five canonical links
-from every `--agent` choice, no `~/.claude/skills` alias, Claude role-home links
-through the canonical names, and the refusal and `--force` cases above.
+from every `--agent` choice, no `~/.claude/skills` alias, and the refusal and `--force` cases above.
 
 ## Discovery notes (2026-10-22)
 

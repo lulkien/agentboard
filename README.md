@@ -18,8 +18,8 @@ the process that wrote it.
 ## Build and install
 
 ```bash
-./install.py                   # cargo install --path . --locked, skills, seat homes
-./install.py --skip-binary     # skills and seat homes only
+./install.py                   # cargo install --path . --locked, skills, global MCP entries
+./install.py --skip-binary     # skills and global MCP entries only
 cargo build --release          # target/release/agentboard, nothing installed
 ```
 
@@ -279,5 +279,5 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
 - `skills/agentboard-manager`, `skills/agentboard-analyst`, `skills/agentboard-coder`,
   `skills/agentboard-reviewer` — one entry skill per seat; Grok's manager recipe is
   in `skills/agentboard-manager/SKILL.md`.
-- `seats/` — client cards the root `install.py` turns into seat homes; see `seats/README.md` for the
-  HTTP cards and optional systemd user unit.
+- `seats/` — the manager launcher and optional systemd user unit; see `seats/README.md` for the
+  global MCP entry the root `install.py` registers.

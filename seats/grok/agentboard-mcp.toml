@@ -1,5 +1,0 @@
-# BEGIN AGENTBOARD MCP
-[mcp_servers.agentboard]
-url = "http://127.0.0.1:8765/mcp/${AGENTBOARD_SEAT:-manager}"
-enabled = true
-# END AGENTBOARD MCP

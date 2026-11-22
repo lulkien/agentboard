@@ -247,9 +247,9 @@ agentboard server; its role skill's first step checks that the board tools answe
 If the CLI uses a custom `AGENTBOARD_DB`, configure the same absolute path for the
 optional systemd user unit, which the installer links but never enables or starts.
 
-The installer also links the canonical skills into `~/.agents/skills` (and, while
-they still exist, each Claude role home's `skills/`). The repo's `seats/` directory holds the installer's
-inputs; `seats/README.md` describes them.
+The installer also links the canonical skills into `~/.agents/skills`. The repo's
+`seats/` directory holds the manager launcher and the systemd unit; `seats/README.md`
+describes them.
 
 ## Wake loop
 
