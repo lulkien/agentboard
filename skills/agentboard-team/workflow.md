@@ -172,6 +172,27 @@ The names `in_progress` and `review` are still accepted as input and read as
    from the top, then change the row's status and assignee in one update. An
    assignee change that leaves the row closed is refused.
 
+## Reading a row
+
+A seat reads a row by cursor, so a wake costs only what changed. Every write
+(`task_comment`, `task_update`) prints `cursor <instance>:<seq>`; the seat keeps
+the one printed by its last write on the row. On a first visit it reads
+`task_get(id, full=true)` once for the brief and reports; the analyst,
+counter-analyst and reviewer also read the thread with
+`board_feed(task=<id>, after="0", full=true)`, while the coder skips the planning
+debate because the plan it builds is the analyst report. On each later wake it
+reads `board_feed(task=<id>, after=<cursor of your last write on the row>,
+full=true)`, which lists only what happened since it last spoke, and
+`task_get(id)` without `full` for the status, assignee and revision. Every feed
+read follows the printed cursor while `more` is true. It reads `full=true` again
+only after a move that wrote a report: a coder handoff to review (coder report),
+a reviewer reopen to the coder or return to the analyst at the cap (reviewer
+report), or an analyst handoff to the coder (analyst report). The analyst and
+counter-analyst exchange, an answer to `blocked` and a cap unblock write comments
+only. A seat with no cursor of its own for the row (a new session, a compacted
+context, a replacement) reads as on a first visit; the Quota resume read below
+is that case.
+
 ## Waiting without spinning
 
 Waiting belongs to the manager, not the seats. The manager blocks on the rows it

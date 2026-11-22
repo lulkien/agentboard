@@ -28,9 +28,12 @@ before acting.
    `counter-analyst`, or `task_list(assignee="counter-analyst")`. Proceed when the
    row is `planning` and held by `counter-analyst`; otherwise report that and stop
    for the manager. Do not `task_claim`.
-2. Read `task_get(id, full=true)` for the brief (`description` and `goal`) and
-   `board_feed(task=<id>, full=true)` for the analyst's latest draft comment
-   (`analyst <n>.<r>`) and any earlier rounds.
+2. On a first visit read `task_get(id, full=true)` for the brief and
+   `board_feed(task=<id>, after="0", full=true)` for the analyst's latest draft
+   and earlier rounds. On a later review read
+   `board_feed(task=<id>, after=<cursor of your last write on the row>, full=true)`
+   (the answers and revised draft) and `task_get(id)` for the revision
+   (workflow.md, Reading a row).
 3. Research the row yourself in the tree: the files and callers the brief touches,
    the goal's proof command, what the draft leaves out. Do not take the draft's
    claims on trust; each finding is a command and the line it printed.

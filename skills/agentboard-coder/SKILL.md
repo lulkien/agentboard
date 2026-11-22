@@ -23,8 +23,12 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
 
 1. Claim one row: `task_claim` with no id takes the highest-priority ready row,
    `task_claim(id)` takes the row assigned to you. One row at a time.
-2. Read it with `task_get(id, full=true)`. The `description` and `goal` are the
-   spec; do not widen it, and do not start a second row.
+2. Read it with `task_get(id, full=true)` on a first visit; the `description` and
+   `goal` are the spec and the analyst report is the plan, so skip the debate
+   thread. On a later wake read
+   `board_feed(task=<id>, after=<cursor of your last write on the row>, full=true)`
+   and `task_get(id)`, with `full=true` after a reviewer reopen or a new analyst
+   turn. Do not widen the spec, and do not start a second row.
 3. Create the task branch before editing, then work only that row and only the
    files it names. The branch name is
    `task-<id>-analyst-<analyst_turn>-implement-<implement_turn>`; create it with
