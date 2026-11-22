@@ -38,6 +38,20 @@ else written. `--skip-binary` skips the build. Then it:
 `--force` replaces foreign skill, launcher and unit links; a real directory at a
 skill destination is always refused.
 
+### agy (Antigravity CLI)
+
+agy expands no variable in an MCP entry, so its `agentboard` entry is the stdio shim
+`agy/agentboard-stdio`: `agy mcp remove agentboard` (a missing entry is fine), then
+`agy mcp add agentboard <repo>/seats/agy/agentboard-stdio`, which leaves exactly one
+entry and replaces an older `serverUrl` one. The shim inherits the launch environment,
+reads `AGENTBOARD_ACTOR` (exit 2 with `agentboard-stdio: set AGENTBOARD_ACTOR` when it is
+empty), and POSTs each JSON-RPC line to `${AGENTBOARD_URL:-http://127.0.0.1:8765/mcp}`
+with `Authorization: Bearer $AGENTBOARD_ACTOR`. A daemon refusal or a refused connection
+comes back as a JSON-RPC error for that request id. agy does not read `~/.agents/skills`,
+so the installer links `~/.gemini/config/skills/<skill>` to the canonical
+`~/.agents/skills/<skill>` links. It never writes `~/.gemini/antigravity-cli/settings.json`
+or onboarding state. `python3 tests/agy_shim.py` proves the shim against a scratch daemon.
+
 ### Leftovers from older installers
 
 Earlier installers built per-role homes at

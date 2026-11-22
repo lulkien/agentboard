@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""stdio MCP shim for agy: forwards each JSON-RPC line to the agentboard daemon.
+
+agy expands no environment variable in an MCP entry, but a stdio child inherits the
+launch environment, so the actor travels as `Authorization: Bearer $AGENTBOARD_ACTOR`
+exactly as for the other clients. AGENTBOARD_URL (default http://127.0.0.1:8765/mcp)
+only lets a test aim at a scratch daemon.
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+
+def fail(request_id, text):
+    """A JSON-RPC error for one request; notifications carry no id and get no reply."""
+    if request_id is None:
+        return
+    reply = {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": f"agentboard-stdio: {text}"}}
+    sys.stdout.write(json.dumps(reply) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    actor = os.environ.get("AGENTBOARD_ACTOR", "")
+    if not actor:
+        print("agentboard-stdio: set AGENTBOARD_ACTOR", file=sys.stderr)
+        return 2
+    url = os.environ.get("AGENTBOARD_URL") or "http://127.0.0.1:8765/mcp"
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request_id = json.loads(line).get("id")
+        except (ValueError, AttributeError):
+            request_id = None
+        request = urllib.request.Request(
+            url,
+            data=line.encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "Authorization": f"Bearer {actor}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                body = response.read().decode().strip()
+        except urllib.error.HTTPError as exc:
+            fail(request_id, f"HTTP {exc.code}: {exc.read().decode(errors='replace').strip()}")
+            continue
+        except (urllib.error.URLError, OSError) as exc:
+            fail(request_id, f"cannot reach {url}: {exc}")
+            continue
+        if body:
+            sys.stdout.write(" ".join(body.splitlines()) + "\n")
+            sys.stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

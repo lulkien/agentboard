@@ -21,7 +21,7 @@ import sys
 import json
 
 SEATS = ["analyst", "coder", "manager", "reviewer"]
-AGENTS = ("codex", "codewhale", "claude", "grok")
+AGENTS = ("codex", "codewhale", "claude", "grok", "agy")
 CLAUDE_MARK = "agentboardGenerated"
 BEGIN = b"# BEGIN AGENTBOARD RULES"
 END = b"# END AGENTBOARD RULES"
@@ -88,24 +88,26 @@ def read(path):
         return f.read()
 
 
-def skill_plans(home, repo, force):
-    """Preflight the canonical ~/.agents/skills links.
+def skill_plans(home, repo, force, agy=False):
+    """Preflight skill links.
 
-    Codex, Grok and Codewhale read HOME/.agents/skills, so these links are all they
-    need.
+    By default the canonical ~/.agents/skills links to the repo, which Codex, Grok and
+    Codewhale read. With agy, ~/.gemini/config/skills links to those canonical links,
+    because agy does not read ~/.agents/skills.
     """
     skills_src = os.path.join(repo, "skills")
     names = sorted(
         name for name in os.listdir(skills_src)
         if not name.startswith(".") and os.path.isfile(os.path.join(skills_src, name, "SKILL.md"))
     )
-    base = os.path.join(home, ".agents", "skills")
+    canonical = os.path.join(home, ".agents", "skills")
+    base = os.path.join(home, ".gemini", "config", "skills") if agy else canonical
     for path in (os.path.dirname(base), base):
         if os.path.lexists(path) and not os.path.isdir(path):
             raise ValueError(f"invalid skills directory: {path}")
     plans, problems = [], []
     for name in names:
-        source = os.path.join(skills_src, name)
+        source = os.path.join(canonical, name) if agy else os.path.join(skills_src, name)
         destination = os.path.join(base, name)
         if os.path.islink(destination) and os.readlink(destination) == source:
             state = "unchanged"
@@ -187,6 +189,14 @@ GLOBAL_MCP_ADD = {
              "-H", "Authorization: Bearer ${AGENTBOARD_ACTOR}"],
     "codewhale": ["codewhale", "mcp", "add", "agentboard", "--url", GLOBAL_MCP_URL,
                   "--bearer-token-env-var", "AGENTBOARD_ACTOR"],
+    # agy expands no variable in an entry, so it gets the stdio shim, which inherits the launch env.
+    "agy": ["agy", "mcp", "add", "agentboard", os.path.join(os.path.dirname(os.path.abspath(__file__)), "seats/agy/agentboard-stdio")],
+}
+
+
+REMOVE_FIRST = {
+    "claude": ["claude", "mcp", "remove", "-s", "user", "agentboard"],
+    "agy": ["agy", "mcp", "remove", "agentboard"],
 }
 
 
@@ -199,10 +209,10 @@ def register_global_mcp(agent):
     if not shutil.which(agent):
         print(f"note: {agent} not found on PATH; agentboard MCP entry not registered for it", file=sys.stderr)
         return
-    if agent == "claude":
-        # `claude mcp add-json` refuses an existing name, so remove first.
-        gone = run_cli(["claude", "mcp", "remove", "-s", "user", "agentboard"])
-        if gone.returncode != 0 and "No MCP server named" not in gone.stdout + gone.stderr:
+    if agent in REMOVE_FIRST:
+        # `claude mcp add-json` refuses an existing name; agy's entry is replaced the same way.
+        gone = run_cli(REMOVE_FIRST[agent])
+        if gone.returncode != 0 and not any(text in gone.stdout + gone.stderr for text in ("No MCP server named", "not found")):
             print(gone.stdout + gone.stderr, file=sys.stderr)
             sys.exit(1)
     added = run_cli(GLOBAL_MCP_ADD[agent])
@@ -242,14 +252,16 @@ def main():
     src = os.path.join(repo, "seats")
     home = os.environ["HOME"]
     selective = selected_agents is not None
-    agents = [name for name in ("codex", "claude", "grok", "codewhale") if not selective or name in selected_agents]
+    agents = [name for name in ("codex", "claude", "grok", "codewhale", "agy") if not selective or name in selected_agents]
 
     refuse = False
     try:
         skills = skill_plans(home, repo, force)
+        if "agy" in agents:
+            agy_skills = skill_plans(home, repo, force, agy=True)
     except (OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
-        skills = []
+        skills = agy_skills = []
         refuse = True
 
     def check(p):
@@ -294,6 +306,8 @@ def main():
         print(f"linked: {d} -> {s}")
 
     install_skills(skills)
+    if "agy" in agents:
+        install_skills(agy_skills)
     if not selective:
         link(f"{src}/agentboard-manager", f"{home}/.local/bin/agentboard-manager")
         link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")

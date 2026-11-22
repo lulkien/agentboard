@@ -14,6 +14,7 @@ real_codex=$(command -v codex || true)
 real_codewhale=$(command -v codewhale || true)
 real_claude=$(command -v claude || true)
 real_grok=$(command -v grok || true)
+real_agy=$(command -v agy || true)
 n=0 fail=0
 ok() { n=$((n + 1)); }
 bad() { n=$((n + 1)); fail=$((fail + 1)); echo "FAIL: $*" >&2; }
@@ -33,7 +34,7 @@ inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/er
 # Client stubs ignore `mcp` calls (logging them), except in the one case that sets
 # real_<cli>, where each stub hands the call to the real binary.
 mkdir -p "$tmp/bin"
-for cli in claude codex grok codewhale; do
+for cli in claude codex grok codewhale agy; do
   cat >"$tmp/bin/$cli" <<SH
 #!/usr/bin/env bash
 var=real_$cli
@@ -77,6 +78,9 @@ has "claude remove argv" "claude mcp remove -s user agentboard" "$tmp/mcp.log"
 has "claude add argv" 'claude mcp add-json -s user agentboard {"type": "http", "url": "http://127.0.0.1:8765/mcp", "headers": {"Authorization": "Bearer ${AGENTBOARD_ACTOR}"}}' "$tmp/mcp.log"
 has "grok add argv" 'grok mcp add -s user --transport http agentboard http://127.0.0.1:8765/mcp -H Authorization: Bearer ${AGENTBOARD_ACTOR}' "$tmp/mcp.log"
 has "codewhale add argv" "codewhale mcp add agentboard --url http://127.0.0.1:8765/mcp --bearer-token-env-var AGENTBOARD_ACTOR" "$tmp/mcp.log"
+has "agy remove argv" "agy mcp remove agentboard" "$tmp/mcp.log"
+has "agy add argv names the shim" "agy mcp add agentboard $repo/seats/agy/agentboard-stdio" "$tmp/mcp.log"
+is "agy skills link through the canonical names" test "$(readlink "$home/.gemini/config/skills/agentboard-analyst")" = "$home/.agents/skills/agentboard-analyst" -a "$(readlink -f "$home/.gemini/config/skills/agentboard-analyst")" = "$repo/skills/agentboard-analyst"
 is "no role home is created" test ! -e "$home/.local/share/agentboard"
 is "fresh install names no leftovers" bash -c '! grep -q "^note: leftover" "$1"' _ "$tmp/out"
 has "done line" "done: agentboard installed" "$tmp/out"
@@ -138,7 +142,7 @@ is "force replaces unit link" test "$(readlink "$home/.config/systemd/user/agent
 
 # --- skills: one canonical link per repo skill in ~/.agents/skills ----------------
 skill_names="agentboard-analyst agentboard-coder agentboard-manager agentboard-reviewer agentboard-team"
-for agent in codex grok codewhale claude; do
+for agent in codex grok codewhale claude agy; do
   newhome
   inst --agent "$agent" --skip-binary; code=$?
   is "--agent $agent install succeeds" test "$code" -eq 0
@@ -222,6 +226,12 @@ is "claude add never runs after a failed remove" bash -c '! grep -q add-json "$1
 newhome
 STUB_MCP_REMOVE_FAIL='No MCP server named "agentboard" in user scope' inst --agent claude --skip-binary; code=$?
 is "claude remove of an absent entry is tolerated" test "$code" -eq 0
+newhome
+STUB_MCP_REMOVE_FAIL='Error: MCP server "agentboard" not found' inst --agent agy --skip-binary; code=$?
+is "agy remove of an absent entry is tolerated" test "$code" -eq 0
+newhome
+STUB_MCP_REMOVE_FAIL="remove denied" inst --agent agy --skip-binary; code=$?
+is "unexpected agy remove failure exits 1" test "$code" -eq 1
 
 # --- one global agentboard MCP entry per client, through the real CLIs -----------
 if [ -n "$real_codex" ] && [ -n "$real_codewhale" ] && [ -n "$real_claude" ] && [ -n "$real_grok" ]; then
@@ -264,13 +274,46 @@ else
   echo "SKIP: global MCP cases need claude, codex, grok, codewhale"
 fi
 
+# --- agy: one stdio-shim entry, replacing any earlier one, through the real CLI ---
+if [ -n "$real_agy" ]; then
+  export real_agy
+  newhome
+  shim=$repo/seats/agy/agentboard-stdio
+  seed() { HOME="$home" PATH="$tmp/bin:$PATH" "$@" >/dev/null 2>&1; }
+  seed "$real_agy" mcp add keep /bin/true
+  seed "$real_agy" mcp add -t http agentboard http://127.0.0.1:8765/mcp/antigravity
+  agy_shape() {
+    python3 - "$home/.gemini/config/mcp_config.json" "$shim" <<'PY'
+import json, sys
+servers = json.load(open(sys.argv[1]))["mcpServers"]
+assert [k for k in servers if k == "agentboard"] == ["agentboard"]
+entry = servers["agentboard"]
+assert entry["command"] == sys.argv[2] and "serverUrl" not in entry and "args" not in entry and "env" not in entry, entry
+assert "keep" in servers
+PY
+  }
+  inst --agent agy --skip-binary; code=$?
+  is "agy first install exits 0" test "$code" -eq 0
+  is "agy first install: one shim entry replaces the serverUrl entry, keep survives" agy_shape
+  cp "$home/.gemini/config/mcp_config.json" "$tmp/agy-config-first"
+  inst --agent agy --skip-binary; code=$?
+  is "agy second install exits 0" test "$code" -eq 0
+  is "agy second install: still one shim entry" agy_shape
+  is "agy second install leaves the config byte-identical" cmp -s "$tmp/agy-config-first" "$home/.gemini/config/mcp_config.json"
+  is "agy install never writes the CLI settings" test ! -e "$home/.gemini/antigravity-cli/settings.json"
+  is "agy skill resolves to the repo skill" test "$(readlink -f "$home/.gemini/config/skills/agentboard-analyst")" = "$repo/skills/agentboard-analyst"
+  unset real_agy
+else
+  echo "SKIP: agy cases need agy"
+fi
+
 # --- help and the three-flag surface -----------------------------------------
 newhome
 for args in -h --help; do
   inst $args; code=$?
   is "$args exits 0" test "$code" -eq 0
   has "$args shows usage" 'usage: install.py [-h] [--agent AGENT[,AGENT...]] [--force] [--skip-binary]' "$tmp/out"
-  has "$args lists client names" 'codex,codewhale,claude,grok' "$tmp/out"
+  has "$args lists client names" 'codex,codewhale,claude,grok,agy' "$tmp/out"
   is "$args writes nothing" test ! -e "$home/.agents" -a ! -e "$home/.local/bin"
 done
 for flag in --grok-only --skip-grok '--codewhale-provider custom' --bogus; do
