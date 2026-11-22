@@ -16,9 +16,9 @@ section in `agentboard-team/SKILL.md`.
 Do these steps yourself:
 
 When starting yourself from a herdr pane or an hc terminal at its shell prompt, use
-the installed `start-agentboard-manager claude|codex|grok` helper. In herdr it
+the installed `agentboard-manager codex|grok|codewhale|claude` helper. In herdr it
 renames the tab to `manager` and starts the manager after the pane is ready; in hc it
-starts the manager as a new terminal named `manager` and prints its address.
+replaces the shell in the current terminal, so your address is `$HC_TERMINAL_ID`.
 `seats/README.md` documents the requirements and launch behavior.
 
 The two workflows differ in one line: in herdr the manager renames a tab and waits
@@ -161,14 +161,14 @@ seat is a named terminal and `hc send` waits for the program to pause.
 
 ## Grok Build manager
 
-Install the seat cards and launcher with `./seats/install.py`, or generate only
-Grok role homes with `./seats/install.py --grok-only`. The installer reads the
+Install the seat cards and launcher with `./install.py`, or generate only
+Grok role homes with `./install.py --agent grok`. The installer reads the
 legacy `~/.grok` config and credentials without changing them, then generates
 private homes at `~/.local/share/agentboard/seats/<seat>/grok`. Each role config
 uses a fixed `/mcp/<seat>` URL. Set `GROK_HOME` to the matching role home whenever
 Grok starts; never use the old `AGENTBOARD_SEAT` override with these cards.
 
-From a herdr pane or an hc terminal at its shell prompt, `start-agentboard-manager
+From a herdr pane or an hc terminal at its shell prompt, `agentboard-manager
 grok` starts Grok with `--trust --always-approve` and prompts `/agentboard-manager`.
 The manager helper sets its manager role home in both hc and herdr. For workers,
 set the role home explicitly. Analyst and reviewer use read-only sandbox policy

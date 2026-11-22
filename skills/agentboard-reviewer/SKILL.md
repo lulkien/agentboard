@@ -127,8 +127,8 @@ inconclusive check the coder cannot fix.
 ## May
 
 You may run the repo suites that exercise an already-built binary:
-`bash tests/cli.sh`, `bash tests/seats-install.sh`,
-`bash tests/skills-install.sh`, `bash tests/start-agentboard-manager.sh`,
+`bash tests/cli.sh`, `bash tests/install.sh`,
+`bash tests/agentboard-manager.sh`,
 `bash tests/race.sh`, `python3 tests/mcp_client.py`,
 `python3 tests/daemon.py`, `bash tests/migrate.sh`,
 `bash scripts/gate.sh --prebuilt`, `python3 tests/doc-names.py`,

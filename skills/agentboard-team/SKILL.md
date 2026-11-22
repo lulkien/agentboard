@@ -76,7 +76,7 @@ workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
 To start the manager in the current herdr pane, run the installed
-`start-agentboard-manager claude|codex|grok` helper from its shell prompt. It
+`agentboard-manager claude|codex|grok` helper from its shell prompt. It
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
@@ -155,9 +155,9 @@ workspace, and the manager keeps its own. Every worker gets a terminal of its ow
 named after the seat.
 
 To start the manager in the current hc terminal, run the installed
-`start-agentboard-manager claude|codex|grok` helper from its shell prompt. It starts
-the selected manager as a new terminal named `manager` and prints its address;
-`seats/README.md` documents its prerequisites.
+`agentboard-manager codex|grok|codewhale|claude` helper from its shell prompt. It
+replaces that shell with the selected manager, so the manager's address is
+`$HC_TERMINAL_ID`; `seats/README.md` documents its prerequisites.
 
 For Claude, analyst and reviewer use Opus at medium effort, and coder uses Sonnet
 at medium effort. Codex loads each seat's model and effort from its profile. Swap
@@ -260,10 +260,10 @@ launch table above; install, cards and permissions are in `seats/README.md`.
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all four | herdr `env CLAUDE_CONFIG_DIR=~/.local/share/agentboard/seats/<seat>/claude herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env CLAUDE_CONFIG_DIR=... claude`; manager via `start-agentboard-manager claude` in either | role home `mcp.json` via `--mcp-config --strict-mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
-| Codex | all four | herdr with `CODEX_HOME=$HOME/.local/share/agentboard/seats/<seat>/codex`; hc with `env CODEX_HOME=... codex --no-daemon -p <seat>`; manager via `start-agentboard-manager codex` in either | `codex -p <seat>` in its isolated role home, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only checkout plus scratch-write and loopback-only network | `$agentboard-<seat>` |
-| Codewhale | all four; hc only, not herdr (no agent kind) | `start-agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env CODEWHALE_HOME=$HOME/.local/share/agentboard/seats/<seat>/codewhale codewhale [-C <scratch dir> for analyst and reviewer] --skip-onboarding --fresh --disable subagents` | per-seat home `mcp.json`, URL `/mcp/<seat>` | yolo for manager and coder; analyst and reviewer workspace-write with `-C` scratch, reviewer adds network (not loopback-only) | `/agentboard-<seat>` |
-| Grok | all four | per-seat `GROK_HOME=~/.local/share/agentboard/seats/<seat>/grok`; manager via `start-agentboard-manager grok` | role config URL `/mcp/<seat>`; legacy `~/.grok` remains unchanged | `--trust --always-approve`; analyst/reviewer add `--sandbox read-only --deny Edit` | `/agentboard-<seat>` |
+| Claude | all four | herdr `env CLAUDE_CONFIG_DIR=~/.local/share/agentboard/seats/<seat>/claude herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env CLAUDE_CONFIG_DIR=... claude`; manager via `agentboard-manager claude` in either | role home `mcp.json` via `--mcp-config --strict-mcp-config`, URL `/mcp/<seat>` | bypass; analyst/reviewer add a three-tool edit deny list | `/agentboard-<seat>` |
+| Codex | all four | herdr with `CODEX_HOME=$HOME/.local/share/agentboard/seats/<seat>/codex`; hc with `env CODEX_HOME=... codex --no-daemon -p <seat>`; manager via `agentboard-manager codex` in either | `codex -p <seat>` in its isolated role home, URL `/mcp/<seat>` | per-profile sandbox: analyst scratch-write, coder full access, reviewer read-only checkout plus scratch-write and loopback-only network | `$agentboard-<seat>` |
+| Codewhale | all four; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env CODEWHALE_HOME=$HOME/.local/share/agentboard/seats/<seat>/codewhale codewhale [-C <scratch dir> for analyst and reviewer] --skip-onboarding --fresh --disable subagents` | per-seat home `mcp.json`, URL `/mcp/<seat>` | yolo for manager and coder; analyst and reviewer workspace-write with `-C` scratch, reviewer adds network (not loopback-only) | `/agentboard-<seat>` |
+| Grok | all four | per-seat `GROK_HOME=~/.local/share/agentboard/seats/<seat>/grok`; manager via `agentboard-manager grok` | role config URL `/mcp/<seat>`; legacy `~/.grok` remains unchanged | `--trust --always-approve`; analyst/reviewer add `--sandbox read-only --deny Edit` | `/agentboard-<seat>` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
 Model and effort per seat come from the launch table for every client. Skills are
@@ -299,18 +299,19 @@ env GROK_HOME="$HOME/.local/share/agentboard/seats/coder/grok" grok --trust --al
 The repo's `seats/` directory is the canonical copy of those cards. Claude
 homes live at `~/.local/share/agentboard/seats/<seat>/claude`; set
 `CLAUDE_CONFIG_DIR` to that directory and pass its `mcp.json` with
-`--strict-mcp-config`. The installer also refreshes the legacy
-`~/.claude/<seat>-mcp.json` card for old launch commands. It reads
+`--strict-mcp-config`. It reads
 `~/.claude/settings.json`, `~/.claude/.credentials.json` and `~/.claude.json`
 without changing them, copying user settings, credentials, and user MCP entries
 into private role files. It does not copy sessions, logs, caches, project
-approvals, or user plugins. Run `skills/install.py` first to link the canonical
-seat skills into each role home. Plugin enablement settings are retained, but
+approvals, or user plugins. The same installer links the canonical skills into
+`~/.agents/skills` and each Claude role home's `skills/`. Plugin enablement settings are retained, but
 plugin records and bundle files are not copied; installed user plugins must be
 installed separately in each role home. Codex launches use the generated
-`~/.local/share/agentboard/seats/<seat>/codex` home through `CODEX_HOME`; the
-legacy `~/.codex/<seat>.config.toml` links are compatibility files and are not
-used by these launches. Codewhale, Claude and Grok likewise use their generated
+`~/.local/share/agentboard/seats/<seat>/codex` home through `CODEX_HOME`. The
+installer never writes `~/.codex`, `~/.claude`, `~/.grok` or `~/.codewhale`; it
+names any `~/.codex/<seat>.config.toml` link, `default.rules` block or
+`~/.claude/<seat>-mcp.json` card an older install left there, for you to delete.
+Codewhale, Claude and Grok likewise use their generated
 role homes through `CODEWHALE_HOME`, `CLAUDE_CONFIG_DIR` and `GROK_HOME`.
 
 ## Wake loop

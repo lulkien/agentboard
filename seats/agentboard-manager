@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+USAGE='usage: agentboard-manager {codex|grok|codewhale|claude}'
 usage() {
-  echo 'usage: start-agentboard-manager {claude|codex|grok|codewhale}' >&2
+  echo "$USAGE" >&2
   exit 1
 }
 
 [[ $# -eq 1 ]] || usage
+if [[ $1 == -h || $1 == --help ]]; then
+  cat <<EOF
+$USAGE
+
+Start the manager seat from its isolated role home
+(~/.local/share/agentboard/seats/manager/<client>). Inside herdr (HERDR_ENV=1)
+it renames this tab to "manager" and starts the client in this pane; inside hc
+(any HC_* variable, with HC_TERMINAL_ID) it starts the client in this terminal.
+Codewhale is hc only.
+EOF
+  exit 0
+fi
 KIND=$1
 case "$KIND" in
   claude|codex|grok|codewhale) ;;
@@ -18,46 +31,53 @@ esac
 # present, as in the manual.
 if [[ ${HERDR_ENV:-} == 1 ]]; then
   if [[ $KIND == codewhale ]]; then
-    echo 'start-agentboard-manager: herdr has no codewhale agent kind; run codewhale under hc' >&2
+    echo 'agentboard-manager: herdr has no codewhale agent kind; run codewhale under hc' >&2
     exit 1
   fi
   world=herdr needs=(herdr jq setsid)
   [[ -n ${HERDR_PANE_ID:-} && -n ${HERDR_TAB_ID:-} ]] || {
-    echo 'start-agentboard-manager: HERDR_PANE_ID and HERDR_TAB_ID are required inside herdr' >&2
+    echo 'agentboard-manager: HERDR_PANE_ID and HERDR_TAB_ID are required inside herdr' >&2
     exit 1
   }
 elif [[ -n $(compgen -e HC_) ]]; then
-  world=hc needs=(hc jq)
+  world=hc needs=(hc jq setsid)
+  [[ -n ${HC_TERMINAL_ID:-} ]] || {
+    echo 'agentboard-manager: HC_TERMINAL_ID is required inside hc (the manager runs in this terminal)' >&2
+    exit 1
+  }
 else
-  echo 'start-agentboard-manager: run it inside herdr (HERDR_ENV=1) or hc (any HC_* variable set)' >&2
+  echo 'agentboard-manager: run it inside herdr (HERDR_ENV=1) or hc (any HC_* variable set)' >&2
   exit 1
 fi
 for command in "${needs[@]}"; do
-  command -v "$command" >/dev/null 2>&1 || { echo "start-agentboard-manager: required command not found: $command" >&2; exit 1; }
+  command -v "$command" >/dev/null 2>&1 || { echo "agentboard-manager: required command not found: $command" >&2; exit 1; }
 done
+
+repo=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+missing() { # missing <path>: the manager's role home is not installed
+  echo "agentboard-manager: $1 missing; run $repo/install.py --agent $KIND" >&2
+  exit 1
+}
 
 claude_home="$HOME/.local/share/agentboard/seats/manager/claude"
 claude_mcp="$claude_home/mcp.json"
 if [[ $KIND == claude && ( ! -f $claude_home/.agentboard-seat || ! -f $claude_mcp ) ]]; then
-  echo "start-agentboard-manager: $claude_home is missing; run seats/install.py and skills/install.py" >&2
+  echo "agentboard-manager: $claude_home missing; run $repo/install.py --agent claude" >&2
   exit 1
 fi
 
 cwhome="$HOME/.local/share/agentboard/seats/manager/codewhale"
 if [[ $KIND == codewhale && ! -f $cwhome/config.toml ]]; then
-  echo "start-agentboard-manager: $cwhome/config.toml missing; run seats/install.py" >&2
-  exit 1
+  missing "$cwhome/config.toml"
 fi
 grok_home="$HOME/.local/share/agentboard/seats/manager/grok"
 if [[ $KIND == grok && ! -f $grok_home/config.toml ]]; then
-  echo "start-agentboard-manager: $grok_home/config.toml missing; run seats/install.py" >&2
-  exit 1
+  missing "$grok_home/config.toml"
 fi
 
 codex_home="$HOME/.local/share/agentboard/seats/manager/codex"
 if [[ $KIND == codex && ! -f $codex_home/manager.config.toml ]]; then
-  echo "start-agentboard-manager: $codex_home/manager.config.toml missing; run seats/install.py" >&2
-  exit 1
+  missing "$codex_home/manager.config.toml"
 fi
 
 case "$KIND" in
@@ -74,7 +94,7 @@ case "$KIND" in
     hargs=(--trust --always-approve)
     ;;
   codewhale)
-    # hc run forwards no environment, so the seat home goes in through env(1)
+    # the seat home goes in through env(1), the same as for the worker seats
     argv=(env "CODEWHALE_HOME=$cwhome" codewhale --skip-onboarding --fresh --disable subagents)
     ;;
 esac
@@ -102,43 +122,26 @@ if [[ $world == herdr ]]; then
     exit 1
   ' _ "$HERDR_PANE_ID" "$KIND" "${hargs[@]}" >>"$log" 2>&1 </dev/null &
 else
-  reply=$(hc run --json --bg --outlive-parent --name manager --cwd "$PWD" -- "${argv[@]}")
-  addr=$(jq -r '.address // empty' <<<"$reply")
-  if [[ -z $addr ]]; then
-    printf 'start-agentboard-manager: hc run reported no address: %s\n' "$reply" >&2
-    exit 1
-  fi
-
-  if [[ $KIND == grok ]]; then
-    hc wait manager >/dev/null
-    status=0
-    sent=$(hc send --wait manager /agentboard-manager) || status=$?
-    if [[ $status -ne 0 ]] || ! jq -e '.started == true' >/dev/null 2>&1 <<<"$sent"; then
-      printf '%s\n' "${sent:-}" >>"$log"
-      echo "start-agentboard-manager: the entry prompt did not land; read the terminal: hc read --lines 40 manager" >&2
-      exit 1
-    fi
-  fi
-
-  if [[ $KIND == codewhale ]]; then
-    # the seat's hooks report status (seats/codewhale/status-hooks.toml): wait for it,
-    # then send until hc stops answering "still starting"
-    hc wait manager --timeout 30 >/dev/null
-    landed=0
-    for _ in {1..10}; do
-      status=0
-      sent=$(hc send --wait manager /agentboard-manager 2>&1) || status=$?
-      if [[ $status -eq 0 ]] && jq -e '.started == true' >/dev/null 2>&1 <<<"$sent"; then landed=1; break; fi
-      [[ $status -eq 0 ]] && break
-      [[ $sent == *'still starting'* ]] || break
+  # hc: the manager replaces this shell in this terminal. Grok and Codewhale cannot
+  # take the entry prompt in argv, so a detached helper types it here once the client
+  # has settled, retrying while hc answers "still starting"; failures go to $log.
+  if [[ $KIND == grok || $KIND == codewhale ]]; then
+    setsid bash -c '
+      term=$1 sent=
       sleep 1
-    done
-    if [[ $landed -ne 1 ]]; then
-      printf '%s\n' "${sent:-}" >>"$log"
-      echo "start-agentboard-manager: the entry prompt did not land; read the terminal: hc read --lines 40 manager" >&2
+      hc wait "$term" --timeout 30 >/dev/null || true
+      for _ in {1..10}; do
+        status=0
+        sent=$(hc send --wait "$term" /agentboard-manager 2>&1) || status=$?
+        if [[ $status -eq 0 ]] && jq -e ".started == true" >/dev/null 2>&1 <<<"$sent"; then exit 0; fi
+        [[ $status -eq 0 ]] && break
+        [[ $sent == *"still starting"* ]] || break
+        sleep 1
+      done
+      printf "%s\n" "$sent"
+      echo "entry prompt did not land in $term; type /agentboard-manager there"
       exit 1
-    fi
+    ' _ "$HC_TERMINAL_ID" >>"$log" 2>&1 </dev/null &
   fi
-
-  echo "manager $addr"
+  exec "${argv[@]}"
 fi

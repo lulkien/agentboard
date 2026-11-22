@@ -167,13 +167,10 @@ pin '^ok: [0-9]+ processes claimed'
 gate bash tests/migrate.sh
 pin '^(migrate: [0-9]+/[0-9]+ passed \(scratch LMDB, stepwise\)|SKIP migrate: Python lmdb unavailable offline \(use uv run --with lmdb\))$'
 
-gate bash tests/skills-install.sh
-pin '^[0-9]+/[0-9]+ passed \(skills installer\)$'
+gate bash tests/install.sh
+pin '^[0-9]+/[0-9]+ passed \(installer\)$'
 
-gate bash tests/seats-install.sh
-pin '^[0-9]+/[0-9]+ passed \(seats installer\)$'
-
-gate bash tests/start-agentboard-manager.sh
+gate bash tests/agentboard-manager.sh
 pin '^[0-9]+/[0-9]+ passed \(manager launcher\)$'
 
 gate python3 scripts/sync-tool-count.py --check

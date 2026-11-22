@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# seats/install.py against isolated homes: foreign links, and the managed block
-# it keeps inside the user's rules/default.rules. Nothing touches a real home.
+# ./install.py against isolated homes (cargo is a stub; nothing is built): per-role seat homes, and the default
+# client homes it reads but never writes. Nothing touches a real home.
 set -u
 cd "$(dirname "$0")/.."
 repo=$(pwd)
-src=$repo/seats/codex/rules/agentboard.rules
-launcher=$repo/seats/start-agentboard-manager
+launcher=$repo/seats/agentboard-manager
 unit=$repo/seats/systemd/agentboard.service
 grok_src=$repo/seats/grok/agentboard-mcp.toml
 tmp=$(mktemp -d)
@@ -37,7 +36,7 @@ inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/er
     AGENTBOARD_FAKE_AUTH_INVENTORY="$home/.codewhale/auth-inventory" \
     AGENTBOARD_FAKE_FAIL_LIST="${AGENTBOARD_FAKE_FAIL_LIST:-}" \
     AGENTBOARD_FAKE_FAIL_SEAT="${AGENTBOARD_FAKE_FAIL_SEAT:-}" \
-    python3 ./seats/install.py "$@" >"$tmp/out" 2>"$tmp/err"
+    ./install.py "$@" >"$tmp/out" 2>"$tmp/err"
   local code=$?
   cat "$tmp/out" >>"$tmp/installer-stdout.log"
   cat "$tmp/err" >>"$tmp/installer-stderr.log"
@@ -51,7 +50,7 @@ inst_with_codex_home() { # inst_with_codex_home <runtime home> [installer args]
     AGENTBOARD_FAKE_AUTH_INVENTORY="$home/.codewhale/auth-inventory" \
     AGENTBOARD_FAKE_FAIL_LIST="${AGENTBOARD_FAKE_FAIL_LIST:-}" \
     AGENTBOARD_FAKE_FAIL_SEAT="${AGENTBOARD_FAKE_FAIL_SEAT:-}" \
-    python3 ./seats/install.py "$@" >"$tmp/out" 2>"$tmp/err"
+    ./install.py "$@" >"$tmp/out" 2>"$tmp/err"
   local code=$?
   cat "$tmp/out" >>"$tmp/installer-stdout.log"
   cat "$tmp/err" >>"$tmp/installer-stderr.log"
@@ -122,20 +121,27 @@ PY
   chmod 700 "$tmp/bin/codewhale"
 }
 make_fake_codewhale
+# cargo is always this stub: it logs its argv and exits $STUB_CARGO_EXIT (default 0).
+cat >"$tmp/bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$STUB_CARGO_LOG"
+exit "${STUB_CARGO_EXIT:-0}"
+SH
+chmod 700 "$tmp/bin/cargo"
+export STUB_CARGO_LOG="$tmp/cargo.log"
 grok_inst() { # grok_inst [args]: Grok-only install into the isolated home
-  HOME="$home" python3 ./seats/install.py --grok-only "$@" >"$tmp/out" 2>"$tmp/err"
+  HOME="$home" PATH="$tmp/bin:$PATH" ./install.py --agent grok "$@" >"$tmp/out" 2>"$tmp/err"
 }
 grok_select() { # grok_select [args]: selected Grok install
-  HOME="$home" CODEX_HOME="$home/.codex" python3 ./seats/install.py --agent grok "$@" >"$tmp/out" 2>"$tmp/err"
+  HOME="$home" CODEX_HOME="$home/.codex" PATH="$tmp/bin:$PATH" ./install.py --agent grok "$@" >"$tmp/out" 2>"$tmp/err"
 }
-refused() { # refused <name> [args]: exit 1, nothing linked, default.rules byte-identical
-  local name=$1; shift
-  local before=$tmp/before
-  if [ -e "$rules" ] && [ ! -L "$rules" ]; then cp "$rules" "$before"; else : >"$before"; fi
-  inst "$@"; local code=$?
-  is "$name exit" test "$code" -eq 1
-  is "$name links nothing" test ! -e "$home/.codex/coder.config.toml"
-  if [ -f "$rules" ] && [ ! -L "$rules" ]; then same "$name unchanged" "$before" "$rules"; fi
+rules_block() { # the marker block an older installer appended to default.rules
+  printf '# BEGIN AGENTBOARD RULES\nprefix_rule(pattern=["rtk", "git", "status"], decision="allow")\n# END AGENTBOARD RULES\n'
+}
+no_shared_writes() { # no_shared_writes <name>: nothing agentboard-owned in default client homes
+  is "$1 writes no Codex profile links" test -z "$(find "$home/.codex" -maxdepth 1 -name '*.config.toml' -print -quit)"
+  is "$1 writes no Claude cards" test -z "$(find "$home/.claude" -maxdepth 1 -name '*-mcp.json' -print -quit)"
+  is "$1 writes no Codex rules" test ! -e "$home/.codex/rules/default.rules" -a ! -e "$home/.codex/rules/agentboard.rules"
 }
 
 # --- isolated Codex role homes copy only validated base settings and auth -----
@@ -188,16 +194,18 @@ for seat in analyst coder manager reviewer; do
   same "$seat copied config preserves unrelated settings" "$tmp/base-config" "$codex_home/config.toml"
   same "$seat private auth snapshot content" "$tmp/base-auth" "$codex_home/auth.json"
   is "$seat home and auth are private" python3 -c 'import os,stat,sys; h,a=sys.argv[1:]; assert stat.S_IMODE(os.stat(h).st_mode)==0o700 and stat.S_IMODE(os.stat(a).st_mode)==0o600' "$codex_home" "$codex_home/auth.json"
-  is "$seat profile selects correct MCP actor and role policy" python3 -c 'import sys,tomllib; s,p=sys.argv[1:]; d=tomllib.load(open(p,"rb")); assert d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/"+s); assert d["approval_policy"] in ("never","on-request"); assert ("sandbox_mode" in d or "default_permissions" in d); assert d["mcp_servers"]["codebase-memory-mcp"]["default_tools_approval_mode"]=="approve"' "$seat" "$codex_home/$seat.config.toml"
+  is "$seat profile selects correct MCP actor and role policy" python3 -c 'import sys,tomllib; s,p=sys.argv[1:]; d=tomllib.load(open(p,"rb")); assert d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/"+s); assert d["approval_policy"] in ("never","on-request"); assert ("sandbox_mode" in d or "default_permissions" in d); assert all(("command" in v or "url" in v) for v in d["mcp_servers"].values())' "$seat" "$codex_home/$seat.config.toml"
   is "$seat Codex -p runtime smoke selects role home" bash -c 'test "$(HOME="$1" CODEX_HOME="$2" PATH="$3:$PATH" codex -p "$4")" = "http://127.0.0.1:8765/mcp/$4"' _ "$home" "$codex_home" "$tmp/bin" "$seat"
   is "$seat runtime files and host rules not copied" test ! -e "$codex_home/rules" -a ! -e "$codex_home/sessions" -a ! -e "$codex_home/cache"
 done
 is "reviewer profile remains restricted" python3 -c 'import tomllib,sys; d=tomllib.load(open(sys.argv[1],"rb")); assert d["default_permissions"]=="reviewer-scratch" and d["permissions"]["reviewer-scratch"]["extends"]==":read-only" and d["permissions"]["reviewer-scratch"]["filesystem"]["/tmp/agentboard/scratch"]=="write" and d["permissions"]["reviewer-scratch"]["network"]["enabled"] is True' "$home/.local/share/agentboard/seats/reviewer/codex/reviewer.config.toml"
 is "analyst profile remains scratch-only" python3 -c 'import tomllib,sys; d=tomllib.load(open(sys.argv[1],"rb")); assert d["default_permissions"]=="seat-scratch" and d["permissions"]["seat-scratch"]["filesystem"]["/tmp/agentboard/scratch"]=="write"' "$home/.local/share/agentboard/seats/analyst/codex/analyst.config.toml"
 is "private auth never printed" bash -c '! grep -q fixture-secret "$1" "$2"' _ "$tmp/out" "$tmp/err"
+is "base Codex home gets no profile links" test -z "$(find "$home/.codex" -maxdepth 1 -name '*.config.toml' -print -quit)"
+is "host default.rules left as the user wrote it" test "$(cat "$home/.codex/rules/default.rules")" = 'host rule'
 
-# A role CODEX_HOME is a runtime selector; installation cleans old shared
-# profiles/rules from that restricted home and keeps compatibility files at ~/.codex.
+# Role homes an older installer polluted are cleaned of profile links and
+# inherited rules; the base Codex home is still never written.
 reviewer_home="$home/.local/share/agentboard/seats/reviewer/codex"
 ln -s "$repo/seats/codex/analyst.config.toml" "$reviewer_home/analyst.config.toml"
 mv "$reviewer_home/reviewer.config.toml" "$tmp/reviewer-profile"
@@ -205,45 +213,24 @@ ln -s "$repo/seats/codex/reviewer.config.toml" "$reviewer_home/reviewer.config.t
 mkdir -p "$reviewer_home/rules"
 {
   printf 'host rule\n'
-  cat "$repo/seats/codex/rules/agentboard.rules"
+  rules_block
 } >"$reviewer_home/rules/default.rules"
 ln -s "$repo/seats/codex/rules/agentboard.rules" "$reviewer_home/rules/agentboard.rules"
 inst_with_codex_home "$reviewer_home" --agent codex --force; code=$?
 is "role CODEX_HOME install succeeds" test "$code" -eq 0
 is "role profile is restored as a private regular file" test -f "$reviewer_home/reviewer.config.toml" -a ! -L "$reviewer_home/reviewer.config.toml"
 is "legacy profile links removed from restricted home" test -z "$(find "$reviewer_home" -maxdepth 1 -type l -name '*.config.toml' -print -quit)"
-is "legacy and inherited rules removed from restricted home" test ! -e "$reviewer_home/rules/default.rules" -a ! -e "$reviewer_home/rules/agentboard.rules"
+is "legacy and inherited rules removed from restricted home" test ! -e "$reviewer_home/rules/default.rules" -a ! -L "$reviewer_home/rules/agentboard.rules"
 is "restricted home rules directory removed when empty" test ! -e "$reviewer_home/rules"
-is "compatibility links stay in base Codex home" test -L "$home/.codex/reviewer.config.toml" -a -f "$home/.codex/rules/default.rules"
+is "role-home cleanup still writes nothing to base Codex home" test ! -e "$home/.codex/reviewer.config.toml" -a "$(cat "$home/.codex/rules/default.rules")" = 'host rule'
 same "reviewer role profile template restored" "$repo/seats/codex/reviewer.config.toml" "$reviewer_home/reviewer.config.toml"
 
-# A CODEX_HOME symlink alias must be classified before installer writes. Role
-# policy cleanup still targets the real home; compatibility writes stay at ~/.codex.
-ln -s "$repo/seats/codex/analyst.config.toml" "$reviewer_home/analyst.config.toml"
-rm "$reviewer_home/reviewer.config.toml"
-ln -s "$repo/seats/codex/reviewer.config.toml" "$reviewer_home/reviewer.config.toml"
-mkdir -p "$reviewer_home/rules"
-{
-  printf 'host rule\n'
-  cat "$repo/seats/codex/rules/agentboard.rules"
-} >"$reviewer_home/rules/default.rules"
-ln -s "$repo/seats/codex/rules/agentboard.rules" "$reviewer_home/rules/agentboard.rules"
-ln -s "$reviewer_home" "$tmp/codex-role-alias"
-inst_with_codex_home "$tmp/codex-role-alias" --agent codex --force; code=$?
-is "role-home CODEX_HOME alias install succeeds" test "$code" -eq 0
-is "role-home alias leaves private profile regular" test -f "$reviewer_home/reviewer.config.toml" -a ! -L "$reviewer_home/reviewer.config.toml"
-is "role-home alias removes legacy profile links" test -z "$(find "$reviewer_home" -maxdepth 1 -type l -name '*.config.toml' -print -quit)"
-is "role-home alias removes inherited rules" test ! -e "$reviewer_home/rules/default.rules" -a ! -e "$reviewer_home/rules/agentboard.rules"
-is "role-home alias keeps compatibility files in base home" test -L "$home/.codex/reviewer.config.toml" -a -f "$home/.codex/rules/default.rules"
-
-# An alias into an unmanaged home cannot be safely classified. Refuse before
-# touching files through it.
+# CODEX_HOME is a runtime selector only: install neither follows nor writes it.
 mkdir -p "$tmp/untrusted-codex-home"
 ln -s "$tmp/untrusted-codex-home" "$tmp/codex-untrusted-alias"
 inst_with_codex_home "$tmp/codex-untrusted-alias" --agent codex --force; code=$?
-is "untrusted CODEX_HOME alias refuses" test "$code" -eq 1
-has "untrusted CODEX_HOME alias diagnostic" "unsafe CODEX_HOME symlink alias" "$tmp/err"
-is "untrusted CODEX_HOME alias writes no profiles or rules" test ! -e "$tmp/untrusted-codex-home/reviewer.config.toml" -a ! -e "$tmp/untrusted-codex-home/rules"
+is "install ignores CODEX_HOME alias" test "$code" -eq 0
+is "CODEX_HOME alias target gets no profiles or rules" test -z "$(ls -A "$tmp/untrusted-codex-home")"
 
 before_homes=$(find "$home/.local/share/agentboard/seats" -type f -print0 | sort -z | xargs -0 cksum | cksum)
 inst --agent codex --force; code=$?
@@ -317,8 +304,9 @@ cp -r "$repo/seats/claude" "$tmp/cards-before"
 inst; code=$?
 is "generated install exit" test "$code" -eq 0
 for seat in analyst coder manager reviewer; do
-  is "$seat generated regular 0600 merged file" python3 -c 'import json,os,stat,sys; p,s=sys.argv[1:]; d=json.load(open(p)); card=json.load(open("seats/claude/"+s+"-mcp.json")); assert stat.S_IMODE(os.stat(p).st_mode)==0o600 and not os.path.islink(p); assert d["mcpServers"]["agentboard"]==card["mcpServers"]["agentboard"] and "extra" in d["mcpServers"]' "$home/.claude/$seat-mcp.json" "$seat"
+  is "$seat writes no legacy card in ~/.claude" test ! -e "$home/.claude/$seat-mcp.json"
   role="$home/.local/share/agentboard/seats/$seat/claude"
+  is "$seat role MCP card regular 0600 merged file" python3 -c 'import json,os,stat,sys; p,s=sys.argv[1:]; d=json.load(open(p)); card=json.load(open("seats/claude/"+s+"-mcp.json")); assert stat.S_IMODE(os.stat(p).st_mode)==0o600 and not os.path.islink(p); assert d["mcpServers"]["agentboard"]==card["mcpServers"]["agentboard"] and "extra" in d["mcpServers"]' "$role/mcp.json" "$seat"
   is "$seat isolated private Claude home" test "$(stat -c %a "$role")" = 700
   is "$seat inherits settings and role restrictions" python3 -c 'import json,sys; d=json.load(open(sys.argv[1]+"/settings.json")); restricted=sys.argv[2] in ("analyst","reviewer"); assert d["env"]["CLAUDE_FIXTURE"]=="present" and "SessionStart" in d["hooks"] and d["permissions"]["deny"][0]=="Bash(rm *)" and d["permissions"]["allow"]==["Read"]; assert all((name in d["permissions"]["deny"])==restricted for name in ("Edit","Write","NotebookEdit")); assert d["enabledPlugins"]=={"fixture@market":"true"}' "$role" "$seat"
   is "$seat inherits global config without project trust" python3 -c 'import hashlib,json,os,stat,sys; p=sys.argv[1]; g=json.load(open(p+"/.claude.json")); c=open(p+"/.credentials.json","rb").read(); mark=open(p+"/.agentboard-credentials.sha256").read().strip(); assert g["account"]["fixture"]=="kept" and g["mcpServers"]["extra"]["env"]["TOKEN"]=="s3cret-value" and "projects" not in g; assert json.loads(c)["accessToken"]=="synthetic-credential-sentinel" and stat.S_IMODE(os.stat(p+"/.credentials.json").st_mode)==0o600 and mark==hashlib.sha256(c).hexdigest() and stat.S_IMODE(os.stat(p+"/.agentboard-credentials.sha256").st_mode)==0o600' "$role"
@@ -327,8 +315,6 @@ for seat in analyst coder manager reviewer; do
   is "$seat does not copy plugin installation data" test ! -e "$role/plugins"
   is "$seat role files are private" bash -c 'for f in "$1"/settings.json "$1"/.claude.json "$1"/mcp.json "$1"/.credentials.json; do test "$(stat -c %a "$f")" = 600 || exit 1; done' _ "$role"
 done
-has "names only output" "servers: agentboard, codebase-memory-mcp, extra" "$tmp/out"
-is "generated lines list names in sorted order" bash -c 'grep -q "servers: agentboard, codebase-memory-mcp, extra" "$1"' _ "$tmp/out"
 is "secret not printed" bash -c '! grep -q s3cret-value "$1" "$2"' _ "$tmp/out" "$tmp/err"
 same "user global config unchanged" "$tmp/claude-global-before" "$home/.claude.json"
 same "user settings unchanged" "$tmp/claude-settings-before" "$home/.claude/settings.json"
@@ -346,32 +332,34 @@ same "base-present role login bytes preserved" "$tmp/manager-role-credentials-be
 has "base-present role login warning is actionable" "warning: preserving Claude role credentials with unknown ownership; inspect and remove manually if stale: $home/.local/share/agentboard/seats/manager/claude/.credentials.json" "$tmp/err"
 is "base-present warning contains no credential or hash" bash -c '! grep -Eq "base-present-role-login-sentinel|[[:xdigit:]]{64}" "$1" "$2"' _ "$tmp/out" "$tmp/err"
 inst
-has "rerun unchanged" "unchanged: $home/.claude/coder-mcp.json" "$tmp/out"
+claude_roles=$home/.local/share/agentboard/seats
+has "rerun unchanged" "unchanged: $claude_roles/coder/claude (Claude role home)" "$tmp/out"
 has "no-force rerun warns about unmarked role login" "warning: preserving Claude role credentials with unknown ownership; inspect and remove manually if stale: $home/.local/share/agentboard/seats/manager/claude/.credentials.json" "$tmp/err"
 same "no-force rerun preserves unmarked role login" "$tmp/manager-role-credentials-before" "$home/.local/share/agentboard/seats/manager/claude/.credentials.json"
-cp "$home/.claude/coder-mcp.json" "$tmp/coder-before-refresh"
+cp "$claude_roles/coder/claude/mcp.json" "$tmp/coder-before-refresh"
 python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["mcpServers"]["extra"]["command"]="y"; open(p,"w").write(json.dumps(d))' "$home/.claude.json"
 inst
-has "stale generated file reported" "note: $home/.claude/coder-mcp.json differs" "$tmp/err"
-same "stale generated file preserved without force" "$tmp/coder-before-refresh" "$home/.claude/coder-mcp.json"
+has "stale role MCP card reported" "note: $claude_roles/coder/claude/mcp.json differs" "$tmp/err"
+same "stale role MCP card preserved without force" "$tmp/coder-before-refresh" "$claude_roles/coder/claude/mcp.json"
 inst --force
-has "stale generated file refreshed with force" "replaced: $home/.claude/coder-mcp.json" "$tmp/out"
-is "force copied updated server value" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["extra"]["command"]=="y"' "$home/.claude/coder-mcp.json"
-rm "$home/.claude/reviewer-mcp.json"
+has "stale role home refreshed with force" "generated: $claude_roles/coder/claude (Claude role home)" "$tmp/out"
+is "force copied updated server value" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["extra"]["command"]=="y"' "$claude_roles/coder/claude/mcp.json"
+rm "$claude_roles/reviewer/claude/mcp.json"
 inst
-is "deleted generated file recreated" test -f "$home/.claude/reviewer-mcp.json"
-is "all generated files regular" bash -c 'for f in "$1"/.claude/*-mcp.json; do test -f "$f" && test ! -L "$f" || exit 1; done' _ "$home"
-is "all generated files private" bash -c 'for f in "$1"/.claude/*-mcp.json; do test "$(stat -c %a "$f")" = 600 || exit 1; done' _ "$home"
-is "all generated markers present" bash -c 'for f in "$1"/.claude/*-mcp.json; do grep -q agentboardGenerated "$f" || exit 1; done' _ "$home"
-is "card wins agentboard clash" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["agentboard"]["url"].endswith("/mcp/analyst")' "$home/.claude/analyst-mcp.json"
-is "user extra server copied" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["extra"]["env"]["TOKEN"]=="s3cret-value"' "$home/.claude/analyst-mcp.json"
+is "deleted role MCP card recreated" test -f "$claude_roles/reviewer/claude/mcp.json"
+is "all role MCP cards regular" bash -c 'for s in analyst coder manager reviewer; do f="$1/$s/claude/mcp.json"; test -f "$f" && test ! -L "$f" || exit 1; done' _ "$claude_roles"
+is "all role MCP cards private" bash -c 'for s in analyst coder manager reviewer; do test "$(stat -c %a "$1/$s/claude/mcp.json")" = 600 || exit 1; done' _ "$claude_roles"
+is "all role MCP card markers present" bash -c 'for s in analyst coder manager reviewer; do grep -q agentboardGenerated "$1/$s/claude/mcp.json" || exit 1; done' _ "$claude_roles"
+is "card wins agentboard clash" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["agentboard"]["url"].endswith("/mcp/analyst")' "$claude_roles/analyst/claude/mcp.json"
+is "user extra server copied" python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["mcpServers"]["extra"]["env"]["TOKEN"]=="s3cret-value"' "$claude_roles/analyst/claude/mcp.json"
 is "secret absent from output and errors" bash -c '! grep -q s3cret-value "$1" "$2"' _ "$tmp/out" "$tmp/err"
 is "credential sentinel absent from output and errors" bash -c '! grep -q synthetic-credential-sentinel "$1" "$2"' _ "$tmp/out" "$tmp/err"
 is "user config remains unchanged" grep -q 'wrong' "$home/.claude.json"
 is "user config was not decorated with installer marker" bash -c '! grep -q agentboardGenerated "$1"' _ "$home/.claude.json"
+cp "$claude_roles/coder/claude/mcp.json" "$tmp/coder-before-rerun"
 inst
-is "second run all unchanged" bash -c 'grep -c "^unchanged: .*/.claude/.*mcp.json$" "$1" | grep -qx 4' _ "$tmp/out"
-is "unchanged file bytes stable" cmp -s "$home/.claude/coder-mcp.json" "$home/.claude/coder-mcp.json"
+is "second run all unchanged" bash -c 'grep -c "^unchanged: .*/claude (Claude role home)$" "$1" | grep -qx 4' _ "$tmp/out"
+same "unchanged role card bytes stable" "$tmp/coder-before-rerun" "$claude_roles/coder/claude/mcp.json"
 rm "$home/.claude/.credentials.json"
 inst --agent claude; code=$?
 is "stale role auth remains without force" test "$code" -eq 0 -a -f "$home/.local/share/agentboard/seats/analyst/claude/.credentials.json" -a -f "$home/.local/share/agentboard/seats/reviewer/claude/.credentials.json"
@@ -391,36 +379,35 @@ is "withdrawal warnings contain no credential or hash" bash -c '! grep -Eq "synt
 is "force stale auth removal prints no credentials" bash -c '! grep -q synthetic-credential-sentinel "$1" "$2"' _ "$tmp/out" "$tmp/err"
 is "repo cards remain regular" bash -c 'for f in seats/claude/*-mcp.json; do test -f "$f" && test ! -L "$f" || exit 1; done'
 is "repo cards retain expected count" test "$(find seats/claude -maxdepth 1 -name '*-mcp.json' | wc -l)" -eq 4
-is "Claude home file count four" test "$(find "$home/.claude" -maxdepth 1 -name '*-mcp.json' | wc -l)" -eq 4
+is "no legacy Claude cards in ~/.claude" test "$(find "$home/.claude" -maxdepth 1 -name '*-mcp.json' | wc -l)" -eq 0
 is "user config lacks rewritten marker" bash -c '! grep -q agentboardGenerated "$1"' _ "$home/.claude.json"
 is "file contains only server names in log" bash -c '! grep -q s3cret-value "$1"' _ "$tmp/out"
-is "missing user config tolerated" test -f "$home/.claude/coder-mcp.json"
-is "all seat endpoints distinct" python3 -c 'import glob,json,sys; u=[json.load(open(p))["mcpServers"]["agentboard"]["url"] for p in glob.glob(sys.argv[1]+"/.claude/*-mcp.json")]; assert len(u)==len(set(u))==4' "$home"
+is "all seat endpoints distinct" python3 -c 'import json,sys; u=[json.load(open(f"{sys.argv[1]}/{s}/claude/mcp.json"))["mcpServers"]["agentboard"]["url"] for s in ("analyst","coder","manager","reviewer")]; assert len(u)==len(set(u))==4' "$claude_roles"
 
-# Old repository symlinks are replaced at the directory entry, never followed.
+# Cards an older installer left in ~/.claude are named, never rewritten,
+# followed or removed, with or without --force.
 newhome
 mkdir -p "$home/.codex/rules"
 ln -s "$repo/seats/claude/coder-mcp.json" "$home/.claude/coder-mcp.json"
-inst; code=$?
-is "repo card symlink install succeeds" test "$code" -eq 0
-is "repo card symlink replaced by regular file" test -f "$home/.claude/coder-mcp.json" -a ! -L "$home/.claude/coder-mcp.json"
-diff -r "$tmp/cards-before" "$repo/seats/claude" >/dev/null || bad "repo card symlink target untouched"
-rm "$home/.claude/coder-mcp.json"
-ln -s /old/checkout/coder-mcp.json "$home/.claude/coder-mcp.json"
-inst; code=$?
-is "foreign card symlink refused" test "$code" -eq 1
-is "foreign link preserved on refusal" test "$(readlink "$home/.claude/coder-mcp.json")" = /old/checkout/coder-mcp.json
-inst --force; code=$?
-is "force replaces foreign card link" test "$code" -eq 0 -a -f "$home/.claude/coder-mcp.json" -a ! -L "$home/.claude/coder-mcp.json"
+ln -s /old/checkout/analyst-mcp.json "$home/.claude/analyst-mcp.json"
 printf 'mine\n' >"$home/.claude/manager-mcp.json"
+printf '{"agentboardGenerated":"old","mcpServers":{}}\n' >"$home/.claude/reviewer-mcp.json"
 cp "$home/.claude/manager-mcp.json" "$tmp/claude-unmarked-before"
-inst; code=$?
-is "unmarked regular Claude file refuses without force" test "$code" -eq 1
-same "unmarked Claude file preserved without force" "$tmp/claude-unmarked-before" "$home/.claude/manager-mcp.json"
-inst --force; code=$?
-is "force replaces unmarked regular Claude file" test "$code" -eq 0
-is "forced Claude file is generated card" python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert "agentboardGenerated" in d and d["mcpServers"]["agentboard"]["url"].endswith("/mcp/manager")' "$home/.claude/manager-mcp.json"
-rm "$home/.claude/manager-mcp.json"
+cp "$home/.claude/reviewer-mcp.json" "$tmp/claude-marked-before"
+for args in "" "--force"; do
+  # shellcheck disable=SC2086
+  inst --agent claude $args; code=$?
+  is "legacy cards ${args:-plain} install succeeds" test "$code" -eq 0
+  is "legacy repo card link kept ${args:-plain}" test "$(readlink "$home/.claude/coder-mcp.json")" = "$repo/seats/claude/coder-mcp.json"
+  is "legacy foreign card link kept ${args:-plain}" test "$(readlink "$home/.claude/analyst-mcp.json")" = /old/checkout/analyst-mcp.json
+  same "unmarked Claude file kept ${args:-plain}" "$tmp/claude-unmarked-before" "$home/.claude/manager-mcp.json"
+  same "generated legacy card kept ${args:-plain}" "$tmp/claude-marked-before" "$home/.claude/reviewer-mcp.json"
+  has "generated legacy card named ${args:-plain}" "note: leftover from an older installer, no longer used; delete it by hand: $home/.claude/reviewer-mcp.json" "$tmp/out"
+  has "legacy repo card link named ${args:-plain}" "note: leftover from an older installer, no longer used; delete it by hand: $home/.claude/coder-mcp.json" "$tmp/out"
+  is "user-owned Claude files not named ${args:-plain}" bash -c '! grep -Eq "(manager|analyst)-mcp.json" "$1"' _ "$tmp/out"
+done
+diff -r "$tmp/cards-before" "$repo/seats/claude" >/dev/null || bad "repo cards untouched by legacy card handling"
+rm "$home/.claude/"*-mcp.json
 printf '{' >"$home/.claude.json"
 inst --force; code=$?
 is "invalid user JSON refused" test "$code" -eq 1
@@ -429,38 +416,37 @@ printf '{"mcpServers":[]}' >"$home/.claude.json"
 inst --force; code=$?
 is "non-object mcpServers refused" test "$code" -eq 1
 has "mcpServers diagnostic names field" 'mcpServers in' "$tmp/err"
-# --- missing rules dir: the block alone, no second rules file ---------------
+# --- fresh full install: role homes, launcher and unit; default homes untouched
 newhome
 inst; code=$?
 is "fresh install exit" test "$code" -eq 0
-is "manager launcher linked" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = "$launcher"
+is "manager launcher linked" test "$(readlink "$home/.local/bin/agentboard-manager")" = "$launcher"
 is "user unit linked" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 for seat in analyst coder manager reviewer; do
+  profile="$home/.local/share/agentboard/seats/$seat/codex/$seat.config.toml"
   is "$seat Claude URL card" python3 -c 'import json,sys; s=sys.argv[1]; p=sys.argv[2]; a=json.load(open(p))["mcpServers"]["agentboard"]; assert a == {"type":"http","url":f"http://127.0.0.1:8765/mcp/{s}"}' "$seat" "$repo/seats/claude/$seat-mcp.json"
-  is "$seat generated Claude file" test -f "$home/.claude/$seat-mcp.json"
-  is "$seat Codex URL card" python3 -c 'import sys,tomllib; s=sys.argv[1]; p=sys.argv[2]; a=tomllib.load(open(p,"rb"))["mcp_servers"]["agentboard"]; assert a["url"] == f"http://127.0.0.1:8765/mcp/{s}" and "command" not in a and "env" not in a and len(a["tools"]) == 12' "$seat" "$home/.codex/$seat.config.toml"
-  is "$seat Codex cbm approval only" python3 -c 'import sys,tomllib; a=tomllib.load(open(sys.argv[1],"rb"))["mcp_servers"]["codebase-memory-mcp"]; assert a == {"default_tools_approval_mode":"approve"}' "$home/.codex/$seat.config.toml"
-  is "$seat Codex rtk pointer" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb"))["developer_instructions"]; assert "rtk <cmd>" in d and "command -v rtk" in d and "Rules for every agent" in d' "$home/.codex/$seat.config.toml"
+  is "$seat Claude role MCP card" test -f "$home/.local/share/agentboard/seats/$seat/claude/mcp.json"
+  is "$seat Codex URL card" python3 -c 'import sys,tomllib; s=sys.argv[1]; p=sys.argv[2]; a=tomllib.load(open(p,"rb"))["mcp_servers"]["agentboard"]; assert a["url"] == f"http://127.0.0.1:8765/mcp/{s}" and "command" not in a and "env" not in a and len(a["tools"]) == 12' "$seat" "$profile"
+  is "$seat Codex profile has no transport-less MCP table" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb"))["mcp_servers"]; assert all(("command" in v or "url" in v) for v in d.values()) and "codebase-memory-mcp" not in d, d' "$profile"
+  is "$seat Codex rtk pointer" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb"))["developer_instructions"]; assert "rtk <cmd>" in d and "command -v rtk" in d and "Rules for every agent" in d' "$profile"
 done
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
 has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config/systemd/user/agentboard.service"
-same "fresh default.rules is the source block" "$src" "$rules"
-is "rules block rtk allows only git reads" python3 -c 'import re,sys; s=open(sys.argv[1]).read(); found={tuple(re.findall(r"\"([^\"]+)\"", m)) for m in re.findall(r"prefix_rule\(pattern=\[([^]]+)\]", s) if m.startswith("\"rtk\"")}; assert found == {("rtk","git","diff"),("rtk","git","log"),("rtk","git","show"),("rtk","git","status")}, found' "$src"
-is "no separate agentboard.rules" test ! -e "$home/.codex/rules/agentboard.rules"
-has "fresh install says added" "added: $rules" "$tmp/out"
+no_shared_writes "fresh install"
+is "fresh install names no leftovers" bash -c '! grep -q "^note: leftover" "$1"' _ "$tmp/out"
 has "done line kept" "done: seat profiles installed" "$tmp/out"
 
 # --- manager launcher link follows the same foreign-link rules ---------------
 newhome
 mkdir -p "$home/.local/bin"
-ln -s /old/checkout/start-agentboard-manager "$home/.local/bin/start-agentboard-manager"
+ln -s /old/checkout/agentboard-manager "$home/.local/bin/agentboard-manager"
 inst; code=$?
 is "foreign launcher link refused" test "$code" -eq 1
 has "foreign launcher link diagnosed" 'foreign link:' "$tmp/err"
-is "foreign launcher link preserved" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = /old/checkout/start-agentboard-manager
+is "foreign launcher link preserved" test "$(readlink "$home/.local/bin/agentboard-manager")" = /old/checkout/agentboard-manager
 is "foreign launcher refusal leaves unit unlinked" test ! -e "$home/.config/systemd/user/agentboard.service"
 inst --force
-is "force replaces launcher link" test "$(readlink "$home/.local/bin/start-agentboard-manager")" = "$launcher"
+is "force replaces launcher link" test "$(readlink "$home/.local/bin/agentboard-manager")" = "$launcher"
 
 # --- user unit follows the same foreign-link rules ---------------------------
 newhome
@@ -474,187 +460,159 @@ is "foreign unit refusal links no Codex card" test ! -e "$home/.codex/coder.conf
 inst --force
 is "force replaces unit link" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 
-# --force replaces regular Codex entries, but refuses directories before writing.
+# --- whatever sits in ~/.codex is the user's: kept with and without --force --
 newhome
 mkdir -p "$home/.codex/rules"
 printf 'foreign profile\n' >"$home/.codex/coder.config.toml"
-cp "$home/.codex/coder.config.toml" "$tmp/codex-foreign-before"
-inst; code=$?
-is "foreign regular Codex profile refuses without force" test "$code" -eq 1
-same "foreign regular Codex profile preserved without force" "$tmp/codex-foreign-before" "$home/.codex/coder.config.toml"
-inst --force; code=$?
-is "force replaces regular Codex profile" test "$code" -eq 0 -a -L "$home/.codex/coder.config.toml"
-is "Codex replacement points at this seat profile" test "$(readlink "$home/.codex/coder.config.toml")" = "$repo/seats/codex/coder.config.toml"
-
-newhome
-mkdir -p "$home/.codex/rules"
 printf 'foreign target' >"$tmp/codex-target"
-ln -s "$tmp/codex-target" "$home/.codex/coder.config.toml"
-inst; code=$?
-is "foreign Codex profile link refuses without force" test "$code" -eq 1
-is "foreign Codex profile link remains without force" test -L "$home/.codex/coder.config.toml"
-inst --force; code=$?
-is "force replaces foreign Codex profile link" test "$code" -eq 0 -a -L "$home/.codex/coder.config.toml" -a "$(readlink "$home/.codex/coder.config.toml")" = "$repo/seats/codex/coder.config.toml"
-is "foreign Codex profile link target stays unchanged" test "$(cat "$tmp/codex-target")" = 'foreign target'
+ln -s "$tmp/codex-target" "$home/.codex/analyst.config.toml"
+ln -s "$repo/seats/codex/manager.config.toml" "$home/.codex/manager.config.toml"
+mkdir "$home/.codex/reviewer.config.toml"
+{
+  printf 'prefix_rule(pattern=["ls"], decision="allow")\n'
+  rules_block
+} >"$rules"
+ln -s "$repo/seats/codex/rules/agentboard.rules" "$home/.codex/rules/agentboard.rules"
+cp "$home/.codex/coder.config.toml" "$tmp/codex-foreign-before"
+cp "$rules" "$tmp/rules-before"
+chmod 640 "$rules"
+for args in "" "--force"; do
+  # shellcheck disable=SC2086
+  inst $args; code=$?
+  is "Codex leftovers ${args:-plain} install succeeds" test "$code" -eq 0
+  same "foreign regular Codex profile kept ${args:-plain}" "$tmp/codex-foreign-before" "$home/.codex/coder.config.toml"
+  is "foreign Codex profile link kept ${args:-plain}" test "$(readlink "$home/.codex/analyst.config.toml")" = "$tmp/codex-target" -a "$(cat "$tmp/codex-target")" = 'foreign target'
+  is "repo Codex profile link kept ${args:-plain}" test "$(readlink "$home/.codex/manager.config.toml")" = "$repo/seats/codex/manager.config.toml"
+  is "Codex profile directory kept ${args:-plain}" test -d "$home/.codex/reviewer.config.toml"
+  same "default.rules with old block byte-identical ${args:-plain}" "$tmp/rules-before" "$rules"
+  is "default.rules mode kept ${args:-plain}" test "$(stat -c %a "$rules")" = 640
+  is "old rules link kept ${args:-plain}" test -L "$home/.codex/rules/agentboard.rules"
+  has "repo Codex profile link named ${args:-plain}" "note: leftover from an older installer, no longer used; delete it by hand: $home/.codex/manager.config.toml" "$tmp/out"
+  has "old rules block named ${args:-plain}" "note: leftover from an older installer, no longer used; delete it by hand: $rules (agentboard block)" "$tmp/out"
+  is "user Codex files not named ${args:-plain}" bash -c '! grep -Eq "(coder|analyst|reviewer)\.config\.toml" "$1"' _ "$tmp/out"
+  is "no temp file left in rules ${args:-plain}" test -z "$(ls -A "$home/.codex/rules" | grep -F .agentboard. || true)"
+done
 
+# --- skills: one canonical link per repo skill in ~/.agents/skills ----------
+skill_names="agentboard-analyst agentboard-coder agentboard-manager agentboard-reviewer agentboard-team"
+for agent in codex grok codewhale claude; do
+  newhome
+  rm -rf "$home/.agents"
+  inst --agent "$agent"; code=$?
+  is "--agent $agent install succeeds from a home with no skills" test "$code" -eq 0
+  is "--agent $agent links all five canonical skills" bash -c 'for s in $2; do test "$(readlink "$1/.agents/skills/$s")" = "$3/skills/$s" || exit 1; done' _ "$home" "$skill_names" "$repo"
+  has "--agent $agent reports a linked skill" "linked: $home/.agents/skills/agentboard-team -> $repo/skills/agentboard-team" "$tmp/out"
+  is "--agent $agent writes no skill alias into ~/.claude" test ! -e "$home/.claude/skills"
+done
+is "Claude role home links seat skill through canonical name" test "$(readlink "$home/.local/share/agentboard/seats/coder/claude/skills/agentboard-coder")" = "$home/.agents/skills/agentboard-coder"
+inst --agent claude
+is "rerun leaves canonical skills alone" bash -c '! grep -q "^linked: .*/.agents/skills/" "$1"' _ "$tmp/out"
+printf 'unrelated\n' >"$tmp/other-skill"
+ln -s "$tmp/other-skill" "$home/.agents/skills/someone-else"
+ln -sfn /old/checkout/skills/agentboard-team "$home/.agents/skills/agentboard-team"
+rm "$home/.agents/skills/agentboard-coder"
+printf 'mine\n' >"$home/.agents/skills/agentboard-coder"
+inst --agent codex; code=$?
+is "foreign canonical skill entries refuse without force" test "$code" -eq 1
+has "foreign skill link named" "exists: $home/.agents/skills/agentboard-team (use --force)" "$tmp/err"
+has "foreign skill file named" "exists: $home/.agents/skills/agentboard-coder (use --force)" "$tmp/err"
+is "refusal keeps foreign skill link" test "$(readlink "$home/.agents/skills/agentboard-team")" = /old/checkout/skills/agentboard-team
+is "refusal writes no Codex role home" test ! -e "$home/.local/share/agentboard/seats/coder/codex"
+inst --agent codex --force; code=$?
+is "force replaces foreign skill entries" test "$code" -eq 0 -a "$(readlink "$home/.agents/skills/agentboard-team")" = "$repo/skills/agentboard-team" -a "$(readlink "$home/.agents/skills/agentboard-coder")" = "$repo/skills/agentboard-coder"
+is "unrelated skills left alone" test "$(readlink "$home/.agents/skills/someone-else")" = "$tmp/other-skill"
+rm "$home/.agents/skills/agentboard-analyst"
+mkdir -p "$home/.agents/skills/agentboard-analyst"
+printf 'keep\n' >"$home/.agents/skills/agentboard-analyst/notes"
+inst --agent codex --force; code=$?
+is "real skill directory refuses even under force" test "$code" -eq 1
+has "real skill directory named" "real directory at skill destination: $home/.agents/skills/agentboard-analyst" "$tmp/err"
+is "real skill directory contents kept" test "$(cat "$home/.agents/skills/agentboard-analyst/notes")" = keep
 newhome
-mkdir -p "$home/.codex/rules" "$home/.claude"
-mkdir "$home/.codex/coder.config.toml"
-inst --force; code=$?
-is "Codex directory refuses under force" test "$code" -eq 1
-is "Codex directory survives force refusal" test -d "$home/.codex/coder.config.toml"
-is "Codex directory refusal writes no Claude card" test ! -e "$home/.claude/coder-mcp.json"
-is "Codex directory refusal writes no rules" test ! -e "$rules"
+rm -rf "$home/.agents"
+printf 'not a dir' >"$home/.agents"
+inst --agent grok; code=$?
+is "non-directory ~/.agents refuses" test "$code" -eq 1 -a ! -e "$home/.local/share/agentboard"
+has "non-directory ~/.agents named in preflight" "invalid skills directory: $home/.agents" "$tmp/err"
+is "non-directory ~/.agents refusal is not a crash" bash -c '! grep -q Traceback "$1"' _ "$tmp/err"
+rm "$home/.agents"
 
-# --- grok-only does not manage the PATH launcher ------------------------------
+# --- the launcher's old name is named as a leftover, never removed ----------
+newhome
+mkdir -p "$home/.local/bin"
+ln -s "$repo/seats/start-agentboard-manager" "$home/.local/bin/start-agentboard-manager"
+inst; code=$?
+is "old launcher name install succeeds" test "$code" -eq 0
+is "old launcher link kept" test -L "$home/.local/bin/start-agentboard-manager"
+is "new launcher linked" test "$(readlink "$home/.local/bin/agentboard-manager")" = "$launcher"
+has "old launcher link named" "note: leftover from an older installer, no longer used; delete it by hand: $home/.local/bin/start-agentboard-manager" "$tmp/out"
+
+# --- a profile MCP table without command or url is refused at install time ---
+newhome
+fake=$tmp/fake-repo
+rm -rf "$fake" "$home/.agents"; mkdir -p "$fake"
+cp -r "$repo/install.py" "$repo/seats" "$repo/skills" "$fake/"
+HOME="$home" PATH="$tmp/bin:$PATH" "$fake/install.py" --agent codex --skip-binary >"$tmp/out" 2>"$tmp/err"; code=$?
+is "fake repo copy installs cleanly before the bad table" test "$code" -eq 0
+rm -rf "$home/.local/share/agentboard/seats"
+printf '\n[mcp_servers.codebase-memory-mcp]\ndefault_tools_approval_mode = "approve"\n' >>"$fake/seats/codex/coder.config.toml"
+HOME="$home" PATH="$tmp/bin:$PATH" "$fake/install.py" --agent codex --skip-binary >"$tmp/out" 2>"$tmp/err"; code=$?
+is "bare profile MCP table refuses" test "$code" -eq 1
+has "bare profile MCP table named" "Codex role profile has MCP servers without command or url: $fake/seats/codex/coder.config.toml: codebase-memory-mcp" "$tmp/err"
+is "bare profile MCP table writes no role home" test ! -e "$home/.local/share/agentboard/seats"
+rm -rf "$fake"
+
+# --- the binary: cargo install after preflight, before any config write ------
+newhome
+: >"$STUB_CARGO_LOG"
+inst --agent grok; code=$?
+is "default install builds the binary" test "$code" -eq 0 -a "$(cat "$STUB_CARGO_LOG")" = "install --path $repo --locked"
+has "build is announced" "building: cargo install --path $repo --locked" "$tmp/out"
+newhome
+: >"$STUB_CARGO_LOG"
+inst --agent grok --skip-binary; code=$?
+is "--skip-binary never runs cargo" test "$code" -eq 0 -a ! -s "$STUB_CARGO_LOG"
+is "--skip-binary still writes configs and skills" test -f "$home/.local/share/agentboard/seats/manager/grok/config.toml" -a -L "$home/.agents/skills/agentboard-team"
+newhome
+rm -rf "$home/.agents"
+: >"$STUB_CARGO_LOG"
+STUB_CARGO_EXIT=101 inst; code=$?
+is "failed build exits 1" test "$code" -eq 1
+has "failed build says nothing else was written" "cargo install failed (exit 101); nothing else was written" "$tmp/err"
+is "failed build writes no seat home, skill or launcher" test ! -e "$home/.local/share/agentboard" -a ! -e "$home/.agents" -a ! -e "$home/.local/bin/agentboard-manager"
+newhome
+mkdir -p "$home/.local/share/agentboard/seats/analyst"
+ln -s "$tmp" "$home/.local/share/agentboard/seats/analyst/grok"
+: >"$STUB_CARGO_LOG"
+inst --agent grok; code=$?
+is "preflight refusal never builds" test "$code" -eq 1 -a ! -s "$STUB_CARGO_LOG"
+newhome
+: >"$STUB_CARGO_LOG"
+HOME="$home" PATH="$tmp/nocargo:/usr/bin:/bin" ./install.py --agent grok >"$tmp/out" 2>"$tmp/err"; code=$?
+is "missing cargo refuses" test "$code" -eq 1 -a ! -e "$home/.local/share/agentboard"
+has "missing cargo names the way out" "cargo not found; install Rust or rerun with --skip-binary" "$tmp/err"
+
+# --- a Grok-only install does not manage the PATH launcher -------------------
 newhome
 grok_inst
-is "grok-only leaves manager launcher alone" test ! -e "$home/.local/bin/start-agentboard-manager"
-is "grok-only leaves user unit alone" test ! -e "$home/.config/systemd/user/agentboard.service"
+is "Grok-only leaves manager launcher alone" test ! -e "$home/.local/bin/agentboard-manager"
+is "Grok-only leaves user unit alone" test ! -e "$home/.config/systemd/user/agentboard.service"
 
-# --- user rules, no trailing newline: original bytes stay the prefix ---------
+# --- help and the three-flag surface -----------------------------------------
 newhome
-mkdir -p "$home/.codex/rules"
-printf 'prefix_rule(pattern=["ls"], decision="allow")' >"$rules"
-cp "$rules" "$tmp/orig"
-inst
-is "append keeps the original bytes" cmp -s -n "$(wc -c <"$tmp/orig")" "$tmp/orig" "$rules"
-is "append adds exactly one newline" test "$(head -c "$(($(wc -c <"$tmp/orig") + 1))" "$rules" | tail -c 1 | od -An -c | tr -d ' ')" = '\n'
-tail -n "$(wc -l <"$src")" "$rules" >"$tmp/tail"
-same "append ends with the block" "$src" "$tmp/tail"
-sum=$(cksum <"$rules")
-inst
-is "second run is idempotent" test "$(cksum <"$rules")" = "$sum"
-has "second run says unchanged" 'unchanged:' "$tmp/out"
-inst --force
-is "force on an identical block keeps bytes" test "$(cksum <"$rules")" = "$sum"
-has "force on an identical block says unchanged" 'unchanged:' "$tmp/out"
-
-# --- an edited block: plain run keeps it, --force replaces it in place -------
-newhome
-mkdir -p "$home/.codex/rules"
-{
-  echo 'prefix_rule(pattern=["before"], decision="allow")'
-  sed 's/"agentboard"/"edited"/' "$src"
-  echo 'prefix_rule(pattern=["after"], decision="allow")'
-} >"$rules"
-cp "$rules" "$tmp/edited"
-inst
-same "plain run leaves an edited block" "$tmp/edited" "$rules"
-has "plain run notes the difference" 'differs from the repo' "$tmp/err"
-has "plain run says unchanged" 'unchanged:' "$tmp/out"
-inst --force
-has "force says replaced" 'replaced:' "$tmp/out"
-{
-  echo 'prefix_rule(pattern=["before"], decision="allow")'
-  cat "$src"
-  echo 'prefix_rule(pattern=["after"], decision="allow")'
-} >"$tmp/expect"
-same "force replaces only the marked range, in place" "$tmp/expect" "$rules"
-
-# --- malformed markers refuse, with and without --force ----------------------
-B='# BEGIN AGENTBOARD RULES'
-E='# END AGENTBOARD RULES'
-n_case=0
-while IFS='|' read -r label body; do
-  for args in "" "--force"; do
-    newhome
-    mkdir -p "$home/.codex/rules"
-    printf '%b' "$body" >"$rules"
-    # shellcheck disable=SC2086
-    refused "malformed $label ${args:-plain}" $args
-    has "malformed $label ${args:-plain} text" 'malformed agentboard block' "$tmp/err"
-  done
-done <<EOF
-duplicate begin|$B\nx\n$B\n$E\n
-duplicate end|$B\n$E\n$E\n
-begin only|a\n$B\nb\n
-end only|a\n$E\nb\n
-end before begin|$E\n$B\n
-indented begin|  $B\nx\n$E\n
-trailing space end|$B\nx\n$E \n
-valid pair plus indented begin|$B\nx\n$E\n  $B\n
-EOF
-
-# --- CRLF files get a CRLF block, and a rerun changes nothing ----------------
-newhome
-mkdir -p "$home/.codex/rules"
-printf 'prefix_rule(pattern=["ls"], decision="allow")\r\n' >"$rules"
-inst
-is "crlf block ends with a crlf end marker" test "$(tail -n 1 "$rules" | tr -d '\r')" = "$E" -a "$(tail -n 1 "$rules" | tail -c 2 | od -An -c | tr -d ' ')" = '\r\n'
-is "crlf file has no bare lf" test "$(grep -c $'\r$' "$rules")" -eq "$(wc -l <"$rules")"
-sum=$(cksum <"$rules")
-inst
-is "crlf rerun is idempotent" test "$(cksum <"$rules")" = "$sum"
-inst --force
-is "crlf force keeps a current block" test "$(cksum <"$rules")" = "$sum"
-
-# --- a symlinked or non-file default.rules is never followed or replaced -----
-newhome
-mkdir -p "$home/.codex/rules"
-printf 'target\n' >"$home/target.rules"
-ln -s "$home/target.rules" "$rules"
-for args in "" "--force"; do
-  inst $args; code=$?
-  is "symlink ${args:-plain} exit" test "$code" -eq 1
-  is "symlink ${args:-plain} still a link" test "$(readlink "$rules")" = "$home/target.rules"
-  is "symlink ${args:-plain} target unchanged" test "$(cat "$home/target.rules")" = target
-  has "symlink ${args:-plain} text" 'is a symlink' "$tmp/err"
-  is "symlink ${args:-plain} links nothing" test ! -e "$home/.codex/coder.config.toml"
+for args in -h --help; do
+  root_inst $args; code=$?
+  is "$args exits 0" test "$code" -eq 0
+  has "$args shows usage" 'usage: install.py [-h] [--agent AGENT[,AGENT...]] [--force] [--skip-binary]' "$tmp/out"
+  has "$args lists client names" 'codex,codewhale,claude,grok' "$tmp/out"
+  is "$args writes nothing" test ! -e "$home/.local/share/agentboard" -a ! -e "$home/.local/bin"
 done
-newhome
-mkdir -p "$rules"
-inst --force; code=$?
-is "directory default.rules exit" test "$code" -eq 1
-has "directory default.rules text" 'not a regular file' "$tmp/err"
-
-# --- mode is preserved on replace and append --------------------------------
-newhome
-mkdir -p "$home/.codex/rules"
-cat "$src" >"$rules"
-sed -i 's/"agentboard"/"edited"/' "$rules"
-chmod 640 "$rules"
-inst --force
-is "replace keeps mode" test "$(stat -c %a "$rules")" = 640
-newhome
-mkdir -p "$home/.codex/rules"
-printf 'x\n' >"$rules"
-chmod 600 "$rules"
-inst
-is "append keeps mode" test "$(stat -c %a "$rules")" = 600
-is "no temp file left" test -z "$(ls -A "$home/.codex/rules" | grep -F .default.rules.agentboard || true)"
-
-# --- legacy rules/agentboard.rules ------------------------------------------
-newhome
-mkdir -p "$home/.codex/rules"
-ln -s "$src" "$home/.codex/rules/agentboard.rules"
-inst
-is "repo-pointing legacy link removed" test ! -e "$home/.codex/rules/agentboard.rules" -a ! -L "$home/.codex/rules/agentboard.rules"
-has "legacy removal reported" 'removed:' "$tmp/out"
-newhome
-mkdir -p "$home/.codex/rules"
-ln -s /old/checkout/agentboard.rules "$home/.codex/rules/agentboard.rules"
-inst
-is "foreign legacy link kept" test -L "$home/.codex/rules/agentboard.rules"
-has "foreign legacy link noted" 'foreign link' "$tmp/err"
-inst --force
-is "force removes a foreign legacy link" test ! -L "$home/.codex/rules/agentboard.rules"
-newhome
-mkdir -p "$home/.codex/rules"
-printf 'mine\n' >"$home/.codex/rules/agentboard.rules"
-inst --force
-is "legacy regular file kept" test "$(cat "$home/.codex/rules/agentboard.rules")" = mine
-has "legacy regular file noted" 'regular file' "$tmp/err"
-
-# --- an empty rules source is refused, not a crash ---------------------------
-newhome
-mkdir -p "$tmp/fake/codex/rules"
-cp -r seats/. "$tmp/fake/"
-: >"$tmp/fake/codex/rules/agentboard.rules"
-HOME="$home" CODEX_HOME="$home/.codex" python3 "$tmp/fake/install.py" >"$tmp/out" 2>"$tmp/err"; code=$?
-is "empty rules source refused" test "$code" -eq 1
-has "empty rules source named" 'bad rules source' "$tmp/err"
-is "empty rules source links nothing" test ! -e "$home/.codex/coder.config.toml"
+for flag in --grok-only --skip-grok '--codewhale-provider custom' --bogus; do
+  # shellcheck disable=SC2086
+  root_inst $flag; code=$?
+  is "removed flag $flag exits usage 2" test "$code" -eq 2 -a ! -e "$home/.local/share/agentboard"
+  has "removed flag $flag prints usage" 'usage: install.py [-h] [--agent AGENT[,AGENT...]] [--force] [--skip-binary]' "$tmp/err"
+done
 
 # --- isolated Grok role homes; legacy ~/.grok remains untouched --------------
 newhome
@@ -789,7 +747,7 @@ has "force preserves unrelated UI setting" 'note = "keep"' "$home/.local/share/a
 has "force preserves unrelated MCP table" '[mcp_servers.other]' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
 is "force removes unmarked token from role config" bash -c '! grep -q synthetic "$1"' _ "$home/.local/share/agentboard/seats/manager/grok/config.toml"
 
-# --agent grok isolates Grok; --skip-grok never examines a malformed Grok base.
+# --agent grok isolates Grok; leaving grok out never examines a malformed Grok base.
 newhome
 mkdir -p "$home/.grok" "$home/.codex/rules"
 printf '[ui]\ntheme = "dark"\n' >"$home/.grok/config.toml"
@@ -799,9 +757,9 @@ is "selected Grok skips unrelated malformed Codex input" test "$code" -eq 0
 is "selected Grok leaves Codex destination unchanged" test "$(cat "$home/.codex/coder.config.toml")" = 'unselected Codex profile'
 rm -rf "$home/.local/share/agentboard/seats/analyst/grok" "$home/.local/share/agentboard/seats/coder/grok" "$home/.local/share/agentboard/seats/manager/grok" "$home/.local/share/agentboard/seats/reviewer/grok"
 printf 'not TOML = [' >"$home/.grok/config.toml"
-inst --skip-grok --force; code=$?
-is "skip Grok succeeds with malformed Grok base" test "$code" -eq 0
-is "skip Grok does not publish Grok role homes" test ! -e "$home/.local/share/agentboard/seats/analyst/grok"
+inst --agent codex,claude,codewhale --force; code=$?
+is "unselected Grok succeeds with malformed Grok base" test "$code" -eq 0
+is "unselected Grok does not publish Grok role homes" test ! -e "$home/.local/share/agentboard/seats/analyst/grok"
 
 # --- Codewhale per-seat homes: own config + MCP card, never ~/.codewhale ---
 newhome
@@ -891,15 +849,7 @@ for seat in analyst coder manager reviewer; do
 done
 same "source auth remains byte-identical after install" "$tmp/base-key-before" "$home/.codewhale/fake-auth/base-provider"
 same "other source API key remains byte-identical" "$tmp/explicit-key-before" "$home/.codewhale/fake-auth/explicit-provider"
-inst --codewhale-provider explicit-provider
-is "explicit provider overrides base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="explicit-provider"' "$cw/coder/codewhale/config.toml"
-for seat in analyst coder manager reviewer; do
-  HOME="$home" CODEWHALE_HOME="$cw/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
-    AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider explicit-provider >"$tmp/seat-key"
-  is "$seat has explicit provider key" cmp -s "$tmp/expected-explicit-key" "$tmp/seat-key"
-done
 inst
-is "omitting provider override restores base provider" python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb"))["provider"]=="base-provider"' "$cw/coder/codewhale/config.toml"
 cp -r "$cw" "$tmp/cw-idempotent-before"
 inst
 is "auth and generated homes are byte-idempotent" diff -r "$tmp/cw-idempotent-before" "$cw"
@@ -1086,34 +1036,6 @@ is "malformed Codewhale TOML refused" test "$code" -eq 1
 has "malformed Codewhale TOML diagnosed" 'invalid TOML in' "$tmp/err"
 is "malformed TOML wrote no seat output" test ! -e "$home/.local/share/agentboard/seats"
 
-# --codewhale-provider writes only the provider name; a bad name is a usage error
-newhome
-mkdir -p "$home/.codex/rules"
-mkdir -p "$home/.codewhale/fake-auth"
-printf '%s' 'deepseek-fixture-key' >"$home/.codewhale/fake-auth/deepseek"
-printf 'provider config store env route\ndeepseek yes no no config\n' >"$home/.codewhale/auth-inventory"
-printf '%s\n' 'deepseek-fixture-key' >"$tmp/expected-deepseek-key"
-printf '%s\n' deepseek-fixture-key >>"$tmp/fixture-secrets"
-inst --codewhale-provider deepseek; code=$?
-is "provider install exit" test "$code" -eq 0
-for seat in analyst coder manager reviewer; do
-  has "$seat provider line" 'provider = "deepseek"' "$home/.local/share/agentboard/seats/$seat/codewhale/config.toml"
-  is "$seat provider config valid TOML" python3 -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1],"rb")); assert c["provider"]=="deepseek" and len(c["hooks"]["hooks"])==3' "$home/.local/share/agentboard/seats/$seat/codewhale/config.toml"
-  HOME="$home" CODEWHALE_HOME="$home/.local/share/agentboard/seats/$seat/codewhale" AGENTBOARD_FAKE_AUTH_DIR="$home/.codewhale/fake-auth" \
-    AGENTBOARD_FAKE_AUTH_LOG="$tmp/codewhale-auth.log" "$tmp/bin/codewhale" auth print-api-key --provider deepseek >"$tmp/seat-key"
-  is "$seat receives explicit provider key" cmp -s "$tmp/expected-deepseek-key" "$tmp/seat-key"
-done
-is "all fixture API keys absent from generated config files" bash -c '! grep -Ff "$1" "$2" "$3" "$4" "$5"' _ "$tmp/fixture-secrets" "$home/.local/share/agentboard/seats/analyst/codewhale/config.toml" "$home/.local/share/agentboard/seats/coder/codewhale/config.toml" "$home/.local/share/agentboard/seats/manager/codewhale/config.toml" "$home/.local/share/agentboard/seats/reviewer/codewhale/config.toml"
-is "explicit provider auth artifact is private" test "$(stat -c %a "$home/.local/share/agentboard/seats/coder/codewhale/auth/deepseek.key")" = 600
-is "explicit provider key absent from config" bash -c '! grep -q deepseek-fixture-key "$1"' _ "$home/.local/share/agentboard/seats/coder/codewhale/config.toml"
-is "all fixture keys absent from installer output and argv logs" bash -c '! grep -Ff "$1" "$2" "$3" "$4"' _ "$tmp/fixture-secrets" "$tmp/installer-stdout.log" "$tmp/installer-stderr.log" "$tmp/codewhale-auth.log"
-newhome
-inst --codewhale-provider 'x"; yolo = false'; code=$?
-is "bad provider name usage error" test "$code" -eq 2
-is "bad provider writes nothing" test ! -e "$home/.local/share/agentboard"
-inst --grok-only; code=$?
-is "grok-only writes no Codewhale home" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
-
 # Root entrypoint and selective client preflight/write boundaries.
 newhome
 mkdir -p "$home/.codex/rules" "$home/.grok" "$home/.codewhale"
@@ -1122,11 +1044,11 @@ printf '{bad grok' >"$home/.grok/config.toml"
 printf '{bad codewhale' >"$home/.codewhale/mcp.json"
 root_inst --agent codex; code=$?
 is "root codex singleton succeeds despite malformed unselected inputs" test "$code" -eq 0
-is "codex singleton installs codex profile" test -L "$home/.codex/coder.config.toml"
-is "codex singleton skips Claude files" test ! -e "$home/.claude/coder-mcp.json"
+is "codex singleton installs codex role home" test -f "$home/.local/share/agentboard/seats/coder/codex/coder.config.toml" -a ! -e "$home/.codex/coder.config.toml"
+is "codex singleton skips Claude files" test ! -e "$home/.local/share/agentboard/seats/coder/claude"
 is "codex singleton skips Codewhale files" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
 is "codex singleton skips Grok config" test "$(cat "$home/.grok/config.toml")" = '{bad grok'
-is "codex singleton skips shared launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+is "codex singleton skips shared launcher and unit" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
 newhome
 mkdir -p "$home/.codex/rules" "$home/.grok" "$home/.codewhale"
@@ -1135,21 +1057,21 @@ printf '{bad grok' >"$home/.grok/config.toml"
 printf '{bad codewhale' >"$home/.codewhale/mcp.json"
 root_inst --agent codex,claude; code=$?
 is "root codex and Claude pair ignores malformed unselected clients" test "$code" -eq 0
-is "pair writes Claude output" test -f "$home/.claude/coder-mcp.json"
-is "pair writes Codex output" test -L "$home/.codex/coder.config.toml"
+is "pair writes Claude output" test -f "$home/.local/share/agentboard/seats/coder/claude/mcp.json"
+is "pair writes Codex output" test -f "$home/.local/share/agentboard/seats/coder/codex/coder.config.toml"
 is "pair skips Codewhale output" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
 is "pair leaves Grok bytes alone" test "$(cat "$home/.grok/config.toml")" = '{bad grok'
-is "pair leaves launcher and unit alone" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+is "pair leaves launcher and unit alone" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
 newhome
 mkdir -p "$home/.codex/rules"
 root_inst --agent codex,codewhale; code=$?
 is "root codex and Codewhale pair succeeds" test "$code" -eq 0
-is "Codewhale pair writes Codex profile" test -L "$home/.codex/coder.config.toml"
+is "Codewhale pair writes Codex profile" test -f "$home/.local/share/agentboard/seats/coder/codex/coder.config.toml"
 is "Codewhale pair writes selected Codewhale home" test -f "$home/.local/share/agentboard/seats/coder/codewhale/config.toml" -a -f "$home/.local/share/agentboard/seats/coder/codewhale/mcp.json"
-is "Codewhale pair skips Claude files" test ! -e "$home/.claude/coder-mcp.json"
+is "Codewhale pair skips Claude files" test ! -e "$home/.local/share/agentboard/seats/coder/claude"
 is "Codewhale pair skips Grok" test ! -e "$home/.grok/config.toml"
-is "Codewhale pair skips shared launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+is "Codewhale pair skips shared launcher and unit" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
 newhome
 mkdir -p "$home/.grok" "$home/.codewhale"
@@ -1161,7 +1083,7 @@ is "Grok singleton installs manager role config" grep -qF 'url = "http://127.0.0
 is "Grok singleton skips Codex profiles" test ! -e "$home/.codex/coder.config.toml"
 is "Grok singleton skips Claude outputs" test ! -e "$home/.claude/coder-mcp.json"
 is "Grok singleton skips Codewhale outputs" test ! -e "$home/.local/share/agentboard/seats/coder/codewhale"
-is "Grok singleton skips launcher and unit" test ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+is "Grok singleton skips launcher and unit" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
 newhome
 mkdir -p "$home/.codex/rules" "$home/.grok"
@@ -1189,7 +1111,7 @@ mkdir -p "$home/.codex/rules"
 printf '{bad json' >"$home/.claude.json"
 root_inst --agent claude; code=$?
 is "selected malformed Claude input refuses" test "$code" -eq 1
-is "selected malformed Claude input writes no output" test ! -e "$home/.claude/coder-mcp.json" -a ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.local/bin/start-agentboard-manager"
+is "selected malformed Claude input writes no output" test ! -e "$home/.claude/coder-mcp.json" -a ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.local/bin/agentboard-manager"
 is "selected malformed Claude input writes no role home" test ! -e "$home/.local/share/agentboard/seats"
 
 newhome
@@ -1199,7 +1121,7 @@ printf '{malformed' >"$home/.codewhale/mcp.json"
 root_inst --agent claude; code=$?
 is "selected Claude succeeds with malformed unselected clients" test "$code" -eq 0
 is "selected Claude publishes all four role homes" test -f "$home/.local/share/agentboard/seats/analyst/claude/mcp.json" -a -f "$home/.local/share/agentboard/seats/coder/claude/mcp.json" -a -f "$home/.local/share/agentboard/seats/manager/claude/mcp.json" -a -f "$home/.local/share/agentboard/seats/reviewer/claude/mcp.json"
-is "selected Claude leaves other clients and shared installs untouched" test ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.local/share/agentboard/seats/coder/codex" -a ! -e "$home/.local/share/agentboard/seats/coder/codewhale" -a "$(cat "$home/.grok/config.toml")" = '[malformed' -a ! -e "$home/.local/bin/start-agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
+is "selected Claude leaves other clients and shared installs untouched" test ! -e "$home/.codex/coder.config.toml" -a ! -e "$home/.local/share/agentboard/seats/coder/codex" -a ! -e "$home/.local/share/agentboard/seats/coder/codewhale" -a "$(cat "$home/.grok/config.toml")" = '[malformed' -a ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 
 for input in settings credentials; do
   newhome
@@ -1224,20 +1146,6 @@ done
 newhome
 root_inst --agent codex --agent claude; code=$?
 is "repeated --agent exits usage 2 before writes" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml"
-newhome
-root_inst --agent codex --skip-grok; code=$?
-is "selector with legacy Grok flag exits usage 2" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml"
-newhome
-root_inst --agent claude --codewhale-provider custom; code=$?
-is "provider without selected Codewhale exits usage 2" test "$code" -eq 2 -a ! -e "$home/.claude/coder-mcp.json"
-newhome
-root_inst --codewhale-provider custom --skip-grok; code=$?
-is "provider outside default full install exits usage 2" test "$code" -eq 2 -a ! -e "$home/.codex/coder.config.toml"
-newhome
-root_inst --agent codewhale --codewhale-provider custom; code=$?
-is "provider override is valid for selected Codewhale" test "$code" -eq 0 -a -f "$home/.local/share/agentboard/seats/coder/codewhale/config.toml"
-is "selected Codewhale provider is applied" grep -qF 'provider = "custom"' "$home/.local/share/agentboard/seats/coder/codewhale/config.toml"
-
 # Legacy Codewhale homes are copied into role-first destinations without mutation.
 newhome
 mkdir -p "$home/.codex/rules" "$home/.codewhale/fake-auth"
@@ -1299,5 +1207,5 @@ has "team manual documents Grok role homes for each seat" 'GROK_HOME="$HOME/.loc
 has "manager skill documents herdr Grok home and read-only policy" 'GROK_HOME="$HOME/.local/share/agentboard/seats/analyst/grok" herdr agent start analyst' "$repo/skills/agentboard-manager/SKILL.md"
 has "seat README documents reviewer Grok home" 'GROK_HOME="$HOME/.local/share/agentboard/seats/reviewer/grok"' "$repo/seats/README.md"
 
-echo "$((n - fail))/$n passed (seats installer)"
+echo "$((n - fail))/$n passed (installer)"
 [ "$fail" -eq 0 ]

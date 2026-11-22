@@ -73,7 +73,3 @@ hide_rate_limit_model_nudge = true
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "thread-name", "five-hour-limit", "weekly-limit", "context-used"]
 status_line_use_colors = true
-
-[mcp_servers.codebase-memory-mcp]
-default_tools_approval_mode = "approve"
-

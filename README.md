@@ -18,9 +18,14 @@ the process that wrote it.
 ## Build and install
 
 ```bash
-cargo build --release          # target/release/agentboard
-cargo install --path . --locked   # ~/.cargo/bin/agentboard
+./install.py                   # cargo install --path . --locked, skills, seat homes
+./install.py --skip-binary     # skills and seat homes only
+cargo build --release          # target/release/agentboard, nothing installed
 ```
+
+`./install.py` is the one installer: it builds and installs `~/.cargo/bin/agentboard`,
+links the skills into `~/.agents/skills`, and generates each client's per-role seat
+homes; see `seats/README.md`.
 
 Rust 1.89 or newer, edition 2024. The only C dependency is the one `heed` builds
 with `cc`.
@@ -274,5 +279,5 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
 - `skills/agentboard-manager`, `skills/agentboard-analyst`, `skills/agentboard-coder`,
   `skills/agentboard-reviewer` — one entry skill per seat; Grok's manager recipe is
   in `skills/agentboard-manager/SKILL.md`.
-- `seats/` — client cards and their installer; see `seats/README.md` for the
+- `seats/` — client cards the root `install.py` turns into seat homes; see `seats/README.md` for the
   HTTP cards and optional systemd user unit.

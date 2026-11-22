@@ -8,16 +8,32 @@ its client gets a board identity.
 | Path | Seat | Loaded by |
 |---|---|---|
 | `~/.local/share/agentboard/seats/<seat>/codex/` | analyst, coder, manager, reviewer | `CODEX_HOME=... codex -p <seat>` |
-| `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | generated into each isolated role home; legacy `~/.codex` links remain for compatibility |
-| `codex/rules/agentboard.rules` | legacy shared Codex home | marked block inside `${CODEX_HOME:-~/.codex}/rules/default.rules`; isolated role homes do not copy host rules |
-| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | merged into role `mcp.json`; legacy card remains at `~/.claude/<seat>-mcp.json` |
+| `codex/<seat>.config.toml` | analyst, coder, manager, reviewer | copied into each isolated role home |
+| `claude/<seat>-mcp.json` | analyst, coder, manager, reviewer | merged into the role home's `mcp.json` |
 | `grok/agentboard-mcp.toml` | grok (all seats) | rendered into private role homes by `install.py` |
 | `systemd/agentboard.service` | shared HTTP daemon | linked to `~/.config/systemd/user/agentboard.service` |
 
 ## Install
 
-    python3 skills/install.py --force
-    ./install.py --force
+    ./install.py [--agent AGENT[,AGENT...]] [--force] [--skip-binary]
+
+Every run also links the five repo skills into `~/.agents/skills` (see
+`../skills/README.md` for which client reads them from where).
+
+Run it from anywhere; it lives at the repository root and is the only installer.
+`./install.py -h` prints the same usage. Those four are the only flags. Once every
+preflight check passes, it runs `cargo install --path <repo> --locked` to build and
+install `~/.cargo/bin/agentboard`, then writes skills and seat homes; a failed
+build exits 1 with nothing else written. `--skip-binary` skips the build.
+
+The installer writes only under `~/.local/share/agentboard/seats/<seat>/<client>`,
+the five `~/.agents/skills` links, and, on a full install, the two links below. The default client homes
+(`~/.codex`, `~/.claude`, `~/.claude.json`, `~/.grok`, `~/.codewhale`) are read as
+bases and never written. Files an older installer put there (repo-pointing
+`~/.codex/<seat>.config.toml` links, the `# BEGIN AGENTBOARD RULES` block in
+`~/.codex/rules/default.rules`, generated or repo-linked `~/.claude/<seat>-mcp.json`
+cards) are no longer used; each run names any it finds in a
+`note: leftover from an older installer` line and leaves them for you to delete.
 
 For Codex, it reads `~/.codex/config.toml` and `~/.codex/auth.json` without
 changing them, validates both, then creates a private role home at
@@ -25,30 +41,22 @@ changing them, validates both, then creates a private role home at
 role profile are copied; rules, sessions, logs, caches and SQLite files are not.
 The home is mode `0700`, copied files are mode `0600`, and each role profile
 overlays its own agentboard URL and permission policy. Launches set `CODEX_HOME`
-to this role home. Existing `${CODEX_HOME:-~/.codex}/<seat>.config.toml` links and
-the shared rules block remain managed for compatibility, but launches do not use
-them. If `CODEX_HOME` points at a generated role home, compatibility writes stay
-under `~/.codex`; the installer removes legacy profile links and managed rules it
-finds in that restricted home. Missing base auth refuses generation, and a forced
-refresh removes stale private snapshots when the base auth file has been revoked.
+to this role home; the installer itself ignores `CODEX_HOME`. Profile links and
+rules an older installer left inside a role home are removed. Missing base auth
+refuses generation, and a forced refresh removes stale private snapshots when the
+base auth file has been revoked.
 Generated role homes are not replaced without `--force`; an unmanaged home is
 refused and must be moved aside. Claude role homes are generated at
-`~/.local/share/agentboard/seats/<seat>/claude`; install canonical skills first
-with `python3 skills/install.py`. The legacy `~/.claude/<seat>-mcp.json` files
-remain generated for older launch commands. Repo card links
-from older installs are safely replaced; `--force` replaces foreign links and
-unmarked regular files at the named seat destinations. Directories and other
-non-regular destinations are refused before any install writes. Each Codex seat
-profile carries its own tool list and permissions. `--force` replaces only the
-named destinations. A full install also links `seats/start-agentboard-manager` to
-`~/.local/bin/start-agentboard-manager`; `--grok-only` manages only Grok role
-homes and does not install the launcher. Use `--skip-grok` to install or refresh
-everything else without reading or changing `~/.grok`; it is mutually exclusive
-with `--grok-only`.
+`~/.local/share/agentboard/seats/<seat>/claude`, with the seat's skills linked into
+its `skills/`. Directories and other non-regular destinations
+are refused before any install writes. Each Codex seat profile carries its own
+tool list and permissions. `--force` replaces only the named destinations. A full
+install also links `seats/agentboard-manager` to
+`~/.local/bin/agentboard-manager` and the user unit below.
 Use `--agent codex,codewhale,claude,grok` to install only the named clients; names
-are exact lowercase values and cannot be repeated. Selected runs preflight only
-those clients, and do not manage the shared launcher or systemd unit. A provider
-override is accepted with the default full install or when `codewhale` is selected.
+are exact lowercase values, cannot be repeated, and `--agent` is given once.
+Selected runs preflight only those clients, and do not manage the shared launcher
+or systemd unit.
 The user unit is linked, never enabled or started. Start the daemon before launching
 HTTP seats and before merging these cards into a live checkout. Its default address
 is `127.0.0.1:8765`; check `/api/health` for the board path and instance. The unit
@@ -56,17 +64,23 @@ uses the default board path. If the manager uses `AGENTBOARD_DB`, give the unit 
 same absolute path with a systemd user drop-in. Stop the daemon before resetting
 or migrating the board, then start it again.
 
-Every role profile sets only `default_tools_approval_mode = "approve"` for
-`codebase-memory-mcp`; the server itself is the copied base `~/.codex/config.toml` entry
-that `codebase-memory-mcp install` writes. Without that entry Codex refuses to load
-any seat profile (`invalid transport` in `mcp_servers.codebase-memory-mcp`); without
-the approval, `approval_policy = "never"` refuses every call.
+Role profiles never name `codebase-memory-mcp`. The server and its
+`default_tools_approval_mode = "approve"` come from the base `~/.codex/config.toml`
+entry that `codebase-memory-mcp install` writes, copied into each role home's
+`config.toml`; without the approval, `approval_policy = "never"` refuses every call.
+Every `[mcp_servers.*]` table in a profile must carry its own `command` or `url`:
+Codex validates the profile file alone when it writes to it (saving folder trust,
+for one), and a table without either fails as `invalid transport`. The installer
+refuses such a profile before writing anything.
 
 ## Start the manager in the current pane or terminal
 
 From a herdr pane or an hc terminal at its shell prompt, run:
 
-    start-agentboard-manager {claude|codex|grok}
+    agentboard-manager {codex|grok|codewhale|claude}
+
+`agentboard-manager -h` explains the choice below. If the manager's role home
+is missing, it refuses and prints the exact `install.py --agent <client>` to run.
 
 The launcher picks by environment: herdr when `HERDR_ENV=1` (it wins when both
 worlds are present), else hc when any `HC_*` variable is set, else it refuses and
@@ -82,13 +96,18 @@ with `herdr agent start`. It requires `HERDR_ENV=1`, `HERDR_PANE_ID`, `HERDR_TAB
 
 ### hc
 
-The command starts the selected manager as a new hc terminal named `manager` in
-the current directory, then prints `manager <address>`. It requires
-an `HC_*` variable (set inside hc), `hc` and `jq`; it needs no window and never calls
-`herdr-app`. Grok cannot take its entry prompt in argv, so the launcher waits for
-that terminal and sends `/agentboard-manager`; a reply that is refused or not
-started is written to `${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log` and is
-never resent, because the screen has to be read first.
+The command replaces the shell in the current hc terminal with the selected
+manager (`exec`), in the current directory, from the manager's role home; it opens
+no new terminal and prints nothing. It requires `HC_TERMINAL_ID` (set inside every
+hc terminal), `hc`, `jq` and `setsid`; it needs no window and never calls
+`herdr-app`. hc names a terminal only at `hc run --name`, so the manager keeps this
+terminal's address (`$HC_TERMINAL_ID`) and no name. Grok and Codewhale cannot take
+their entry prompt in argv, so a detached helper waits for this terminal and sends
+`/agentboard-manager`, retrying up to ten times while hc answers `still starting`.
+A reply that is refused or not started is never resent, because the screen has to
+be read first; it is written to
+`${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`, and you type
+`/agentboard-manager` yourself.
 
 Seats start hidden and the launcher adds no label itself. A terminal joins the
 person's window only when it carries both labels at launch,
@@ -98,24 +117,6 @@ way the person asks for it, and `herdr-app do agent.focus --terminal <address>` 
 shows it. The manager copies both ids from its own terminal with
 `hc get <its address> --json` (the `labels` field). The launcher never touches the
 window, so it also runs on a headless machine.
-
-The legacy shared Codex rules are a block, not a link, because Codex appends its own allowed
-commands to `$CODEX_HOME/rules/default.rules`. The block is the whole of
-`codex/rules/agentboard.rules`, from its `# BEGIN AGENTBOARD RULES` line to its
-`# END AGENTBOARD RULES` line:
-
-- No block yet (or no file): it is appended, and every byte already there stays.
-- One well-formed block: left alone, reported `unchanged`, with a note if it differs
-  from the repo. `--force` rewrites just those lines where they stand.
-- Duplicate, missing, reversed or whitespace-padded markers: refused, `--force`
-  included, since guessing the span could delete your rules. Fix the file by hand.
-- A symlink or non-regular `default.rules` is refused and never written through.
-- Line endings (CRLF or LF) and file mode are kept; the write is a same-directory
-  temp plus rename, and it aborts if the file changed meanwhile. Install with
-  Codex closed.
-- An old `rules/agentboard.rules` link into this repo is removed; a foreign link goes
-  only under `--force`; a regular file is kept and reported.
-- To uninstall, delete the marked lines by hand; there is no uninstall verb.
 
 ## What every card carries
 
@@ -170,10 +171,9 @@ role. Set `CLAUDE_CONFIG_DIR` to that directory and use its `mcp.json` with
 global settings and credentials are copied with private permissions, and user
 MCP entries are merged with the role card taking precedence. Session history,
 caches, logs, project settings/approvals and plugins are not copied. Canonical
-agentboard seat skills are linked from `~/.agents/skills` after running
-`skills/install.py`. User plugin enablement settings are retained, but plugin
+agentboard seat skills are linked from `~/.agents/skills` by the same run. User plugin enablement settings are retained, but plugin
 records and bundle files are not copied; install user plugins separately in
-each role home. The legacy card is retained for old launch commands.
+each role home.
 When base authentication is withdrawn, rerun with `--force` to remove copied
 `.credentials.json` snapshots whose bytes still match the installer's private
 SHA-256 ownership marker. Unmarked credentials, including logins created in a
@@ -196,8 +196,7 @@ config, so they are per seat. The installer reads `~/.codewhale/mcp.json` and
 `~/.codewhale/config.toml` as optional, read-only bases; it preserves other MCP
 servers and top-level fields, while the generated agentboard entry wins. User
 provider/model settings carry into each seat, with seat policy, hooks and MCP path
-overriding them. `--codewhale-provider NAME` overrides a base provider. Neither
-base is rewritten, and credentials are omitted from generated TOML. If a base is
+overriding them. Neither base is rewritten, and credentials are omitted from generated TOML. If a base is
 absent, that file uses the existing defaults. Clean managed outputs refresh when
 their bases change; hand-edited outputs remain protected by the normal `--force`
 rule. If a role-first home is absent, install safely copies regular files from
@@ -228,9 +227,8 @@ providers other than the selected one. Missing providers are skipped; OAuth/sess
 grants and other non-exportable routes are not transferred. Inventory or export
 errors refuse before seat files change. Source keys are read-only, and key rotation
 is picked up on rerun. A removed source key does not revoke an existing seat key.
-Credentials stay out of generated config. The selected base provider, or
-`--codewhale-provider NAME`, still controls `config.toml`; the flag overrides the
-base provider. With no exportable keys, the installer keeps the no-auth default.
+Credentials stay out of generated config. The base provider controls
+`config.toml`; change it in `~/.codewhale/config.toml` and rerun. With no exportable keys, the installer keeps the no-auth default.
 Manual key setup remains available:
 
     codewhale auth print-api-key --provider P | CODEWHALE_HOME=<home> codewhale auth set --provider P --api-key-stdin
@@ -257,6 +255,9 @@ config is preserved on `--force`. Credential files are refreshed
 or withdrawn only while they still match the installer's recorded snapshot;
 diverged or independently created credentials stay in place. The installer
 refreshes only its marked agentboard table in a role config.
+A hand-written `[mcp_servers.agentboard]` table in `~/.grok/config.toml` (no
+`# BEGIN AGENTBOARD MCP` markers) refuses a plain install; `--force` drops that
+table from each role copy only and still leaves `~/.grok/config.toml` unchanged.
 Base `auth.json` and `mcp_credentials.json` must each be valid JSON objects. Only
 those files are copied as credentials. `~/.grok` is read-only and is never
 rewritten.

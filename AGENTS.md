@@ -44,14 +44,13 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/daemon.py` | `daemon: 332/332 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
-| `bash tests/seats-install.sh` | `673/673 passed (seats installer)` (isolated homes; no board writes) |
-| `bash tests/start-agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `83/83 passed (manager launcher)` |
-| `bash tests/skills-install.sh` | `9/9 passed (skills installer)` (isolated homes; no board writes) |
+| `bash tests/install.sh` | `618/618 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
+| `bash tests/agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `96/96 passed (manager launcher)` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
 | `python3 tests/doc-names.py` | `doc-names: 14 pages, 152 CLI names, 156 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
-| `bash scripts/gate.sh` | `GATES OK: 15 gates passed`; with `--full` `GATES OK: 16 gates passed` |
-| `bash scripts/gate.sh --prebuilt` | `GATES OK: 11 gates passed` (reviewer; venv on PATH) |
+| `bash scripts/gate.sh` | `GATES OK: 14 gates passed`; with `--full` `GATES OK: 15 gates passed` |
+| `bash scripts/gate.sh --prebuilt` | `GATES OK: 10 gates passed` (reviewer; venv on PATH) |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 | `cargo test --offline --lib -- --ignored --nocapture large_board_reads_scale_with_relevant_work` | `large-board work: tasks=2510 api_reads=2520 wait_polls=1 wait_rows=250 feed_visits=3` |
 
@@ -197,13 +196,16 @@ screenshots from the coder report because browser use is not verified in the san
 ## Where the rest lives
 
 - `skills/agentboard-team` — running a team: launcher, wake commands, roles,
-  workflow. `skills/install.py --force` creates canonical repo links under
-  `~/.agents/skills`, then links Claude skills to those canonical names; Codex and
-  Grok read `~/.agents/skills` directly. There is one physical copy: never copy over
-  the installed links.
+  workflow. `./install.py` creates canonical repo links under `~/.agents/skills`
+  and links them into each Claude role home; Codex, Grok and Codewhale read
+  `~/.agents/skills` directly. There is one physical copy: never copy over the
+  installed links.
 - `PROTOCOL.md` — the wire surface: twelve tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
   `agentboard-manager/SKILL.md`.
 - `seats/` — the canonical per-seat client cards (codex profiles, claude MCP
-  configs) and `seats/install.py` to link them into a home directory.
+  configs). The one installer is the repository-root `./install.py` (`-h`,
+  `--agent`, `--force`, `--skip-binary`): it runs `cargo install --path . --locked`,
+  links the skills, and generates per-role homes under
+  `~/.local/share/agentboard/seats`; it never writes a default client home.

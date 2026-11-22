@@ -49,13 +49,9 @@ board_agents = { approval_mode = "approve" }        # list registered actors
 board_project_delete = { approval_mode = "auto" }   # manager-only project deletion
 board_agent_delete = { approval_mode = "auto" }     # manager-only roster deletion
 
-[mcp_servers.codebase-memory-mcp]
-default_tools_approval_mode = "approve"
-
 [notice]
 hide_rate_limit_model_nudge = true
 
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "thread-name", "five-hour-limit", "weekly-limit", "context-used"]
 status_line_use_colors = true
-
