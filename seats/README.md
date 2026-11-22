@@ -115,11 +115,10 @@ be read first; it is written to
 `${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`, and you type
 `/agentboard-manager` yourself.
 
-Seats start hidden and the launcher adds no label itself. A terminal joins the
-person's window only when it carries both labels at launch,
-`--label herdr.space=<space-id> --label herdr.tab=<tab-id>`, or gets
-`hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` afterwards; either
-way the person asks for it, and `herdr-app do agent.focus --terminal <address>` then
+Seats start hidden and the launcher adds no label itself. No `--label` goes on
+`hc run` unless the human asks to watch that seat. The opt-in, only when the human asks:
+`hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` (only when the human asks); the terminal then
+joins the person's window, and `herdr-app do agent.focus --terminal <address>`
 shows it. The manager copies both ids from its own terminal with
 `hc get <its address> --json` (the `labels` field). The launcher never touches the
 window, so it also runs on a headless machine.

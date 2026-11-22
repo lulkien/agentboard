@@ -48,13 +48,11 @@ seat is a named terminal and `hc send` waits for the program to pause.
    - herdr: one tab per seat and never split panes; pass those flags after `--` on
      `herdr agent start`.
    - hc: one named terminal per seat and never two agents in one terminal; pass
-     them after `--` on `hc run`. Seats start hidden and no launch adds a label:
-     when the human wants to watch one, give its terminal both labels at launch,
-     `--label herdr.space=<space-id> --label herdr.tab=<tab-id>`, or add them
-     afterwards with
-     `hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>`. Copy both ids
-     from the manager's own terminal with `hc get <its address> --json` (the
-     `labels` field).
+     them after `--` on `hc run`. Seats start hidden. Never put `--label` on
+     `hc run`; labels are an opt-in, only when the human asks to watch that seat:
+     `hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` (only when the human asks).
+     Copy both ids from the manager's own terminal with
+     `hc get <its address> --json` (the `labels` field).
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context, the working branch, the paths the seat may touch and the paths or
    actions it must not), `goal` (the command and the output line that proves it),

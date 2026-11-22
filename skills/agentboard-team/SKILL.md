@@ -229,11 +229,10 @@ the agent busy, read the terminal before sending again.
 Codewhale seats run under hc only; herdr has no agent kind for them. Completion is
 authoritative on the board (`agentboard wait`), not the terminal.
 
-Seats start hidden: a terminal joins the person's window only when it carries both
-labels at launch, `--label herdr.space=<space-id> --label herdr.tab=<tab-id>`, or
-gets `hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` afterwards. Copy
-both ids from the manager's own terminal with `hc get <its address> --json` (the
-`labels` field). The launch adds no label;
+Seats start hidden. No `--label` goes on `hc run` unless the human asks to watch
+that seat; the recipes above carry none. The opt-in is one line:
+`hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` (only when the human asks). Copy both ids from
+the manager's own terminal with `hc get <its address> --json` (the `labels` field);
 `herdr-app do agent.focus --terminal <address>` then shows a seat that has both.
 
 ## Harness map
