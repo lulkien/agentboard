@@ -55,8 +55,10 @@ or onboarding state. `python3 tests/agy_shim.py` proves the shim against a scrat
 Launch an agy seat as its board actor, with the entry prompt in `-i` (so no typing
 helper runs):
 
-    env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
-    hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
+    env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
+    hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
+
+Model by seat: analyst, counter-analyst and reviewer use `gemini-4-hydrogen-high`; coder uses `gemini-4-argon-medium`; manager remains on `gemini-4-neon-medium`.
 
 `agentboard-manager agy` does the same for the manager with `gemini-4-neon-medium` and
 `-i /agentboard-manager`. No seat gets a `--settings` deny or sandbox flag; its limits are

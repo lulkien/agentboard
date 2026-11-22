@@ -128,8 +128,10 @@ env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind codex --pane "$P
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok --pane "$PANE" -- --trust --always-approve
 
 # agy seats: the entry prompt travels in -i, so no herdr agent prompt follows
+# Model by seat: analyst/counter-analyst/reviewer use gemini-4-hydrogen-high;
+# coder uses gemini-4-argon-medium; manager uses gemini-4-neon-medium.
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- \
-  --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
+  --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
 # and Grok; $agentboard-<seat> T<id> for Codex.
@@ -192,9 +194,10 @@ hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder codex --no-
 hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex --no-daemon \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 
-# agy seats: gemini-4-neon-high for analyst, counter-analyst, coder and reviewer, -medium for the manager
+# agy seats: gemini-4-hydrogen-high for analyst, counter-analyst and reviewer;
+# gemini-4-argon-medium for coder; gemini-4-neon-medium for manager.
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy \
-  --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
+  --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
 # Codewhale seats (hc only)
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> codewhale \
@@ -249,7 +252,7 @@ launch recipes above; install and the registered entries are in `seats/README.md
 | agy | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> agy`; manager via `agentboard-manager agy`; first prompt in `-i`, no typing helper | global stdio entry `seats/agy/agentboard-stdio` (`agy mcp add`), which reads `AGENTBOARD_ACTOR` from the launch environment | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
-Model and effort per seat come from the launch table for every client; agy takes the effort in the model id (`gemini-4-neon-high` for analyst, counter-analyst, coder and reviewer, `gemini-4-neon-medium` for the manager).
+Model and effort per seat come from the launch table for every client; agy takes the effort in the model id: `gemini-4-hydrogen-high` for analyst, counter-analyst and reviewer, `gemini-4-argon-medium` for coder, and `gemini-4-neon-medium` for manager.
 agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. agy reads skills from `~/.gemini/config/skills`, which the installer links. Skills are
 one physical copy under `~/.agents/skills`, which the installer links; Codex, Grok
 and Codewhale read that directory directly. Claude reads `~/.claude/skills`, which the
