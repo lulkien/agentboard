@@ -105,6 +105,7 @@ fn router(board: Arc<Board>, bound: SocketAddr) -> Router {
         config,
     );
     Router::new()
+        .route("/mcp", any(mcp_header_request))
         .route("/mcp/{actor}", any(mcp_request))
         .route("/", get(shell))
         .route("/epics", get(shell))
@@ -173,11 +174,38 @@ async fn browser_headers(request: Request, next: Next) -> Response {
 async fn mcp_request(
     State(app): State<App>,
     Path(actor): Path<String>,
-    mut request: Request,
+    request: Request,
 ) -> Response {
     if actor.trim().is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
+    mcp_request_as(State(app), actor, request).await
+}
+
+async fn mcp_header_request(State(app): State<App>, request: Request) -> Response {
+    let actor = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let Some(actor) = actor.filter(|actor| !actor.contains("${")) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "set AGENTBOARD_ACTOR and send Authorization: Bearer <actor>",
+        )
+            .into_response();
+    };
+    if crate::domain::validate_actor(actor).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid AGENTBOARD_ACTOR; send Authorization: Bearer <actor>",
+        )
+            .into_response();
+    }
+    mcp_request_as(State(app), actor.to_owned(), request).await
+}
+
+async fn mcp_request_as(State(app): State<App>, actor: String, mut request: Request) -> Response {
     let project = match crate::routes::parse("/", request.uri().query().unwrap_or("")) {
         Ok(route) => route.filters.project,
         Err(_) => return (StatusCode::BAD_REQUEST, "invalid query").into_response(),

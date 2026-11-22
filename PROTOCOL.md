@@ -24,6 +24,12 @@ whole board. The default address is `127.0.0.1:8765`; a non-loopback bind needs 
 flag, and a wildcard address (`0.0.0.0`, `[::]`) is refused: name one address.
 If the board cannot be opened, the process exits `1` with one line on stderr.
 
+`POST /mcp` takes the actor from `Authorization: Bearer <actor>`. The actor is
+validated using the same rules as board actors. A missing or malformed header,
+or an unexpanded `${...}` placeholder, returns 400 with guidance to set
+`AGENTBOARD_ACTOR`; it never returns 401. `/mcp/<actor>` continues to use its
+path actor and ignores `Authorization`.
+
 One guard runs before every route: `Host` must be the bound address, `localhost` or
 `127.0.0.1` (else 421); a present `Origin` must be `http://` plus such a host (else
 403); `/mcp` answers loopback peers only, whatever the bind address (else 403).

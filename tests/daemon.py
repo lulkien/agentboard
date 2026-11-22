@@ -85,8 +85,8 @@ class Daemon:
         head.update(headers or {})
         return self.request("POST", path, json.dumps(message), head)
 
-    def call(self, path, tool, arguments=None):
-        status, body = self.rpc(path, "tools/call", {"name": tool, "arguments": arguments or {}})
+    def call(self, path, tool, arguments=None, headers=None):
+        status, body = self.rpc(path, "tools/call", {"name": tool, "arguments": arguments or {}}, headers=headers)
         assert status == 200, (status, body)
         result = json.loads(body)["result"]
         return "".join(part.get("text", "") for part in result["content"])
@@ -435,13 +435,39 @@ def main():
         agents = daemon.call("/mcp/alice", "board_agents")
         has("roster has alice", "alice", agents)
         has("roster has bob", "bob", agents)
+        bearer = {"Authorization": "Bearer analyst"}
+        check("/mcp initializes with a bearer actor", 200, daemon.rpc(
+            "/mcp", "initialize",
+            {"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "c", "version": "0"}},
+            headers=bearer,
+        )[0])
+        check("/mcp without Authorization is 400", 400, daemon.rpc("/mcp", "tools/list")[0])
+        check("/mcp rejects a non-Bearer Authorization header", 400, daemon.rpc(
+            "/mcp", "tools/list", headers={"Authorization": "Basic analyst"}
+        )[0])
+        check("/mcp rejects an invalid actor", 400, daemon.rpc(
+            "/mcp", "tools/list", headers={"Authorization": "Bearer  analyst"}
+        )[0])
+        check("/mcp refuses an unexpanded actor placeholder on a write", 400, daemon.rpc(
+            "/mcp", "tools/call",
+            {"name": "task_comment", "arguments": {"id": 2, "body": "must not write"}},
+            headers={"Authorization": "Bearer ${AGENTBOARD_ACTOR}"},
+        )[0])
+        agents = daemon.call("/mcp/alice", "board_agents")
+        ok("placeholder actor was not added to roster", "${AGENTBOARD_ACTOR}" not in agents)
+        daemon.call("/mcp", "task_comment", {"id": 2, "body": "bearer analyst comment"}, headers=bearer)
+        daemon.call("/mcp/coder", "task_comment", {"id": 2, "body": "path coder comment"}, headers={"Authorization": "Bearer analyst"})
+        feed = daemon.call("/mcp/alice", "board_feed", {"after": "0"})
+        events = {" ".join(line.split()[2:5]) for line in feed.splitlines() if " commented " in line}
+        check("/mcp comment is attributed to bearer actor", True, "analyst commented T2" in events)
+        check("/mcp/{actor} ignores bearer actor", True, "coder commented T2" in events)
         escaped = urllib.parse.quote("al ice<&", safe="")
         daemon.call("/mcp/" + escaped + "?project=0", "task_add", {"title": "odd name"})
         has("the actor segment is percent-decoded", "al ice<&", daemon.call("/mcp/alice", "board_agents"))
 
         # Guard.
         check("/mcp/ with no name is 404", 404, daemon.rpc("/mcp/", "tools/list")[0])
-        check("/mcp with no slash is 404", 404, daemon.rpc("/mcp", "tools/list")[0])
+        check("/mcp with no Authorization is 400", 400, daemon.rpc("/mcp", "tools/list")[0])
         check("foreign Origin is 403", 403, daemon.rpc("/mcp/alice", "tools/list", headers={"Origin": "http://evil.example"})[0])
         check("Origin null is 403", 403, daemon.rpc("/mcp/alice", "tools/list", headers={"Origin": "null"})[0])
         check("foreign Origin is refused on the API too", 403, daemon.request("GET", "/api/health", headers={"Origin": "http://evil.example"})[0])

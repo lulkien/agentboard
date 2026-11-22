@@ -41,7 +41,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `cargo build --release` | `Finished` |
 | `bash tests/cli.sh` | `434/434 passed (cli, lmdb)` |
 | `python3 tests/mcp_client.py` | `227/227 passed (mcp, lmdb)` |
-| `python3 tests/daemon.py` | `daemon: 332/332 passed (http, lmdb)` (scratch boards, loopback port 0) |
+| `python3 tests/daemon.py` | `daemon: 340/340 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
 | `bash tests/install.sh` | `618/618 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
