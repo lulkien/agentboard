@@ -27,7 +27,7 @@ then shows the wrong seat and the two share one set of keys.
 
 ```bash
 hc run --bg --name coder --cwd "$REPO" -- \
-  claude --mcp-config ~/.claude/coder-mcp.json --dangerously-skip-permissions
+  env AGENTBOARD_ACTOR=coder claude --dangerously-skip-permissions
 ```
 
 `SKILL.md` has the per-seat command with its preferred model and permission mode.
@@ -60,20 +60,14 @@ Status comes from the program's own reports, and a plain program has none. Liven
 is `state: live|finished` plus `board_agents` last activity on the board, never a
 guess from screen text.
 
-## Traps
+## Prompt recovery
 
-- A prompt that does not turn the agent busy is usually an overlay: a usage panel, a
-  recap, a permission dialog. `hc keys coder esc`, then send again.
-- Apostrophes end the shell quote in `hc send`. Keep the line free of them; never
-  stage the prompt in a file and pass `"$(cat file)"` — the task row is the prompt,
-  and a second copy is exactly what the board exists to prevent.
-- A send without `--wait` gives no evidence the text landed; verify on the board.
-- `hc run` without `--bg` streams the agent's whole screen into your output and holds
-  your shell. Use `--bg` for seats, then `hc wait` and `hc read` to collect.
-- A seat that went idle is not a seat that failed: check the board (`task_get`,
-  `board_agents`) before restarting anything.
-- Restarting an agent mid-write loses its claim context. Comment what it was doing
-  first, then reassign with `force` and a reason.
+Use the shared [prompt delivery and quoting procedure](../SKILL.md#prompt-delivery-and-quoting)
+for overlays, quoting and delivery checks. `hc run` without `--bg` streams the
+agent screen and holds the shell; use `--bg`, then `hc wait` and `hc read`.
+
+Before restarting an idle seat, inspect `task_get` and `board_agents`. If it was
+mid-write, comment its state before reassigning with `force` and a reason.
 
 ## Watching
 

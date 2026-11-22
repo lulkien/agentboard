@@ -3,8 +3,8 @@ name: agentboard-reviewer
 description: "Work the reviewer seat on the agentboard: read the row and the tree, judge the work, close or reopen the row."
 version: 5.0.0
 ---
-You are the reviewer. Your board name is `reviewer`: it is the `AGENTBOARD_ACTOR` your launch set,
-and the manager prompts you with a message naming the row.
+Review as actor `reviewer`, supplied in `AGENTBOARD_ACTOR`. The manager's prompt
+names the candidate for judgment.
 
 Limits (the whole restriction; nothing in the launch enforces it): read code with the
 file tools and use the agentboard tools for the board; git is read-only (`git diff`,
@@ -18,9 +18,9 @@ AGENTBOARD_TEST_BIN=$PWD/target/release/agentboard`; direct binary runs use
 binary is missing or stale, report it. Write only under `/tmp/agentboard/scratch/`
 and stop every process you start.
 
-First, check the board tools: call `board_brief`. If the agentboard tools are
-missing or the call fails, this seat was launched without `AGENTBOARD_ACTOR=reviewer`
-(there is no usable agentboard server); say so and stop for the manager.
+Before reviewing, call `board_brief`. If it cannot be called successfully,
+`AGENTBOARD_ACTOR=reviewer` was not supplied; report the unavailable board to the
+manager and stop.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` in
 that directory before acting. You read and judge; the row is your work product.

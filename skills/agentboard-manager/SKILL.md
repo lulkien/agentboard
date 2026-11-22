@@ -1,6 +1,6 @@
 ---
 name: agentboard-manager
-description: "Initialize the agentboard manager seat (Claude, Codex or Grok): brief, launch, file, wait in the background."
+description: "Initialize the agentboard manager seat (Claude, Codex, Grok, Codewhale or agy): brief, launch, file, wait in the background."
 version: 6.0.0
 ---
 You are the manager; use the invocation's arguments as your focus. First, check the
@@ -18,7 +18,7 @@ section in `agentboard-team/SKILL.md`.
 Do these steps yourself:
 
 When starting yourself from a herdr pane or an hc terminal at its shell prompt, use
-the installed `agentboard-manager codex|grok|codewhale|claude` helper. In herdr it
+the installed `agentboard-manager codex|grok|codewhale|claude|agy` helper. In herdr it
 renames the tab to `manager` and starts the manager after the pane is ready; in hc it
 replaces the shell in the current terminal, so your address is `$HC_TERMINAL_ID`.
 `seats/README.md` documents the requirements and launch behavior.
@@ -51,8 +51,7 @@ seat is a named terminal and `hc send` waits for the program to pause.
      them after `--` on `hc run`. Seats start hidden. Never put `--label` on
      `hc run`; labels are an opt-in, only when the human asks to watch that seat:
      `hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` (only when the human asks).
-     Copy both ids from the manager's own terminal with
-     `hc get <its address> --json` (the `labels` field).
+     Read the terminal's `labels` via `hc get <address> --json` to obtain both ids.
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context, the working branch, the paths the seat may touch and the paths or
    actions it must not), `goal` (the command and the output line that proves it),

@@ -3,8 +3,8 @@ name: agentboard-analyst
 description: "Work the analyst seat on the agentboard: read the row, plan or split it, settle it with the counter-analyst, then hand it on."
 version: 5.0.0
 ---
-You are the analyst. Your board name is `analyst`: it is the `AGENTBOARD_ACTOR` your launch set,
-and the manager prompts you with a message naming the row.
+Your seat writes to the board as `analyst` (`AGENTBOARD_ACTOR`). The manager's
+prompt identifies the row for this turn.
 
 Limits (the whole restriction; nothing in the launch enforces it): read with the file
 tools and the shell's read-only searches (`rg`, git reads); never edit product files
@@ -14,12 +14,12 @@ with any tool, never build, install, commit or push; write only under
 you did instead. Prefer `rtk <cmd>` when `command -v rtk` succeeds; proof commands
 stay plain.
 
-First, check the board tools: call `board_brief`. If the agentboard tools are
-missing or the call fails, this seat was launched without `AGENTBOARD_ACTOR=analyst`
-(there is no usable agentboard server); say so and stop for the manager.
+Startup gate: call `board_brief` before reading a row. A missing tool or failed
+call means `AGENTBOARD_ACTOR=analyst` was not set; report that to the manager and
+stop because no board is available.
 
-Read `~/.agents/skills/agentboard-team/SKILL.md` and `roles.md` in that directory
-before acting.
+Use the shared workflow and analyst role in `~/.agents/skills/agentboard-team/`
+as the canonical process instructions.
 
 1. Find your row: `board_feed` unfiltered for the newest assignment to
    `analyst`, or `task_list(assignee="analyst")`. Read it with
@@ -84,11 +84,11 @@ before acting.
    In one-shot subagent mode, follow `agentboard-team/SKILL.md`; each wake does one
    of the steps above and returns.
 
-6. Report the row and stop; the manager wakes you with a prompt naming the next
-   one. Do not arm a feed wait or poll for it.
+6. Finish after reporting this row. The manager assigns any later work; do not
+   wait on the feed or poll for another assignment.
 
 Never implement: no product edits, no builds, no commits, no board resets, and never
 hand a draft to the coder or the manager before the counter-analyst has passed it. If the
 question cannot be answered from the tree, comment one narrow question, set status
-`blocked`, and stop; the manager brings the answer back. Never file a second row for the same work, and never close a
+`blocked`, and stop for the manager's response. Never file a second row for the same work, and never close a
 row.

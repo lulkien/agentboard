@@ -24,8 +24,8 @@ cargo build --release          # target/release/agentboard, nothing installed
 ```
 
 `./install.py` is the one installer: it builds and installs `~/.cargo/bin/agentboard`,
-links the skills into `~/.agents/skills`, and generates each client's per-role seat
-homes; see `seats/README.md`.
+links the skills into `~/.agents/skills`, and registers each client's global MCP
+entry; seats select their identity with `AGENTBOARD_ACTOR`. See `seats/README.md`.
 
 Rust 1.89 or newer, edition 2024. The only C dependency is the one `heed` builds
 with `cc`.
@@ -207,8 +207,9 @@ agentboard: agent "bob" still holds open tasks (count 2); release or reassign th
 
 `agentboard daemon [IP:PORT] [--allow-non-loopback]` (default `127.0.0.1:8765`) is a
 foreground process that opens the board once and serves the twelve MCP tools over
-streamable HTTP at `/mcp/<actor>`. The URL segment is the seat's name, so one
-process serves every seat and each write is attributed to its URL name. The
+streamable HTTP at `/mcp` (actor from the `Authorization: Bearer <actor>` header)
+and `/mcp/<actor>` (actor from the URL segment). One process serves every seat and
+attributes each write to that actor. The
 project is the tool argument, else `?project=ID` on the MCP URL, else the whole
 board; the daemon's own environment and working directory are never read. The
 startup line and `GET /api/health` print the resolved board path and instance id. The dashboard footer has an off-by-default **Live update** toggle that polls its `cursor` every 5 s and reloads the page when it moves.
@@ -248,8 +249,8 @@ replacement edits the same working tree.
 
 ## MCP
 
-MCP is served by `agentboard daemon` at `http://127.0.0.1:8765/mcp/<actor>`.
-Task writes use the actor in the URL path; project scope comes from the tool
+MCP is served by `agentboard daemon` at `http://127.0.0.1:8765/mcp` with a bearer
+actor, or `/mcp/<actor>` with the actor in the path. Project scope comes from the tool
 argument or `?project=<id>`.
 
 | Tool | Answers |

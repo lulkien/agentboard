@@ -153,6 +153,19 @@ open overlay) goes unnoticed. The manager's later wake prompts go without `--wai
 (it never blocks) and are checked with `herdr agent read <seat> --lines 40`. If a
 prompt does not turn the agent busy, read the pane: `herdr agent read coder --lines 40`.
 
+## Prompt delivery and quoting
+
+If a herdr prompt stalls because an overlay is open, inspect the pane with
+`herdr agent read <seat> --lines 40`, dismiss the overlay with
+`herdr agent send-keys <seat> escape`, then prompt again. For hc, inspect with
+`hc read --lines 40 <seat>` and dismiss it with `hc keys <seat> esc`.
+
+Prompt arguments are shell-quoted by the terminal helpers. Keep apostrophes out
+of prompt text; never copy a prompt into a file to work around quoting, since the
+task row is its source. Use `--wait` when the launch or first prompt needs proof
+of delivery; for manager wake prompts, verify the seat afterward as described in
+the launcher sections.
+
 ## Launch a team (hc, one terminal per seat)
 
 One agent per terminal. Never start two agents in one terminal: it is one seat's

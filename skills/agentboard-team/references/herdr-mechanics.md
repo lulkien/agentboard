@@ -41,27 +41,16 @@ opens in the wrong tree.
 herdr agent prompt coder '/agentboard-coder T<id>' --wait     # Codex: '$agentboard-coder T<id>'
 ```
 
-`--kind` is the canonical kind name from `herdr agent start --help` (`claude`,
-`codex`, `opencode`, …). Everything after `--` is the agent's own argv
-(Claude `--model` / `--dangerously-skip-permissions` / `--disallowedTools`, Codex `-m` / `-p`, MCP config flags).
-The seat's board name is not a herdr concept: the MCP server is registered at the
-HTTP URL `/mcp/<seat>` in the card, so the pane's tool calls arrive attributed.
+Use the supported kind names from `herdr agent start --help`. Everything after
+`--` belongs to the agent process; the shared launcher table documents its flags.
+Each seat receives its board identity through `AGENTBOARD_ACTOR`, and the global
+`agentboard` MCP entry carries it to the daemon.
 
-## Traps
+## Troubleshooting
 
-- A prompt that stalls (`no observed working state … current status is idle`) is
-  usually an open overlay: usage panel, recap, permission dialog. Read the pane
-  (`herdr agent read coder --lines 40`), send `escape` via
-  `herdr agent send-keys coder escape`, then prompt again.
-- Apostrophes end the shell quote in `herdr agent prompt`. Keep the line free of
-  them; never stage the prompt in a file and pass `"$(cat file)"` — the task row is
-  the prompt, and a second copy is exactly what the board exists to prevent.
-- `herdr agent prompt` without `--wait` gives no evidence the text landed. Use it
-  when you will verify on the board instead.
-- A seat that went idle is not a seat that failed: check the board
-  (`task_get`, `board_agents`) before restarting anything.
-- Restarting an agent mid-write loses its claim context. Comment what it was doing
-  first, then reassign with `force` and a reason.
+Herdr overlay recovery and prompt quoting use the terminal guidance in
+[the team manual](../SKILL.md#prompt-delivery-and-quoting). Before restarting a pane,
+inspect `task_get` and `board_agents` to confirm its board state.
 
 ## Teardown
 
@@ -74,6 +63,4 @@ herdr tab close "$tab"
 herdr agent list            # confirm nothing named coder/reviewer remains
 ```
 
-Closing a pane does not touch the board: rows stay, claims stay attributed, and a
-replacement seat resumes from the row. That is why the board, not the pane, is the
-record.
+Pane closure only ends the terminal process; task state remains on the board.

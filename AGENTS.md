@@ -86,7 +86,7 @@ update the expectation here.
 - `src/cli.rs` — argv as types. Validation stays in the store.
 - `src/main.rs` — thin: resolve board and actor, call the store, print, exit.
 - `src/daemon.rs` — `agentboard daemon`: the same MCP adapter over streamable HTTP
-  (axum + rmcp, stateless) at `/mcp/<actor>`, one shared `Arc<Board>`, and the guard
+  (axum + rmcp, stateless) at `/mcp` (bearer actor) and `/mcp/<actor>`, one shared `Arc<Board>`, and the guard
   (Host, Origin, loopback peer for `/mcp`) that runs before every route.
   `src/daemon/api.rs` is the read-only JSON API beside it (GET only, no write route);
   it builds JSON from the store read models and takes every query through

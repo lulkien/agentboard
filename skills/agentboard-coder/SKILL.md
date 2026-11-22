@@ -3,32 +3,26 @@ name: agentboard-coder
 description: "Work the coder seat on the agentboard: claim one row, implement and verify it, hand it to review."
 version: 5.0.0
 ---
-You are the coder. Your board name is `coder`: it is the `AGENTBOARD_ACTOR` your launch set,
-and the manager prompts you with a message naming the row.
+This process uses `AGENTBOARD_ACTOR=coder`. Work the row identified by the
+manager's prompt.
 
-Limits (the whole restriction; nothing in the launch enforces it): prefer MCP to the
-shell (agentboard tools, `codebase-memory-mcp`, the file tools, `rg` for text) and
-name an MCP call that failed and what you did instead; prefer `rtk <cmd>` when
-`command -v rtk` succeeds, proof commands plain. The shell is for building and
-proving: cargo build, test, fmt, clippy, the project scripts and any command the row
-names. Git: status, log, show, diff, switch, branch and commit on your task branch;
-never push, tag, reset, clean or stash. Never edit a path the row does not own.
+Limits (the launch does not enforce them): use MCP for board and structural queries;
+use file tools or `rg` for source. Record failed MCP calls and their fallback. Prefer
+`rtk` for routine shell commands; keep proof commands plain. Build and verification
+belong in the shell. Git writes are limited to your task branch and one commit; do
+not push, tag, reset, clean or stash. Edit only paths listed on the row.
 
-First, check the board tools: call `board_brief`. If the agentboard tools are
-missing or the call fails, this seat was launched without `AGENTBOARD_ACTOR=coder`
-(there is no usable agentboard server); say so and stop for the manager.
+Startup gate: call `board_brief`. A failed call means this process lacks
+`AGENTBOARD_ACTOR=coder` and cannot reach its board; notify the manager and stop.
 
 Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` in
 that directory before acting; the repo's `AGENTS.md` narrows what you may run.
 
 1. Claim one row: `task_claim` with no id takes the highest-priority ready row,
    `task_claim(id)` takes the row assigned to you. One row at a time.
-2. Read it with `task_get(id, full=true)` on a first visit; the `description` and
-   `goal` are the spec and the analyst report is the plan, so skip the debate
-   thread. On a later wake read
-   `board_feed(task=<id>, after=<cursor of your last write on the row>, full=true)`
-   and `task_get(id)`, with `full=true` after a reviewer reopen or a new analyst
-   turn. Do not widen the spec, and do not start a second row.
+2. First visit: `task_get(id, full=true)` supplies the spec and plan. On resume,
+   read `board_feed(task=<id>, after=<last cursor>, full=true)` and `task_get(id)`;
+   reopen or a new analyst turn needs full text. Stay on this row and its scope.
 3. Create the task branch before editing, then work only that row and only the
    files it names. The branch name is
    `task-<id>-analyst-<analyst_turn>-implement-<implement_turn>`; create it with
@@ -81,9 +75,8 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
 6. A missing requirement is not a guess: comment one narrow question,
    `task_update` the status to `blocked`, then stop and report; the manager brings
    the answer back.
-7. If you must stop before the handoff (quota, compaction, told to stop), comment
-   a resume note first: state, the task branch and its commit, what is verified,
-   next step, any uncommitted paths, and what a replacement must not redo. When
+7. If you must stop before handoff, use the resume-note fields in
+   `agentboard-team/workflow.md`. When
    you resume or replace another seat on a row, read
    `board_feed(task=<id>, after="0", full=true)` first, follow the printed cursor
    while `more` is true, and do not redo verified steps.
