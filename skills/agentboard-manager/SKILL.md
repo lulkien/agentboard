@@ -40,7 +40,11 @@ seat is a named terminal and `hc send` waits for the program to pause.
    global MCP entry sends it as a bearer token. The
    manual's launch sections have the exact commands and preferred-model table
    (Claude Opus/Sonnet 5.5;
-   Codex Sol with model and effort passed as flags).
+   Codex Sol with model and effort passed as flags). There are five seats: manager,
+   analyst, counter-analyst, coder, reviewer. Launch the counter-analyst like the
+   analyst, with the seat name and skill swapped (`AGENTBOARD_ACTOR=counter-analyst`,
+   entry prompt `/agentboard-counter-analyst T<id>`, `$agentboard-counter-analyst`
+   under Codex), and only when a row is going through the analyst.
    - herdr: one tab per seat and never split panes; pass those flags after `--` on
      `herdr agent start`.
    - hc: one named terminal per seat and never two agents in one terminal; pass
@@ -57,7 +61,8 @@ seat is a named terminal and `hc send` waits for the program to pause.
    and `assignee` when the owner is known. File a row only when you can hand it to
    a seat. If the evidence cannot be named yet, do not hand the row to the coder:
    assign the analyst (`planning`) or keep it yourself until the goal is
-   falsifiable.
+   falsifiable. Every analyst plan and split plan is challenged by the counter-analyst
+   before it reaches the coder or you; there is no size threshold and no opt-out.
 
    When the analyst returns a row as `todo` with `manager` as assignee and a split
    plan in the analyst report, file the children instead of implementing it:
@@ -112,12 +117,25 @@ seat is a named terminal and `hc send` waits for the program to pause.
      watch `done,reviewing,blocked`: `reviewing` is the hand-off and the cue to prompt
      the reviewer. Including `implementing` here matches the coder's claim, so the
      watch fires immediately and tells you nothing new.
-   - While an analyst holds a row (`planning`), the hand to the coder moves it to
-     `implementing` with the coder as assignee. Arm `wait ID --status reviewing,done,blocked --assignee --timeout 300`
-     so that reassignment ends the wait; the
-     first line then carries `; handoff T… to coder`. Re-arm with `--after CURSOR`,
-     the `cursor` line the previous wait printed, so a handoff that landed between
-     two waits is not lost.
+   - While the analyst stage runs (`planning`), the row alternates between the
+     analyst and the counter-analyst with the status unchanged, then the analyst's
+     hand to the coder moves it to `implementing` with the coder as assignee. Arm
+     `wait ID --status reviewing,done,blocked --assignee --timeout 300` so every
+     reassignment ends the wait; the first line then carries `; handoff T… to
+     counter-analyst`, `; handoff T… to analyst` or `; handoff T… to coder`.
+     Prompt the seat the handoff names (`/agentboard-counter-analyst T<id>` or
+     `/agentboard-analyst T<id>`), arm the wait again, and proceed as today on
+     `to coder`. The debate is row comments; the analyst report holds only the
+     passed plan. A split plan ends `todo` with `manager`, as before.
+   - The counter-analyst reviews at most 5 times per analyst turn. When the wait
+     returns `blocked` on a row the counter-analyst holds, read its `cap:` comment,
+     put the disagreement to the human, and bring the answer back as a comment;
+     then return the row to `planning`/`analyst` with the decision in a comment:
+     rework, or accept a named draft as it stands. Never send it to the coder
+     yourself: the analyst writes the accepted draft into the analyst report and
+     makes the terminal move. Never decide the disagreement yourself.
+   - Re-arm every analyst-stage wait with `--after CURSOR`, the `cursor` line the
+     previous wait printed, so a handoff that landed between two waits is not lost.
    - Stage the set by phase. Once you have prompted the reviewer, add
      `implementing` to `done,reviewing,blocked`: the coder has already claimed, so
      `implementing` now means a reopen that needs the coder prompted again.
@@ -193,7 +211,7 @@ for an unattended prompt. For board tools, use `use_tool` with catalog keys such
 `agentboard wait` in the background; there is no MCP wait tool.
 
 Check setup with `grok inspect --json` (confirm `projectTrusted`, the skills
-`agentboard-team`, `agentboard-manager`, `agentboard-analyst`, `agentboard-coder`
+`agentboard-team`, `agentboard-manager`, `agentboard-analyst`, `agentboard-counter-analyst`, `agentboard-coder`
 and `agentboard-reviewer`, and the MCP servers), `grok mcp list`, and
 `grok mcp doctor agentboard`. An optional headless read-only probe is:
 

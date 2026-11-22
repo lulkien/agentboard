@@ -20,7 +20,7 @@ Once every preflight check passes, it runs `cargo install --path <repo> --locked
 build and install `~/.cargo/bin/agentboard`; a failed build exits 1 with nothing
 else written. `--skip-binary` skips the build. Then it:
 
-- links the five repo skills into `~/.agents/skills` (see `../skills/README.md` for
+- links the six repo skills into `~/.agents/skills` (see `../skills/README.md` for
   which client reads them from where; `~/.claude/skills` is not linked yet);
 - on a full install, links the launcher and the user unit (it never enables or
   starts the unit);

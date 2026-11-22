@@ -173,6 +173,9 @@ pin '^[0-9]+/[0-9]+ passed \(installer\)$'
 gate bash tests/agentboard-manager.sh
 pin '^[0-9]+/[0-9]+ passed \(manager launcher\)$'
 
+gate bash tests/counter-loop.sh
+pin '^[0-9]+/[0-9]+ passed \(counter loop\)$'
+
 gate python3 scripts/sync-tool-count.py --check
 pin '^MCP router: [0-9]+ tools; published counts match$'
 

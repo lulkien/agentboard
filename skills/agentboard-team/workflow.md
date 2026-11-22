@@ -9,7 +9,7 @@ stale writes, so two agents cannot silently overwrite each other.
 | Status | Means | Who sets it |
 | --- | --- | --- |
 | `todo` | ready, nobody working | manager (creation) |
-| `planning` | analyst is planning the row | manager (starts the analyst) |
+| `planning` | the analyst or the counter-analyst is planning the row | manager (starts the analyst) |
 | `implementing` | claimed and being worked | the holder (`task_claim`), or the analyst/manager handing to the coder |
 | `blocked` | cannot continue, question on the row | the holder |
 | `reviewing` | work finished, waiting on a reviewer | the coder |
@@ -59,8 +59,9 @@ The analyst decides whether a row is one unit of work. It is too big when it
 cannot be one branch, one commit, one review, or one falsifiable goal; tedious
 work that still meets that test stays whole. There is no file or line threshold.
 
-For a row that fails the test, the analyst writes a split plan in the analyst
-report and returns the row: `task_update(status="todo", assignee="manager")`. The
+For a row that fails the test, the analyst drafts a split plan, settles it with the
+counter-analyst (below), writes the agreed split plan in the analyst report and
+returns the row: `task_update(status="todo", assignee="manager")`. The
 plan states why the row is too big, the child titles, each child's scope and
 paths, each child's falsifiable goal, and the order or dependencies. The analyst
 files nothing.
@@ -71,6 +72,48 @@ not canceled and not handed to a coder. The manager closes it only when
 `task_epic` shows every direct child terminal; the board refuses a close while
 one is open. Closing the umbrella lands no branch of its own.
 
+## The counter-analyst
+
+Every plan and every split plan from the analyst is challenged by the counter-analyst
+before it reaches the coder or the manager; there is no size threshold and no
+opt-out. The two seats are one role with two names: each researches the row on its
+own, and the counter-analyst's job is the counter-argument. The row stays `planning`
+the whole time; only the assignee alternates, and the exchange is row comments, not
+report sections.
+
+1. The analyst comments its draft `analyst <n>.<r> draft:` (`Files`, `Functions`,
+   `Behaviour`, `Must not change`, `Proof`, or a split plan) and hands the row to
+   `counter-analyst`. `n` is the analyst turn, `r` counts the analyst's drafts and
+   answers in it, from `1`.
+2. The counter-analyst does its own read-only research, then comments
+   `counter-analyst <n>.<r>: objections` with numbered `Blocking` and `Note` items,
+   each with evidence, or `counter-analyst <n>.<r>: pass`, and hands the row back to
+   `analyst` either way. A `Note` never blocks a pass.
+3. Below the cap the analyst answers every Blocking item in a comment
+   (`analyst <n>.<r+1>: answers`, with the revised draft) and hands back to the
+   counter-analyst.
+4. After a `pass` the analyst writes the one agreed plan into the analyst report
+   (heading `## Analyst plan <n>`, line `Turn: analyst <n>`, the text of the passed
+   draft) and makes the terminal move: `implementing`/`coder` for a plan,
+   `todo`/`manager` for a split plan. The counter-analyst never writes the report or
+   moves a row onward.
+5. The cap is 5 counter reviews per analyst turn. When review 5 still holds a
+   Blocking objection, the counter-analyst comments `cap: <one-line disagreement>`
+   and sets `blocked`, assignee still `counter-analyst`; the manager asks the human.
+   The human's answer comes back as a comment and the manager returns the row to
+   `planning`/`analyst` with that decision, never straight to the coder: either
+   rework, with a fresh 5 reviews counted from the decision, or accept a named draft
+   as it stands, in which case the analyst writes that draft into the analyst report
+   (`## Analyst plan <n>`, `Turn: analyst <n>`) and makes the terminal move, so the
+   coder always finds a plan in the report.
+6. A return to the analyst after the implement cap opens analyst turn `n+1`, and `r`
+   restarts at `1`.
+
+The manager's analyst-stage wait (`--status reviewing,done,blocked --assignee`)
+fires on every alternation with `; handoff T<id> to <seat>` on its first line, and
+the manager prompts the seat it names. A comment is limited to 32768 characters;
+a longer draft or objection list is split across consecutive comments.
+
 ## Transitions
 
 The board enforces only the revision guard, the holder rule and the assignee rule
@@ -80,8 +123,11 @@ this contract, not a store check.
 | From to | Who | Call |
 | --- | --- | --- |
 | `todo` to `planning` | manager, when it starts the analyst | `task_update(status="planning", assignee="analyst")` |
-| `planning` to `implementing` | analyst, or manager | `task_update(status="implementing", assignee="coder")` |
-| `planning` to `todo` | analyst, returning an oversized row | `task_update(status="todo", assignee="manager")` |
+| `planning` to `planning` | analyst, handing its draft or its answers to the counter-analyst | `task_update(assignee="counter-analyst")`; the status stays `planning` |
+| `planning` to `planning` | counter-analyst, after a review (`pass` or `objections`) | `task_update(assignee="analyst")`; the status stays `planning` |
+| `planning` to `implementing` | analyst, after the counter-analyst's `pass`; or manager | `task_update(status="implementing", assignee="coder")` |
+| `planning` to `todo` | analyst, after a `pass`, returning an oversized row | `task_update(status="todo", assignee="manager")` |
+| `planning` to `blocked` | counter-analyst, at the cap of 5 reviews with a Blocking objection left | comment `cap: <disagreement>`, then `task_update(status="blocked")`; the assignee stays `counter-analyst` |
 | `todo` to `implementing` | coder | `task_claim` |
 | `implementing` to `reviewing` | coder, or manager with `force`+`reason` | `task_update(status="reviewing", assignee="reviewer")` |
 | `reviewing` to `done` | reviewer | `task_update(status="done")` |
@@ -101,7 +147,8 @@ The names `in_progress` and `review` are still accepted as input and read as
    (context, plus the paths the seat may touch and the paths or actions it must
    not), a `goal` (the command and the output line that proves it), and an
    assignee when the owner is known. If the evidence cannot be named yet, the row
-   does not go to the coder: it goes to the analyst (`planning`) or stays with the
+   does not go to the coder: it goes to the analyst (`planning`; the counter-analyst
+   then challenges the plan) or stays with the
    manager until the goal is falsifiable.
 2. The seat claims it: `task_claim(id)`. The row now reads `implementing` and that
    seat's name.
@@ -204,7 +251,8 @@ Follow-ups: <optional>
   on a scratch board, or `not-verified (accepted coder <level>: <reason>)`. On a code
   row, only `needs a build` is an accepted reason. A mismatch with coder output
   blocks the row.
-- The analyst's report is not a handoff of finished work. It lists `Files`,
+- The analyst's report is not a handoff of finished work, and it holds only the
+  plan the counter-analyst passed (the exchange stays comments). It lists `Files`,
   `Functions`, `Behaviour`, `Must not change` and `Proof` (the command and the
   line that proves it). It also names its analyst turn (`Turn: analyst <n>`) so
   the coder builds the branch name from a stated number, not a guess.

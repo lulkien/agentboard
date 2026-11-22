@@ -15,10 +15,10 @@ Pages here:
 
 - this manual: the board, the seats, the launcher, the wake loop, the twelve tools
 - `workflow.md`: how a task moves and who moves it
-- `roles.md`: manager, analyst, coder and reviewer: what each may run and never does
+- `roles.md`: manager, analyst, counter-analyst, coder and reviewer: what each may run and never does
 
 Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboard-analyst`,
-`agentboard-coder`, `agentboard-reviewer`. Wire details live in `PROTOCOL.md`; changing the tree in `AGENTS.md`.
+`agentboard-counter-analyst`, `agentboard-coder`, `agentboard-reviewer`. Wire details live in `PROTOCOL.md`; changing the tree in `AGENTS.md`.
 
 ## The board
 
@@ -43,7 +43,8 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
 | Seat | Writes as | Entry skill | Job |
 | --- | --- | --- | --- |
 | manager | the name its client was started with (`manager` here) | `agentboard-manager` | file rows, read the board, hand rows out, quota, decide with the human |
-| analyst | `analyst` | `agentboard-analyst` | read and plan, hand the row to the coder |
+| analyst | `analyst` | `agentboard-analyst` | read and plan; settle the plan with the counter-analyst, then hand the row to the coder |
+| counter-analyst | `counter-analyst` | `agentboard-counter-analyst` | research the row independently, argue against the plan, pass it or send it back |
 | coder | `coder` | `agentboard-coder` | implement one row, verify it, hand it to review |
 | reviewer | `reviewer` | `agentboard-reviewer` | read the work and judge it; close or reopen the row |
 
@@ -87,13 +88,14 @@ profile and no deny list: what a seat may and may never do is written in its rol
 skill and `roles.md`, and a seat that ignores them is a contract breach the
 reviewer reopens, not a launch flag.
 
-For Claude, analyst and reviewer use Opus at medium effort, and coder uses Sonnet
+For Claude, analyst, counter-analyst and reviewer use Opus at medium effort, and coder uses Sonnet
 at medium effort. Codex takes the model and effort as flags. Swap a model only when
 the human names a different one.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
 | analyst | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
+| counter-analyst | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
 | coder | `--model claude-sonnet-5-5 --effort medium` | `--model gpt-6-luna -c model_reasoning_effort=medium` |
 | reviewer | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
 
@@ -105,6 +107,8 @@ herdr pane list                                    # note the new tab's pane id
 # Claude seats: actor, model, effort, unattended permission mode
 env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind claude --pane "$PANE_ANALYST" -- \
   --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
+env AGENTBOARD_ACTOR=counter-analyst herdr agent start counter-analyst --kind claude --pane "$PANE_COUNTER" -- \
+  --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 env AGENTBOARD_ACTOR=coder herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
   --model claude-sonnet-5-5 --effort medium --dangerously-skip-permissions
 env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
@@ -112,6 +116,8 @@ env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind claude --pane "$
 
 # Codex seats
 env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind codex --pane "$PANE_ANALYST" -- \
+  --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+env AGENTBOARD_ACTOR=counter-analyst herdr agent start counter-analyst --kind codex --pane "$PANE_COUNTER" -- \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 env AGENTBOARD_ACTOR=coder herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
   --model gpt-6-luna -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
@@ -128,6 +134,7 @@ env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
 # and Grok; $agentboard-<seat> T<id> for Codex.
 herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
+herdr agent prompt counter-analyst '/agentboard-counter-analyst T<id>' --wait   # '$agentboard-counter-analyst' for Codex
 herdr agent prompt coder '$agentboard-coder T<id>' --wait   # Codex seat
 ```
 
@@ -135,7 +142,7 @@ Start only the seats the work needs: a reviewer with nothing to review is a tab
 that idles. Pick one kind per team; do not mix Claude and Codex rows of the table
 in one launch unless the human asks.
 
-A seat's restrictions are the ones its role skill states (analyst and reviewer
+A seat's restrictions are the ones its role skill states (analyst, counter-analyst and reviewer
 never edit product files, the coder commits only on its task branch); nothing in
 the launch enforces them.
 
@@ -164,6 +171,8 @@ export REPO=/path/to/repo
 # Claude seats
 hc run --bg --name analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=analyst claude \
   --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
+hc run --bg --name counter-analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=counter-analyst claude \
+  --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder claude \
   --model claude-sonnet-5-5 --effort medium --dangerously-skip-permissions
 hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer claude \
@@ -176,12 +185,14 @@ hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> grok --tr
 # outside hc and nothing it starts is addressable.
 hc run --bg --name analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=analyst codex --no-daemon \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+hc run --bg --name counter-analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=counter-analyst codex --no-daemon \
+  --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder codex --no-daemon \
   --model gpt-6-luna -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex --no-daemon \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 
-# agy seats: gemini-4-neon-high for analyst, coder and reviewer, -medium for the manager
+# agy seats: gemini-4-neon-high for analyst, counter-analyst, coder and reviewer, -medium for the manager
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy \
   --dangerously-skip-permissions --model gemini-4-neon-high -i '/agentboard-<seat> T<id>'
 
@@ -193,9 +204,11 @@ hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> codewhale
 # Claude, Grok and Codewhale; $agentboard-<seat> T<id> for Codex. A terminal that
 # has not reported yet is working, so wait for each seat before its first prompt.
 hc wait analyst
+hc wait counter-analyst
 hc wait coder
 hc wait reviewer
 hc send --wait analyst '/agentboard-analyst T<id>'
+hc send --wait counter-analyst '/agentboard-counter-analyst T<id>'   # '$agentboard-counter-analyst' for Codex
 hc send --wait coder '$agentboard-coder T<id>'   # Codex seat
 ```
 
@@ -230,18 +243,18 @@ launch recipes above; install and the registered entries are in `seats/README.md
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all four | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> claude`; manager via `agentboard-manager claude` in either | global `agentboard` entry (`claude mcp add-json -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
-| Codex | all four | herdr and hc as for Claude with `--kind codex` / `codex --no-daemon`; manager via `agentboard-manager codex` in either | global `[mcp_servers.agentboard]` (`codex mcp add`), `bearer_token_env_var = "AGENTBOARD_ACTOR"` | `--dangerously-bypass-approvals-and-sandbox` | `$agentboard-<seat>` |
-| Codewhale | all four; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> codewhale --skip-onboarding --fresh --disable subagents --approval-policy never` | global `mcp.json` entry (`codewhale mcp add`), `bearer_token_env_var` | `--approval-policy never` | `/agentboard-<seat>` |
-| Grok | all four | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok`; manager via `agentboard-manager grok` | global entry (`grok mcp add -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--trust --always-approve` | `/agentboard-<seat>` |
-| agy | all four | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> agy`; manager via `agentboard-manager agy`; first prompt in `-i`, no typing helper | global stdio entry `seats/agy/agentboard-stdio` (`agy mcp add`), which reads `AGENTBOARD_ACTOR` from the launch environment | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
+| Claude | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> claude`; manager via `agentboard-manager claude` in either | global `agentboard` entry (`claude mcp add-json -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
+| Codex | all five | herdr and hc as for Claude with `--kind codex` / `codex --no-daemon`; manager via `agentboard-manager codex` in either | global `[mcp_servers.agentboard]` (`codex mcp add`), `bearer_token_env_var = "AGENTBOARD_ACTOR"` | `--dangerously-bypass-approvals-and-sandbox` | `$agentboard-<seat>` |
+| Codewhale | all five; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> codewhale --skip-onboarding --fresh --disable subagents --approval-policy never` | global `mcp.json` entry (`codewhale mcp add`), `bearer_token_env_var` | `--approval-policy never` | `/agentboard-<seat>` |
+| Grok | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok`; manager via `agentboard-manager grok` | global entry (`grok mcp add -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--trust --always-approve` | `/agentboard-<seat>` |
+| agy | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> agy`; manager via `agentboard-manager agy`; first prompt in `-i`, no typing helper | global stdio entry `seats/agy/agentboard-stdio` (`agy mcp add`), which reads `AGENTBOARD_ACTOR` from the launch environment | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
-Model and effort per seat come from the launch table for every client; agy takes the effort in the model id (`gemini-4-neon-high` for analyst, coder and reviewer, `gemini-4-neon-medium` for the manager).
+Model and effort per seat come from the launch table for every client; agy takes the effort in the model id (`gemini-4-neon-high` for analyst, counter-analyst, coder and reviewer, `gemini-4-neon-medium` for the manager).
 agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. agy reads skills from `~/.gemini/config/skills`, which the installer links. Skills are
 one physical copy under `~/.agents/skills`, which the installer links; Codex, Grok
 and Codewhale read that directory directly. Claude reads `~/.claude/skills`, which the
-installer does not link yet; until it does, link the five `agentboard-*` skill
+installer does not link yet; until it does, link the six `agentboard-*` skill
 directories there by hand.
 
 ## Register a seat's MCP server
@@ -289,10 +302,11 @@ agentboard feed --after "$CURSOR" --recipient coder --wait 300
   works too: `agentboard wait 12 --epic` watches its direct children and returns
   once every one of them is `done` or `canceled`. The verdict's first line is
   `matched:` (exit 0) or `timeout:` (exit 3), and it writes nothing.
-- An analyst-to-coder handoff changes the assignee and leaves the status alone, so
-  a status wait never sees it. Add `--assignee` to the same wait:
+- An analyst handoff (to the counter-analyst, back to the analyst, or on to the coder)
+  changes the assignee and leaves the status alone, so a status wait never sees it. Add `--assignee` to the same wait:
   `agentboard wait 27 --status reviewing,done,blocked --assignee --timeout 300`. It returns on a
-  handoff after the wait starts and says `; handoff T27 to coder` on the first line.
+  handoff after the wait starts and says `; handoff T27 to coder` (or `to counter-analyst`,
+  `to analyst`) on the first line; the manager prompts the seat it names.
 - In hc, park a long wait in a terminal of its own, so the manager stays reachable:
   `hc run --bg --name watch-27 --cwd "$REPO" agentboard wait 27 --status
   reviewing,done,blocked --assignee --timeout 300` returns at once, and the watch's
@@ -453,9 +467,10 @@ third implement turn is found short. The coder's branch is
 `task-<id>-analyst-<n>-implement-<m>`; the handoff names it and its one commit in
 the coder report, and the comment names the report.
 
-An analyst that finds the row too big does not hand it on: it returns
-`todo`/`manager` with a split plan in the analyst report, and the manager files
-the children under that row, which stays the umbrella.
+An analyst that finds the row too big does not hand it on: after the counter-analyst
+passes its split plan it returns `todo`/`manager` with that plan in the analyst
+report, and the manager files the children under that row, which stays the umbrella.
+`workflow.md` (The counter-analyst) has the pass rule.
 
 When a holder is gone for good — out of quota, its seat replaced by another name —
 send the row back instead of handing it over:

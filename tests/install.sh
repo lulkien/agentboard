@@ -70,7 +70,7 @@ is "manager launcher linked" test "$(readlink "$home/.local/bin/agentboard-manag
 is "user unit linked" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
 has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config/systemd/user/agentboard.service"
-for s in analyst coder manager reviewer team; do
+for s in analyst counter-analyst coder manager reviewer team; do
   is "skill agentboard-$s linked" test "$(readlink "$home/.agents/skills/agentboard-$s")" = "$repo/skills/agentboard-$s"
 done
 has "codex add argv" "codex mcp add agentboard --url http://127.0.0.1:8765/mcp --bearer-token-env-var AGENTBOARD_ACTOR" "$tmp/mcp.log"
@@ -141,12 +141,12 @@ inst --skip-binary --force
 is "force replaces unit link" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 
 # --- skills: one canonical link per repo skill in ~/.agents/skills ----------------
-skill_names="agentboard-analyst agentboard-coder agentboard-manager agentboard-reviewer agentboard-team"
+skill_names="agentboard-analyst agentboard-counter-analyst agentboard-coder agentboard-manager agentboard-reviewer agentboard-team"
 for agent in codex grok codewhale claude agy; do
   newhome
   inst --agent "$agent" --skip-binary; code=$?
   is "--agent $agent install succeeds" test "$code" -eq 0
-  is "--agent $agent links all five canonical skills" bash -c 'for s in $2; do test "$(readlink "$1/.agents/skills/$s")" = "$3/skills/$s" || exit 1; done' _ "$home" "$skill_names" "$repo"
+  is "--agent $agent links all six canonical skills" bash -c 'for s in $2; do test "$(readlink "$1/.agents/skills/$s")" = "$3/skills/$s" || exit 1; done' _ "$home" "$skill_names" "$repo"
   has "--agent $agent reports a linked skill" "linked: $home/.agents/skills/agentboard-team -> $repo/skills/agentboard-team" "$tmp/out"
   is "--agent $agent writes no skill alias into ~/.claude" test ! -e "$home/.claude/skills"
   is "--agent $agent leaves launcher and unit alone" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"

@@ -1,6 +1,6 @@
 # Seats
 
-Four seats, one board: manager, analyst, coder, reviewer. A seat is a CLI agent
+Five seats, one board: manager, analyst, counter-analyst, coder, reviewer. A seat is a CLI agent
 process with its own `AGENTBOARD_ACTOR`, pointed at the same `AGENTBOARD_DB`.
 Nothing in the board enforces these rules; they are the team's contract, and the
 board's refusals (stale revision, held task, missing reason) are what make breaking
@@ -102,18 +102,21 @@ Never:
 ## Analyst
 
 The seat that turns a question into a plan. The manager files the row with the
-question; the analyst reads it, plans, and hands the same row on.
+question; the analyst reads it, drafts a plan, settles it with the counter-analyst,
+and hands the row on only after the counter-analyst passes it.
 
 May:
 - read code with the file tools and the shell's read-only searches (`rg`, git reads)
 - write only under `/tmp/agentboard/scratch/`
 - read the row the manager set to `planning` with the analyst as assignee; it does
   not `task_claim` it, because a claim starts `implementing`
-- `task_comment` one short line naming the analyst turn; the plan goes in the
-  analyst report
-- `task_update` the row to write its report and hand it to the coder
-  (`status="implementing"`, `assignee="coder"`), or to return an oversized row to
-  the manager (`status="todo"`, `assignee="manager"`) with a split plan
+- `task_comment` its draft plan (`analyst <n>.<r> draft:`) and its answers to the
+  counter-analyst's Blocking objections, each comment under 32768 characters
+- `task_update` the row to hand it to `counter-analyst` (status stays `planning`)
+- after the counter-analyst's `pass`, write the one agreed plan into the analyst
+  report and hand the row to the coder (`status="implementing"`, `assignee="coder"`),
+  or return an oversized row to the manager (`status="todo"`, `assignee="manager"`)
+  with the agreed split plan
 
 Never:
 - implement the plan, edit product files (the file tools included), or run the
@@ -121,6 +124,30 @@ Never:
 - build, install, commit or push
 - file a second row for the same work
 - close a row; the reviewer or the coder closes it
+- hand a draft to the coder or the manager before the counter-analyst has passed it
+
+## Counter-analyst
+
+The second analyst. It researches the row on its own and argues against the
+analyst's plan; the analyst and it are one role with two names, and every plan and
+split plan goes through it before the coder or the manager.
+
+May:
+- read code with the file tools and the shell's read-only searches (`rg`, git reads)
+- write only under `/tmp/agentboard/scratch/`
+- read the row held by `counter-analyst` in `planning`; it does not `task_claim` it
+- `task_comment` its review, `counter-analyst <n>.<r>: objections` with numbered
+  `Blocking` and `Note` items and their evidence, or `counter-analyst <n>.<r>: pass`
+- `task_update` the row to hand it back to `analyst` (status stays `planning`), for a
+  pass and for objections alike
+- at review 5, if a Blocking item stands, comment `cap: <disagreement>` and
+  `task_update(status="blocked")`, the assignee staying `counter-analyst`
+
+Never:
+- implement, edit product files (the file tools included), build, install, commit
+  or push
+- write or rewrite the analyst report, or move a row to the coder or the manager
+- file or close a row, or `task_claim`
 
 ## Talking between seats
 

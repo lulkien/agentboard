@@ -44,13 +44,14 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/daemon.py` | `daemon: 340/340 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
-| `bash tests/install.sh` | `163/163 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
+| `bash tests/install.sh` | `164/164 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
 | `bash tests/agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `99/99 passed (manager launcher)` |
+| `bash tests/counter-loop.sh` (scratch board, real binary; the analyst/counter-analyst protocol) | `30/30 passed (counter loop)` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 14 pages, 153 CLI names, 161 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 15 pages, 153 CLI names, 179 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
-| `bash scripts/gate.sh` | `GATES OK: 14 gates passed`; with `--full` `GATES OK: 15 gates passed` |
-| `bash scripts/gate.sh --prebuilt` | `GATES OK: 10 gates passed` (reviewer; venv on PATH) |
+| `bash scripts/gate.sh` | `GATES OK: 15 gates passed`; with `--full` `GATES OK: 16 gates passed` |
+| `bash scripts/gate.sh --prebuilt` | `GATES OK: 11 gates passed` (reviewer; venv on PATH) |
 | `cargo test --offline --lib -- --ignored --nocapture claim_latency` | `claim latency, 8 processes over 1000 tasks: p50=... p95=...`; gross-regression ceilings 75 ms debug / 40 ms release, not targets, overridable with `AGENTBOARD_CLAIM_P95_MS` |
 | `cargo test --offline --lib -- --ignored --nocapture large_board_reads_scale_with_relevant_work` | `large-board work: tasks=2510 api_reads=2520 wait_polls=1 wait_rows=250 feed_visits=3` |
 
@@ -200,7 +201,7 @@ screenshots from the coder report because browser use is not verified in the san
   Codex, Grok and Codewhale read `~/.agents/skills` directly. There is one physical copy: never copy over the
   installed links.
 - `PROTOCOL.md` — the wire surface: twelve tools, cursors, refusals, exit codes.
-- `skills/agentboard-{manager,analyst,coder,reviewer}/` — one seat entry point each
+- `skills/agentboard-{manager,analyst,counter-analyst,coder,reviewer}/` — one seat entry point each
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
   `agentboard-manager/SKILL.md`.
 - `seats/` — the manager launcher and the systemd unit. The one installer is the repository-root `./install.py` (`-h`,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install agentboard for every supported client.
 
-Builds the agentboard binary, links the five skills once into ~/.agents/skills (which
+Builds the agentboard binary, links the six skills once into ~/.agents/skills (which
 Codex, Grok and Codewhale read), and registers one global `agentboard` MCP entry per
 selected client through that client's own `mcp add` command. The entry is the same
 for every seat: the seat's name comes from AGENTBOARD_ACTOR in the environment the
