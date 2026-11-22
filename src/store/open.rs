@@ -362,10 +362,6 @@ pub struct GrowOutcome {
 }
 
 impl Board {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_options(path, BoardOptions::from_env()?)
-    }
-
     pub fn open_with_options(path: impl AsRef<Path>, options: BoardOptions) -> Result<Self> {
         options.map_size_bytes()?;
         let path = prepare_path(path.as_ref())?;

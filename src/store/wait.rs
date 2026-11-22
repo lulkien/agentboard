@@ -271,7 +271,7 @@ impl Board {
                 .range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
             {
                 let (key, _) = entry?;
-                fresh.push(index_seq(key)?);
+                fresh.push(super::feed::event_index_seq(key)?);
             }
         }
         if fresh.is_empty() {
@@ -283,7 +283,7 @@ impl Board {
                 .next()
             {
                 let (key, _) = entry?;
-                let seq = index_seq(key)?;
+                let seq = super::feed::event_index_seq(key)?;
                 row.last = Some(self.wait_event(txn, seq)?);
             }
             return Ok(());
@@ -319,7 +319,7 @@ impl Board {
             .range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
         {
             let (key, _) = entry?;
-            let seq = index_seq(key)?;
+            let seq = super::feed::event_index_seq(key)?;
             let event = self.wait_event(txn, seq)?;
             if event.kind != EventKind::Updated {
                 continue;
@@ -339,16 +339,6 @@ impl Board {
         self.read_event_in_txn(txn, sequence)?
             .ok_or(Error::Corrupt("event index points to a missing event"))
     }
-}
-
-/// The event sequence stored in bytes 8..16 of an `events_by_task` key.
-fn index_seq(key: &[u8]) -> Result<u64> {
-    let bytes: [u8; 8] = key
-        .get(8..16)
-        .ok_or(Error::Corrupt("invalid event index key"))?
-        .try_into()
-        .map_err(|_| Error::Corrupt("invalid event index key"))?;
-    Ok(u64::from_be_bytes(bytes))
 }
 
 fn ordered(statuses: &[Status]) -> Vec<Status> {

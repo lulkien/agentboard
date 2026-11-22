@@ -3,7 +3,6 @@
 //! Result shape is deliberate: reads are one line per task, writes answer with the
 //! changed record plus its event cursor. Agents pay tokens per byte.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -18,38 +17,11 @@ use serde::Deserialize;
 use crate::domain::{self, EventKind, NewTask, Status, TaskPatch};
 use crate::render;
 use crate::store::{
-    Board as BoardHandle, ClaimOutcome, Error as StoreError, FeedFilter, ListFilter, UpdateInput,
+    Board as BoardHandle, Error as StoreError, FeedFilter, ListFilter, UpdateInput,
 };
 
 const NAME: &str = "agentboard";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Resolve the adapter's project scope without making the store depend on
-/// process environment or the caller's working directory.
-pub fn resolve_project(
-    board: &BoardHandle,
-    explicit: Option<u64>,
-) -> crate::store::Result<Option<u64>> {
-    if explicit.is_some() {
-        return Ok(explicit);
-    }
-    if let Ok(raw) = std::env::var("AGENTBOARD_PROJECT") {
-        let id = raw
-            .parse::<u64>()
-            .map_err(|_| StoreError::InvalidProjectEnv(raw.clone()))?;
-        return Ok(Some(id));
-    }
-    let Ok(cwd) = std::env::current_dir() else {
-        return Ok(None);
-    };
-    let cwd = normalized_path(&cwd);
-    let projects = board.list_projects()?;
-    Ok(projects.into_iter().find_map(|project| {
-        (!project.project_path.is_empty()
-            && normalized_path(Path::new(&project.project_path)) == cwd)
-            .then_some(project.project_id)
-    }))
-}
 
 /// Identity and project of one HTTP request. The daemon puts it in the request extensions.
 #[derive(Clone, Debug)]
@@ -70,10 +42,6 @@ fn request_scope(extensions: &Extensions) -> Result<RequestScope, ErrorData> {
 /// working directory, only its argument, then the project on its URL.
 fn call_project(explicit: Option<u64>, scope: &RequestScope) -> Option<u64> {
     explicit.or(scope.project)
-}
-
-fn normalized_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn text(body: String) -> CallToolResult {
@@ -288,10 +256,6 @@ impl Board {
         }
     }
 
-    fn actor_name(scope: &RequestScope) -> &str {
-        &scope.actor
-    }
-
     #[tool(
         name = "task_add",
         description = "Create a task; returns its record and event cursor"
@@ -302,7 +266,7 @@ impl Board {
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
         let scope = request_scope(&extensions)?;
-        let actor = Self::actor_name(&scope).to_owned();
+        let actor = scope.actor.clone();
         let status = match args.status.as_deref() {
             Some(raw) => Status::parse(raw).map_err(|e| err(e.to_string()))?,
             None => Status::Todo,
@@ -369,19 +333,7 @@ impl Board {
             })
         })
         .await?;
-        let mut lines: Vec<String> = page.tasks.iter().map(render::task_line).collect();
-        if lines.is_empty() {
-            lines.push("no tasks".into());
-        }
-        lines.push(format!(
-            "total {} cursor {}",
-            page.total,
-            page.cursor.encode()
-        ));
-        if page.more {
-            lines.push("more true".into());
-        }
-        Ok(text(lines.join("\n")))
+        Ok(text(render::task_page(&page)))
     }
 
     #[tool(
@@ -422,7 +374,7 @@ impl Board {
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
         let scope = request_scope(&extensions)?;
-        let actor = Self::actor_name(&scope).to_owned();
+        let actor = scope.actor.clone();
         let status = match args.status.as_deref() {
             Some(raw) => Some(Status::parse(raw).map_err(|e| err(e.to_string()))?),
             None => None,
@@ -482,14 +434,11 @@ impl Board {
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
         let scope = request_scope(&extensions)?;
-        let actor = Self::actor_name(&scope).to_owned();
+        let actor = scope.actor.clone();
         let outcome = blocking(&self.board, move |board| {
             board.claim(&actor, args.id, domain::now_ms())
         })
         .await?;
-        if matches!(outcome, ClaimOutcome::NoWork) {
-            return Ok(text("no ready tasks".into()));
-        }
         Ok(text(render::claim_line(&outcome)))
     }
 
@@ -503,7 +452,7 @@ impl Board {
         extensions: Extensions,
     ) -> Result<CallToolResult, ErrorData> {
         let scope = request_scope(&extensions)?;
-        let actor = Self::actor_name(&scope).to_owned();
+        let actor = scope.actor.clone();
         let cursor = blocking(&self.board, move |board| -> crate::store::Result<_> {
             let event = board.comment(&actor, args.id, &args.body, domain::now_ms())?;
             let instance = board.metadata()?.instance_id;
@@ -578,11 +527,7 @@ impl Board {
     )]
     async fn board_agents(&self) -> Result<CallToolResult, ErrorData> {
         let agents = blocking(&self.board, move |board| board.agents()).await?;
-        if agents.is_empty() {
-            return Ok(text("no actors".into()));
-        }
-        let lines: Vec<String> = agents.iter().map(render::agent_line).collect();
-        Ok(text(lines.join("\n")))
+        Ok(text(render::agents_list(&agents)))
     }
 
     #[tool(

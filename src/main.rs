@@ -1,15 +1,15 @@
 //! CLI entry: parse, call the store, render text, set the exit code.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
 
 use agentboard::domain::{self, EventKind, NewProject, NewTask, Status, TaskPatch};
 use agentboard::store::{
-    AssigneeMatch, Board, BoardOptions, ClaimOutcome, FeedFilter, ListFilter, UpdateInput,
-    WaitSpec, parse_status_csv,
+    AssigneeMatch, Board, BoardOptions, ClaimOutcome, Error as StoreError, FeedFilter, ListFilter,
+    UpdateInput, WaitSpec, parse_status_csv,
 };
 use agentboard::{cli, render};
 
@@ -65,6 +65,32 @@ fn need_actor(actor: Option<String>) -> Result<String, String> {
 
 fn open(path: &PathBuf) -> agentboard::store::Result<Board> {
     Board::open_with_options(path, BoardOptions::from_env()?)
+}
+
+fn resolve_project(board: &Board, explicit: Option<u64>) -> agentboard::store::Result<Option<u64>> {
+    if explicit.is_some() {
+        return Ok(explicit);
+    }
+    if let Ok(raw) = std::env::var("AGENTBOARD_PROJECT") {
+        let id = raw
+            .parse::<u64>()
+            .map_err(|_| StoreError::InvalidProjectEnv(raw.clone()))?;
+        return Ok(Some(id));
+    }
+    let Ok(cwd) = std::env::current_dir() else {
+        return Ok(None);
+    };
+    let cwd = normalized_path(&cwd);
+    let projects = board.list_projects()?;
+    Ok(projects.into_iter().find_map(|project| {
+        (!project.project_path.is_empty()
+            && normalized_path(Path::new(&project.project_path)) == cwd)
+            .then_some(project.project_id)
+    }))
+}
+
+fn normalized_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn run(
@@ -151,7 +177,7 @@ fn run(
             let actor = need_actor(actor)?;
             let status = parse_status(status.as_deref())?.unwrap_or(Status::Todo);
             let board = open(&path)?;
-            let project = agentboard::server::resolve_project(&board, project)?;
+            let project = resolve_project(&board, project)?;
             let input = NewTask {
                 title,
                 description,
@@ -183,7 +209,7 @@ fn run(
         } => {
             let status = parse_status(status.as_deref())?;
             let board = open(&path)?;
-            let project = agentboard::server::resolve_project(&board, project)?;
+            let project = resolve_project(&board, project)?;
             let page = board.list(&ListFilter {
                 status,
                 assignee: assignee.as_deref(),
@@ -193,19 +219,7 @@ fn run(
                 limit,
                 offset,
             })?;
-            let mut lines: Vec<String> = page.tasks.iter().map(render::task_line).collect();
-            if lines.is_empty() {
-                lines.push("no tasks".into());
-            }
-            lines.push(format!(
-                "total {} cursor {}",
-                page.total,
-                page.cursor.encode()
-            ));
-            if page.more {
-                lines.push("more true".into());
-            }
-            Ok((lines.join("\n"), ExitCode::SUCCESS))
+            Ok((render::task_page(&page), ExitCode::SUCCESS))
         }
         Cmd::Epic { id } => {
             let board = open(&path)?;
@@ -366,7 +380,7 @@ fn run(
         }
         Cmd::Brief { project } => {
             let board = open(&path)?;
-            let project = agentboard::server::resolve_project(&board, project)?;
+            let project = resolve_project(&board, project)?;
             let brief = board.brief_for_project(10, project)?;
             Ok((render::brief_text(&brief), ExitCode::SUCCESS))
         }
@@ -377,11 +391,7 @@ fn run(
                 return Ok((render::deleted_agent(&agent), ExitCode::SUCCESS));
             }
             let agents = board.agents()?;
-            if agents.is_empty() {
-                return Ok(("no actors".into(), ExitCode::SUCCESS));
-            }
-            let lines: Vec<String> = agents.iter().map(render::agent_line).collect();
-            Ok((lines.join("\n"), ExitCode::SUCCESS))
+            Ok((render::agents_list(&agents), ExitCode::SUCCESS))
         }
     }
 }

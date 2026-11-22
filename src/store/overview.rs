@@ -52,11 +52,9 @@ impl Board {
                 continue;
             }
             let task: Task = serde_json::from_slice(raw)?;
-            if !task.status.is_terminal() {
-                lanes[keys::status_code(task.status) as usize].push(task.clone());
-                if let Some(assignee) = &task.assignee {
-                    held.entry(assignee.clone()).or_default().push(task.clone());
-                }
+            lanes[keys::status_code(task.status) as usize].push(task.clone());
+            if let Some(assignee) = &task.assignee {
+                held.entry(assignee.clone()).or_default().push(task.clone());
             }
             if matches!(task.status, Status::Blocked | Status::Reviewing)
                 || (task.status == Status::Todo && task.assignee.is_some())

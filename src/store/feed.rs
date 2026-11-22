@@ -86,7 +86,7 @@ fn checked_cursor(raw: &str, instance_id: &str) -> Result<Cursor> {
     Ok(cursor)
 }
 
-fn index_sequence(key: &[u8]) -> Result<u64> {
+pub(super) fn event_index_seq(key: &[u8]) -> Result<u64> {
     let bytes: [u8; 8] = key
         .get(8..16)
         .ok_or(Error::Corrupt("invalid event index key"))?
@@ -116,7 +116,7 @@ impl Board {
                 .rev_range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
             {
                 let (key, _) = entry?;
-                let seq = index_sequence(key)?;
+                let seq = event_index_seq(key)?;
                 let event = self.indexed_event(txn, task_id, seq)?;
                 visited += 1;
                 if matches(filter, &event) {
@@ -172,7 +172,7 @@ impl Board {
                 .rev_range(txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
             {
                 let (key, _) = entry?;
-                let seq = index_sequence(key)?;
+                let seq = event_index_seq(key)?;
                 let event = self.indexed_event(txn, task_id, seq)?;
                 visited += 1;
                 if matches(filter, &event) {
@@ -271,7 +271,7 @@ impl Board {
                 .range(&txn, &(Bound::Included(&lo[..]), Bound::Included(&hi[..])))?
             {
                 let (key, _) = entry?;
-                let seq = index_sequence(key)?;
+                let seq = event_index_seq(key)?;
                 let event = self.indexed_event(&txn, task_id, seq)?;
                 #[cfg(test)]
                 {

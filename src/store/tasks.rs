@@ -61,8 +61,7 @@ impl Board {
     /// `new_actor` registers an unknown target assignee, never the caller.
     pub fn add(&self, actor: &str, input: NewTask, new_actor: bool, now_ms: i64) -> Result<Added> {
         let mut txn = self.env.write_txn()?;
-        let metadata = self.checked_metadata(&txn)?;
-        let mut metadata = metadata;
+        let mut metadata = self.checked_metadata(&txn)?;
         let task_id = metadata.next_task_id;
         let task = Task::new(task_id, actor, input, now_ms)?;
         self.require_project(&txn, Some(task.project_id))?;
@@ -319,6 +318,7 @@ impl Board {
 
     /// Read-only candidate probe. The later claim write rechecks this same
     /// index under its write transaction before changing task ownership.
+    #[cfg(test)]
     pub fn next_claimable_id(&self, actor: &str) -> Result<Option<u64>> {
         validate_actor(actor)?;
         let txn = read_txn(&self.env)?;
@@ -326,6 +326,7 @@ impl Board {
         Ok(self.next_claimable_in_txn(&txn, actor)?.map(|task| task.id))
     }
 
+    #[cfg(test)]
     pub fn event(&self, sequence: u64) -> Result<Option<Event>> {
         let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;
@@ -339,6 +340,7 @@ impl Board {
         Ok(Some(event))
     }
 
+    #[cfg(test)]
     pub fn agent(&self, name: &str) -> Result<Option<Agent>> {
         let txn = read_txn(&self.env)?;
         self.checked_metadata(&txn)?;

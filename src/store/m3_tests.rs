@@ -874,7 +874,7 @@ fn list_filters_pages_and_brief_counts() {
             .collect::<Vec<_>>(),
         vec![closed.id]
     );
-    let brief = board.brief(10).unwrap();
+    let brief = board.brief_for_project(10, None).unwrap();
     let count = |status: Status| {
         brief
             .counts
@@ -917,7 +917,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
     assert!(epic.counts.iter().all(|(_, count)| *count == 1));
     assert_eq!(epic.cursor.seq, before.next_event_seq - 1);
     assert_eq!(epic.cursor.instance_id, before.instance_id);
-    let brief = board.brief(0).unwrap();
+    let brief = board.brief_for_project(0, None).unwrap();
     assert_eq!(
         brief.epics.iter().map(|e| e.task.id).collect::<Vec<_>>(),
         vec![children[0].id, root.id]
@@ -953,7 +953,7 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
         })
         .unwrap();
     assert!(matches!(board.epic(children[0].id), Err(Error::NotEpic(_))));
-    assert_eq!(board.brief(10).unwrap().epics.len(), 1);
+    assert_eq!(board.brief_for_project(10, None).unwrap().epics.len(), 1);
     // Build a legal closed epic after its children have all become terminal.
     // Terminal parents remain readable in both epic and brief.
     for child in &children[..5] {
@@ -991,7 +991,10 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
     let closed = board.epic(root.id).unwrap();
     assert_eq!(closed.task.status, Status::Done);
     assert_eq!(closed.total, 208);
-    assert_eq!(board.brief(0).unwrap().epics[0].task, closed.task);
+    assert_eq!(
+        board.brief_for_project(0, None).unwrap().epics[0].task,
+        closed.task
+    );
     assert_eq!(board.metadata().unwrap(), before);
     assert_eq!(board.agents().unwrap(), roster);
 }

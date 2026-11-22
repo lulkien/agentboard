@@ -5,13 +5,12 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::domain::{Status, Task};
+use crate::domain::{Status, Task, deserialize_project_id, standalone_project_id};
 
 use super::feed::Cursor;
 use super::keys;
 use super::open::{Board, Error, MapUsage, ReadTxn, Result, read_txn};
 
-pub const DEFAULT_LIST_LIMIT: usize = 20;
 pub const MAX_LIST_LIMIT: usize = 200;
 
 #[derive(Deserialize)]
@@ -26,17 +25,6 @@ pub(super) struct TaskHead<'a> {
         deserialize_with = "deserialize_project_id"
     )]
     pub project_id: u64,
-}
-
-fn deserialize_project_id<'de, D>(deserializer: D) -> std::result::Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(0))
-}
-
-fn standalone_project_id() -> u64 {
-    0
 }
 
 impl<'a> From<&'a Task> for TaskHead<'a> {
@@ -241,11 +229,6 @@ impl Board {
                 seq: metadata.next_event_seq.saturating_sub(1),
             },
         })
-    }
-
-    /// Derived epic progress and unparented active work, with global counts.
-    pub fn brief(&self, active_limit: usize) -> Result<Brief> {
-        self.brief_for_project(active_limit, None)
     }
 
     /// Derived epic progress and active work for one project, or the whole board.

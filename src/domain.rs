@@ -19,14 +19,14 @@ pub const MAX_REPORT_CHARS: usize = 262_144;
 pub const STANDALONE_PROJECT_ID: u64 = 0;
 pub const STANDALONE_PROJECT_NAME: &str = "standalone";
 
-fn deserialize_project_id<'de, D>(deserializer: D) -> Result<u64, D::Error>
+pub(crate) fn deserialize_project_id<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(STANDALONE_PROJECT_ID))
 }
 
-fn standalone_project_id() -> u64 {
+pub(crate) fn standalone_project_id() -> u64 {
     STANDALONE_PROJECT_ID
 }
 
@@ -597,13 +597,6 @@ impl EventKind {
             Self::Commented => "commented",
         }
     }
-
-    pub const ALL: [EventKind; 4] = [
-        EventKind::Created,
-        EventKind::Updated,
-        EventKind::Claimed,
-        EventKind::Commented,
-    ];
 
     pub fn parse(raw: &str) -> Result<Self, Error> {
         match raw {

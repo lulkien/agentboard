@@ -1,7 +1,7 @@
 //! Compact text rendering shared by the CLI and the MCP tools.
 
 use crate::domain::{Event, Project, Status, Task};
-use crate::store::{Agent, Brief, Epic, FeedPage, WaitOutcome};
+use crate::store::{Agent, Brief, Epic, FeedPage, TaskPage, WaitOutcome};
 
 /// Width of a task title in a one-line list.
 const TITLE_WIDTH: usize = 72;
@@ -44,6 +44,29 @@ pub fn task_line(task: &Task) -> String {
         task.assignee.as_deref().unwrap_or("-"),
         truncate(&task.title, TITLE_WIDTH)
     )
+}
+
+pub fn task_page(page: &TaskPage) -> String {
+    let mut lines: Vec<String> = page.tasks.iter().map(task_line).collect();
+    if lines.is_empty() {
+        lines.push("no tasks".into());
+    }
+    lines.push(format!(
+        "total {} cursor {}",
+        page.total,
+        page.cursor.encode()
+    ));
+    if page.more {
+        lines.push("more true".into());
+    }
+    lines.join("\n")
+}
+
+pub fn agents_list(agents: &[Agent]) -> String {
+    if agents.is_empty() {
+        return "no actors".into();
+    }
+    agents.iter().map(agent_line).collect::<Vec<_>>().join("\n")
 }
 
 /// A compact record, or the stored text itself when `full` is set: no title clip,
