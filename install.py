@@ -35,13 +35,6 @@ def split_lines(data):
     return parts
 
 
-def raw_lines(data):
-    """The same lines with their terminators, so a rewrite keeps every other byte."""
-    return [p + b"\n" for p in data.split(b"\n")[:-1]] + (
-        [data.rsplit(b"\n", 1)[-1]] if data and not data.endswith(b"\n") else []
-    )
-
-
 def strip_cr(line):
     return line[:-1] if line.endswith(b"\r") else line
 
@@ -75,12 +68,6 @@ def marked_scan(data, begin, end):
 
 def rules_scan(data):
     return marked_scan(data, BEGIN, END)
-
-
-def source_ok(data, begin=BEGIN, end=END):
-    lines = [strip_cr(x) for x in split_lines(data)]
-    markers = sum(1 for x in lines if x.strip(b" \t") in (begin, end))
-    return markers == 2 and lines[0] == begin and lines[-1] == end
 
 
 def read(path):
