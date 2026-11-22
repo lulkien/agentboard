@@ -9,6 +9,12 @@ unit=$repo/seats/systemd/agentboard.service
 grok_src=$repo/seats/grok/agentboard-mcp.toml
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# Every real client CLI writes under the temp $HOME, never a seat home the caller runs in.
+unset CLAUDE_CONFIG_DIR GROK_HOME CODEWHALE_HOME CODEX_HOME
+real_codex=$(command -v codex || true)
+real_codewhale=$(command -v codewhale || true)
+real_claude=$(command -v claude || true)
+real_grok=$(command -v grok || true)
 n=0 fail=0
 ok() { n=$((n + 1)); }
 bad() { n=$((n + 1)); fail=$((fail + 1)); echo "FAIL: $*" >&2; }
@@ -84,6 +90,11 @@ if args[:2] == ["auth", "list"]:
     else:
         sys.stdout.write("provider config store env route\n")
     sys.exit(0)
+if args[:2] in (["mcp", "add"], ["mcp", "remove"]):
+    real = os.environ.get("real_codewhale")
+    if real:
+        os.execv(real, [real] + args)
+    sys.exit(0)
 if args[:2] == ["mcp", "list"]:
     config = pathlib.Path(os.environ["CODEWHALE_HOME"], "mcp.json")
     try:
@@ -121,6 +132,22 @@ PY
   chmod 700 "$tmp/bin/codewhale"
 }
 make_fake_codewhale
+# claude and grok are stubs that ignore `mcp` calls, like the Codex and Codewhale stubs; the
+# global-MCP case alone sets real_<cli> so each stub hands the call to the real binary.
+for cli in claude grok; do
+  cat >"$tmp/bin/$cli" <<SH
+#!/usr/bin/env bash
+var=real_$cli
+[ -n "\${!var:-}" ] && exec "\${!var}" "\$@"
+echo "\$*" >>"\${STUB_MCP_LOG:-/dev/null}"
+case "\$2" in
+  remove) [ -z "\${STUB_MCP_REMOVE_FAIL:-}" ] || { echo "\$STUB_MCP_REMOVE_FAIL" >&2; exit 1; } ;;
+  add|add-json) [ -z "\${STUB_MCP_ADD_FAIL:-}" ] || { echo "\$STUB_MCP_ADD_FAIL" >&2; exit 1; } ;;
+esac
+exit 0
+SH
+  chmod 700 "$tmp/bin/$cli"
+done
 # cargo is always this stub: it logs its argv and exits $STUB_CARGO_EXIT (default 0).
 cat >"$tmp/bin/cargo" <<'SH'
 #!/usr/bin/env bash
@@ -172,6 +199,11 @@ cat >"$tmp/bin/codex" <<'PY'
 #!/usr/bin/env python3
 import os, sys, tomllib
 args = sys.argv[1:]
+if args[:2] in (["mcp", "add"], ["mcp", "remove"]):
+    real = os.environ.get("real_codex")
+    if real:
+        os.execv(real, [real] + args)
+    sys.exit(0)
 assert len(args) == 2 and args[0] in ("-p", "--profile")
 seat = args[1]
 with open(os.path.join(os.environ["CODEX_HOME"], seat + ".config.toml"), "rb") as f:
@@ -205,7 +237,7 @@ is "base Codex home gets no profile links" test -z "$(find "$home/.codex" -maxde
 is "host default.rules left as the user wrote it" test "$(cat "$home/.codex/rules/default.rules")" = 'host rule'
 
 # Role homes an older installer polluted are cleaned of profile links and
-# inherited rules; the base Codex home is still never written.
+# inherited rules; the stub swallows `mcp add`, so the base Codex home is not written here.
 reviewer_home="$home/.local/share/agentboard/seats/reviewer/codex"
 ln -s "$repo/seats/codex/analyst.config.toml" "$reviewer_home/analyst.config.toml"
 mv "$reviewer_home/reviewer.config.toml" "$tmp/reviewer-profile"
@@ -591,12 +623,74 @@ newhome
 HOME="$home" PATH="$tmp/nocargo:/usr/bin:/bin" ./install.py --agent grok >"$tmp/out" 2>"$tmp/err"; code=$?
 is "missing cargo refuses" test "$code" -eq 1 -a ! -e "$home/.local/share/agentboard"
 has "missing cargo names the way out" "cargo not found; install Rust or rerun with --skip-binary" "$tmp/err"
+newhome
+HOME="$home" PATH="$tmp/nocargo:/usr/bin:/bin" ./install.py --agent grok --skip-binary >"$tmp/out" 2>"$tmp/err"; code=$?
+is "missing grok CLI is a note, not a failure" test "$code" -eq 0
+has "missing grok CLI is named" "note: grok not found on PATH" "$tmp/err"
 
 # --- a Grok-only install does not manage the PATH launcher -------------------
 newhome
 grok_inst
 is "Grok-only leaves manager launcher alone" test ! -e "$home/.local/bin/agentboard-manager"
 is "Grok-only leaves user unit alone" test ! -e "$home/.config/systemd/user/agentboard.service"
+
+# --- one global agentboard MCP entry per client, through the client's own command ---
+if [ -n "$real_codex" ] && [ -n "$real_codewhale" ] && [ -n "$real_claude" ] && [ -n "$real_grok" ]; then
+  export real_codex real_codewhale real_claude real_grok
+  newhome
+  seed() { HOME="$home" PATH="$tmp/bin:$PATH" "$@" >/dev/null 2>&1; }
+  seed "$real_claude" mcp add-json -s user keep '{"type":"http","url":"http://127.0.0.1:9/keep"}'
+  seed "$real_codex" mcp add keep --url http://127.0.0.1:9/keep
+  seed "$real_grok" mcp add -s user --transport http keep http://127.0.0.1:9/keep
+  seed "$real_codewhale" mcp add keep --url http://127.0.0.1:9/keep
+  global_shape() { # global_shape <label>: one agentboard entry per client, shaped as stated
+    HOME="$home" python3 - "$1" <<'PY'
+import json, sys, tomllib, os
+home, url = os.environ["HOME"], "http://127.0.0.1:8765/mcp"
+bearer = "Bearer ${AGENTBOARD_ACTOR}"
+def cfg(path, toml):
+    with open(path, "rb") as f:
+        return tomllib.load(f) if toml else json.load(f)
+claude = cfg(f"{home}/.claude.json", False)["mcpServers"]
+codex = cfg(f"{home}/.codex/config.toml", True)["mcp_servers"]
+grok = cfg(f"{home}/.grok/config.toml", True)["mcp_servers"]
+whale = cfg(f"{home}/.codewhale/mcp.json", False)["servers"]
+for name, servers in (("claude", claude), ("codex", codex), ("grok", grok), ("codewhale", whale)):
+    assert [k for k in servers if k == "agentboard"] == ["agentboard"], name
+    assert "keep" in servers, name
+    assert servers["agentboard"]["url"] == url, name
+assert claude["agentboard"]["headers"]["Authorization"] == bearer
+assert grok["agentboard"]["headers"]["Authorization"] == bearer
+assert codex["agentboard"]["bearer_token_env_var"] == "AGENTBOARD_ACTOR"
+assert whale["agentboard"]["bearer_token_env_var"] == "AGENTBOARD_ACTOR"
+PY
+  }
+  for run in first second; do
+    inst --skip-binary; code=$?
+    is "global MCP $run install exits 0" test "$code" -eq 0
+    is "global MCP $run install: one agentboard entry per client, keep survives" global_shape "$run"
+  done
+  is "Codex role home inherits no global agentboard table" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); s=d.get("mcp_servers",{}); sys.exit(0 if "agentboard" not in s and "keep" in s else 1)' "$home/.local/share/agentboard/seats/coder/codex/config.toml"
+  unset real_codex real_codewhale real_claude real_grok
+  is "Grok role url still carries the seat" python3 -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1],"rb")); sys.exit(0 if d["mcp_servers"]["agentboard"]["url"].endswith("/mcp/coder") else 1)' "$home/.local/share/agentboard/seats/coder/grok/config.toml"
+else
+  echo "SKIP: global MCP cases need claude, codex, grok, codewhale"
+fi
+
+# --- a failing global MCP command fails the install and says why ---------------
+newhome
+STUB_MCP_ADD_FAIL="grok add exploded" inst --agent grok --skip-binary; code=$?
+is "failing mcp add exits 1" test "$code" -eq 1
+has "failing mcp add shows the CLI output" "grok add exploded" "$tmp/err"
+newhome
+: >"$tmp/mcp.log"
+STUB_MCP_LOG="$tmp/mcp.log" STUB_MCP_REMOVE_FAIL="remove denied" inst --agent claude --skip-binary; code=$?
+is "unexpected claude remove failure exits 1" test "$code" -eq 1
+has "claude remove failure shows the CLI output" "remove denied" "$tmp/err"
+is "claude add never runs after a failed remove" bash -c '! grep -q add-json "$1"' _ "$tmp/mcp.log"
+newhome
+STUB_MCP_REMOVE_FAIL='No MCP server named "agentboard" in user scope' inst --agent claude --skip-binary; code=$?
+is "claude remove of an absent entry is tolerated" test "$code" -eq 0
 
 # --- help and the three-flag surface -----------------------------------------
 newhome
@@ -734,18 +828,16 @@ grok_inst --force; code=$?
 is "malformed Grok auth refused" test "$code" -eq 1
 is "malformed auth preflight writes no role homes" test ! -e "$home/.local/share/agentboard/seats"
 
-# The legacy config's agentboard table can be replaced only after explicit force.
+# The base config's agentboard table (the global entry) never reaches a role home, and needs no force.
 newhome
 mkdir -p "$home/.grok"
 printf '[ui]\ntheme = "dark"\nnote = "keep"\n\n[mcp_servers.agentboard]\nurl = "http://wrong"\n\n[mcp_servers.agentboard.env]\nTOKEN = "synthetic"\n\n[mcp_servers.other]\nurl = "http://other"\n' >"$home/.grok/config.toml"
 grok_inst; code=$?
-is "unmarked Grok agentboard table refused" test "$code" -eq 1
-is "unmarked refusal writes no role homes" test ! -e "$home/.local/share/agentboard/seats"
-grok_inst --force; code=$?
-is "force safely replaces unmarked Grok table" test "$code" -eq 0
-has "force preserves unrelated UI setting" 'note = "keep"' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
-has "force preserves unrelated MCP table" '[mcp_servers.other]' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
-is "force removes unmarked token from role config" bash -c '! grep -q synthetic "$1"' _ "$home/.local/share/agentboard/seats/manager/grok/config.toml"
+is "base Grok agentboard table stripped without force" test "$code" -eq 0
+is "base Grok agentboard table survives in the base config" grep -q 'http://wrong' "$home/.grok/config.toml"
+has "preserves unrelated UI setting" 'note = "keep"' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
+has "preserves unrelated MCP table" '[mcp_servers.other]' "$home/.local/share/agentboard/seats/manager/grok/config.toml"
+is "strips unmarked token from role config" bash -c '! grep -q synthetic "$1"' _ "$home/.local/share/agentboard/seats/manager/grok/config.toml"
 
 # --agent grok isolates Grok; leaving grok out never examines a malformed Grok base.
 newhome

@@ -4,7 +4,8 @@
 Each role gets its own home under ~/.local/share/agentboard/seats/<seat>/<client>,
 built from the repo cards plus validated copies of the user's base settings and
 credentials. The default client homes (~/.codex, ~/.claude, ~/.grok, ~/.codewhale)
-are read, never written; files an older installer left there are only named.
+are read, and each selected client gets one global agentboard MCP entry written through
+its own `mcp add` command; files an older installer left there are only named.
 The five skills are linked once into ~/.agents/skills, which Codex, Grok and
 Codewhale read from any role home; Claude role homes link them into skills/.
 usage: install.py [-h] [--agent AGENT[,AGENT...]] [--force] [--skip-binary]
@@ -125,6 +126,12 @@ def codex_seat_home_plans(home, src, force):
                     raise ValueError("top level must be an object")
         except (UnicodeDecodeError, json.JSONDecodeError, tomllib.TOMLDecodeError, ValueError) as exc:
             raise ValueError(f"invalid {parser.upper()} in {path}: {exc}") from exc
+        if name == "config.toml":
+            # The global agentboard entry authenticates from AGENTBOARD_ACTOR, which role
+            # homes do not set; the role overlay supplies its own entry.
+            cleaned = remove_agentboard_table(payload)
+            if cleaned is not None:
+                payload = cleaned
         inputs[name] = payload
 
     missing_auth = inputs["auth.json"] is None
@@ -533,7 +540,7 @@ def marked_candidate(before, exists, state, source, begin, end):
     return before + sep + block
 
 
-def remove_grok_entry(data):
+def remove_agentboard_table(data):
     """Remove safely identifiable agentboard table sections, preserving other bytes."""
     raw = raw_lines(data)
     headers = []
@@ -561,6 +568,9 @@ def remove_grok_entry(data):
     remove = set()
     for start in target:
         end = next((index for index in headers if index > start), len(raw))
+        if end == len(raw):  # last table: also drop the blank separator before it
+            while start > 0 and not strip_cr(raw[start - 1]).strip():
+                start -= 1
         while end > start + 1:
             trailing = strip_cr(raw[end - 1]).strip()
             if trailing and not trailing.startswith(b"#"):
@@ -570,7 +580,7 @@ def remove_grok_entry(data):
     return b"".join(line for index, line in enumerate(raw) if index not in remove)
 
 
-def grok_preflight(path, source, force):
+def grok_preflight(path, source, force, strip_unmarked=False):
     if os.path.islink(path):
         print(f"{path} is a symlink; the installer edits only a regular file", file=sys.stderr)
         return False, None
@@ -611,13 +621,13 @@ def grok_preflight(path, source, force):
         print(f"invalid mcp_servers table in {path}; review it by hand", file=sys.stderr)
         return False, None
     if isinstance(servers, dict) and "agentboard" in servers:
-        if not force:
+        if not (force or strip_unmarked):
             print(
                 f"unmarked [mcp_servers.agentboard] entry in {path}; review and remove or convert it by hand",
                 file=sys.stderr,
             )
             return False, None
-        cleaned = remove_grok_entry(outside)
+        cleaned = remove_agentboard_table(outside)
         if cleaned is None:
             print(f"cannot safely locate unmarked [mcp_servers.agentboard] entry in {path}", file=sys.stderr)
             return False, None
@@ -669,7 +679,7 @@ def grok_seat_home_plans(home, src, force):
                 raise ValueError(f"unsafe Grok seat home path: {current}")
         files = {}
         role_source = source.replace(b"${AGENTBOARD_SEAT:-manager}", seat.encode())
-        base_ok, base_state = grok_preflight(base_config, role_source, force)
+        base_ok, base_state = grok_preflight(base_config, role_source, force, strip_unmarked=True)
         if not base_ok:
             raise ValueError(f"unsafe Grok base config: {base_config}")
         role_config = os.path.join(dest, "config.toml")
@@ -1167,13 +1177,50 @@ def report_shared_leftovers(home, src):
         print(f"note: leftover from an older installer, no longer used; delete it by hand: {path}")
 
 
+GLOBAL_MCP_URL = "http://127.0.0.1:8765/mcp"
+GLOBAL_MCP_ADD = {
+    "codex": ["codex", "mcp", "add", "agentboard", "--url", GLOBAL_MCP_URL,
+              "--bearer-token-env-var", "AGENTBOARD_ACTOR"],
+    "claude": ["claude", "mcp", "add-json", "-s", "user", "agentboard", json.dumps(
+        {"type": "http", "url": GLOBAL_MCP_URL,
+         "headers": {"Authorization": "Bearer ${AGENTBOARD_ACTOR}"}})],
+    "grok": ["grok", "mcp", "add", "-s", "user", "--transport", "http", "agentboard", GLOBAL_MCP_URL,
+             "-H", "Authorization: Bearer ${AGENTBOARD_ACTOR}"],
+    "codewhale": ["codewhale", "mcp", "add", "agentboard", "--url", GLOBAL_MCP_URL,
+                  "--bearer-token-env-var", "AGENTBOARD_ACTOR"],
+}
+
+
+def run_cli(argv):
+    return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+
+
+def register_global_mcp(agent):
+    """Replace the one global agentboard MCP entry through the client's own command."""
+    if not shutil.which(agent):
+        print(f"note: {agent} not found on PATH; agentboard MCP entry not registered for it", file=sys.stderr)
+        return
+    if agent == "claude":
+        # `claude mcp add-json` refuses an existing name, so remove first.
+        gone = run_cli(["claude", "mcp", "remove", "-s", "user", "agentboard"])
+        if gone.returncode != 0 and "No MCP server named" not in gone.stdout + gone.stderr:
+            print(gone.stdout + gone.stderr, file=sys.stderr)
+            sys.exit(1)
+    added = run_cli(GLOBAL_MCP_ADD[agent])
+    if added.returncode != 0:
+        print(added.stdout + added.stderr, file=sys.stderr)
+        sys.exit(1)
+    print(f"registered: agentboard MCP entry for {agent}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="install.py",
         description="Build and install the agentboard binary, link the agentboard skills into "
         "~/.agents/skills and generate isolated per-role "
         "seat homes under ~/.local/share/agentboard/seats. "
-        "Nothing is written into the default client homes (~/.codex, ~/.claude, ~/.grok, ~/.codewhale).",
+        "Each client's own `mcp add` registers one global agentboard MCP entry in its default home; "
+        "nothing else is written there.",
     )
     parser.add_argument(
         "--agent",
@@ -1365,6 +1412,10 @@ def main():
     if install_grok:
         install_grok_seat_homes(grok_seat_plans)
 
+    for agent, selected in (("codex", install_codex), ("claude", install_claude),
+                            ("grok", install_grok), ("codewhale", install_codewhale)):
+        if selected:
+            register_global_mcp(agent)
     report_shared_leftovers(home, src)
     print("done: seat profiles installed; see seats/README.md")
 

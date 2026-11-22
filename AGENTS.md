@@ -44,7 +44,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/daemon.py` | `daemon: 340/340 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
-| `bash tests/install.sh` | `618/618 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
+| `bash tests/install.sh` | `631/631 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
 | `bash tests/agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `96/96 passed (manager launcher)` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
 | `python3 tests/doc-names.py` | `doc-names: 14 pages, 152 CLI names, 156 MCP names passed` |
@@ -208,4 +208,4 @@ screenshots from the coder report because browser use is not verified in the san
   configs). The one installer is the repository-root `./install.py` (`-h`,
   `--agent`, `--force`, `--skip-binary`): it runs `cargo install --path . --locked`,
   links the skills, and generates per-role homes under
-  `~/.local/share/agentboard/seats`; it never writes a default client home.
+  `~/.local/share/agentboard/seats`; it writes a default client home only through each client's own `mcp add` (one global `agentboard` entry).

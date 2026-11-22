@@ -29,7 +29,10 @@ build exits 1 with nothing else written. `--skip-binary` skips the build.
 The installer writes only under `~/.local/share/agentboard/seats/<seat>/<client>`,
 the five `~/.agents/skills` links, and, on a full install, the two links below. The default client homes
 (`~/.codex`, `~/.claude`, `~/.claude.json`, `~/.grok`, `~/.codewhale`) are read as
-bases and never written. Files an older installer put there (repo-pointing
+bases. The one exception: each selected client's own `mcp add` registers a single global
+`agentboard` entry (`http://127.0.0.1:8765/mcp`, bearer token from `AGENTBOARD_ACTOR`),
+replacing any earlier one and leaving other servers alone; a client missing from `PATH`
+gets a note. Role homes do not inherit that entry. Files an older installer put there (repo-pointing
 `~/.codex/<seat>.config.toml` links, the `# BEGIN AGENTBOARD RULES` block in
 `~/.codex/rules/default.rules`, generated or repo-linked `~/.claude/<seat>-mcp.json`
 cards) are no longer used; each run names any it finds in a
