@@ -77,7 +77,7 @@ workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
 To start the manager in the current herdr pane, run the installed
-`agentboard-manager claude|codex|grok|agy` helper from its shell prompt. It
+`agentboard-manager claude|codex|grok|agy|opencode` helper from its shell prompt. It
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
 
@@ -91,6 +91,10 @@ reviewer reopens, not a launch flag.
 For Claude, analyst, counter-analyst and reviewer use Opus at medium effort, and coder uses Sonnet
 at medium effort. Codex takes the model and effort as flags. Swap a model only when
 the human names a different one.
+
+OpenCode sets its model and variant with `OPENCODE_CONFIG_CONTENT`: use
+`anthropic/claude-opus-5-5#medium` for manager, analyst, counter-analyst and
+reviewer, and `anthropic/claude-sonnet-5-5#medium` for coder.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
@@ -133,6 +137,11 @@ env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok --pane "$PANE" 
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
+# OpenCode; set <seat-model> to the model mapped above
+env AGENTBOARD_ACTOR=<seat> OPENCODE_CONFIG_CONTENT='{"model":"<seat-model>"}' \
+  herdr agent start <seat> --kind opencode --pane "$PANE" -- \
+  --standalone --auto --prompt "Use skill agentboard-<seat>. Work row T<id>"
+
 # First prompt is the seat skill and the row: /agentboard-<seat> T<id> for Claude
 # and Grok; $agentboard-<seat> T<id> for Codex.
 herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
@@ -173,7 +182,7 @@ workspace, and the manager keeps its own. Every worker gets a terminal of its ow
 named after the seat.
 
 To start the manager in the current hc terminal, run the installed
-`agentboard-manager codex|grok|codewhale|claude|agy` helper from its shell prompt. It
+`agentboard-manager codex|grok|codewhale|claude|agy|opencode` helper from its shell prompt. It
 replaces that shell with the selected manager, so the manager's address is
 `$HC_TERMINAL_ID`; `seats/README.md` documents its prerequisites.
 
@@ -211,6 +220,14 @@ hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex
 # gemini-3.8-flash-medium for coder; gemini-4-neon-medium for manager.
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
+
+# OpenCode; set <seat-model> to the model mapped above
+hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> \
+  OPENCODE_CONFIG_CONTENT='{"model":"<seat-model>"}' \
+  opencode --standalone --auto --prompt "Use skill agentboard-<seat>. Work row T<id>"
+
+# Use the literal `Use skill agentboard-<seat>...` prompt form above. The slash
+# form only opens the TUI; `Use the agentboard-<seat> skill...` was not recognized.
 
 # Codewhale seats (hc only)
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> codewhale \
@@ -263,12 +280,13 @@ launch recipes above; install and the registered entries are in `seats/README.md
 | Codewhale | all five; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> codewhale --skip-onboarding --fresh --disable subagents --approval-policy never` | global `mcp.json` entry (`codewhale mcp add`), `bearer_token_env_var` | `--approval-policy never` | `/agentboard-<seat>` |
 | Grok | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok`; manager via `agentboard-manager grok` | global entry (`grok mcp add -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--trust --always-approve` | `/agentboard-<seat>` |
 | agy | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> agy`; manager via `agentboard-manager agy`; first prompt in `-i`, no typing helper | global stdio entry `seats/agy/agentboard-stdio` (`agy mcp add`), which reads `AGENTBOARD_ACTOR` from the launch environment | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
+| OpenCode | all five; `--standalone` required | See OpenCode recipe above; manager via `agentboard-manager opencode` | See `seats/README.md` | `--auto` | See launch recipe |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
 Model and effort per seat come from the launch table for every client; agy takes the effort in the model id: `gemini-4-hydrogen-medium` for analyst, counter-analyst and reviewer, `gemini-3.8-flash-medium` for coder, and `gemini-4-neon-medium` for manager.
 agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. agy reads skills from `~/.gemini/config/skills`, which the installer links. Skills are
-one physical copy under `~/.agents/skills`, which the installer links; Codex, Grok
-and Codewhale read that directory directly. Claude reads `~/.claude/skills`, and agy
+one physical copy under `~/.agents/skills`, which the installer links; Codex, Grok,
+Codewhale and OpenCode read that directory directly. Claude reads `~/.claude/skills`, and agy
 `~/.gemini/config/skills`; the installer links both through the canonical names.
 
 ## Register a seat's MCP server

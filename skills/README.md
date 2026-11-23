@@ -5,7 +5,8 @@ plus `references/herdr-mechanics.md` and `references/hc-mechanics.md`). The five
 points: `agentboard-manager/`, `agentboard-analyst/`, `agentboard-counter-analyst/`, `agentboard-coder/`,
 `agentboard-reviewer/`. Each confirms the seat's
 board name, preserves its startup check and seat limits, and links to the shared
-workflow. Claude, Codex, Grok, Codewhale and agy load these skills directly.
+workflow. Claude, Codex, Grok, Codewhale, agy and OpenCode load these skills
+directly.
 
 ## Install
 
@@ -31,6 +32,7 @@ against an isolated `HOME`; seats start as `env AGENTBOARD_ACTOR=<seat> <client>
 | Codewhale 0.10.2 | `$HOME/.agents/skills` (`codewhale doctor`: "selected skills dir: ~/.agents/skills") | nothing beyond the canonical link | `/agentboard-<seat>` |
 | Claude Code 2.1.330 | `~/.claude/skills` | canonical links via `~/.agents/skills` | `/agentboard-<seat>` |
 | Antigravity (`agy`) | `~/.gemini/config/skills` | canonical links via `~/.agents/skills` | `/agentboard-<seat>` |
+| OpenCode 2.4.0 | `~/.agents/skills` | nothing beyond the canonical link | See the team launch recipe |
 
 The installer writes `~/.claude/skills` only with `claude` selected (the default), never `$CODEX_HOME/skills` or any role home; aliases an
 older skill installer left there still resolve and are left alone.

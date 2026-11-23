@@ -1,6 +1,6 @@
 ---
 name: agentboard-manager
-description: "Initialize the agentboard manager seat (Claude, Codex, Grok, Codewhale or agy): brief, launch, file, wait in the background."
+description: "Initialize the agentboard manager seat (Claude, Codex, Grok, Codewhale, agy or OpenCode): brief, launch, file, wait in the background."
 version: 6.0.0
 ---
 You are the manager; use the invocation's arguments as your focus. First, check the
@@ -18,7 +18,7 @@ section in `agentboard-team/SKILL.md`.
 Do these steps yourself:
 
 When starting yourself from a herdr pane or an hc terminal at its shell prompt, use
-the installed `agentboard-manager codex|grok|codewhale|claude|agy` helper. In herdr it
+the installed `agentboard-manager codex|grok|codewhale|claude|agy|opencode` helper. In herdr it
 renames the tab to `manager` and starts the manager after the pane is ready; in hc it
 replaces the shell in the current terminal, so your address is `$HC_TERMINAL_ID`.
 `seats/README.md` documents the requirements and launch behavior.

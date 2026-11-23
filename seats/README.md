@@ -28,8 +28,11 @@ else written. `--skip-binary` skips the build. Then it:
   own command, so no live config is hand-edited: `claude mcp add-json -s user`
   (after `claude mcp remove -s user agentboard`, since Claude refuses a second add),
   `codex mcp add --url ... --bearer-token-env-var AGENTBOARD_ACTOR`,
-  `grok mcp add -s user --transport http ... -H 'Authorization: Bearer ${AGENTBOARD_ACTOR}'`
-  and `codewhale mcp add --url ... --bearer-token-env-var AGENTBOARD_ACTOR`. A rerun
+  `grok mcp add -s user --transport http ... -H 'Authorization: Bearer ${AGENTBOARD_ACTOR}'`,
+  `codewhale mcp add --url ... --bearer-token-env-var AGENTBOARD_ACTOR`, and
+  `opencode mcp add --global --url ... --header 'Authorization=Bearer {env:AGENTBOARD_ACTOR}' agentboard`.
+  OpenCode sends `Bearer` with no token if `AGENTBOARD_ACTOR` is unset or empty, which
+  the daemon rejects with HTTP 400; always set it for each seat. A rerun
   replaces the entry and leaves other servers alone. A client missing from `PATH` gets
   a `note:` line; a failing add exits 1 with the client's output. The entry resolves
   `AGENTBOARD_ACTOR` at launch: a seat started without it has no usable agentboard
@@ -84,7 +87,7 @@ the global config.
 
 From a herdr pane or an hc terminal at its shell prompt, run:
 
-    agentboard-manager {codex|grok|codewhale|claude|agy}
+    agentboard-manager {codex|grok|codewhale|claude|agy|opencode}
 
 `agentboard-manager -h` explains the choice below. The launcher starts the client with
 `AGENTBOARD_ACTOR=manager` and no home variable, so the client reads the global
@@ -117,6 +120,18 @@ be read first; it is written to
 `${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`, and you type
 `/agentboard-manager` yourself.
 
+### OpenCode
+
+OpenCode seats run with `--standalone` so each process owns a private server and
+inherits its own `AGENTBOARD_ACTOR`; without it, seats can join a shared service
+whose environment was fixed at startup. The launcher supplies
+`OPENCODE_CONFIG_CONTENT='{"model":"anthropic/claude-opus-5-5#medium"}'` for
+the manager. Top-level `opencode` has no `--model` option. The installer registers
+the remote MCP entry with `opencode mcp add --global --url ... --header
+'Authorization=Bearer {env:AGENTBOARD_ACTOR}' agentboard`. An unset or empty
+`AGENTBOARD_ACTOR` sends an empty Bearer token, which the daemon rejects with HTTP
+400. Set the actor in every seat's environment.
+
 Seats start hidden and the launcher adds no label itself. No `--label` goes on
 `hc run` unless the human asks to watch that seat. The opt-in, only when the human asks:
 `hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` (only when the human asks); the terminal then
@@ -144,3 +159,5 @@ window, so it also runs on a headless machine.
 The installer suite checks the exact `mcp add` commands, a rerun against the real
 CLIs (one entry, same shape, other servers kept), refusals, link handling, and that
 old role homes stay byte-identical while being named as leftovers.
+Live seats using Anthropic models remain unproven; the available live run used
+the free `deepseek-v4.1-flash-free` model.
