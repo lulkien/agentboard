@@ -2,7 +2,7 @@
 """Install agentboard for every supported client.
 
 Builds the agentboard binary, links the six skills once into ~/.agents/skills (which
-Codex, Grok and Codewhale read), and registers one global `agentboard` MCP entry per
+Codex, Grok and Codewhale read; Claude and agy get links in their own skills directories), and registers one global `agentboard` MCP entry per
 selected client through that client's own `mcp add` command. The entry is the same
 for every seat: the seat's name comes from AGENTBOARD_ACTOR in the environment the
 seat is launched with. Role homes and per-seat cards from older installers are never
@@ -75,12 +75,16 @@ def read(path):
         return f.read()
 
 
-def skill_plans(home, repo, force, agy=False):
+# clients that do not read ~/.agents/skills get their own directory of links
+CLIENT_SKILL_DIRS = {"agy": (".gemini", "config", "skills"), "claude": (".claude", "skills")}
+
+
+def skill_plans(home, repo, force, client=None):
     """Preflight skill links.
 
     By default the canonical ~/.agents/skills links to the repo, which Codex, Grok and
-    Codewhale read. With agy, ~/.gemini/config/skills links to those canonical links,
-    because agy does not read ~/.agents/skills.
+    Codewhale read. With agy or claude, that client's own skills directory links to those
+    canonical links, because neither reads ~/.agents/skills.
     """
     skills_src = os.path.join(repo, "skills")
     names = sorted(
@@ -88,13 +92,13 @@ def skill_plans(home, repo, force, agy=False):
         if not name.startswith(".") and os.path.isfile(os.path.join(skills_src, name, "SKILL.md"))
     )
     canonical = os.path.join(home, ".agents", "skills")
-    base = os.path.join(home, ".gemini", "config", "skills") if agy else canonical
+    base = os.path.join(home, *CLIENT_SKILL_DIRS[client]) if client else canonical
     for path in (os.path.dirname(base), base):
         if os.path.lexists(path) and not os.path.isdir(path):
             raise ValueError(f"invalid skills directory: {path}")
     plans, problems = [], []
     for name in names:
-        source = os.path.join(canonical, name) if agy else os.path.join(skills_src, name)
+        source = os.path.join(canonical, name) if client else os.path.join(skills_src, name)
         destination = os.path.join(base, name)
         if os.path.islink(destination) and os.readlink(destination) == source:
             state = "unchanged"
@@ -244,11 +248,11 @@ def main():
     refuse = False
     try:
         skills = skill_plans(home, repo, force)
-        if "agy" in agents:
-            agy_skills = skill_plans(home, repo, force, agy=True)
+        client_skills = [skill_plans(home, repo, force, c) for c in CLIENT_SKILL_DIRS if c in agents]
     except (OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
-        skills = agy_skills = []
+        skills = []
+        client_skills = []
         refuse = True
 
     def check(p):
@@ -293,8 +297,8 @@ def main():
         print(f"linked: {d} -> {s}")
 
     install_skills(skills)
-    if "agy" in agents:
-        install_skills(agy_skills)
+    for plans in client_skills:
+        install_skills(plans)
     if not selective:
         link(f"{src}/agentboard-manager", f"{home}/.local/bin/agentboard-manager")
         link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")

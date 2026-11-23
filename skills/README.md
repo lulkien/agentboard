@@ -29,10 +29,10 @@ against an isolated `HOME`; seats start as `env AGENTBOARD_ACTOR=<seat> <client>
 | Codex 0.171.0 | `$HOME/.agents/skills` (`codex debug prompt-input` lists it) | nothing beyond the canonical link | `$agentboard-<seat>` via `/skills` |
 | Grok Build 1.0.89 | `$HOME/.agents/skills` (`grok inspect --json` reports it as a `user` skill) | nothing beyond the canonical link | `/agentboard-<seat>` |
 | Codewhale 0.10.2 | `$HOME/.agents/skills` (`codewhale doctor`: "selected skills dir: ~/.agents/skills") | nothing beyond the canonical link | `/agentboard-<seat>` |
-| Claude Code 2.1.330 | `~/.claude/skills` | nothing: the installer does not link it, so link the six names there by hand | `/agentboard-<seat>` |
+| Claude Code 2.1.330 | `~/.claude/skills` | canonical links via `~/.agents/skills` | `/agentboard-<seat>` |
 | Antigravity (`agy`) | `~/.gemini/config/skills` | canonical links via `~/.agents/skills` | `/agentboard-<seat>` |
 
-The installer never writes `~/.claude/skills`, `$CODEX_HOME/skills` or any role home; aliases an
+The installer writes `~/.claude/skills` only with `claude` selected (the default), never `$CODEX_HOME/skills` or any role home; aliases an
 older skill installer left there still resolve and are left alone.
 
 An existing canonical entry that is exactly this repo's link is left unchanged.
@@ -46,7 +46,7 @@ Each seat's board name is the `AGENTBOARD_ACTOR` it is launched with; the global
 what the board attributes writes to and what the feed addresses.
 
 `tests/install.sh` proves the layout in isolated homes: six canonical links
-from every `--agent` choice, no `~/.claude/skills` alias, and the refusal and `--force` cases above.
+from every `--agent` choice, `~/.claude/skills` links only for `claude`, and the refusal and `--force` cases above.
 
 ## Discovery notes (2026-10-22)
 

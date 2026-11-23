@@ -81,6 +81,7 @@ has "codewhale add argv" "codewhale mcp add agentboard --url http://127.0.0.1:87
 has "agy remove argv" "agy mcp remove agentboard" "$tmp/mcp.log"
 has "agy add argv names the shim" "agy mcp add agentboard $repo/seats/agy/agentboard-stdio" "$tmp/mcp.log"
 is "agy skills link through the canonical names" test "$(readlink "$home/.gemini/config/skills/agentboard-analyst")" = "$home/.agents/skills/agentboard-analyst" -a "$(readlink -f "$home/.gemini/config/skills/agentboard-analyst")" = "$repo/skills/agentboard-analyst"
+is "claude skills link through the canonical names" test "$(readlink "$home/.claude/skills/agentboard-counter-analyst")" = "$home/.agents/skills/agentboard-counter-analyst" -a "$(readlink -f "$home/.claude/skills/agentboard-counter-analyst")" = "$repo/skills/agentboard-counter-analyst"
 is "no role home is created" test ! -e "$home/.local/share/agentboard"
 is "fresh install names no leftovers" bash -c '! grep -q "^note: leftover" "$1"' _ "$tmp/out"
 has "done line" "done: agentboard installed" "$tmp/out"
@@ -148,11 +149,15 @@ for agent in codex grok codewhale claude agy; do
   is "--agent $agent install succeeds" test "$code" -eq 0
   is "--agent $agent links all six canonical skills" bash -c 'for s in $2; do test "$(readlink "$1/.agents/skills/$s")" = "$3/skills/$s" || exit 1; done' _ "$home" "$skill_names" "$repo"
   has "--agent $agent reports a linked skill" "linked: $home/.agents/skills/agentboard-team -> $repo/skills/agentboard-team" "$tmp/out"
-  is "--agent $agent writes no skill alias into ~/.claude" test ! -e "$home/.claude/skills"
+  if [ "$agent" = claude ]; then
+    is "--agent claude links the skills into ~/.claude" test "$(readlink "$home/.claude/skills/agentboard-team")" = "$home/.agents/skills/agentboard-team"
+  else
+    is "--agent $agent writes no skill alias into ~/.claude" test ! -e "$home/.claude/skills"
+  fi
   is "--agent $agent leaves launcher and unit alone" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 done
 inst --agent claude --skip-binary
-is "rerun leaves canonical skills alone" bash -c '! grep -q "^linked: .*/.agents/skills/" "$1"' _ "$tmp/out"
+is "rerun leaves canonical skills alone" bash -c '! grep -q "^linked: [^ ]*/.agents/skills/" "$1"' _ "$tmp/out"
 printf 'unrelated\n' >"$tmp/other-skill"
 ln -s "$tmp/other-skill" "$home/.agents/skills/someone-else"
 ln -sfn /old/checkout/skills/agentboard-team "$home/.agents/skills/agentboard-team"
