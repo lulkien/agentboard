@@ -76,7 +76,7 @@ case "$KIND" in
     argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codewhale --skip-onboarding --fresh --disable subagents --approval-policy never)
     ;;
   opencode)
-    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME -u OPENCODE_CONFIG -u OPENCODE_CONFIG_DIR -u OPENCODE_CONFIG_CONTENT 'OPENCODE_CONFIG_CONTENT={"model":"anthropic/claude-opus-5-5#medium"}' AGENTBOARD_ACTOR=manager opencode --standalone --auto --prompt 'Use skill agentboard-manager. Read the board and manage the manager workflow.')
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME -u OPENCODE_CONFIG -u OPENCODE_CONFIG_DIR -u OPENCODE_CONFIG_CONTENT 'OPENCODE_CONFIG_CONTENT={"model":"opencode/deepseek-v4.1-flash-free"}' AGENTBOARD_ACTOR=manager opencode --standalone --auto --prompt 'Use skill agentboard-manager. Read the board and manage the manager workflow.')
     hargs=(--standalone --auto --prompt 'Use skill agentboard-manager. Read the board and manage the manager workflow.')
     ;;
 esac
@@ -89,7 +89,7 @@ if [[ $world == herdr ]]; then
   unset CODEX_HOME CLAUDE_CONFIG_DIR GROK_HOME CODEWHALE_HOME
   if [[ $KIND == opencode ]]; then
     unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT
-    export OPENCODE_CONFIG_CONTENT='{"model":"anthropic/claude-opus-5-5#medium"}'
+    export OPENCODE_CONFIG_CONTENT='{"model":"opencode/deepseek-v4.1-flash-free"}'
   fi
   setsid bash -c '
     pane=$1 kind=$2

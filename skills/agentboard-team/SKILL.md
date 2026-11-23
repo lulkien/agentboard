@@ -92,9 +92,8 @@ For Claude, analyst, counter-analyst and reviewer use Opus at medium effort, and
 at medium effort. Codex takes the model and effort as flags. Swap a model only when
 the human names a different one.
 
-OpenCode sets its model and variant with `OPENCODE_CONFIG_CONTENT`: use
-`anthropic/claude-opus-5-5#medium` for manager, analyst, counter-analyst and
-reviewer, and `anthropic/claude-sonnet-5-5#medium` for coder.
+Every OpenCode seat uses `opencode/deepseek-v4.1-flash-free` to save the paid
+Codex, Claude and agy token pools.
 
 | Seat | Claude (`--kind claude`) | Codex (`--kind codex`) |
 | --- | --- | --- |
@@ -137,8 +136,8 @@ env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok --pane "$PANE" 
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
-# OpenCode; set <seat-model> to the model mapped above
-env AGENTBOARD_ACTOR=<seat> OPENCODE_CONFIG_CONTENT='{"model":"<seat-model>"}' \
+# OpenCode; every seat uses the free model to save the paid Codex, Claude and agy token pools
+env AGENTBOARD_ACTOR=<seat> OPENCODE_CONFIG_CONTENT='{"model":"opencode/deepseek-v4.1-flash-free"}' \
   herdr agent start <seat> --kind opencode --pane "$PANE" -- \
   --standalone --auto --prompt "Use skill agentboard-<seat>. Work row T<id>"
 
@@ -221,9 +220,9 @@ hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
-# OpenCode; set <seat-model> to the model mapped above
+# OpenCode; every seat uses the free model to save the paid Codex, Claude and agy token pools
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> \
-  OPENCODE_CONFIG_CONTENT='{"model":"<seat-model>"}' \
+  OPENCODE_CONFIG_CONTENT='{"model":"opencode/deepseek-v4.1-flash-free"}' \
   opencode --standalone --auto --prompt "Use skill agentboard-<seat>. Work row T<id>"
 
 # Use the literal `Use skill agentboard-<seat>...` prompt form above. The slash

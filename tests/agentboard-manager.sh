@@ -109,7 +109,7 @@ run_kind grok 'EXEC grok <--trust> <--always-approve>'
 run_kind agy 'EXEC agy <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager>'
 run_kind codewhale 'EXEC codewhale <--skip-onboarding> <--fresh> <--disable> <subagents> <--approval-policy> <never>'
 run_kind opencode 'EXEC opencode <--standalone> <--auto> <--prompt> <Use skill agentboard-manager. Read the board and manage the manager workflow.>'
-exact "$CLIENT_LOG" 'OPEN CONFIG= DIR= CONTENT={"model":"anthropic/claude-opus-5-5#medium"}' 'opencode gets isolated manager config and model'
+exact "$CLIENT_LOG" 'OPEN CONFIG= DIR= CONTENT={"model":"opencode/deepseek-v4.1-flash-free"}' 'opencode gets isolated manager config and model'
 # exec replaces the launcher: the client is the process the shell started
 : >"$CLIENT_LOG"
 bash -c 'echo "LAUNCHER $$" >>"$CLIENT_LOG"; exec "$1" codex' _ "$repo/seats/agentboard-manager" >/dev/null 2>&1
@@ -198,7 +198,7 @@ run_herdr_kind() {
   fi
   exact "$HERDR_LOG" 'ENV AGENTBOARD_ACTOR=manager CODEX_HOME= CLAUDE_CONFIG_DIR= GROK_HOME= CODEWHALE_HOME=' "herdr $kind gets the manager actor and no home variable"
   if [[ $kind == opencode ]]; then
-    exact "$HERDR_LOG" 'OPEN CONFIG= DIR= CONTENT={"model":"anthropic/claude-opus-5-5#medium"}' 'herdr opencode clears inherited config and sets model'
+    exact "$HERDR_LOG" 'OPEN CONFIG= DIR= CONTENT={"model":"opencode/deepseek-v4.1-flash-free"}' 'herdr opencode clears inherited config and sets model'
   fi
   is "herdr $kind never calls hc" test ! -s "$STUB_HC_LOG"
 }

@@ -125,8 +125,9 @@ be read first; it is written to
 OpenCode seats run with `--standalone` so each process owns a private server and
 inherits its own `AGENTBOARD_ACTOR`; without it, seats can join a shared service
 whose environment was fixed at startup. The launcher supplies
-`OPENCODE_CONFIG_CONTENT='{"model":"anthropic/claude-opus-5-5#medium"}'` for
-the manager. Top-level `opencode` has no `--model` option. The installer registers
+`OPENCODE_CONFIG_CONTENT='{"model":"opencode/deepseek-v4.1-flash-free"}'` for
+every seat because OpenCode seats save the paid Codex, Claude and agy token pools.
+Top-level `opencode` has no `--model` option. The installer registers
 the remote MCP entry with `opencode mcp add --global --url ... --header
 'Authorization=Bearer {env:AGENTBOARD_ACTOR}' agentboard`. An unset or empty
 `AGENTBOARD_ACTOR` sends an empty Bearer token, which the daemon rejects with HTTP
@@ -159,5 +160,3 @@ window, so it also runs on a headless machine.
 The installer suite checks the exact `mcp add` commands, a rerun against the real
 CLIs (one entry, same shape, other servers kept), refusals, link handling, and that
 old role homes stay byte-identical while being named as leftovers.
-Live seats using Anthropic models remain unproven; the available live run used
-the free `deepseek-v4.1-flash-free` model.
