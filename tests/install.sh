@@ -15,6 +15,7 @@ real_codewhale=$(command -v codewhale || true)
 real_claude=$(command -v claude || true)
 real_grok=$(command -v grok || true)
 real_agy=$(command -v agy || true)
+real_opencode=$(command -v opencode || true)
 n=0 fail=0
 ok() { n=$((n + 1)); }
 bad() { n=$((n + 1)); fail=$((fail + 1)); echo "FAIL: $*" >&2; }
@@ -34,7 +35,7 @@ inst() { # inst [args]: run the installer; stdout in $tmp/out, stderr in $tmp/er
 # Client stubs ignore `mcp` calls (logging them), except in the one case that sets
 # real_<cli>, where each stub hands the call to the real binary.
 mkdir -p "$tmp/bin"
-for cli in claude codex grok codewhale agy; do
+for cli in claude codex grok codewhale agy opencode; do
   cat >"$tmp/bin/$cli" <<SH
 #!/usr/bin/env bash
 var=real_$cli
@@ -80,6 +81,7 @@ has "grok add argv" 'grok mcp add -s user --transport http agentboard http://127
 has "codewhale add argv" "codewhale mcp add agentboard --url http://127.0.0.1:8765/mcp --bearer-token-env-var AGENTBOARD_ACTOR" "$tmp/mcp.log"
 has "agy remove argv" "agy mcp remove agentboard" "$tmp/mcp.log"
 has "agy add argv names the shim" "agy mcp add agentboard $repo/seats/agy/agentboard-stdio" "$tmp/mcp.log"
+has "opencode add argv uses actor header substitution" 'opencode mcp add --global --url http://127.0.0.1:8765/mcp --header Authorization=Bearer {env:AGENTBOARD_ACTOR} agentboard' "$tmp/mcp.log"
 is "agy skills link through the canonical names" test "$(readlink "$home/.gemini/config/skills/agentboard-analyst")" = "$home/.agents/skills/agentboard-analyst" -a "$(readlink -f "$home/.gemini/config/skills/agentboard-analyst")" = "$repo/skills/agentboard-analyst"
 is "claude skills link through the canonical names" test "$(readlink "$home/.claude/skills/agentboard-counter-analyst")" = "$home/.agents/skills/agentboard-counter-analyst" -a "$(readlink -f "$home/.claude/skills/agentboard-counter-analyst")" = "$repo/skills/agentboard-counter-analyst"
 is "no role home is created" test ! -e "$home/.local/share/agentboard"
@@ -143,7 +145,7 @@ is "force replaces unit link" test "$(readlink "$home/.config/systemd/user/agent
 
 # --- skills: one canonical link per repo skill in ~/.agents/skills ----------------
 skill_names="agentboard-analyst agentboard-counter-analyst agentboard-coder agentboard-manager agentboard-reviewer agentboard-team"
-for agent in codex grok codewhale claude agy; do
+for agent in codex grok codewhale claude agy opencode; do
   newhome
   inst --agent "$agent" --skip-binary; code=$?
   is "--agent $agent install succeeds" test "$code" -eq 0
@@ -154,6 +156,7 @@ for agent in codex grok codewhale claude agy; do
   else
     is "--agent $agent writes no skill alias into ~/.claude" test ! -e "$home/.claude/skills"
   fi
+  is "--agent $agent does not create an opencode skill alias" test ! -e "$home/.config/opencode/skills"
   is "--agent $agent leaves launcher and unit alone" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 done
 inst --agent claude --skip-binary
@@ -279,6 +282,34 @@ else
   echo "SKIP: global MCP cases need claude, codex, grok, codewhale"
 fi
 
+# --- opencode: global MCP registration is idempotent through the real CLI ------
+if [ -n "$real_opencode" ]; then
+  export real_opencode
+  newhome
+  seed() { HOME="$home" XDG_CONFIG_HOME="$home/config" PATH="$tmp/bin:$PATH" "$@" >/dev/null 2>&1; }
+  seed "$real_opencode" mcp add --global --url http://127.0.0.1:9/keep --header 'Authorization=Bearer keep' keep
+  opencode_shape() {
+    XDG_CONFIG_HOME="$home/config" python3 - <<'PY'
+import json, os
+path = os.path.join(os.environ["XDG_CONFIG_HOME"], "opencode", "opencode.json")
+servers = json.load(open(path))["mcp"]["servers"]
+assert [k for k in servers if k == "agentboard"] == ["agentboard"]
+entry = servers["agentboard"]
+assert entry["url"] == "http://127.0.0.1:8765/mcp", entry
+assert entry["headers"]["Authorization"] == "Bearer {env:AGENTBOARD_ACTOR}", entry
+assert "keep" in servers
+PY
+  }
+  for run in first second; do
+    XDG_CONFIG_HOME="$home/config" inst --agent opencode --skip-binary; code=$?
+    is "opencode $run install exits 0" test "$code" -eq 0
+    is "opencode $run install keeps one agentboard entry and the unrelated entry" opencode_shape
+  done
+  unset real_opencode
+else
+  echo "SKIP: opencode cases need opencode"
+fi
+
 # --- agy: one stdio-shim entry, replacing any earlier one, through the real CLI ---
 if [ -n "$real_agy" ]; then
   export real_agy
@@ -318,7 +349,7 @@ for args in -h --help; do
   inst $args; code=$?
   is "$args exits 0" test "$code" -eq 0
   has "$args shows usage" 'usage: install.py [-h] [--agent AGENT[,AGENT...]] [--force] [--skip-binary]' "$tmp/out"
-  has "$args lists client names" 'codex,codewhale,claude,grok,agy' "$tmp/out"
+  has "$args lists client names" 'codex,codewhale,claude,grok,agy,opencode' "$tmp/out"
   is "$args writes nothing" test ! -e "$home/.agents" -a ! -e "$home/.local/bin"
 done
 for flag in --grok-only --skip-grok '--codewhale-provider custom' --bogus; do

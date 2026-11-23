@@ -21,7 +21,7 @@ import sys
 import json
 
 SEATS = ["analyst", "coder", "manager", "reviewer"]
-AGENTS = ("codex", "codewhale", "claude", "grok", "agy")
+AGENTS = ("codex", "codewhale", "claude", "grok", "agy", "opencode")
 CLAUDE_MARK = "agentboardGenerated"
 BEGIN = b"# BEGIN AGENTBOARD RULES"
 END = b"# END AGENTBOARD RULES"
@@ -182,6 +182,8 @@ GLOBAL_MCP_ADD = {
                   "--bearer-token-env-var", "AGENTBOARD_ACTOR"],
     # agy expands no variable in an entry, so it gets the stdio shim, which inherits the launch env.
     "agy": ["agy", "mcp", "add", "agentboard", os.path.join(os.path.dirname(os.path.abspath(__file__)), "seats/agy/agentboard-stdio")],
+    "opencode": ["opencode", "mcp", "add", "--global", "--url", GLOBAL_MCP_URL,
+                 "--header", "Authorization=Bearer {env:AGENTBOARD_ACTOR}", "agentboard"],
 }
 
 
@@ -243,7 +245,7 @@ def main():
     src = os.path.join(repo, "seats")
     home = os.environ["HOME"]
     selective = selected_agents is not None
-    agents = [name for name in ("codex", "claude", "grok", "codewhale", "agy") if not selective or name in selected_agents]
+    agents = [name for name in ("codex", "claude", "grok", "codewhale", "agy", "opencode") if not selective or name in selected_agents]
 
     refuse = False
     try:

@@ -36,6 +36,9 @@ printf '\n' >>"$HERDR_LOG"
 if [[ $1 == agent && $2 == start && ${3:-} == manager && ${HERDR_ENV:-} == 1 ]]; then
   printf 'ENV AGENTBOARD_ACTOR=%s CODEX_HOME=%s CLAUDE_CONFIG_DIR=%s GROK_HOME=%s CODEWHALE_HOME=%s\n' \
     "${AGENTBOARD_ACTOR:-}" "${CODEX_HOME:-}" "${CLAUDE_CONFIG_DIR:-}" "${GROK_HOME:-}" "${CODEWHALE_HOME:-}" >>"$HERDR_LOG"
+  if [[ ${5:-} == opencode ]]; then
+    printf 'OPEN CONFIG=%s DIR=%s CONTENT=%s\n' "${OPENCODE_CONFIG:-}" "${OPENCODE_CONFIG_DIR:-}" "${OPENCODE_CONFIG_CONTENT:-}" >>"$HERDR_LOG"
+  fi
 fi
 if [[ $1 == pane && $2 == process-info ]]; then
   case ${HERDR_MODE:-ready} in
@@ -50,13 +53,16 @@ cat >"$tmp/bin/sleep" <<'SH'
 exit 0
 SH
 # each client records how it was exec'd: argv, its role-home variable and its pid
-for client in claude codex grok codewhale agy; do
+for client in claude codex grok codewhale agy opencode; do
   cat >"$tmp/bin/$client" <<'SH'
 #!/usr/bin/env bash
 {
   printf 'EXEC %s' "${0##*/}"; printf ' <%s>' "$@"; printf '\n'
   printf 'HOMES AGENTBOARD_ACTOR=%s CODEX_HOME=%s CLAUDE_CONFIG_DIR=%s GROK_HOME=%s CODEWHALE_HOME=%s\n' \
     "${AGENTBOARD_ACTOR:-}" "${CODEX_HOME:-}" "${CLAUDE_CONFIG_DIR:-}" "${GROK_HOME:-}" "${CODEWHALE_HOME:-}"
+  if [[ ${0##*/} == opencode ]]; then
+    printf 'OPEN CONFIG=%s DIR=%s CONTENT=%s\n' "${OPENCODE_CONFIG:-}" "${OPENCODE_CONFIG_DIR:-}" "${OPENCODE_CONFIG_CONTENT:-}"
+  fi
   printf 'PID %s\n' "$$"
 } >>"$CLIENT_LOG"
 SH
@@ -67,6 +73,7 @@ export PATH="$tmp/bin:$PATH" HC_TERMINAL_ID=t4 STUB_HC_LOG="$tmp/hc.log" CLIENT_
 unset HERDR_PANE_ID HERDR_TAB_ID HERDR_ENV
 # inherited role homes must not reach the client: the launcher drops them
 export CODEX_HOME=/inherited/codex CLAUDE_CONFIG_DIR=/inherited/claude GROK_HOME=/inherited/grok CODEWHALE_HOME=/inherited/codewhale
+export OPENCODE_CONFIG=/inherited/opencode.json OPENCODE_CONFIG_DIR=/inherited/opencode OPENCODE_CONFIG_CONTENT='{"model":"inherited/model"}'
 no_hc() { local v; for v in $(compgen -e HC_); do unset "$v"; done; }
 export HOME="$tmp/home"
 repo=$(pwd)
@@ -101,6 +108,8 @@ run_kind codex 'EXEC codex <--no-daemon> <--model> <gpt-6-sol> <-c> <model_reaso
 run_kind grok 'EXEC grok <--trust> <--always-approve>'
 run_kind agy 'EXEC agy <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager>'
 run_kind codewhale 'EXEC codewhale <--skip-onboarding> <--fresh> <--disable> <subagents> <--approval-policy> <never>'
+run_kind opencode 'EXEC opencode <--standalone> <--auto> <--prompt> <Use skill agentboard-manager. Read the board and manage the manager workflow.>'
+exact "$CLIENT_LOG" 'OPEN CONFIG= DIR= CONTENT={"model":"anthropic/claude-opus-5-5#medium"}' 'opencode gets isolated manager config and model'
 # exec replaces the launcher: the client is the process the shell started
 : >"$CLIENT_LOG"
 bash -c 'echo "LAUNCHER $$" >>"$CLIENT_LOG"; exec "$1" codex' _ "$repo/seats/agentboard-manager" >/dev/null 2>&1
@@ -188,12 +197,16 @@ run_herdr_kind() {
     is "herdr $kind sends no prompt" bash -c '! grep -Fq "CALL <agent> <prompt>" "$1"' _ "$HERDR_LOG"
   fi
   exact "$HERDR_LOG" 'ENV AGENTBOARD_ACTOR=manager CODEX_HOME= CLAUDE_CONFIG_DIR= GROK_HOME= CODEWHALE_HOME=' "herdr $kind gets the manager actor and no home variable"
+  if [[ $kind == opencode ]]; then
+    exact "$HERDR_LOG" 'OPEN CONFIG= DIR= CONTENT={"model":"anthropic/claude-opus-5-5#medium"}' 'herdr opencode clears inherited config and sets model'
+  fi
   is "herdr $kind never calls hc" test ! -s "$STUB_HC_LOG"
 }
 run_herdr_kind claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--dangerously-skip-permissions> <--> </agentboard-manager>'
 run_herdr_kind codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--model> <gpt-6-sol> <-c> <model_reasoning_effort=medium> <--dangerously-bypass-approvals-and-sandbox> <--> <$agentboard-manager>'
 run_herdr_kind grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
 run_herdr_kind agy 'CALL <agent> <start> <manager> <--kind> <agy> <--pane> <pane-7> <--> <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager>'
+run_herdr_kind opencode 'CALL <agent> <start> <manager> <--kind> <opencode> <--pane> <pane-7> <--> <--standalone> <--auto> <--prompt> <Use skill agentboard-manager. Read the board and manage the manager workflow.>'
 
 run_herdr_not_ready() {
   local mode=$1
@@ -242,15 +255,15 @@ run_missing_herdr
 if "$repo/seats/agentboard-manager" >"$tmp/out" 2>"$tmp/no-kind"; then bad 'no kind unexpectedly succeeded'; else
   is 'no kind exits 1' test "$?" -eq 1
 fi
-has "$tmp/no-kind" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy}' 'no kind reports usage'
+has "$tmp/no-kind" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy|opencode}' 'no kind reports usage'
 is 'unknown kind exits 1' bash -c '"$1" invalid >/dev/null 2>&1; [[ $? -eq 1 ]]' _ "$repo/seats/agentboard-manager"
 if "$repo/seats/agentboard-manager" invalid >"$tmp/out" 2>"$tmp/usage"; then bad 'unknown kind unexpectedly succeeded'; else ok; fi
-has "$tmp/usage" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy}' 'unknown kind reports usage'
+has "$tmp/usage" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy|opencode}' 'unknown kind reports usage'
 
 for flag in -h --help; do
   : >"$STUB_HC_LOG"
   if "$repo/seats/agentboard-manager" "$flag" >"$tmp/help" 2>"$tmp/err"; then ok; else bad "$flag exits non-zero"; fi
-  has "$tmp/help" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy}' "$flag prints usage on stdout"
+  has "$tmp/help" 'usage: agentboard-manager {codex|grok|codewhale|claude|agy|opencode}' "$flag prints usage on stdout"
   is "$flag starts nothing" test ! -s "$STUB_HC_LOG"
 done
 

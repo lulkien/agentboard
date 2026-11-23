@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-USAGE='usage: agentboard-manager {codex|grok|codewhale|claude|agy}'
+USAGE='usage: agentboard-manager {codex|grok|codewhale|claude|agy|opencode}'
 usage() {
   echo "$USAGE" >&2
   exit 1
@@ -17,12 +17,13 @@ client reads the global agentboard MCP entry that install.py registers). Inside 
 it renames this tab to "manager" and starts the client in this pane; inside hc
 (any HC_* variable, with HC_TERMINAL_ID) it starts the client in this terminal.
 Codewhale is hc only.
+OpenCode runs standalone with automatic approval and the manager skill prompt.
 EOF
   exit 0
 fi
 KIND=$1
 case "$KIND" in
-  claude|codex|grok|codewhale|agy) ;;
+  claude|codex|grok|codewhale|agy|opencode) ;;
   *) usage ;;
 esac
 
@@ -74,6 +75,10 @@ case "$KIND" in
   codewhale)
     argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codewhale --skip-onboarding --fresh --disable subagents --approval-policy never)
     ;;
+  opencode)
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME -u OPENCODE_CONFIG -u OPENCODE_CONFIG_DIR -u OPENCODE_CONFIG_CONTENT 'OPENCODE_CONFIG_CONTENT={"model":"anthropic/claude-opus-5-5#medium"}' AGENTBOARD_ACTOR=manager opencode --standalone --auto --prompt 'Use skill agentboard-manager. Read the board and manage the manager workflow.')
+    hargs=(--standalone --auto --prompt 'Use skill agentboard-manager. Read the board and manage the manager workflow.')
+    ;;
 esac
 
 log=${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log
@@ -82,6 +87,10 @@ if [[ $world == herdr ]]; then
   # the board actor rides in the environment herdr gives the agent
   export AGENTBOARD_ACTOR=manager
   unset CODEX_HOME CLAUDE_CONFIG_DIR GROK_HOME CODEWHALE_HOME
+  if [[ $KIND == opencode ]]; then
+    unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT
+    export OPENCODE_CONFIG_CONTENT='{"model":"anthropic/claude-opus-5-5#medium"}'
+  fi
   setsid bash -c '
     pane=$1 kind=$2
     shift 2
