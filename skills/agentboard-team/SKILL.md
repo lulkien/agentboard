@@ -283,10 +283,7 @@ launch recipes above; install and the registered entries are in `seats/README.md
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
 Model and effort per seat come from the launch table for every client; agy takes the effort in the model id: `gemini-4-hydrogen-medium` for analyst, counter-analyst and reviewer, `gemini-3.8-flash-medium` for coder, and `gemini-4-neon-medium` for manager.
-agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. agy reads skills from `~/.gemini/config/skills`, which the installer links. Skills are
-one physical copy under `~/.agents/skills`, which the installer links; Codex, Grok,
-Codewhale and OpenCode read that directory directly. Claude reads `~/.claude/skills`, and agy
-`~/.gemini/config/skills`; the installer links both through the canonical names.
+agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. Install skills with the root installer, which invokes `bunx skills@1.9.0` or falls back to `npx -y skills@1.9.0`; see `skills/README.md` for client targets. Rerun `./install.py --skip-binary` after editing repo skills.
 
 ## Register a seat's MCP server
 
@@ -301,7 +298,7 @@ agentboard server; its role skill's first step checks that the board tools answe
 If the CLI uses a custom `AGENTBOARD_DB`, configure the same absolute path for the
 optional systemd user unit, which the installer links but never enables or starts.
 
-The installer also links the canonical skills into `~/.agents/skills`. The repo's
+The installer delegates global skill installation to the `skills` CLI. The repo's
 `seats/` directory holds the manager launcher and the systemd unit; `seats/README.md`
 describes them.
 

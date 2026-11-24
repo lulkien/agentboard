@@ -18,10 +18,13 @@ Run it from anywhere; it lives at the repository root and is the only installer.
 `./install.py -h` prints the same usage. Those three flags are the only options.
 Once every preflight check passes, it runs `cargo install --path <repo> --locked` to
 build and install `~/.cargo/bin/agentboard`; a failed build exits 1 with nothing
-else written. `--skip-binary` skips the build. Then it:
+else written. `--skip-binary` skips the build. It requires `bunx` or `npx` on
+`PATH` and installs skills through `bunx skills@1.9.0 add` or
+`npx -y skills@1.9.0 add`, with `DO_NOT_TRACK=1`. Then it:
 
-- links the six repo skills into `~/.agents/skills` (see `../skills/README.md` for
-  which client reads them from where; Claude and agy get links in their own directories);
+- installs the six repo skills globally through the `skills` CLI (see
+  `../skills/README.md` for client target mapping); rerun `./install.py
+  --skip-binary` after changing repo skills;
 - on a full install, links the launcher and the user unit (it never enables or
   starts the unit);
 - registers one global `agentboard` entry per selected client through the client's
@@ -38,8 +41,8 @@ else written. `--skip-binary` skips the build. Then it:
   `AGENTBOARD_ACTOR` at launch: a seat started without it has no usable agentboard
   server, which is why every role skill's first step calls `board_brief`.
 
-`--force` replaces foreign skill, launcher and unit links; a real directory at a
-skill destination is always refused.
+`--force` governs launcher and unit links. The `skills` CLI manages skill
+destinations and reports its own conflicts.
 
 ### agy (Antigravity CLI)
 
@@ -51,8 +54,7 @@ reads `AGENTBOARD_ACTOR` (exit 2 with `agentboard-stdio: set AGENTBOARD_ACTOR` w
 empty), and POSTs each JSON-RPC line to `${AGENTBOARD_URL:-http://127.0.0.1:8765/mcp}`
 with `Authorization: Bearer $AGENTBOARD_ACTOR`. A daemon refusal or a refused connection
 comes back as a JSON-RPC error for that request id. agy does not read `~/.agents/skills`,
-so the installer links `~/.gemini/config/skills/<skill>` to the canonical
-`~/.agents/skills/<skill>` links. It never writes `~/.gemini/antigravity-cli/settings.json`
+so the `skills` CLI installs them in `~/.gemini/config/skills`. It never writes `~/.gemini/antigravity-cli/settings.json`
 or onboarding state. `python3 tests/agy_shim.py` proves the shim against a scratch daemon.
 
 Launch an agy seat as its board actor, with the entry prompt in `-i` (so no typing

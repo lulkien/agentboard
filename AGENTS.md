@@ -44,7 +44,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `python3 tests/daemon.py` | `daemon: 340/340 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
-| `bash tests/install.sh` | `181/181 passed (installer)` (isolated homes; cargo stubbed; no board writes) |
+| `bash tests/install.sh` | `159/159 passed (installer)` or `163/163 passed (installer)` (the latter includes optional real OpenCode CLI cases; isolated homes; cargo and skills CLI stubbed; no board writes) |
 | `bash tests/agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `113/113 passed (manager launcher)` |
 | `bash tests/counter-loop.sh` (scratch board, real binary; the analyst/counter-analyst protocol) | `30/30 passed (counter loop)` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
@@ -197,13 +197,15 @@ screenshots from the coder report because browser use is not verified in the san
 ## Where the rest lives
 
 - `skills/agentboard-team` — running a team: launcher, wake commands, roles,
-  workflow. `./install.py` creates canonical repo links under `~/.agents/skills`;
-  Codex, Grok and Codewhale read `~/.agents/skills` directly. There is one physical copy: never copy over the
-  installed links.
+  workflow. `./install.py` delegates installation to `bunx`/`npx skills@1.9.0`;
+  Codex, Grok and Codewhale read `~/.agents/skills` directly. The CLI manages
+  installed skill copies; rerun `./install.py --skip-binary` after repo skill edits.
 - `PROTOCOL.md` — the wire surface: twelve tools, cursors, refusals, exit codes.
 - `skills/agentboard-{manager,analyst,counter-analyst,coder,reviewer}/` — one seat entry point each
   (`/agentboard-<seat>`; `$agentboard-<seat>` under Codex). Grok uses
   `agentboard-manager/SKILL.md`.
 - `seats/` — the manager launcher and the systemd unit. The one installer is the repository-root `./install.py` (`-h`,
-  `--agent`, `--force`, `--skip-binary`): it runs `cargo install --path . --locked`,
-  links the skills and registers the global MCP entry per client; it only names old role homes as leftovers; it writes a default client home only through each client's own `mcp add` (one global `agentboard` entry).
+`--agent`, `--force`, `--skip-binary`): it runs `cargo install --path . --locked`,
+installs skills through `bunx`/`npx skills@1.9.0`, and registers the global MCP
+entry per client; it only names old role homes as leftovers; it writes a default
+client home only through each client's own `mcp add` (one global `agentboard` entry).

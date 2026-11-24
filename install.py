@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Install agentboard for every supported client.
 
-Builds the agentboard binary, links the six skills once into ~/.agents/skills (which
-Codex, Grok and Codewhale read; Claude and agy get links in their own skills directories), and registers one global `agentboard` MCP entry per
+Builds the agentboard binary, installs the six skills with the `skills` CLI, and registers one global `agentboard` MCP entry per
 selected client through that client's own `mcp add` command. The entry is the same
 for every seat: the seat's name comes from AGENTBOARD_ACTOR in the environment the
 seat is launched with. Role homes and per-seat cards from older installers are never
@@ -75,57 +74,32 @@ def read(path):
         return f.read()
 
 
-# clients that do not read ~/.agents/skills get their own directory of links
-CLIENT_SKILL_DIRS = {"agy": (".gemini", "config", "skills"), "claude": (".claude", "skills")}
+SKILLS_PACKAGE = "skills@1.9.0"
+SKILLS_AGENTS = {
+    "codex": "codex", "claude": "claude-code", "grok": "universal",
+    "codewhale": "universal", "agy": "antigravity", "opencode": "opencode",
+}
 
 
-def skill_plans(home, repo, force, client=None):
-    """Preflight skill links.
+def find_skills_runner():
+    if shutil.which("bunx"):
+        return ["bunx", SKILLS_PACKAGE]
+    if shutil.which("npx"):
+        return ["npx", "-y", SKILLS_PACKAGE]
+    return None
 
-    By default the canonical ~/.agents/skills links to the repo, which Codex, Grok and
-    Codewhale read. With agy or claude, that client's own skills directory links to those
-    canonical links, because neither reads ~/.agents/skills.
-    """
-    skills_src = os.path.join(repo, "skills")
-    names = sorted(
-        name for name in os.listdir(skills_src)
-        if not name.startswith(".") and os.path.isfile(os.path.join(skills_src, name, "SKILL.md"))
+
+def install_skills(runner, repo, agents):
+    targets = list(dict.fromkeys(SKILLS_AGENTS[agent] for agent in agents))
+    command = [*runner, "add", repo, "-g", "-a", *targets, "-s", "*", "-y"]
+    result = subprocess.run(
+        command, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        env={**os.environ, "DO_NOT_TRACK": "1"},
     )
-    canonical = os.path.join(home, ".agents", "skills")
-    base = os.path.join(home, *CLIENT_SKILL_DIRS[client]) if client else canonical
-    for path in (os.path.dirname(base), base):
-        if os.path.lexists(path) and not os.path.isdir(path):
-            raise ValueError(f"invalid skills directory: {path}")
-    plans, problems = [], []
-    for name in names:
-        source = os.path.join(canonical, name) if client else os.path.join(skills_src, name)
-        destination = os.path.join(base, name)
-        if os.path.islink(destination) and os.readlink(destination) == source:
-            state = "unchanged"
-        elif os.path.isdir(destination) and not os.path.islink(destination):
-            problems.append(f"real directory at skill destination: {destination}; move it aside")
-            continue
-        elif os.path.lexists(destination) and not force:
-            problems.append(f"exists: {destination} (use --force)")
-            continue
-        else:
-            state = "rewrite" if os.path.lexists(destination) else "new"
-        plans.append((source, destination, state))
-    if problems:
-        raise ValueError("\n".join(problems))
-    return plans
-
-
-def install_skills(plans):
-    """Point each canonical skill name at this repo; never follows or removes a directory."""
-    for source, destination, state in plans:
-        if state == "unchanged":
-            continue
-        os.makedirs(os.path.dirname(destination), exist_ok=True)
-        if os.path.lexists(destination):
-            os.unlink(destination)
-        os.symlink(source, destination)
-        print(f"linked: {destination} -> {source}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr, file=sys.stderr)
+        sys.exit(1)
+    print(f"skills: {' '.join(runner)} add {repo} -a {' '.join(targets)}")
 
 
 def agent_list(value):
@@ -219,8 +193,8 @@ def register_global_mcp(agent):
 def main():
     parser = argparse.ArgumentParser(
         prog="install.py",
-        description="Build and install the agentboard binary, link the agentboard skills into "
-        "~/.agents/skills and register one global agentboard MCP entry per client through its "
+        description="Build and install the agentboard binary, install the agentboard skills with "
+        "the skills CLI and register one global agentboard MCP entry per client through its "
         "own `mcp add` command. Nothing else is written to the default client homes.",
     )
     parser.add_argument(
@@ -230,7 +204,7 @@ def main():
         metavar="AGENT[,AGENT...]",
         help=f"install only these clients: {','.join(AGENTS)} (default: all, plus the launcher link and systemd unit)",
     )
-    parser.add_argument("--force", action="store_true", help="replace existing skill links and launcher links")
+    parser.add_argument("--force", action="store_true", help="replace existing launcher and unit links")
     parser.add_argument(
         "--skip-binary",
         action="store_true",
@@ -247,15 +221,12 @@ def main():
     selective = selected_agents is not None
     agents = [name for name in ("codex", "claude", "grok", "codewhale", "agy", "opencode") if not selective or name in selected_agents]
 
+    runner = find_skills_runner()
+    if runner is None:
+        print("neither bunx nor npx found on PATH; install Bun or Node.js to install skills", file=sys.stderr)
+        sys.exit(1)
+
     refuse = False
-    try:
-        skills = skill_plans(home, repo, force)
-        client_skills = [skill_plans(home, repo, force, c) for c in CLIENT_SKILL_DIRS if c in agents]
-    except (OSError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        skills = []
-        client_skills = []
-        refuse = True
 
     def check(p):
         nonlocal refuse
@@ -298,9 +269,7 @@ def main():
         os.symlink(s, d)
         print(f"linked: {d} -> {s}")
 
-    install_skills(skills)
-    for plans in client_skills:
-        install_skills(plans)
+    install_skills(runner, repo, agents)
     if not selective:
         link(f"{src}/agentboard-manager", f"{home}/.local/bin/agentboard-manager")
         link(f"{src}/systemd/agentboard.service", f"{home}/.config/systemd/user/agentboard.service")

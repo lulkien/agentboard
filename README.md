@@ -24,8 +24,9 @@ cargo build --release          # target/release/agentboard, nothing installed
 ```
 
 `./install.py` is the one installer: it builds and installs `~/.cargo/bin/agentboard`,
-links the skills into `~/.agents/skills`, and registers each client's global MCP
-entry; seats select their identity with `AGENTBOARD_ACTOR`. See `seats/README.md`.
+installs repo skills through `bunx skills@1.9.0` (or `npx -y skills@1.9.0`), and
+registers each client's global MCP entry; seats select their identity with
+`AGENTBOARD_ACTOR`. See `seats/README.md`.
 
 Rust 1.89 or newer, edition 2024. The only C dependency is the one `heed` builds
 with `cc`.

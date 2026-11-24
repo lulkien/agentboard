@@ -10,45 +10,43 @@ directly.
 
 ## Install
 
-The repository-root installer links them; there is no separate skill installer:
+The repository-root installer delegates installation to the `skills` CLI:
 
     ./install.py [--agent AGENT[,AGENT...]] [--force] [--skip-binary]
 
-Every run, whatever `--agent` selects, makes one canonical link per skill:
-
-    ~/.agents/skills/<name> -> <repo>/skills/<name>
+It runs `bunx skills@1.9.0 add <repo> -g -a <targets...> -s '*' -y`; if `bunx`
+is unavailable it uses `npx -y skills@1.9.0`. Install Bun or Node.js so one of
+those runners is on `PATH`. The CLI installs the six repo skills globally, with
+targets selected by `--agent`.
 
 Six names are installed: `agentboard-team` and the five `agentboard-<seat>` entry
-points. Both the link and the repo directory are one physical copy, so an edit is
-visible without reinstalling. Unrelated skills are left alone.
+points. `skills` manages the client-specific destinations. Re-run `./install.py
+--skip-binary` after editing repo skills to refresh installed copies.
 
 Where each client finds them under the global-config launch (checked 2026-11-22
 against an isolated `HOME`; seats start as `env AGENTBOARD_ACTOR=<seat> <client>`):
 
 | CLI | Reads skills from | What the installer adds | Invocation |
 |---|---|---|---|
-| Codex 0.171.0 | `$HOME/.agents/skills` (`codex debug prompt-input` lists it) | nothing beyond the canonical link | `$agentboard-<seat>` via `/skills` |
-| Grok Build 1.0.89 | `$HOME/.agents/skills` (`grok inspect --json` reports it as a `user` skill) | nothing beyond the canonical link | `/agentboard-<seat>` |
-| Codewhale 0.10.2 | `$HOME/.agents/skills` (`codewhale doctor`: "selected skills dir: ~/.agents/skills") | nothing beyond the canonical link | `/agentboard-<seat>` |
-| Claude Code 2.1.330 | `~/.claude/skills` | canonical links via `~/.agents/skills` | `/agentboard-<seat>` |
-| Antigravity (`agy`) | `~/.gemini/config/skills` | canonical links via `~/.agents/skills` | `/agentboard-<seat>` |
-| OpenCode 2.4.0 | `~/.agents/skills` | nothing beyond the canonical link | See the team launch recipe |
+| Codex | `$HOME/.agents/skills` | `codex` | `$agentboard-<seat>` via `/skills` |
+| Grok | `$HOME/.agents/skills` | `universal` | `/agentboard-<seat>` |
+| Codewhale | `$HOME/.agents/skills` | `universal` | `/agentboard-<seat>` |
+| Claude Code | `~/.claude/skills` | `claude-code` | `/agentboard-<seat>` |
+| Antigravity (`agy`) | `~/.gemini/config/skills` | `antigravity` | `/agentboard-<seat>` |
+| OpenCode | `~/.agents/skills` | `opencode` | See the team launch recipe |
 
-The installer writes `~/.claude/skills` only with `claude` selected (the default), never `$CODEX_HOME/skills` or any role home; aliases an
-older skill installer left there still resolve and are left alone.
-
-An existing canonical entry that is exactly this repo's link is left unchanged.
-Any other file or link at one of the six names refuses the whole install, naming
-each conflict as `exists: <path> (use --force)`; `--force` replaces those links or
-files. A real directory at one of the names is refused even under `--force`, and a
-non-directory `~/.agents` or `~/.agents/skills` refuses in preflight.
+Target mapping is: `codex` → `codex`, `claude` → `claude-code`, `grok` and
+`codewhale` → `universal`, `agy` → `antigravity`, and `opencode` → `opencode`.
+`--agent` selects these targets; the default selects all six clients. The installer
+sets `DO_NOT_TRACK=1` for the CLI. `--force` applies to launcher and unit links;
+the skills CLI handles skill destination conflicts.
 
 Each seat's board name is the `AGENTBOARD_ACTOR` it is launched with; the global
 `agentboard` MCP entry sends it as a bearer token to the shared board. That name is
 what the board attributes writes to and what the feed addresses.
 
-`tests/install.sh` proves the layout in isolated homes: six canonical links
-from every `--agent` choice, `~/.claude/skills` links only for `claude`, and the refusal and `--force` cases above.
+`tests/install.sh` proves the CLI arguments and runner selection with local stubs;
+it does not make network calls.
 
 ## Discovery notes (2026-10-22)
 

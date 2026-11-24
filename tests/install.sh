@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ./install.py against isolated homes (cargo is a stub; nothing is built): skills, launcher links, one
+# ./install.py against isolated homes (cargo and skills are stubs; nothing is built): skills, launcher links, one
 # global agentboard MCP entry per client, and old role homes named as leftovers, never touched.
 set -u
 cd "$(dirname "$0")/.."
@@ -49,6 +49,14 @@ exit 0
 SH
   chmod 700 "$tmp/bin/$cli"
 done
+# bunx is the preferred skills runner stub: it logs its arguments and tracking flag.
+cat >"$tmp/bin/bunx" <<'SH'
+#!/usr/bin/env bash
+printf 'bunx %s | DO_NOT_TRACK=%s\n' "$*" "${DO_NOT_TRACK:-}" >>"$STUB_SKILLS_LOG"
+echo "stub skills output"
+exit "${STUB_SKILLS_EXIT:-0}"
+SH
+chmod 700 "$tmp/bin/bunx"
 # cargo is always this stub: it logs its argv and exits $STUB_CARGO_EXIT (default 0).
 cat >"$tmp/bin/cargo" <<'SH'
 #!/usr/bin/env bash
@@ -57,6 +65,7 @@ exit "${STUB_CARGO_EXIT:-0}"
 SH
 chmod 700 "$tmp/bin/cargo"
 export STUB_CARGO_LOG="$tmp/cargo.log"
+export STUB_SKILLS_LOG="$tmp/skills.log"
 
 # --- retired files are gone ---------------------------------------------------
 is "per-seat cards and profiles are deleted" bash -c '! ls seats/claude seats/codex >/dev/null 2>&1'
@@ -72,8 +81,10 @@ is "user unit linked" test "$(readlink "$home/.config/systemd/user/agentboard.se
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
 has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config/systemd/user/agentboard.service"
 for s in analyst counter-analyst coder manager reviewer team; do
-  is "skill agentboard-$s linked" test "$(readlink "$home/.agents/skills/agentboard-$s")" = "$repo/skills/agentboard-$s"
+  is "skill agentboard-$s is not manually linked" test ! -e "$home/.agents/skills/agentboard-$s"
 done
+has "skills CLI receives all deduplicated agents and tracking opt-out" "bunx skills@1.9.0 add $repo -g -a codex claude-code universal antigravity opencode -s * -y | DO_NOT_TRACK=1" "$tmp/skills.log"
+has "skills CLI success summary" "skills: bunx skills@1.9.0 add $repo -a codex claude-code universal antigravity opencode" "$tmp/out"
 has "codex add argv" "codex mcp add agentboard --url http://127.0.0.1:8765/mcp --bearer-token-env-var AGENTBOARD_ACTOR" "$tmp/mcp.log"
 has "claude remove argv" "claude mcp remove -s user agentboard" "$tmp/mcp.log"
 has "claude add argv" 'claude mcp add-json -s user agentboard {"type": "http", "url": "http://127.0.0.1:8765/mcp", "headers": {"Authorization": "Bearer ${AGENTBOARD_ACTOR}"}}' "$tmp/mcp.log"
@@ -82,8 +93,7 @@ has "codewhale add argv" "codewhale mcp add agentboard --url http://127.0.0.1:87
 has "agy remove argv" "agy mcp remove agentboard" "$tmp/mcp.log"
 has "agy add argv names the shim" "agy mcp add agentboard $repo/seats/agy/agentboard-stdio" "$tmp/mcp.log"
 has "opencode add argv uses actor header substitution" 'opencode mcp add --global --url http://127.0.0.1:8765/mcp --header Authorization=Bearer {env:AGENTBOARD_ACTOR} agentboard' "$tmp/mcp.log"
-is "agy skills link through the canonical names" test "$(readlink "$home/.gemini/config/skills/agentboard-analyst")" = "$home/.agents/skills/agentboard-analyst" -a "$(readlink -f "$home/.gemini/config/skills/agentboard-analyst")" = "$repo/skills/agentboard-analyst"
-is "claude skills link through the canonical names" test "$(readlink "$home/.claude/skills/agentboard-counter-analyst")" = "$home/.agents/skills/agentboard-counter-analyst" -a "$(readlink -f "$home/.claude/skills/agentboard-counter-analyst")" = "$repo/skills/agentboard-counter-analyst"
+is "skills CLI owns skill installation" test ! -e "$home/.gemini/config/skills" -a ! -e "$home/.claude/skills"
 is "no role home is created" test ! -e "$home/.local/share/agentboard"
 is "fresh install names no leftovers" bash -c '! grep -q "^note: leftover" "$1"' _ "$tmp/out"
 has "done line" "done: agentboard installed" "$tmp/out"
@@ -143,50 +153,41 @@ is "foreign unit refusal registers nothing" test ! -e "$home/.agents"
 inst --skip-binary --force
 is "force replaces unit link" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 
-# --- skills: one canonical link per repo skill in ~/.agents/skills ----------------
-skill_names="agentboard-analyst agentboard-counter-analyst agentboard-coder agentboard-manager agentboard-reviewer agentboard-team"
+# --- skills CLI: each selected client maps to the planned agent target -------------
+declare -A skill_target=( [codex]=codex [claude]=claude-code [grok]=universal [codewhale]=universal [agy]=antigravity [opencode]=opencode )
 for agent in codex grok codewhale claude agy opencode; do
   newhome
+  : >"$tmp/skills.log"
   inst --agent "$agent" --skip-binary; code=$?
   is "--agent $agent install succeeds" test "$code" -eq 0
-  is "--agent $agent links all six canonical skills" bash -c 'for s in $2; do test "$(readlink "$1/.agents/skills/$s")" = "$3/skills/$s" || exit 1; done' _ "$home" "$skill_names" "$repo"
-  has "--agent $agent reports a linked skill" "linked: $home/.agents/skills/agentboard-team -> $repo/skills/agentboard-team" "$tmp/out"
-  if [ "$agent" = claude ]; then
-    is "--agent claude links the skills into ~/.claude" test "$(readlink "$home/.claude/skills/agentboard-team")" = "$home/.agents/skills/agentboard-team"
-  else
-    is "--agent $agent writes no skill alias into ~/.claude" test ! -e "$home/.claude/skills"
-  fi
-  is "--agent $agent does not create an opencode skill alias" test ! -e "$home/.config/opencode/skills"
+  has "--agent $agent selects the planned skills target" "bunx skills@1.9.0 add $repo -g -a ${skill_target[$agent]} -s * -y | DO_NOT_TRACK=1" "$tmp/skills.log"
+  is "--agent $agent creates no manual skill links" test ! -e "$home/.agents/skills" -a ! -e "$home/.claude/skills" -a ! -e "$home/.gemini/config/skills"
   is "--agent $agent leaves launcher and unit alone" test ! -e "$home/.local/bin/agentboard-manager" -a ! -e "$home/.config/systemd/user/agentboard.service"
 done
-inst --agent claude --skip-binary
-is "rerun leaves canonical skills alone" bash -c '! grep -q "^linked: [^ ]*/.agents/skills/" "$1"' _ "$tmp/out"
-printf 'unrelated\n' >"$tmp/other-skill"
-ln -s "$tmp/other-skill" "$home/.agents/skills/someone-else"
-ln -sfn /old/checkout/skills/agentboard-team "$home/.agents/skills/agentboard-team"
-rm "$home/.agents/skills/agentboard-coder"
-printf 'mine\n' >"$home/.agents/skills/agentboard-coder"
-inst --agent codex --skip-binary; code=$?
-is "foreign canonical skill entries refuse without force" test "$code" -eq 1
-has "foreign skill link named" "exists: $home/.agents/skills/agentboard-team (use --force)" "$tmp/err"
-has "foreign skill file named" "exists: $home/.agents/skills/agentboard-coder (use --force)" "$tmp/err"
-is "refusal keeps foreign skill link" test "$(readlink "$home/.agents/skills/agentboard-team")" = /old/checkout/skills/agentboard-team
-inst --agent codex --skip-binary --force; code=$?
-is "force replaces foreign skill entries" test "$code" -eq 0 -a "$(readlink "$home/.agents/skills/agentboard-team")" = "$repo/skills/agentboard-team" -a "$(readlink "$home/.agents/skills/agentboard-coder")" = "$repo/skills/agentboard-coder"
-is "unrelated skills left alone" test "$(readlink "$home/.agents/skills/someone-else")" = "$tmp/other-skill"
-rm "$home/.agents/skills/agentboard-analyst"
-mkdir -p "$home/.agents/skills/agentboard-analyst"
-printf 'keep\n' >"$home/.agents/skills/agentboard-analyst/notes"
-inst --agent codex --skip-binary --force; code=$?
-is "real skill directory refuses even under force" test "$code" -eq 1
-has "real skill directory named" "real directory at skill destination: $home/.agents/skills/agentboard-analyst" "$tmp/err"
-is "real skill directory contents kept" test "$(cat "$home/.agents/skills/agentboard-analyst/notes")" = keep
+
+# npx is the fallback when bunx is absent; no runner fails before cargo or writes.
 newhome
-printf 'not a dir' >"$home/.agents"
-inst --agent grok --skip-binary; code=$?
-is "non-directory ~/.agents refuses" test "$code" -eq 1
-has "non-directory ~/.agents named in preflight" "invalid skills directory: $home/.agents" "$tmp/err"
-is "non-directory ~/.agents refusal is not a crash" bash -c '! grep -q Traceback "$1"' _ "$tmp/err"
+mkdir -p "$tmp/npxonly"
+cat >"$tmp/npxonly/npx" <<'SH'
+#!/usr/bin/env bash
+printf 'npx %s | DO_NOT_TRACK=%s\n' "$*" "${DO_NOT_TRACK:-}" >>"$STUB_SKILLS_LOG"
+exit 0
+SH
+chmod 700 "$tmp/npxonly/npx"
+: >"$tmp/skills.log"
+HOME="$home" PATH="$tmp/npxonly:/usr/bin:/bin" STUB_SKILLS_LOG="$tmp/skills.log" ./install.py --agent grok --skip-binary >"$tmp/out" 2>"$tmp/err"; code=$?
+is "npx fallback succeeds" test "$code" -eq 0
+has "npx fallback uses non-interactive pinned package" "npx -y skills@1.9.0 add $repo -g -a universal -s * -y | DO_NOT_TRACK=1" "$tmp/skills.log"
+newhome
+mkdir -p "$tmp/noskills"
+: >"$STUB_CARGO_LOG"
+HOME="$home" PATH="$tmp/noskills:/usr/bin:/bin" ./install.py --agent grok >"$tmp/out" 2>"$tmp/err"; code=$?
+is "missing skills runner refuses before cargo and writes" test "$code" -eq 1 -a ! -s "$STUB_CARGO_LOG" -a ! -e "$home/.agents" -a ! -e "$home/.local/bin/agentboard-manager"
+has "missing skills runner explains requirement" "neither bunx nor npx found on PATH" "$tmp/err"
+newhome
+STUB_SKILLS_EXIT=1 inst --agent grok --skip-binary; code=$?
+is "failing skills CLI exits 1" test "$code" -eq 1
+has "failing skills CLI output is forwarded" "stub skills output" "$tmp/err"
 
 # --- the binary: cargo install after preflight, before any registration -----------
 newhome
@@ -212,11 +213,13 @@ inst; code=$?
 is "preflight refusal never builds" test "$code" -eq 1 -a ! -s "$STUB_CARGO_LOG"
 newhome
 mkdir -p "$tmp/nocargo"
-HOME="$home" PATH="$tmp/nocargo:/usr/bin:/bin" ./install.py --agent grok >"$tmp/out" 2>"$tmp/err"; code=$?
+mkdir -p "$tmp/skillsonly"
+ln -s "$tmp/bin/bunx" "$tmp/skillsonly/bunx"
+HOME="$home" PATH="$tmp/nocargo:$tmp/skillsonly:/usr/bin:/bin" ./install.py --agent grok >"$tmp/out" 2>"$tmp/err"; code=$?
 is "missing cargo refuses" test "$code" -eq 1 -a ! -e "$home/.agents"
 has "missing cargo names the way out" "cargo not found; install Rust or rerun with --skip-binary" "$tmp/err"
 newhome
-HOME="$home" PATH="$tmp/nocargo:/usr/bin:/bin" ./install.py --agent grok --skip-binary >"$tmp/out" 2>"$tmp/err"; code=$?
+HOME="$home" PATH="$tmp/nocargo:$tmp/skillsonly:/usr/bin:/bin" ./install.py --agent grok --skip-binary >"$tmp/out" 2>"$tmp/err"; code=$?
 is "missing grok CLI is a note, not a failure" test "$code" -eq 0
 has "missing grok CLI is named" "note: grok not found on PATH" "$tmp/err"
 
@@ -337,7 +340,7 @@ PY
   is "agy second install: still one shim entry" agy_shape
   is "agy second install leaves the config byte-identical" cmp -s "$tmp/agy-config-first" "$home/.gemini/config/mcp_config.json"
   is "agy install never writes the CLI settings" test ! -e "$home/.gemini/antigravity-cli/settings.json"
-  is "agy skill resolves to the repo skill" test "$(readlink -f "$home/.gemini/config/skills/agentboard-analyst")" = "$repo/skills/agentboard-analyst"
+  is "agy skills CLI stub creates no manual skill link" test ! -e "$home/.gemini/config/skills/agentboard-analyst"
   unset real_agy
 else
   echo "SKIP: agy cases need agy"
