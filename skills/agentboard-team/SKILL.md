@@ -77,9 +77,10 @@ workspace, and a split puts two agents on one screen and one set of keys. The
 manager keeps its own tab; every worker gets a fresh tab.
 
 To start the manager in the current herdr pane, run the installed
-`agentboard-manager claude|codex|grok|agy|opencode` helper from its shell prompt. It
+`agentboard-manager claude|codex|grok|agy|opencode [-- <prompt>]` helper from its shell prompt. It
 renames that tab to `manager`, waits until the prompt is ready, and starts the
 selected manager; `seats/README.md` documents its setup and prerequisites.
+The optional prompt is passed as one argument after the manager skill invocation.
 
 Every seat is the same client with the global `agentboard` MCP entry that
 `install.py` registers; the seat's name is `AGENTBOARD_ACTOR`, set with `env` on the
@@ -181,7 +182,7 @@ workspace, and the manager keeps its own. Every worker gets a terminal of its ow
 named after the seat.
 
 To start the manager in the current hc terminal, run the installed
-`agentboard-manager codex|grok|codewhale|claude|agy|opencode` helper from its shell prompt. It
+`agentboard-manager codex|grok|codewhale|claude|agy|opencode [-- <prompt>]` helper from its shell prompt. It
 replaces that shell with the selected manager, so the manager's address is
 `$HC_TERMINAL_ID`; `seats/README.md` documents its prerequisites.
 

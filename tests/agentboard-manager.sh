@@ -267,5 +267,85 @@ for flag in -h --help; do
   is "$flag starts nothing" test ! -s "$STUB_HC_LOG"
 done
 
+run_kind_prompt() {
+  local kind=$1 expected=$2
+  : >"$STUB_HC_LOG"; : >"$CLIENT_LOG"
+  if "$repo/seats/agentboard-manager" "$kind" -- "focus on T467" >"$tmp/out" 2>"$tmp/err"; then ok; else bad "$kind prompt launcher succeeds"; fi
+  exact "$CLIENT_LOG" "$expected" "$kind receives combined initial prompt"
+  is "$kind does not run hc" bash -c '! grep -Fq "CALL <run>" "$1"' _ "$STUB_HC_LOG"
+  is "$kind prints nothing" test ! -s "$tmp/out"
+  if [[ $kind == grok || $kind == codewhale ]]; then
+    wait_for "$STUB_HC_LOG" 'focus on T467' || true
+    exact "$STUB_HC_LOG" 'CALL <wait> <t4> <--timeout> <30>' "$kind helper waits for terminal"
+    exact "$STUB_HC_LOG" 'CALL <send> <--wait> <t4> </agentboard-manager focus on T467>' "$kind sends combined prompt"
+    is "$kind waits before sending prompt" bash -c 'w=$(grep -nF "CALL <wait>" "$1" | cut -d: -f1 | head -1); s=$(grep -nF "CALL <send>" "$1" | cut -d: -f1 | head -1); [[ -n $w && -n $s && $w -lt $s ]]' _ "$STUB_HC_LOG"
+  else
+    /usr/bin/sleep 0.1
+    is "$kind uses no send helper" bash -c '! grep -Fq "CALL <send>" "$1"' _ "$STUB_HC_LOG"
+    is "$kind uses no wait helper" bash -c '! grep -Fq "CALL <wait>" "$1"' _ "$STUB_HC_LOG"
+  fi
+}
+run_kind_prompt claude 'EXEC claude <--model> <claude-sonnet-5-5> <--dangerously-skip-permissions> </agentboard-manager focus on T467>'
+run_kind_prompt codex 'EXEC codex <--no-daemon> <--model> <gpt-6-sol> <-c> <model_reasoning_effort=medium> <--dangerously-bypass-approvals-and-sandbox> <$agentboard-manager focus on T467>'
+run_kind_prompt grok 'EXEC grok <--trust> <--always-approve>'
+run_kind_prompt agy 'EXEC agy <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager focus on T467>'
+run_kind_prompt codewhale 'EXEC codewhale <--skip-onboarding> <--fresh> <--disable> <subagents> <--approval-policy> <never>'
+run_kind_prompt opencode 'EXEC opencode <--standalone> <--auto> <--prompt> <Use skill agentboard-manager. focus on T467>'
+
+run_herdr_kind_prompt() {
+  local kind=$1 expected=$2
+  : >"$HERDR_LOG"; : >"$STUB_HC_LOG"
+  (no_hc; export HERDR_ENV=1 HERDR_PANE_ID=pane-7 HERDR_TAB_ID=tab-3; "$repo/seats/agentboard-manager" "$kind" -- "focus on T467") >"$tmp/out" 2>"$tmp/err"
+  for _ in {1..50}; do grep -qF 'CALL <agent> <start> <manager>' "$HERDR_LOG" && break; /usr/bin/sleep 0.02; done
+  exact "$HERDR_LOG" "$expected" "herdr $kind starts with prompt"
+  if [[ $kind == grok ]]; then
+    for _ in {1..50}; do grep -qF 'CALL <agent> <prompt>' "$HERDR_LOG" && break; /usr/bin/sleep 0.02; done
+    exact "$HERDR_LOG" 'CALL <agent> <prompt> <manager> </agentboard-manager focus on T467> <--wait>' 'herdr grok sends combined entry prompt'
+    is 'herdr grok omits prompt from launch args' bash -c '! grep -F "CALL <agent> <start>" "$1" | grep -Fq "focus on T467"' _ "$HERDR_LOG"
+  else
+    is "herdr $kind sends no separate prompt" bash -c '! grep -Fq "CALL <agent> <prompt>" "$1"' _ "$HERDR_LOG"
+  fi
+  is "herdr $kind never calls hc" test ! -s "$STUB_HC_LOG"
+}
+run_herdr_kind_prompt claude 'CALL <agent> <start> <manager> <--kind> <claude> <--pane> <pane-7> <--> <--model> <claude-sonnet-5-5> <--dangerously-skip-permissions> <--> </agentboard-manager focus on T467>'
+run_herdr_kind_prompt codex 'CALL <agent> <start> <manager> <--kind> <codex> <--pane> <pane-7> <--> <--model> <gpt-6-sol> <-c> <model_reasoning_effort=medium> <--dangerously-bypass-approvals-and-sandbox> <--> <$agentboard-manager focus on T467>'
+run_herdr_kind_prompt grok 'CALL <agent> <start> <manager> <--kind> <grok> <--pane> <pane-7> <--> <--trust> <--always-approve>'
+run_herdr_kind_prompt agy 'CALL <agent> <start> <manager> <--kind> <agy> <--pane> <pane-7> <--> <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager focus on T467>'
+run_herdr_kind_prompt opencode 'CALL <agent> <start> <manager> <--kind> <opencode> <--pane> <pane-7> <--> <--standalone> <--auto> <--prompt> <Use skill agentboard-manager. focus on T467>'
+
+if "$repo/seats/agentboard-manager" agy -- focus on T467 >"$tmp/out" 2>"$tmp/err"; then ok; else bad 'unquoted prompt succeeds'; fi
+exact "$CLIENT_LOG" 'EXEC agy <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager focus on T467>' 'unquoted words join with spaces'
+if "$repo/seats/agentboard-manager" agy -- '-dash --flag' >"$tmp/out" 2>"$tmp/err"; then ok; else bad 'hyphen-leading prompt succeeds'; fi
+exact "$CLIENT_LOG" 'EXEC agy <--dangerously-skip-permissions> <--model> <gemini-4-neon-medium> <-i> </agentboard-manager -dash --flag>' 'hyphen-leading prompt remains text'
+special=$(printf 'check "a" %s $NOEXP\nline2' "'b'")
+if "$repo/seats/agentboard-manager" claude -- "$special" >"$tmp/out" 2>"$tmp/err"; then ok; else bad 'quoted prompt with newline succeeds'; fi
+is 'quotes, dollar sign and newline remain literal in one argument' bash -c 'grep -Fq -- "$2" "$1"' _ "$CLIENT_LOG" "$special"
+
+run_bad_args() {
+  local label=$1; shift
+  : >"$CLIENT_LOG"; : >"$HERDR_LOG"; : >"$STUB_HC_LOG"
+  if "$repo/seats/agentboard-manager" "$@" >"$tmp/out" 2>"$tmp/err"; then bad "$label unexpectedly succeeds"; else ok; fi
+  has "$tmp/err" '[-- <prompt>]' "$label prints usage"
+  is "$label starts no client" test ! -s "$CLIENT_LOG" -a ! -s "$HERDR_LOG" -a ! -s "$STUB_HC_LOG"
+}
+run_bad_args 'extra kind argument' claude extra
+run_bad_args 'missing prompt' claude --
+run_bad_args 'empty prompt' claude -- ''
+run_bad_args 'whitespace prompt' claude -- '   '
+for args in '-h extra' '-- foo'; do
+  if "$repo/seats/agentboard-manager" $args >"$tmp/out" 2>"$tmp/err"; then bad "$args unexpectedly succeeds"; else ok; fi
+  has "$tmp/err" '[-- <prompt>]' "$args prints usage"
+done
+for kind in grok codewhale; do
+  : >"$STUB_HC_LOG"; : >"$CLIENT_LOG"
+  if "$repo/seats/agentboard-manager" "$kind" -- $'a\nb' >"$tmp/out" 2>"$tmp/err"; then bad "$kind newline prompt unexpectedly succeeds"; else ok; fi
+  has "$tmp/err" 'cannot contain newlines' "$kind newline prompt is rejected"
+  is "$kind newline prompt starts nothing" test ! -s "$CLIENT_LOG" -a ! -s "$STUB_HC_LOG"
+done
+for flag in -h --help; do
+  if "$repo/seats/agentboard-manager" "$flag" >"$tmp/help" 2>"$tmp/err"; then ok; else bad "$flag help exits zero"; fi
+  has "$tmp/help" '[-- <prompt>]' "$flag help documents prompt"
+done
+
 echo "$((n - fail))/$n passed (manager launcher)"
 [[ $fail -eq 0 ]]

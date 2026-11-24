@@ -66,7 +66,8 @@ helper runs):
 Model by seat: analyst, counter-analyst and reviewer use `gemini-4-hydrogen-medium`; coder uses `gemini-3.8-flash-medium`; manager remains on `gemini-4-neon-medium`.
 
 `agentboard-manager agy` does the same for the manager with `gemini-4-neon-medium` and
-`-i /agentboard-manager`. No seat gets a `--settings` deny or sandbox flag; its limits are
+`-i /agentboard-manager`; an optional prompt follows `--` and is passed with the skill
+invocation as one argument. No seat gets a `--settings` deny or sandbox flag; its limits are
 written in its role skill. One-time setup a human does first: finish agy's onboarding (the
 terms and data-use screen, which stops a seat at "Finish setup"), and make sure the seat's
 working directory is in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`,
@@ -89,9 +90,11 @@ the global config.
 
 From a herdr pane or an hc terminal at its shell prompt, run:
 
-    agentboard-manager {codex|grok|codewhale|claude|agy|opencode}
+    agentboard-manager {codex|grok|codewhale|claude|agy|opencode} [-- <prompt>]
 
-`agentboard-manager -h` explains the choice below. The launcher starts the client with
+The optional prompt follows `--`; multiple arguments are joined with spaces and
+passed as one argument after the manager skill invocation. `agentboard-manager -h`
+explains the choice below. The launcher starts the client with
 `AGENTBOARD_ACTOR=manager` and no home variable, so the client reads the global
 `agentboard` entry `install.py` registered (bearer token from `AGENTBOARD_ACTOR`).
 
@@ -117,10 +120,11 @@ hc terminal), `hc`, `jq` and `setsid`; it needs no window and never calls
 terminal's address (`$HC_TERMINAL_ID`) and no name. Grok and Codewhale cannot take
 their entry prompt in argv, so a detached helper waits for this terminal and sends
 `/agentboard-manager`, retrying up to ten times while hc answers `still starting`.
+An optional prompt is joined to the skill invocation and sent as one argument.
 A reply that is refused or not started is never resent, because the screen has to
 be read first; it is written to
-`${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`, and you type
-`/agentboard-manager` yourself.
+`${XDG_RUNTIME_DIR:-/tmp}/agentboard-manager-start.log`, and you type the combined
+entry prompt yourself.
 
 ### OpenCode
 

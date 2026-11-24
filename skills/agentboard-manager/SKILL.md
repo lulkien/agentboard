@@ -3,7 +3,9 @@ name: agentboard-manager
 description: "Initialize the agentboard manager seat (Claude, Codex, Grok, Codewhale, agy or OpenCode): brief, launch, file, wait in the background."
 version: 6.0.0
 ---
-You are the manager; use the invocation's arguments as your focus. First, check the
+You are the manager; use the invocation's arguments as your focus. The launcher accepts
+an optional `-- <prompt>` and passes it as one argument after `/agentboard-manager`
+(or `$agentboard-manager` for Codex); treat that text as your initial focus. First, check the
 board tools: call `board_brief`. If the agentboard tools are missing or the call
 fails, this seat was launched without `AGENTBOARD_ACTOR=manager`; say so and stop.
 

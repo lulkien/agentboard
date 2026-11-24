@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-USAGE='usage: agentboard-manager {codex|grok|codewhale|claude|agy|opencode}'
+USAGE='usage: agentboard-manager {codex|grok|codewhale|claude|agy|opencode} [-- <prompt>]'
 usage() {
   echo "$USAGE" >&2
   exit 1
 }
 
-[[ $# -eq 1 ]] || usage
-if [[ $1 == -h || $1 == --help ]]; then
+[[ $# -ge 1 ]] || usage
+if [[ $# -eq 1 && ( $1 == -h || $1 == --help ) ]]; then
   cat <<EOF
 $USAGE
 
@@ -18,6 +18,7 @@ it renames this tab to "manager" and starts the client in this pane; inside hc
 (any HC_* variable, with HC_TERMINAL_ID) it starts the client in this terminal.
 Codewhale is hc only.
 OpenCode runs standalone with automatic approval and the manager skill prompt.
+Pass an optional initial prompt as -- <prompt>; remaining words are joined with spaces.
 EOF
   exit 0
 fi
@@ -26,6 +27,27 @@ case "$KIND" in
   claude|codex|grok|codewhale|agy|opencode) ;;
   *) usage ;;
 esac
+shift
+PROMPT=
+if [[ $# -gt 0 ]]; then
+  [[ $1 == -- ]] || usage
+  shift
+  [[ $# -gt 0 ]] || usage
+  local_ifs=$IFS
+  IFS=' '
+  PROMPT="$*"
+  IFS=$local_ifs
+  [[ $PROMPT == *[![:space:]]* ]] || usage
+fi
+if [[ ( $KIND == grok || $KIND == codewhale ) && $PROMPT == *$'\n'* ]]; then
+  echo "agentboard-manager: prompt for $KIND cannot contain newlines" >&2
+  exit 1
+fi
+entry="/agentboard-manager${PROMPT:+ $PROMPT}"
+codex_entry="\$agentboard-manager${PROMPT:+ $PROMPT}"
+if [[ -n $PROMPT ]]; then opencode_prompt="Use skill agentboard-manager. $PROMPT"
+else opencode_prompt='Use skill agentboard-manager. Read the board and manage the manager workflow.'
+fi
 
 # HERDR_ENV=1 means herdr: rename the tab and start in this pane. Else any HC_*
 # variable means hc: start a new terminal. Else refuse. herdr wins when both are
@@ -56,12 +78,12 @@ done
 
 case "$KIND" in
   claude)
-    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager claude --model claude-sonnet-5-5 --dangerously-skip-permissions /agentboard-manager)
-    hargs=(--model claude-sonnet-5-5 --dangerously-skip-permissions -- /agentboard-manager)
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager claude --model claude-sonnet-5-5 --dangerously-skip-permissions "$entry")
+    hargs=(--model claude-sonnet-5-5 --dangerously-skip-permissions -- "$entry")
     ;;
   codex)
-    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codex --no-daemon --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox '$agentboard-manager')
-    hargs=(--model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox -- '$agentboard-manager')
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codex --no-daemon --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox "$codex_entry")
+    hargs=(--model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox -- "$codex_entry")
     ;;
   grok)
     argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager grok --trust --always-approve)
@@ -69,15 +91,15 @@ case "$KIND" in
     ;;
   agy)
     # the first prompt travels in -i, so no typing helper runs for agy
-    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager agy --dangerously-skip-permissions --model gemini-4-neon-medium -i /agentboard-manager)
-    hargs=(--dangerously-skip-permissions --model gemini-4-neon-medium -i /agentboard-manager)
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager agy --dangerously-skip-permissions --model gemini-4-neon-medium -i "$entry")
+    hargs=(--dangerously-skip-permissions --model gemini-4-neon-medium -i "$entry")
     ;;
   codewhale)
     argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME AGENTBOARD_ACTOR=manager codewhale --skip-onboarding --fresh --disable subagents --approval-policy never)
     ;;
   opencode)
-    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME -u OPENCODE_CONFIG -u OPENCODE_CONFIG_DIR -u OPENCODE_CONFIG_CONTENT 'OPENCODE_CONFIG_CONTENT={"model":"opencode/deepseek-v4.1-flash-free"}' AGENTBOARD_ACTOR=manager opencode --standalone --auto --prompt 'Use skill agentboard-manager. Read the board and manage the manager workflow.')
-    hargs=(--standalone --auto --prompt 'Use skill agentboard-manager. Read the board and manage the manager workflow.')
+    argv=(env -u CODEX_HOME -u CLAUDE_CONFIG_DIR -u GROK_HOME -u CODEWHALE_HOME -u OPENCODE_CONFIG -u OPENCODE_CONFIG_DIR -u OPENCODE_CONFIG_CONTENT 'OPENCODE_CONFIG_CONTENT={"model":"opencode/deepseek-v4.1-flash-free"}' AGENTBOARD_ACTOR=manager opencode --standalone --auto --prompt "$opencode_prompt")
+    hargs=(--standalone --auto --prompt "$opencode_prompt")
     ;;
 esac
 
@@ -92,13 +114,13 @@ if [[ $world == herdr ]]; then
     export OPENCODE_CONFIG_CONTENT='{"model":"opencode/deepseek-v4.1-flash-free"}'
   fi
   setsid bash -c '
-    pane=$1 kind=$2
-    shift 2
+    pane=$1 kind=$2 entry=$3
+    shift 3
     for _ in {1..50}; do
       if herdr pane process-info --pane "$pane" | jq -e ".result.process_info // {} | (.shell_pid != null and .foreground_process_group_id != null and .foreground_process_group_id == .shell_pid)" >/dev/null; then
         herdr agent start manager --kind "$kind" --pane "$pane" -- "$@"
         if [[ $kind == grok ]]; then
-          herdr agent prompt manager /agentboard-manager --wait
+          herdr agent prompt manager "$entry" --wait
         fi
         exit
       fi
@@ -106,28 +128,28 @@ if [[ $world == herdr ]]; then
     done
     echo "timed out waiting for shell prompt in pane $pane" >&2
     exit 1
-  ' _ "$HERDR_PANE_ID" "$KIND" "${hargs[@]}" >>"$log" 2>&1 </dev/null &
+  ' _ "$HERDR_PANE_ID" "$KIND" "$entry" "${hargs[@]}" >>"$log" 2>&1 </dev/null &
 else
   # hc: the manager replaces this shell in this terminal. Grok and Codewhale cannot
   # take the entry prompt in argv, so a detached helper types it here once the client
   # has settled, retrying while hc answers "still starting"; failures go to $log.
   if [[ $KIND == grok || $KIND == codewhale ]]; then
     setsid bash -c '
-      term=$1 sent=
+      term=$1 entry=$2 sent=
       sleep 1
       hc wait "$term" --timeout 30 >/dev/null || true
       for _ in {1..10}; do
         status=0
-        sent=$(hc send --wait "$term" /agentboard-manager 2>&1) || status=$?
+        sent=$(hc send --wait "$term" "$entry" 2>&1) || status=$?
         if [[ $status -eq 0 ]] && jq -e ".started == true" >/dev/null 2>&1 <<<"$sent"; then exit 0; fi
         [[ $status -eq 0 ]] && break
         [[ $sent == *"still starting"* ]] || break
         sleep 1
       done
       printf "%s\n" "$sent"
-      echo "entry prompt did not land in $term; type /agentboard-manager there"
+      echo "entry prompt did not land in $term; type $entry there"
       exit 1
-    ' _ "$HC_TERMINAL_ID" >>"$log" 2>&1 </dev/null &
+    ' _ "$HC_TERMINAL_ID" "$entry" >>"$log" 2>&1 </dev/null &
   fi
   exec "${argv[@]}"
 fi
