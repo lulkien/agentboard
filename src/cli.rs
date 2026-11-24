@@ -103,6 +103,9 @@ pub enum Cmd {
         /// Print the full description and goal
         #[arg(long)]
         full: bool,
+        /// CSV list of task fields to print
+        #[arg(long, value_name = "CSV", value_delimiter = ',')]
+        fields: Option<Vec<String>>,
     },
     /// Show direct-child progress for an epic
     Epic {
@@ -234,6 +237,9 @@ pub enum Cmd {
     Brief {
         #[arg(long, value_name = "ID")]
         project: Option<u64>,
+        /// Include fully closed terminal epics
+        #[arg(long)]
+        all: bool,
     },
     /// List or delete registered actors
     Agents {

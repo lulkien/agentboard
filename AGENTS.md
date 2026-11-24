@@ -39,8 +39,8 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `cargo test --offline --lib` | `test result: ok. 125 passed; 0 failed; 2 ignored` |
 | `cargo clippy --offline --all-targets -- -D warnings` | no warnings or errors (`Finished` is normal) |
 | `cargo build --release` | `Finished` |
-| `bash tests/cli.sh` | `434/434 passed (cli, lmdb)` |
-| `python3 tests/mcp_client.py` | `227/227 passed (mcp, lmdb)` |
+| `bash tests/cli.sh` | `443/443 passed (cli, lmdb)` |
+| `python3 tests/mcp_client.py` | `237/237 passed (mcp, lmdb)` |
 | `python3 tests/daemon.py` | `daemon: 340/340 passed (http, lmdb)` (scratch boards, loopback port 0) |
 | `bash tests/race.sh` | `ok: 8 processes claimed 24 tasks, 24 distinct, 24 claimed events` |
 | `bash tests/migrate.sh` | `migrate: 31/31 passed (scratch LMDB, stepwise)`; or `SKIP migrate: Python lmdb unavailable offline (use uv run --with lmdb)` |
@@ -48,7 +48,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `bash tests/agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `113/113 passed (manager launcher)` |
 | `bash tests/counter-loop.sh` (scratch board, real binary; the analyst/counter-analyst protocol) | `30/30 passed (counter loop)` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 15 pages, 153 CLI names, 193 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 15 pages, 154 CLI names, 193 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 15 gates passed`; with `--full` `GATES OK: 16 gates passed` |
 | `bash scripts/gate.sh --prebuilt` | `GATES OK: 11 gates passed` (reviewer; venv on PATH) |

@@ -226,12 +226,22 @@ fn run(
             let epic = board.epic(id)?;
             Ok((render::epic_text(&epic), ExitCode::SUCCESS))
         }
-        Cmd::Get { id, full } => {
+        Cmd::Get { id, full, fields } => {
             let board = open(&path)?;
             let task = board
                 .get(id)?
                 .ok_or_else(|| format!("task T{id} does not exist"))?;
-            Ok((render::task_record(&task, full), ExitCode::SUCCESS))
+            let selected = fields
+                .map(render::parse_task_fields)
+                .transpose()?
+                .filter(|fields| !fields.is_empty());
+            Ok((
+                selected.map_or_else(
+                    || render::task_record(&task, full),
+                    |fields| render::selected_task_record(&task, full, &fields),
+                ),
+                ExitCode::SUCCESS,
+            ))
         }
         Cmd::Update {
             id,
@@ -378,10 +388,10 @@ fn run(
             };
             Ok((render::wait_text(&outcome), code))
         }
-        Cmd::Brief { project } => {
+        Cmd::Brief { project, all } => {
             let board = open(&path)?;
             let project = resolve_project(&board, project)?;
-            let brief = board.brief_for_project(10, project)?;
+            let brief = board.brief_for_project_with(10, project, all)?;
             Ok((render::brief_text(&brief), ExitCode::SUCCESS))
         }
         Cmd::Agents { cmd } => {

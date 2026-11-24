@@ -133,6 +133,9 @@ pub struct BriefArgs {
     /// Restrict the summary to this project ID
     #[serde(default)]
     pub project: Option<u64>,
+    /// Include fully closed terminal epics
+    #[serde(default)]
+    pub all: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -141,6 +144,9 @@ pub struct GetArgs {
     /// Print the full description and goal
     #[serde(default)]
     pub full: bool,
+    /// Select task fields to print
+    #[serde(default)]
+    pub fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -348,7 +354,16 @@ impl Board {
         let task = blocking(&self.board, move |board| board.get(args.id))
             .await?
             .ok_or_else(|| err(format!("task T{} does not exist", args.id)))?;
-        Ok(text(render::task_record(&task, args.full)))
+        let selected = args
+            .fields
+            .map(render::parse_task_fields)
+            .transpose()
+            .map_err(err)?
+            .filter(|fields| !fields.is_empty());
+        Ok(text(selected.map_or_else(
+            || render::task_record(&task, args.full),
+            |fields| render::selected_task_record(&task, args.full, &fields),
+        )))
     }
 
     #[tool(
@@ -514,7 +529,7 @@ impl Board {
         let scope = request_scope(&extensions)?;
         let brief = blocking(&self.board, move |board| {
             let project = call_project(args.project, &scope);
-            board.brief_for_project(10, project)
+            board.brief_for_project_with(10, project, args.all)
         })
         .await?;
         Ok(text(render::brief_text(&brief)))

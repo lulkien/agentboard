@@ -88,7 +88,7 @@ agentboard add "title" [--description TEXT] [--goal TEXT] [--status S]
                       [--project ID] [--new-actor]
 agentboard ls [--status S] [--assignee NAME] [--parent ID] [--project ID]
               [--all] [--limit N] [--offset N]
-agentboard get ID [--full]
+agentboard get ID [--full] [--fields CSV]
 agentboard epic ID
 agentboard update ID --if-revision N
               [--title|--description|--goal|--status|--priority|--assignee|
@@ -104,7 +104,7 @@ agentboard feed [--after CURSOR] [--kind K] [--recipient NAME] [--task ID]
                 [--limit N] [--full] [--wait SECONDS]
 agentboard wait ID... [--status CSV] [--assignee [NAME]] [--epic] [--after CURSOR]
                [--timeout SECONDS]
-agentboard brief [--project ID]
+agentboard brief [--project ID] [--all]
 agentboard agents
 agentboard agents delete NAME
 agentboard path
@@ -152,7 +152,8 @@ Statuses: `todo`, `planning`, `implementing`, `blocked`, `reviewing`, `done`, `c
   parent first, then retries; parents never auto-reopen. A closed child likewise
   waits for its closed parent before it can reopen, and a closed task takes a new
   owner only in the update that reopens it.
-- `brief` shows all epic rows with progress first, then up to ten unparented active
+- `brief` shows open epic rows with progress first (use `--all` to include fully
+  closed terminal epics), then up to ten unparented active
   tasks, then board map usage, then scoped status counts. Each section uses
   `(priority, id)` order. Map usage reports LMDB's high-water page mark and map
   size; reclaimed pages below that mark remain counted.

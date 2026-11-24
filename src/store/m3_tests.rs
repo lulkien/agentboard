@@ -995,6 +995,21 @@ fn epic_rollup_is_direct_unpaged_and_read_only() {
         board.brief_for_project(0, None).unwrap().epics[0].task,
         closed.task
     );
+    assert!(
+        board
+            .brief_for_project_with(0, None, false)
+            .unwrap()
+            .epics
+            .is_empty()
+    );
+    assert_eq!(
+        board
+            .brief_for_project_with(0, None, true)
+            .unwrap()
+            .epics
+            .len(),
+        1
+    );
     assert_eq!(board.metadata().unwrap(), before);
     assert_eq!(board.agents().unwrap(), roster);
 }

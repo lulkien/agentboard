@@ -180,6 +180,8 @@ def main():
         has("task_get prints full text", "full text here", body)
         is_error, body = server.call("task_get", {"id": 1})
         has("task_get prints a revision", "revision 1", body)
+        _, empty_fields_body = server.call("task_get", {"id": 1, "fields": []})
+        check("empty task_get fields preserve default record", body, empty_fields_body)
 
         is_error, body = server.call("task_claim", {"id": 1})
         check("task_claim is not an error", False, is_error)
@@ -246,6 +248,15 @@ def main():
         check("compact task_get hides reports", False, "## Coder report 01" in body)
         _, body = server.call("task_get", {"id": 2, "full": True})
         has("full task_get shows the report", "## Coder report 01", body)
+        is_error, body = server.call("task_get", {"id": 2, "fields": ["coder_report"], "full": True})
+        check("selected report task_get succeeds", False, is_error)
+        check("selected report starts with task id", "T2", body.splitlines()[0])
+        has("selected report returns stored bytes", "## Coder report 01\nbuilt", body)
+        check("selected report omits other report fields", False, "analyst_report" in body or "reviewer_report" in body)
+        is_error, body = server.call("task_get", {"id": 2, "fields": ["bad_field"]})
+        check("unknown task_get field is invalid params", True, is_error)
+        has("unknown task_get field names field", "unknown task field", body)
+        has("unknown task_get field value", "bad_field", body)
         _, body = server.call(
             "task_update",
             {"id": 2, "if_revision": 2, "coder_report": "## Coder report 02\nfixed"},
@@ -399,6 +410,10 @@ def main():
             error, body = epics.call("task_update", {"id": 1, "if_revision": 1, "status": "done"})
             check("all terminal epic closes", False, error)
             has("closed epic body", "T1 done", body)
+            _, brief = epics.call("board_brief")
+            check("board_brief hides fully closed terminal epic", False, "T1 done" in brief)
+            _, brief = epics.call("board_brief", {"all": True})
+            has("board_brief all shows fully closed terminal epic", "T1 done", brief)
             print("tools/list: task_epic present")
         for status in ["done", "canceled"]:
             with Server(os.path.join(scratch, "parent-" + status), "manager") as parents:

@@ -8,6 +8,54 @@ const TITLE_WIDTH: usize = 72;
 /// Width of a free-text field in a compact record.
 const FIELD_WIDTH: usize = 160;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskField {
+    Title,
+    Status,
+    Priority,
+    Assignee,
+    Revision,
+    Parent,
+    Project,
+    Description,
+    Goal,
+    AnalystReport,
+    CoderReport,
+    ReviewerReport,
+}
+
+impl TaskField {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "title" => Ok(Self::Title),
+            "status" => Ok(Self::Status),
+            "priority" => Ok(Self::Priority),
+            "assignee" => Ok(Self::Assignee),
+            "revision" => Ok(Self::Revision),
+            "parent" => Ok(Self::Parent),
+            "project" => Ok(Self::Project),
+            "description" => Ok(Self::Description),
+            "goal" => Ok(Self::Goal),
+            "analyst_report" => Ok(Self::AnalystReport),
+            "coder_report" => Ok(Self::CoderReport),
+            "reviewer_report" => Ok(Self::ReviewerReport),
+            _ => Err(format!("unknown task field \"{value}\"")),
+        }
+    }
+}
+
+pub fn parse_task_fields<I, S>(fields: I) -> Result<Vec<TaskField>, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    fields
+        .into_iter()
+        .filter(|field| !field.as_ref().is_empty())
+        .map(|field| TaskField::parse(field.as_ref()))
+        .collect()
+}
+
 pub fn project_line(project: &Project) -> String {
     format!(
         "{}\t{}\t{}",
@@ -117,6 +165,62 @@ pub fn task_record(task: &Task, full: bool) -> String {
                 lines.push(format!("{name} {value}"));
             }
         }
+    }
+    lines.join("\n")
+}
+
+pub fn selected_task_record(task: &Task, full: bool, fields: &[TaskField]) -> String {
+    let mut lines = vec![format!("T{}", task.id)];
+    for field in fields {
+        let (name, value, optional_text) = match field {
+            TaskField::Title => (
+                "title",
+                if full {
+                    task.title.clone()
+                } else {
+                    truncate(&task.title, TITLE_WIDTH)
+                },
+                false,
+            ),
+            TaskField::Status => ("status", task.status.as_str().to_owned(), false),
+            TaskField::Priority => ("priority", task.priority.to_string(), false),
+            TaskField::Assignee => (
+                "assignee",
+                task.assignee.clone().unwrap_or_else(|| "-".into()),
+                false,
+            ),
+            TaskField::Revision => ("revision", task.revision.to_string(), false),
+            TaskField::Parent => match task.parent_id {
+                Some(id) => ("parent", format!("T{id}"), false),
+                None => continue,
+            },
+            TaskField::Project => ("project", task.project_id.to_string(), false),
+            TaskField::Description => (
+                "description",
+                if full {
+                    task.description.clone()
+                } else {
+                    truncate(&task.description, FIELD_WIDTH)
+                },
+                true,
+            ),
+            TaskField::Goal => (
+                "goal",
+                if full {
+                    task.goal.clone()
+                } else {
+                    truncate(&task.goal, FIELD_WIDTH)
+                },
+                true,
+            ),
+            TaskField::AnalystReport => ("analyst_report", task.analyst_report.clone(), true),
+            TaskField::CoderReport => ("coder_report", task.coder_report.clone(), true),
+            TaskField::ReviewerReport => ("reviewer_report", task.reviewer_report.clone(), true),
+        };
+        if optional_text && value.is_empty() {
+            continue;
+        }
+        lines.push(format!("{name} {value}"));
     }
     lines.join("\n")
 }

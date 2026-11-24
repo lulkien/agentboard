@@ -233,6 +233,15 @@ impl Board {
 
     /// Derived epic progress and active work for one project, or the whole board.
     pub fn brief_for_project(&self, active_limit: usize, project: Option<u64>) -> Result<Brief> {
+        self.brief_for_project_with(active_limit, project, true)
+    }
+
+    pub fn brief_for_project_with(
+        &self,
+        active_limit: usize,
+        project: Option<u64>,
+        include_terminal_epics: bool,
+    ) -> Result<Brief> {
         let map = self.map_usage()?;
         let txn = read_txn(&self.env)?;
         let metadata = self.checked_metadata(&txn)?;
@@ -254,11 +263,19 @@ impl Board {
             }
             counts[keys::status_code(task.status) as usize] += 1;
             if let Some(child_counts) = children.get(&task.id) {
-                epics.push(rollup(
-                    serde_json::from_slice(raw)?,
-                    child_counts,
-                    cursor.clone(),
-                ));
+                let epic = rollup(serde_json::from_slice(raw)?, child_counts, cursor.clone());
+                if include_terminal_epics
+                    || !task.status.is_terminal()
+                    || epic.done
+                        + epic
+                            .counts
+                            .iter()
+                            .find(|(s, _)| *s == Status::Canceled)
+                            .map_or(0, |(_, n)| *n)
+                        != epic.total
+                {
+                    epics.push(epic);
+                }
             } else if task.parent_id.is_none()
                 && !task.status.is_terminal()
                 && task.status != Status::Todo

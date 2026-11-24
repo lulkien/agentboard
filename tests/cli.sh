@@ -116,6 +116,14 @@ has "compact record truncates the title" "…" "$out"
 out=$("$B" get 1 --full)
 has "get --full returns the whole title" "$long_title" "$out"
 lacks "get --full leaves no marker" "…" "$out"
+out=$("$B" get 1 --fields title,assignee)
+check "selected get starts with task id" T1 "$(printf '%s\n' "$out" | head -1)"
+check "selected get has requested fields only" "title ${long_title:0:71}…
+assignee -" "$(printf '%s\n' "$out" | tail -2)"
+out=$("$B" get 1 --fields nope 2>&1); code=$?
+check "unknown get field exit" 1 "$code"
+has "unknown get field names field" 'unknown task field "nope"' "$out"
+check "empty selected fields preserve default record" "$("$B" get 1)" "$("$B" get 1 --fields '')"
 indented=$'line one\n    line two'
 "$B" add "indented body" --description "$indented" >/dev/null
 out=$("$B" get 2 --full)
@@ -140,6 +148,9 @@ has "a second report is present" "## Coder report 02" "$out"
 out=$("$B" get 1 --full)
 lacks "replace drops the old sections" "## Coder report 01" "$out"
 has "replace stores the new body" "coder_report short" "$out"
+out=$("$B" get 1 --fields coder_report --full)
+check "selected report starts with task id" T1 "$(printf '%s\n' "$out" | head -1)"
+check "selected report returns stored bytes only" $'T1\ncoder_report short' "$out"
 printf '## Reviewer report 01\nverdict' > "$S/review-report.md"
 "$B" update 1 --if-revision 4 --reviewer-report-file "$S/review-report.md" >/dev/null
 out=$("$B" get 1 --full)
@@ -357,6 +368,10 @@ check "brief map usage grows after large writes" true "$(test "${brief_after:-0}
 out=$("$B" update 1 --if-revision 1 --status done); code=$?
 check "all terminal epic closes" 0 "$code"
 has "closed epic record" "T1 done" "$out"
+out=$("$B" brief)
+lacks "brief hides fully closed terminal epic" "T1 done" "$out"
+out=$("$B" brief --all)
+has "brief all shows fully closed terminal epic" "T1 done" "$out"
 
 # --- terminal parents refuse new attachments, manager reopens and retries ---
 for status in done canceled; do

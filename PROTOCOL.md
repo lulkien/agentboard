@@ -119,12 +119,19 @@ it is terminal.
 ### task_get
 
 ```json
-{"id": 7, "full": false}
+{"id": 7, "full": false, "fields": ["title", "status"]}
 ```
 
 The record with its revision. Compact reads collapse whitespace and cut titles at
 72 and fields at 160 characters with `…`. `full: true` prints the title on its own
 line and every field exactly as stored, including the three seat reports.
+`fields` optionally selects from `title`, `status`, `priority`, `assignee`,
+`revision`, `parent`, `project`, `description`, `goal`, `analyst_report`,
+`coder_report`, and `reviewer_report`. A selected read starts with `T<id>` and
+prints only those fields; empty optional fields are omitted, while an unassigned
+assignee prints `-`. Selected reports are returned exactly as stored even when
+`full` is false. Unknown names are invalid params. Omit `fields` or pass an empty
+array for the unchanged full record format.
 
 ### task_epic
 
@@ -271,7 +278,9 @@ then `cursor <cursor>`, then `more true` and/or `older true` when applicable.
 
 ### board_brief
 
-Optional `project` (an ID) limits it to one project. All epic rows first, each
+Optional `project` (an ID) limits it to one project. `all` defaults to false;
+when false, fully closed epics in terminal status are omitted. Set `all: true`
+to include them. All remaining epic rows first, each
 compact task row followed by `  done D/N`, then up to ten unparented non-epic tasks in `planning`, `implementing`, `blocked` or `reviewing`.
 Each section sorts by `(priority, id)`. Nested and terminal epics remain visible
 while they have children. The final line is status counts, scoped to the selected

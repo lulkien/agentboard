@@ -408,13 +408,13 @@ agentboard --db DIR --actor reviewer feed --task ID --after 0 --full
 | --- | --- |
 | `task_add` | file work; assigns on creation when you name an assignee |
 | `task_list` | status, assignee, parent, project; `all=true` includes closed rows |
-| `task_get` | one task and its revision; `full=true` for stored text and reports |
+| `task_get` | one task and its revision; `full=true` for stored text and reports; `fields` selects task fields |
 | `task_epic` | umbrella row, direct-child counts and done/total progress |
 | `task_update` | fields, status, owner, reports; needs `if_revision`; `force`+`reason` to override; `release` to return a held row to `todo` |
 | `task_claim` | next ready task, or one by id |
 | `task_comment` | append context; never moves the revision |
 | `board_feed` | events after a cursor, filters, `wait`; `full=true` for whole bodies |
-| `board_brief` | epic progress, unparented active work, then project status counts; accepts `project` |
+| `board_brief` | open epic progress, unparented active work, then project status counts; accepts `project`; `all=true` includes fully closed terminal epics |
 | `board_agents` | roster with last activity and last task |
 | `board_project_delete` | remove a project after moving every linked task |
 | `board_agent_delete` | remove a roster entry with no open work |
