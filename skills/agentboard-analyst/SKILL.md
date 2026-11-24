@@ -22,10 +22,12 @@ Use the shared workflow and analyst role in `~/.agents/skills/agentboard-team/`
 as the canonical process instructions.
 
 1. Find your row: `board_feed` unfiltered for the newest assignment to
-   `analyst`, or `task_list(assignee="analyst")`. Read it with
-   `task_get(id, full=true)` and `board_feed(task=<id>, after="0", full=true)`
-   on a first visit; its `description` and `goal` are the brief. Later wakes read
-   by cursor (workflow.md, Reading a row).
+   `analyst`, or `task_list(assignee="analyst")`. On a first visit read
+   `task_get(id, fields=["title","description","goal","revision","status","assignee","parent","project"], full=true)`
+   and compact `board_feed(task=id)`; fetch a needed event/comment with
+   `after="<seq-1>", limit=1, full=true`. Add `reviewer_report` to the selected
+   fields when returned from review at the implement cap. Later wakes read by
+   cursor (workflow.md, Reading a row).
 2. Do not `task_claim`: a claim starts `implementing`. Proceed when the row is
    `planning` and held by `analyst`; otherwise report that and stop for the manager.
 3. Read the code the row names. Decide whether it is one unit of work. It is too
@@ -51,8 +53,9 @@ as the canonical process instructions.
    `counter-analyst`, and nothing wakes it, so the manager prompts it.
 5. When the manager wakes you again, read
    `board_feed(task=<id>, after=<cursor of your last write on the row>, full=true)`
-   and `task_get(id)`; a return from review at the implement cap also needs
-   `task_get(id, full=true)` for the reviewer report. In a round, the
+   and `task_get(id, fields=["revision","status","assignee"])`; a return from
+   review at the implement cap also needs `reviewer_report` in the targeted read.
+   In a round, the
    counter-analyst has commented `counter-analyst <n>.<r>:`.
    - `pass`: write the final agreed plan into the analyst report with `task_update(id,
      if_revision, analyst_report=...)`: heading `## Analyst plan <n>`, the line

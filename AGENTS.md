@@ -48,7 +48,7 @@ and uses scratch boards; the daemon suites start their own loopback listeners.
 | `bash tests/agentboard-manager.sh` (stub herdr and hc; no live pane or terminal) | `113/113 passed (manager launcher)` |
 | `bash tests/counter-loop.sh` (scratch board, real binary; the analyst/counter-analyst protocol) | `30/30 passed (counter loop)` |
 | `python3 scripts/sync-tool-count.py --check` | `MCP router: 12 tools; published counts match` |
-| `python3 tests/doc-names.py` | `doc-names: 15 pages, 154 CLI names, 193 MCP names passed` |
+| `python3 tests/doc-names.py` | `doc-names: 15 pages, 154 CLI names, 200 MCP names passed` |
 | `python3 scripts/doc-overlap.py` | four zero-count lines, exit 0 |
 | `bash scripts/gate.sh` | `GATES OK: 15 gates passed`; with `--full` `GATES OK: 16 gates passed` |
 | `bash scripts/gate.sh --prebuilt` | `GATES OK: 11 gates passed` (reviewer; venv on PATH) |

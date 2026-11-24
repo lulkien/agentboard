@@ -20,9 +20,12 @@ that directory before acting; the repo's `AGENTS.md` narrows what you may run.
 
 1. Claim one row: `task_claim` with no id takes the highest-priority ready row,
    `task_claim(id)` takes the row assigned to you. One row at a time.
-2. First visit: `task_get(id, full=true)` supplies the spec and plan. On resume,
-   read `board_feed(task=<id>, after=<last cursor>, full=true)` and `task_get(id)`;
-   reopen or a new analyst turn needs full text. Stay on this row and its scope.
+2. First visit or reopen: read
+   `task_get(id, fields=["title","description","goal","analyst_report","revision","status","assignee","parent","project"], full=true)`;
+   add `reviewer_report` on reopen. On resume, read
+   `board_feed(task=<id>, after=<last cursor>, full=true)` and
+   `task_get(id, fields=["revision","status","assignee"])`. Stay on this row
+   and its scope.
 3. Create the task branch before editing, then work only that row and only the
    files it names. The branch name is
    `task-<id>-analyst-<analyst_turn>-implement-<implement_turn>`; create it with

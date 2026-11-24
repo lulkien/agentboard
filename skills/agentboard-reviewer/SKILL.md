@@ -26,11 +26,13 @@ Read `~/.agents/skills/agentboard-team/SKILL.md`, `workflow.md` and `roles.md` i
 that directory before acting. You read and judge; the row is your work product.
 
 1. Find the row: `board_feed` unfiltered, or `task_list(status="reviewing")`.
-2. Read `task_get(id, full=true)` on a first visit or after a coder handoff to
-   review, else `task_get(id)`; read
-   `board_feed(task=<id>, after=<cursor of your last write on the row>, full=true)`,
-   or `after="0"` on a first visit; then follow **Verify** below. Judge only the
-   last commit on the named branch.
+2. Read `task_get(id, fields=["title","description","goal","analyst_report","coder_report","revision","status","assignee","parent","project"], full=true)`
+   on a first visit or after a coder handoff to review. Read compact
+   `board_feed(task=id)` and fetch a specific event/comment with
+   `after="<seq-1>", limit=1, full=true` when its full text is needed. On a later
+   wake, read `board_feed(task=<id>, after=<cursor of your last write on the row>,
+   full=true)` and `task_get(id, fields=["revision","status","assignee"])`; then
+   follow **Verify** below. Judge only the last commit on the named branch.
 3. Comment findings on the row using **Severity** and its evidence shape.
 4. Close when the goal is proved: `task_update(id, if_revision, status="done",
    reviewer_report=...)` with one short comment naming the verdict. Reopen when it

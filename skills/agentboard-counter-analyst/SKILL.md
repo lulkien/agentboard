@@ -23,11 +23,15 @@ Follow the shared process and counter-analyst role in
    `counter-analyst`, or `task_list(assignee="counter-analyst")`. Proceed when the
    row is `planning` and held by `counter-analyst`; otherwise report that and stop
    for the manager. Do not `task_claim`.
-2. On a first visit read `task_get(id, full=true)` for the brief and
-   `board_feed(task=<id>, after="0", full=true)` for the analyst's latest draft
-   and earlier rounds. On a later review read
+2. On a first visit read
+   `task_get(id, fields=["title","description","goal","revision","status","assignee","parent","project"], full=true)`
+   for the brief, then `board_feed(task=id, kind="commented", limit=1, full=true)`
+   for the analyst's latest draft. This assumes the draft is the latest comment
+   at handoff; otherwise read compact `board_feed(task=id)` and fetch the draft
+   with `after="<seq-1>", limit=1, full=true`. On a later review read
    `board_feed(task=<id>, after=<cursor of your last write on the row>, full=true)`
-   (the answers and revised draft) and `task_get(id)` for the revision
+   (the answers and revised draft) and
+   `task_get(id, fields=["revision","status","assignee"])` for the revision
    (workflow.md, Reading a row).
 3. Research the row yourself in the tree: the files and callers the brief touches,
    the goal's proof command, what the draft leaves out. Do not take the draft's

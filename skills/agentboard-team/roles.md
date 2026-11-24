@@ -72,7 +72,7 @@ Never:
 Reads and judges. The review row is the work product.
 
 May:
-- `task_get` with `full=true`, `board_feed`, `task_list`, `board_brief`
+- `task_get` with selected `fields` and `full=true` when reading reports, `board_feed`, `task_list`, `board_brief`
 - read the row's branch, its last commit and its diff through git reads
 - run the repo's test suites against an already-built binary on scratch boards,
   and run that binary directly on a scratch board, for example

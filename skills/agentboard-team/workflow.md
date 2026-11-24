@@ -174,24 +174,19 @@ The names `in_progress` and `review` are still accepted as input and read as
 
 ## Reading a row
 
-A seat reads a row by cursor, so a wake costs only what changed. Every write
+A seat reads only the task fields and events it needs. Every write
 (`task_comment`, `task_update`) prints `cursor <instance>:<seq>`; the seat keeps
-the one printed by its last write on the row. On a first visit it reads
-`task_get(id, full=true)` once for the brief and reports; the analyst,
-counter-analyst and reviewer also read the thread with
-`board_feed(task=<id>, after="0", full=true)`, while the coder skips the planning
-debate because the plan it builds is the analyst report. On each later wake it
-reads `board_feed(task=<id>, after=<cursor of your last write on the row>,
-full=true)`, which lists only what happened since it last spoke, and
-`task_get(id)` without `full` for the status, assignee and revision. Every feed
-read follows the printed cursor while `more` is true. It reads `full=true` again
-only after a move that wrote a report: a coder handoff to review (coder report),
-a reviewer reopen to the coder or return to the analyst at the cap (reviewer
-report), or an analyst handoff to the coder (analyst report). The analyst and
-counter-analyst exchange, an answer to `blocked` and a cap unblock write comments
-only. A seat with no cursor of its own for the row (a new session, a compacted
-context, a replacement) reads as on a first visit; the Quota resume read below
-is that case.
+the one printed by its last write on the row. A later status check uses
+`task_get(id, fields=["revision","status","assignee"])`. The first visit uses
+the role-specific selections below, with `full=true` so requested text and
+reports retain their stored bytes:
+
+- Analyst: `task_get(id, fields=["title","description","goal","revision","status","assignee","parent","project"], full=true)`; add `reviewer_report` when returned from review at the implement cap. Read `board_feed(task=id)` compactly, then fetch a specific event with `after="<seq-1>", limit=1, full=true` when its full comment is needed.
+- Counter-analyst: `task_get(id, fields=["title","description","goal","revision","status","assignee","parent","project"], full=true)`, then `board_feed(task=id, kind="commented", limit=1, full=true)` for the analyst's latest draft. This assumes that draft is the latest comment at handoff. Otherwise read compact `board_feed(task=id)` and fetch the draft with `after="<seq-1>", limit=1, full=true`.
+- Coder: `task_get(id, fields=["title","description","goal","analyst_report","revision","status","assignee","parent","project"], full=true)`; add `reviewer_report` on reopen. The coder skips the planning debate because the plan it builds is the analyst report.
+- Reviewer: `task_get(id, fields=["title","description","goal","analyst_report","coder_report","revision","status","assignee","parent","project"], full=true)`. Read compact `board_feed(task=id)` and fetch the specific event/comment needed with `after="<seq-1>", limit=1, full=true`.
+
+On a later wake, read `board_feed(task=<id>, after=<cursor of your last write on the row>, full=true)` and follow the printed cursor while `more` is true. Fetch full text again only when a report was written: coder report on handoff to review, reviewer report on reopen or return to the analyst at the cap, and analyst report on handoff to the coder. The analyst/counter-analyst exchange, an answer to `blocked`, and a cap unblock write comments only. A seat with no cursor of its own for the row (a new session, compacted context, or replacement) uses the first-visit reads; quota/replacement recovery follows the separate read in **Quota**.
 
 ## Waiting without spinning
 
@@ -234,8 +229,9 @@ the seat's report, not in a comment: `task_update(id, if_revision,
 analyst_report=..., coder_report=..., reviewer_report=...)` appends a section, and
 `replace_report=true` rewrites it. The seat writes the heading, for example
 `## Coder report 02 - flaky check corrected`; the board joins sections with `---`.
-Only `task_get(full=true)` and the dashboard print reports, and the event records
-sizes, not text.
+Only `task_get` with `full=true` and the dashboard print reports, and the event
+records sizes, not text. A selected read includes a report only when its name is
+in `fields`.
 
 A comment stays short: the handoff line the next seat acts on, or a question and a
 blocker. Everything a later seat must read goes in the report.
