@@ -63,7 +63,7 @@ helper runs):
     env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
     hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
-Model by seat: analyst, counter-analyst, reviewer, designer and librarian use `gemini-4-neon-medium`; coder uses `gemini-4-hydrogen-medium`; manager remains on `gemini-4-neon-medium`.
+Model by seat: analyst, counter-analyst, reviewer, designer and librarian use `gemini-4-neon-medium`; coder uses `gemini-4-hydrogen-low`; manager remains on `gemini-4-neon-medium`.
 
 `agentboard-manager agy` does the same for the manager with `gemini-4-neon-medium` and
 `-i /agentboard-manager`; an optional prompt follows `--` and is passed with the skill

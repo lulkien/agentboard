@@ -97,7 +97,7 @@ skill and `roles.md`, and a seat that ignores them is a contract breach the
 reviewer reopens, not a launch flag.
 
 For Claude, analyst, counter-analyst, reviewer, designer and librarian use Opus at
-medium effort, and coder uses Sonnet at medium effort. Designer and librarian use
+medium effort, and coder uses Sonnet at low effort. Designer and librarian use
 the analyst model/effort for each client. Codex takes the model and effort as flags. Swap a model only when
 the human names a different one.
 
@@ -108,7 +108,7 @@ Codex, Claude and agy token pools.
 | --- | --- | --- |
 | analyst | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
 | counter-analyst | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
-| coder | `--model claude-sonnet-5-5 --effort medium` | `--model gpt-6-luna -c model_reasoning_effort=medium` |
+| coder | `--model claude-sonnet-5-5 --effort low` | `--model gpt-6-luna -c model_reasoning_effort=low` |
 | reviewer | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
 | designer, librarian | same as analyst | same as analyst |
 
@@ -123,7 +123,7 @@ env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind claude --pane "$PA
 env AGENTBOARD_ACTOR=counter-analyst herdr agent start counter-analyst --kind claude --pane "$PANE_COUNTER" -- \
   --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 env AGENTBOARD_ACTOR=coder herdr agent start coder --kind claude --pane "$PANE_CODER" -- \
-  --model claude-sonnet-5-5 --effort medium --dangerously-skip-permissions
+  --model claude-sonnet-5-5 --effort low --dangerously-skip-permissions
 env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind claude --pane "$PANE_REVIEWER" -- \
   --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 
@@ -133,16 +133,17 @@ env AGENTBOARD_ACTOR=analyst herdr agent start analyst --kind codex --pane "$PAN
 env AGENTBOARD_ACTOR=counter-analyst herdr agent start counter-analyst --kind codex --pane "$PANE_COUNTER" -- \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 env AGENTBOARD_ACTOR=coder herdr agent start coder --kind codex --pane "$PANE_CODER" -- \
-  --model gpt-6-luna -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+  --model gpt-6-luna -c model_reasoning_effort=low --dangerously-bypass-approvals-and-sandbox
 env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind codex --pane "$PANE_REVIEWER" -- \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 
-# Grok seats: the same, with Grok's trust and approve flags
-env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok --pane "$PANE" -- --trust --always-approve
+# Grok seats: non-coder seats use Grok's trust and approve flags; coder adds low effort
+env AGENTBOARD_ACTOR=<non-coder-seat> herdr agent start <non-coder-seat> --kind grok --pane "$PANE" -- --trust --always-approve
+env AGENTBOARD_ACTOR=coder herdr agent start coder --kind grok --pane "$PANE_CODER" -- --trust --always-approve --reasoning-effort low
 
 # agy seats: the entry prompt travels in -i, so no herdr agent prompt follows
 # Model by seat: analyst/counter-analyst/reviewer/designer/librarian use gemini-4-neon-medium;
-# coder uses gemini-4-hydrogen-medium; manager uses gemini-4-neon-medium.
+# coder uses gemini-4-hydrogen-low; manager uses gemini-4-neon-medium.
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
@@ -213,12 +214,13 @@ hc run --bg --name analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=analyst claude 
 hc run --bg --name counter-analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=counter-analyst claude \
   --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder claude \
-  --model claude-sonnet-5-5 --effort medium --dangerously-skip-permissions
+  --model claude-sonnet-5-5 --effort low --dangerously-skip-permissions
 hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer claude \
   --model claude-opus-5-5 --effort medium --dangerously-skip-permissions
 
-# Grok Build seats
-hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> grok --trust --always-approve
+# Grok Build seats: non-coder seats use the two flags; coder adds low effort
+hc run --bg --name <non-coder-seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<non-coder-seat> grok --trust --always-approve
+hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder grok --trust --always-approve --reasoning-effort low
 
 # Codex seats. --no-daemon is mandatory: without it the seat's own commands run
 # outside hc and nothing it starts is addressable.
@@ -227,13 +229,13 @@ hc run --bg --name analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=analyst codex -
 hc run --bg --name counter-analyst --cwd "$REPO" -- env AGENTBOARD_ACTOR=counter-analyst codex --no-daemon \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder codex --no-daemon \
-  --model gpt-6-luna -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
+  --model gpt-6-luna -c model_reasoning_effort=low --dangerously-bypass-approvals-and-sandbox
 hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex --no-daemon \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 
 # agy seats: gemini-4-neon-medium for analyst, counter-analyst, reviewer,
 # designer and librarian;
-# gemini-4-hydrogen-medium for coder; gemini-4-neon-medium for manager.
+# gemini-4-hydrogen-low for coder; gemini-4-neon-medium for manager.
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
@@ -299,7 +301,7 @@ launch recipes above; install and the registered entries are in `seats/README.md
 | OpenCode | five core; designer on demand; librarian interactive; `--standalone` required | See OpenCode recipe above; manager via `agentboard-manager opencode` | See `seats/README.md` | `--auto` | See launch recipe |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
-Model and effort per seat come from the launch table for every client; designer and librarian use the analyst row. agy takes the effort in the model id: `gemini-4-neon-medium` for analyst, counter-analyst, reviewer, designer, librarian and manager, and `gemini-4-hydrogen-medium` for coder.
+Model and effort per seat come from the launch table for Claude and Codex; designer and librarian use the analyst row. Grok coder adds `--reasoning-effort low`. agy takes the effort in the model id: `gemini-4-neon-medium` for analyst, counter-analyst, reviewer, designer, librarian and manager, and `gemini-4-hydrogen-low` for coder.
 agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. Install skills with the root installer, which invokes `bunx skills@1.9.0` or falls back to `npx -y skills@1.9.0`; see `skills/README.md` for client targets. Rerun `./install.py --skip-binary` after editing repo skills.
 
 ## Register a seat's MCP server

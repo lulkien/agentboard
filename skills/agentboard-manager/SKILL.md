@@ -196,8 +196,9 @@ with `env AGENTBOARD_ACTOR=<seat>` and no home variable.
 
 From a herdr pane or an hc terminal at its shell prompt, `agentboard-manager
 grok` starts Grok with `--trust --always-approve` and prompts `/agentboard-manager`.
-For workers, only the actor and Grok's two flags go on the launch; the role skill
-holds the seat's restrictions. For a fresh herdr tab, use:
+For non-coder workers, only the actor and Grok's two flags go on the launch;
+coder adds `--reasoning-effort low`. The role skill holds the seat's restrictions.
+For a fresh herdr tab, use:
 
     herdr tab create --cwd "$REPO" --label analyst
     herdr pane list
