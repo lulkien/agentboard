@@ -42,8 +42,9 @@ seat is a named terminal and `hc send` waits for the program to pause.
    global MCP entry sends it as a bearer token. The
    manual's launch sections have the exact commands and preferred-model table
    (Claude Opus/Sonnet 5.5;
-   Codex Sol with model and effort passed as flags). There are five seats: manager,
-   analyst, counter-analyst, coder, reviewer. Launch the counter-analyst like the
+   Codex Sol with model and effort passed as flags). There are five core seats:
+   manager, analyst, counter-analyst, coder and reviewer; designer and librarian
+   are optional situational seats. Launch the counter-analyst like the
    analyst, with the seat name and skill swapped (`AGENTBOARD_ACTOR=counter-analyst`,
    entry prompt `/agentboard-counter-analyst T<id>`, `$agentboard-counter-analyst`
    under Codex), and only when a row is going through the analyst.
@@ -54,6 +55,13 @@ seat is a named terminal and `hc send` waits for the program to pause.
      `hc run`; labels are an opt-in, only when the human asks to watch that seat:
      `hc label <address> herdr.space=<space-id> herdr.tab=<tab-id>` (only when the human asks).
      Read the terminal's `labels` via `hc get <address> --json` to obtain both ids.
+   - Launch `designer` only for a design row, using the analyst model and its
+     entry skill. Wait with `agentboard wait ID --status
+     reviewing,done,blocked --assignee --timeout 300`; read the design comment
+     before dispatching a dependent coder row, which cites the design row ID.
+     Set `new_actor=true` on `task_add` if `designer` is not yet in the roster.
+   - Run `librarian` interactively for direct user Q&A using the analyst model.
+     Do not start it with `--bg`, send it a manager wake prompt, or wait on it.
 3. File one row per unit of work with MCP `task_add`: title, `description`
    (context, the working branch, the paths the seat may touch and the paths or
    actions it must not), `goal` (the command and the output line that proves it),
@@ -210,8 +218,8 @@ for an unattended prompt. For board tools, use `use_tool` with catalog keys such
 `agentboard wait` in the background; there is no MCP wait tool.
 
 Check setup with `grok inspect --json` (confirm `projectTrusted`, the skills
-`agentboard-team`, `agentboard-manager`, `agentboard-analyst`, `agentboard-counter-analyst`, `agentboard-coder`
-and `agentboard-reviewer`, and the MCP servers), `grok mcp list`, and
+`agentboard-team`, `agentboard-manager`, `agentboard-analyst`, `agentboard-counter-analyst`, `agentboard-coder`,
+`agentboard-reviewer`, `agentboard-designer` and `agentboard-librarian`, and the MCP servers), `grok mcp list`, and
 `grok mcp doctor agentboard`. An optional headless read-only probe is:
 
     env AGENTBOARD_ACTOR=manager grok -p 'list the board brief with the agentboard board_brief tool' --always-approve --max-turns 3

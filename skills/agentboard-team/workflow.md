@@ -8,12 +8,12 @@ stale writes, so two agents cannot silently overwrite each other.
 
 | Status | Means | Who sets it |
 | --- | --- | --- |
-| `todo` | ready, nobody working | manager (creation) |
+| `todo` | ready, nobody working | manager (creation), or librarian (discovered issue) |
 | `planning` | the analyst or the counter-analyst is planning the row | manager (starts the analyst) |
 | `implementing` | claimed and being worked | the holder (`task_claim`), or the analyst/manager handing to the coder |
 | `blocked` | cannot continue, question on the row | the holder |
-| `reviewing` | work finished, waiting on a reviewer | the coder |
-| `done` | verified, evidence on the row | the reviewer, or the coder when the task names no reviewer |
+| `reviewing` | work finished, waiting on a reviewer | the coder or designer |
+| `done` | verified, evidence on the row | the reviewer, or the coder/designer when the task names no reviewer |
 | `canceled` | dropped on purpose | whoever owns the decision, with a reason in a comment |
 
 A coder never closes its own work when the task names a reviewer; it moves the row
@@ -128,8 +128,9 @@ this contract, not a store check.
 | `planning` to `implementing` | analyst, after the counter-analyst's `pass`; or manager | `task_update(status="implementing", assignee="coder")` |
 | `planning` to `todo` | analyst, after a `pass`, returning an oversized row | `task_update(status="todo", assignee="manager")` |
 | `planning` to `blocked` | counter-analyst, at the cap of 5 reviews with a Blocking objection left | comment `cap: <disagreement>`, then `task_update(status="blocked")`; the assignee stays `counter-analyst` |
-| `todo` to `implementing` | coder | `task_claim` |
-| `implementing` to `reviewing` | coder, or manager with `force`+`reason` | `task_update(status="reviewing", assignee="reviewer")` |
+| `todo` to `implementing` | coder or designer | `task_claim` |
+| `implementing` to `reviewing` | coder or designer, or manager with `force`+`reason` | `task_update(status="reviewing", assignee="reviewer")` |
+| `implementing` to `done` | coder or designer, when no reviewer is named | `task_update(status="done")` |
 | `reviewing` to `done` | reviewer | `task_update(status="done")` |
 | `reviewing` to `implementing` | reviewer (reopen), while `implement_turn` is below 3 | `task_update(status="implementing", assignee="coder")` |
 | `reviewing` to `planning` | reviewer (implement cap reached) | `task_update(status="planning", assignee="analyst")` |
@@ -142,6 +143,9 @@ The names `in_progress` and `review` are still accepted as input and read as
 `implementing` and `reviewing`.
 
 ## The loop
+
+Situational seat participation is defined in `roles.md`; designers use a separate
+design row and librarians remain outside implementation dispatch.
 
 1. Manager files one row per unit of work: `task_add` with a title, a `description`
    (context, plus the paths the seat may touch and the paths or actions it must

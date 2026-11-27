@@ -281,7 +281,8 @@ and no rule lives in only one of them. `PROTOCOL.md` has the exact shapes.
   workflow.
 - `skills/agentboard-manager`, `skills/agentboard-analyst`,
   `skills/agentboard-counter-analyst`, `skills/agentboard-coder`,
-  `skills/agentboard-reviewer` — one entry skill per seat; Grok's manager recipe is
+  `skills/agentboard-reviewer`, `skills/agentboard-designer`,
+  `skills/agentboard-librarian` — one entry skill per seat; Grok's manager recipe is
   in `skills/agentboard-manager/SKILL.md`.
 - `seats/` — the manager launcher and optional systemd user unit; see `seats/README.md` for the
   global MCP entry the root `install.py` registers.

@@ -22,7 +22,7 @@ else written. `--skip-binary` skips the build. It requires `bunx` or `npx` on
 `PATH` and installs skills through `bunx skills@1.9.0 add` or
 `npx -y skills@1.9.0 add`, with `DO_NOT_TRACK=1`. Then it:
 
-- installs the six repo skills globally through the `skills` CLI (see
+- installs the eight repo skills globally through the `skills` CLI (see
   `../skills/README.md` for client target mapping); rerun `./install.py
   --skip-binary` after changing repo skills;
 - on a full install, links the launcher and the user unit (it never enables or
@@ -63,7 +63,7 @@ helper runs):
     env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
     hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
 
-Model by seat: analyst, counter-analyst and reviewer use `gemini-4-neon-medium`; coder uses `gemini-4-hydrogen-medium`; manager remains on `gemini-4-neon-medium`.
+Model by seat: analyst, counter-analyst, reviewer, designer and librarian use `gemini-4-neon-medium`; coder uses `gemini-4-hydrogen-medium`; manager remains on `gemini-4-neon-medium`.
 
 `agentboard-manager agy` does the same for the manager with `gemini-4-neon-medium` and
 `-i /agentboard-manager`; an optional prompt follows `--` and is passed with the skill

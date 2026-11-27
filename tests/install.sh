@@ -80,7 +80,9 @@ is "manager launcher linked" test "$(readlink "$home/.local/bin/agentboard-manag
 is "user unit linked" test "$(readlink "$home/.config/systemd/user/agentboard.service")" = "$unit"
 has "unit restarts on failure" 'Restart=on-failure' "$home/.config/systemd/user/agentboard.service"
 has "unit prevents exit one restart" 'RestartPreventExitStatus=1' "$home/.config/systemd/user/agentboard.service"
-for s in analyst counter-analyst coder manager reviewer team; do
+for s in analyst counter-analyst coder designer librarian manager reviewer team; do
+  is "skill agentboard-$s exists" test -f "$repo/skills/agentboard-$s/SKILL.md"
+  is "skill agentboard-$s frontmatter matches" grep -qE "^name: agentboard-$s$" "$repo/skills/agentboard-$s/SKILL.md"
   is "skill agentboard-$s is not manually linked" test ! -e "$home/.agents/skills/agentboard-$s"
 done
 has "skills CLI receives all deduplicated agents and tracking opt-out" "bunx skills@1.9.0 add $repo -g -a codex claude-code universal antigravity opencode -s * -y | DO_NOT_TRACK=1" "$tmp/skills.log"

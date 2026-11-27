@@ -1,9 +1,9 @@
 # skills
 
 `agentboard-team/` is the shared manual (`SKILL.md`, `workflow.md`, `roles.md`,
-plus `references/herdr-mechanics.md` and `references/hc-mechanics.md`). The five seat directories are one-page entry
+plus `references/herdr-mechanics.md` and `references/hc-mechanics.md`). The seven seat directories are one-page entry
 points: `agentboard-manager/`, `agentboard-analyst/`, `agentboard-counter-analyst/`, `agentboard-coder/`,
-`agentboard-reviewer/`. Each confirms the seat's
+`agentboard-reviewer/`, `agentboard-designer/`, `agentboard-librarian/`. Each confirms the seat's
 board name, preserves its startup check and seat limits, and links to the shared
 workflow. Claude, Codex, Grok, Codewhale, agy and OpenCode load these skills
 directly.
@@ -16,10 +16,10 @@ The repository-root installer delegates installation to the `skills` CLI:
 
 It runs `bunx skills@1.9.0 add <repo> -g -a <targets...> -s '*' -y`; if `bunx`
 is unavailable it uses `npx -y skills@1.9.0`. Install Bun or Node.js so one of
-those runners is on `PATH`. The CLI installs the six repo skills globally, with
+those runners is on `PATH`. The CLI installs the eight repo skills globally, with
 targets selected by `--agent`.
 
-Six names are installed: `agentboard-team` and the five `agentboard-<seat>` entry
+Eight names are installed: `agentboard-team` and the seven `agentboard-<seat>` entry
 points. `skills` manages the client-specific destinations. Re-run `./install.py
 --skip-binary` after editing repo skills to refresh installed copies.
 
@@ -60,7 +60,7 @@ it does not make network calls.
 - Codex 0.167.2's `codex debug prompt-input` lists skills from `~/.agents/skills`;
   the old `$CODEX_HOME/skills` alias was redundant and duplicate paths list once.
 - Grok Build 1.0.70 was exercised here: `grok inspect --json` lists the canonical
-  `agentboard-team` and the five `agentboard-<seat>` skills from `~/.agents/skills`
+  `agentboard-team` and the seven `agentboard-<seat>` skills from `~/.agents/skills`
   without any alias, reports `projectTrusted`, and lists the MCP servers it will
   start. Project instructions and project skills load only in a trusted folder, so a
   grok seat is launched with `--trust`; `grok mcp doctor <server>` proves the board

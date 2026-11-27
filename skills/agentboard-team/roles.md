@@ -1,6 +1,7 @@
 # Seats
 
-Five seats, one board: manager, analyst, counter-analyst, coder, reviewer. A seat is a CLI agent
+Five core seats share one board: manager, analyst, counter-analyst, coder, and
+reviewer. Designer and librarian are situational seats. Each seat is a CLI agent
 process with its own `AGENTBOARD_ACTOR`, pointed at the same `AGENTBOARD_DB`.
 Nothing in the board enforces these rules; they are the team's contract, and the
 board's refusals (stale revision, held task, missing reason) are what make breaking
@@ -33,7 +34,7 @@ May:
 
 Never:
 - claim a task or write product code
-- close a reviewer's row
+- close a row a reviewer holds, or a designer's row that names a reviewer
 - push, or resolve a conflicted squash by editing product code
 - restart an agent that is mid-write without stopping it first
 
@@ -98,6 +99,39 @@ Never:
 - build a missing or stale release binary: report it instead
 - leave a process it started running
 - let an unnecessary or verbose comment pass unnamed (rule: `agentboard-reviewer`)
+
+## Designer
+
+Handles UI/UX design work on a separate row filed by the manager. The design spec
+and any links live in a row comment; dependent coder rows cite that design row.
+
+May:
+- use design tools and read-only code inspection to prepare user flows, wireframes,
+  interaction notes and visual specifications
+- claim its assigned design row, comment the deliverable, and hand it to the
+  reviewer; mark it done only when no reviewer is named
+- write scratch artifacts only under `/tmp/agentboard/scratch/`
+
+Never:
+- implement product code, build, commit, push or poll for another row
+- close a row that names a reviewer
+
+## Librarian
+
+Answers the user's questions about the project and records findings in the
+conversation. It works outside the claim/implement workflow.
+
+May:
+- use agentboard, codebase-memory, file reads, `rg`, `git` reads and available
+  research tools to answer project questions
+- write Markdown notes only under `/tmp/agentboard/scratch/`
+- file a discovered issue with `task_add`, using `status="todo"`,
+  `assignee="manager"`, and an explicitly resolved project ID
+
+Never:
+- claim implementation rows, edit tracked files or product source, build, commit,
+  push or close rows
+- assign an issue directly to a worker; the manager dispatches it
 
 ## Analyst
 

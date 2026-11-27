@@ -15,10 +15,11 @@ Pages here:
 
 - this manual: the board, the seats, the launcher, the wake loop, the twelve tools
 - `workflow.md`: how a task moves and who moves it
-- `roles.md`: manager, analyst, counter-analyst, coder and reviewer: what each may run and never does
+- `roles.md`: the five core seats and the designer and librarian situational seats: what each may run and never does
 
 Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboard-analyst`,
-`agentboard-counter-analyst`, `agentboard-coder`, `agentboard-reviewer`. Wire details live in `PROTOCOL.md`; changing the tree in `AGENTS.md`.
+`agentboard-counter-analyst`, `agentboard-coder`, `agentboard-reviewer`,
+`agentboard-designer`, `agentboard-librarian`. Wire details live in `PROTOCOL.md`; changing the tree in `AGENTS.md`.
 
 ## The board
 
@@ -47,6 +48,12 @@ Each seat has a one-page entry skill of its own: `agentboard-manager`, `agentboa
 | counter-analyst | `counter-analyst` | `agentboard-counter-analyst` | research the row independently, argue against the plan, pass it or send it back |
 | coder | `coder` | `agentboard-coder` | implement one row, verify it, hand it to review |
 | reviewer | `reviewer` | `agentboard-reviewer` | read the work and judge it; close or reopen the row |
+| designer | `designer` | `agentboard-designer` | handle UI/UX design rows when needed |
+| librarian | `librarian` | `agentboard-librarian` | answer user questions and file discovered issues |
+
+Designer and librarian are optional situational seats; the five core seats remain
+the default workflow. See `roles.md` for their boundaries and `workflow.md` for
+how they participate.
 
 Nothing in the binary starts processes, and nothing in the board enforces these
 roles: they are the team's contract. What the board enforces is narrower — a stale
@@ -89,8 +96,9 @@ profile and no deny list: what a seat may and may never do is written in its rol
 skill and `roles.md`, and a seat that ignores them is a contract breach the
 reviewer reopens, not a launch flag.
 
-For Claude, analyst, counter-analyst and reviewer use Opus at medium effort, and coder uses Sonnet
-at medium effort. Codex takes the model and effort as flags. Swap a model only when
+For Claude, analyst, counter-analyst, reviewer, designer and librarian use Opus at
+medium effort, and coder uses Sonnet at medium effort. Designer and librarian use
+the analyst model/effort for each client. Codex takes the model and effort as flags. Swap a model only when
 the human names a different one.
 
 Every OpenCode seat uses `opencode/deepseek-v4.1-flash-free` to save the paid
@@ -102,6 +110,7 @@ Codex, Claude and agy token pools.
 | counter-analyst | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
 | coder | `--model claude-sonnet-5-5 --effort medium` | `--model gpt-6-luna -c model_reasoning_effort=medium` |
 | reviewer | `--model claude-opus-5-5 --effort medium` | `--model gpt-6-sol -c model_reasoning_effort=medium` |
+| designer, librarian | same as analyst | same as analyst |
 
 ```bash
 export REPO=/path/to/repo
@@ -132,7 +141,7 @@ env AGENTBOARD_ACTOR=reviewer herdr agent start reviewer --kind codex --pane "$P
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok --pane "$PANE" -- --trust --always-approve
 
 # agy seats: the entry prompt travels in -i, so no herdr agent prompt follows
-# Model by seat: analyst/counter-analyst/reviewer use gemini-4-neon-medium;
+# Model by seat: analyst/counter-analyst/reviewer/designer/librarian use gemini-4-neon-medium;
 # coder uses gemini-4-hydrogen-medium; manager uses gemini-4-neon-medium.
 env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy --pane "$PANE" -- \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
@@ -148,6 +157,12 @@ herdr agent prompt analyst '/agentboard-analyst T<id>' --wait
 herdr agent prompt counter-analyst '/agentboard-counter-analyst T<id>' --wait   # '$agentboard-counter-analyst' for Codex
 herdr agent prompt coder '$agentboard-coder T<id>' --wait   # Codex seat
 ```
+
+Launch `designer` on demand for its design row using the analyst model row and
+the `/agentboard-designer T<id>` or `$agentboard-designer T<id>` entry prompt.
+Run `librarian` as an interactive pane for direct user Q&A, with
+`AGENTBOARD_ACTOR=librarian` and the analyst model row. Do not background the
+librarian, wake it with a manager prompt, or wait on it.
 
 Start only the seats the work needs: a reviewer with nothing to review is a tab
 that idles. Pick one kind per team; do not mix Claude and Codex rows of the table
@@ -216,7 +231,8 @@ hc run --bg --name coder --cwd "$REPO" -- env AGENTBOARD_ACTOR=coder codex --no-
 hc run --bg --name reviewer --cwd "$REPO" -- env AGENTBOARD_ACTOR=reviewer codex --no-daemon \
   --model gpt-6-sol -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox
 
-# agy seats: gemini-4-neon-medium for analyst, counter-analyst and reviewer;
+# agy seats: gemini-4-neon-medium for analyst, counter-analyst, reviewer,
+# designer and librarian;
 # gemini-4-hydrogen-medium for coder; gemini-4-neon-medium for manager.
 hc run --bg --name <seat> --cwd "$REPO" -- env AGENTBOARD_ACTOR=<seat> agy \
   --dangerously-skip-permissions --model <seat-model> -i '/agentboard-<seat> T<id>'
@@ -275,15 +291,15 @@ launch recipes above; install and the registered entries are in `seats/README.md
 
 | Client | Seats | Start | Actor wiring | Permission posture | Seat skill |
 | --- | --- | --- | --- | --- | --- |
-| Claude | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> claude`; manager via `agentboard-manager claude` in either | global `agentboard` entry (`claude mcp add-json -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
-| Codex | all five | herdr and hc as for Claude with `--kind codex` / `codex --no-daemon`; manager via `agentboard-manager codex` in either | global `[mcp_servers.agentboard]` (`codex mcp add`), `bearer_token_env_var = "AGENTBOARD_ACTOR"` | `--dangerously-bypass-approvals-and-sandbox` | `$agentboard-<seat>` |
-| Codewhale | all five; hc only, not herdr (no agent kind) | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> codewhale --skip-onboarding --fresh --disable subagents --approval-policy never` | global `mcp.json` entry (`codewhale mcp add`), `bearer_token_env_var` | `--approval-policy never` | `/agentboard-<seat>` |
-| Grok | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok`; manager via `agentboard-manager grok` | global entry (`grok mcp add -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--trust --always-approve` | `/agentboard-<seat>` |
-| agy | all five | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> agy`; manager via `agentboard-manager agy`; first prompt in `-i`, no typing helper | global stdio entry `seats/agy/agentboard-stdio` (`agy mcp add`), which reads `AGENTBOARD_ACTOR` from the launch environment | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
-| OpenCode | all five; `--standalone` required | See OpenCode recipe above; manager via `agentboard-manager opencode` | See `seats/README.md` | `--auto` | See launch recipe |
+| Claude | five core; designer on demand; librarian interactive | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind claude`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> claude`; manager via `agentboard-manager claude` in either | global `agentboard` entry (`claude mcp add-json -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
+| Codex | five core; designer on demand; librarian interactive | herdr and hc as for Claude with `--kind codex` / `codex --no-daemon`; manager via `agentboard-manager codex` in either | global `[mcp_servers.agentboard]` (`codex mcp add`), `bearer_token_env_var = "AGENTBOARD_ACTOR"` | `--dangerously-bypass-approvals-and-sandbox` | `$agentboard-<seat>` |
+| Codewhale | five core; designer on demand; librarian interactive; hc only | `agentboard-manager codewhale`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> codewhale --skip-onboarding --fresh --disable subagents --approval-policy never` | global `mcp.json` entry (`codewhale mcp add`), `bearer_token_env_var` | `--approval-policy never` | `/agentboard-<seat>` |
+| Grok | five core; designer on demand; librarian interactive | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind grok`; manager via `agentboard-manager grok` | global entry (`grok mcp add -s user`), header `Bearer ${AGENTBOARD_ACTOR}` | `--trust --always-approve` | `/agentboard-<seat>` |
+| agy | five core; designer on demand; librarian interactive | herdr `env AGENTBOARD_ACTOR=<seat> herdr agent start <seat> --kind agy`; hc `hc run --bg --name <seat> -- env AGENTBOARD_ACTOR=<seat> agy`; manager via `agentboard-manager agy`; first prompt in `-i`, no typing helper | global stdio entry `seats/agy/agentboard-stdio` (`agy mcp add`), which reads `AGENTBOARD_ACTOR` from the launch environment | `--dangerously-skip-permissions` | `/agentboard-<seat>` |
+| OpenCode | five core; designer on demand; librarian interactive; `--standalone` required | See OpenCode recipe above; manager via `agentboard-manager opencode` | See `seats/README.md` | `--auto` | See launch recipe |
 | Internal subagent | any seat, one-shot | the host's Agent call, when neither `HERDR_ENV=1` nor any `HC_*` variable is set | CLI with `--actor <seat>` (see the subagent section) | the host's | the seat's entry skill, named in the prompt |
 
-Model and effort per seat come from the launch table for every client; agy takes the effort in the model id: `gemini-4-neon-medium` for analyst, counter-analyst and reviewer, `gemini-4-hydrogen-medium` for coder, and `gemini-4-neon-medium` for manager.
+Model and effort per seat come from the launch table for every client; designer and librarian use the analyst row. agy takes the effort in the model id: `gemini-4-neon-medium` for analyst, counter-analyst, reviewer, designer, librarian and manager, and `gemini-4-hydrogen-medium` for coder.
 agy needs a one-time onboarding (terms and data-use screen) done by a human, and its working directory must be listed in `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json`; the installer never writes either. Install skills with the root installer, which invokes `bunx skills@1.9.0` or falls back to `npx -y skills@1.9.0`; see `skills/README.md` for client targets. Rerun `./install.py --skip-binary` after editing repo skills.
 
 ## Register a seat's MCP server

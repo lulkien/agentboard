@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install agentboard for every supported client.
 
-Builds the agentboard binary, installs the six skills with the `skills` CLI, and registers one global `agentboard` MCP entry per
+Builds the agentboard binary, installs the eight skills with the `skills` CLI, and registers one global `agentboard` MCP entry per
 selected client through that client's own `mcp add` command. The entry is the same
 for every seat: the seat's name comes from AGENTBOARD_ACTOR in the environment the
 seat is launched with. Role homes and per-seat cards from older installers are never
